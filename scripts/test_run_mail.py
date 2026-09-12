@@ -53,6 +53,12 @@ class Compose(unittest.TestCase):
             md = run_mail.compose({**REC, "status": status}, "x")
             self.assertIn(want, md.splitlines()[0])
 
+    def test_orphan_bold_marker_from_a_member_is_not_rendered(self):
+        """Live: a minion report began with `**\\n\\n`, printing a bare ** in Reif's inbox."""
+        md = run_mail.compose({**REC, "report": "**\n\nBOTTOM LINE: shipped."}, "x")
+        self.assertNotIn("\n**\n", md)
+        self.assertIn("BOTTOM LINE: shipped.", md)
+
     def test_missing_rewrite_says_so_and_still_carries_the_report(self):
         md = run_mail.compose(REC, "")
         self.assertIn("could not be rewritten in plain words", md)

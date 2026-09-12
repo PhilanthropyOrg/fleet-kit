@@ -23,6 +23,7 @@ Rules:
 from __future__ import annotations
 
 import os
+import re
 import pathlib
 import subprocess
 import sys
@@ -135,6 +136,18 @@ def plain_words(rec: dict) -> str:
     return text if 0 < len(text) <= 1500 else ""
 
 
+def _clean_block(text: str) -> str:
+    """Strip orphan markdown emphasis a member left dangling at either end.
+
+    Live 2026-09-12: a minion report's `report` field literally began with `**\n\n`, so the
+    email rendered a bare `**` on its own line above the report. The member's words are
+    reproduced verbatim otherwise -- this only removes a marker that opens nothing.
+    """
+    t = (text or "").strip()
+    t = re.sub(r"^(?:\*{1,3}|_{1,3})\s*$", "", t, flags=re.MULTILINE).strip()
+    return t
+
+
 def compose(rec: dict, plain: str) -> str:
     """The email. Plain English is the WHOLE body, not a summary bolted on top of jargon.
 
@@ -166,13 +179,13 @@ def compose(rec: dict, plain: str) -> str:
     md += ["---", "",
            "<small>The rest is the helper's own words, kept so every claim above can be checked.</small>", ""]
     if (rec.get("outcome") or "").strip():
-        md += ["**What it reported:** " + rec["outcome"].strip(), ""]
+        md += ["**What it reported:** " + _clean_block(rec["outcome"]), ""]
     if rec.get("report"):
-        md += [rec["report"].strip(), ""]
+        md += [_clean_block(rec["report"]), ""]
     if rec.get("evidence"):
-        md += ["**How it checked:** " + rec["evidence"].strip(), ""]
+        md += ["**How it checked:** " + _clean_block(rec["evidence"]), ""]
     if rec.get("self_critique"):
-        md += ["**What it thinks it got wrong:** " + rec["self_critique"].strip(), ""]
+        md += ["**What it thinks it got wrong:** " + _clean_block(rec["self_critique"]), ""]
     tok = rec.get("tokens") or {}
     if tok.get("cost_usd") is not None or tok.get("num_turns") is not None:
         md.append(f"<small>cost ${tok.get('cost_usd') or 0:.2f} · {tok.get('num_turns') or 0} turns · run {rec.get('run_id')}</small>")
