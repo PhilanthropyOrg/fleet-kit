@@ -28,13 +28,16 @@ import json
 import sys
 
 VALID_VERDICTS = ("approve", "block")
-REQUIRED_FINDING_KEYS = ("file", "line", "severity", "what_breaks")
+# "plain": Reif, 2026-09-12 -- every finding carries one or two sentences a smart person
+# outside software can read, next to the technical what_breaks. persona_law.md §13.
+REQUIRED_FINDING_KEYS = ("file", "line", "severity", "what_breaks", "plain")
 
 
 def _findings_text(findings: list) -> str:
     lines = []
     for f in findings:
-        lines.append(f"- {f.get('file', '?')}:{f.get('line', '?')} ({f.get('severity', '?')}): {f.get('what_breaks', '?')}")
+        lines.append(f"- **{f.get('severity', '?')}** -- {f.get('plain', '?')}")
+        lines.append(f"  Where: {f.get('file', '?')}:{f.get('line', '?')}. Technical: {f.get('what_breaks', '?')}")
     return "\n".join(lines)
 
 
