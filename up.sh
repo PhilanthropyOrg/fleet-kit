@@ -116,7 +116,8 @@ fi
 #    2026-08-21 -- the running container was 13 commits behind despite `up.sh` having been run
 #    after those commits landed in the checkout.
 echo "[up] building $IMAGE_TAG (podman reuses cached layers for anything unchanged)..."
-podman build -t "$IMAGE_TAG" .
+UP_DEPLOY_SHA="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
+podman build --build-arg DEPLOY_SHA="$UP_DEPLOY_SHA" -t "$IMAGE_TAG" .
 
 # 2. Generate this project's fleet.env from the template on first run only — never overwrite
 #    an operator's existing edits (kill-switch toggles, tuned budgets) on a re-run.
