@@ -241,10 +241,19 @@ case "${1:-cron-foreground}" in
       # dont-shoot-the-messenger (fk#558 deliverable 8): the one voice to Reif. 06:30 / 12:30 /
       # 17:30 Central = 11:30 / 17:30 / 22:30 UTC while CDT holds (UTC-5). When DST ends these
       # drift an hour late; fix here, not in the member. Each slot is passed as the task line.
+      # FLEET_MESSENGER_SLOTS: which of the three slots to schedule (space/comma-separated
+      # subset of morning|afternoon|wrap). Unset = all three. `FLEET_MESSENGER_SLOTS="morning wrap"`
+      # drops the 12:30 afternoon block without silencing the whole member.
+      messenger_slot_enabled() {
+        local slot="$1" s
+        [ -z "${FLEET_MESSENGER_SLOTS:-}" ] && return 0
+        for s in ${FLEET_MESSENGER_SLOTS//,/ }; do [ "$s" = "$slot" ] && return 0; done
+        return 1
+      }
       if cron_member_enabled dont-shoot-the-messenger; then
-        echo "30 11 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh dont-shoot-the-messenger --task morning >> $LOG_DIR/dont-shoot-the-messenger.log 2>&1"
-        echo "30 17 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh dont-shoot-the-messenger --task afternoon >> $LOG_DIR/dont-shoot-the-messenger.log 2>&1"
-        echo "30 22 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh dont-shoot-the-messenger --task wrap >> $LOG_DIR/dont-shoot-the-messenger.log 2>&1"
+        messenger_slot_enabled morning && echo "30 11 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh dont-shoot-the-messenger --task morning >> $LOG_DIR/dont-shoot-the-messenger.log 2>&1"
+        messenger_slot_enabled afternoon && echo "30 17 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh dont-shoot-the-messenger --task afternoon >> $LOG_DIR/dont-shoot-the-messenger.log 2>&1"
+        messenger_slot_enabled wrap && echo "30 22 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh dont-shoot-the-messenger --task wrap >> $LOG_DIR/dont-shoot-the-messenger.log 2>&1"
       fi
       if cron_member_enabled judge-judy; then
         echo "*/15 * * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh judge-judy >> $LOG_DIR/judge-judy.log 2>&1"
