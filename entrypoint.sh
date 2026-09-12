@@ -391,6 +391,17 @@ case "${1:-cron-foreground}" in
       # A fix for "never runs" landed as "runs constantly" because the cadence was a
       # literal and the population behind it grew 25x.
       echo "${FLEET_VP_DUE_CADENCE:-*/15} * * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) FLEET_LOG_DIR=$LOG_DIR && [ -f \"\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}\" ] && { set -a; . \"\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}\"; set +a; }; bash /fleet-kit/scripts/vp_due.sh >> $LOG_DIR/vp_due.log 2>&1"
+      # pr_arm_sweep.sh: arm auto-merge on every open PR that is already green on its branch's
+      # own required checks and that nothing armed. Arming is minion.md step 9 -- a charter line,
+      # so it only happens when an LLM pass reaches the end of its checklist, and dumbledore's
+      # charter forbids merging at all. Measured 2026-09-12: all 3 open fleet-kit PRs were green
+      # on `selftest` and unarmed, two for 26h, and two of those were fixes for vp_due's own
+      # hourly-redispatch waste (61 of minion's 127 productive passes that day ended "already
+      # fixed by an open PR"). This only ARMS; the required checks still decide.
+      #
+      # 20 minutes, offset off :00 so it reads a settled check rollup rather than racing the CI
+      # that a top-of-hour cron wave just kicked off. Tunable via FLEET_PR_ARM_CADENCE.
+      echo "${FLEET_PR_ARM_CADENCE:-7,27,47} * * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) FLEET_LOG_DIR=$LOG_DIR && [ -f \"\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}\" ] && { set -a; . \"\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}\"; set +a; }; bash /fleet-kit/scripts/pr_arm_sweep.sh >> $LOG_DIR/pr_arm_sweep.log 2>&1"
       # auto_deploy_race_check.sh (gh#255): auto_deploy.sh's own guarded fetch/pull cannot
       # produce a multi-branch fast-forward error or a ref-lock race -- when auto_deploy.cron.log
       # (the HOST crontab's raw stdout/stderr capture, same bind-mounted $FLEET_LOG_DIR as this
