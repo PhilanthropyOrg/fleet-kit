@@ -6228,10 +6228,13 @@ def _judge_judy_verdict_reads_validated_json_not_prose():
 
     # Prefer the CLI's own already-parsed structured_output over a second parse of .result.
     rc, out = run(json.dumps({"structured_output": {"verdict": "block", "findings": [
-        {"file": "a.py", "line": 10, "severity": "high", "what_breaks": "null deref"}]},
+        {"file": "a.py", "line": 10, "severity": "high", "what_breaks": "null deref",
+         "plain": "The page would crash for anyone who opens it."}]},
         "result": "{\"verdict\": \"approve\", \"findings\": []}"}))
     assert rc == 0 and out["verdict"] == "block", "must prefer structured_output over .result"
-    assert out["findings_text"] == "- a.py:10 (high): null deref", out["findings_text"]
+    # Reif, 2026-09-12: the plain sentence leads; file:line + technical detail on the next line.
+    assert out["findings_text"] == ("- **high** -- The page would crash for anyone who opens it.\n"
+                                    "  Where: a.py:10. Technical: null deref"), out["findings_text"]
 
     # AC2/AC5: deliberately unparseable output -- the outer envelope itself is not JSON. Must
     # hold (ok=False, exit 1), never come back looking like a valid, silently-approved answer.
