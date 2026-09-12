@@ -35,12 +35,19 @@ PLAIN_MODEL = os.environ.get("FLEET_RUN_MAIL_MODEL", "haiku")
 PLAIN_BUDGET_USD = os.environ.get("FLEET_RUN_MAIL_BUDGET_USD", "0.05")
 PLAIN_TIMEOUT_S = int(os.environ.get("FLEET_RUN_MAIL_TIMEOUT_S", "120"))
 
-PLAIN_PROMPT = """Rewrite the fleet run below for a smart person who is not a programmer.
+PLAIN_PROMPT = """Rewrite this whole fleet run for a smart person who is not a programmer.
+Reif reads these on his phone. He is not going to translate jargon.
 
-Rules: at most 120 words. Short sentences. Say what happened and what it means for the person
-first, then anything they need to do. No file names, no function names, no code words, no
-acronyms without their plain meaning. If the run failed or was cut short, say so plainly.
-Answer with the rewrite only -- no heading, no preamble.
+Write it as:
+A first line: what happened, in plain words.
+Then "What this means:" one or two sentences on why it matters to him.
+Then "What to do:" the decision or action he has to take, or "Nothing -- this is just a receipt."
+
+Rules: at most 160 words total. Short sentences, common words. Never use a file name, a
+function name, a branch name, a command, or a code word. Never use an acronym without saying
+what it means. Say "the issue about X" rather than a bare number where you can. If the run
+failed, was cut short, or ran out of money, say that first and plainly. Do not invent anything
+that is not in the run below. Answer with the rewrite only -- no heading, no preamble.
 
 RUN:
 """
@@ -54,16 +61,39 @@ def wants_mail(rec: dict) -> bool:
     return bool(rec.get("member")) and rec.get("status") not in SKIP_STATUSES
 
 
+def repo_slug() -> str:
+    """owner/name for building links, or "" when we cannot know it.
+
+    FLEET_REPO is the checkout PATH inside the container ("/repo"), never a slug -- building
+    a URL from it produced `https://github.com//repo/issues/4996` in the first real run mail
+    (Reif, 2026-09-12). FLEET_REPO_URL is the git remote and is the only reliable source; a
+    fleet.env may set it more than once (one per instance), and the last assignment is the
+    one the shell exported, which is what os.environ already reflects. No slug -> no link,
+    never a broken one.
+    """
+    url = (os.environ.get("FLEET_REPO_URL") or "").strip()
+    if url:
+        slug = url.rsplit("github.com", 1)[-1].lstrip(":/").removesuffix(".git").strip("/")
+        if slug.count("/") == 1 and all(slug.split("/")):
+            return slug
+    repo = (os.environ.get("FLEET_REPO") or "").strip().strip("/")
+    # Only if it already looks like owner/name -- never a filesystem path.
+    if repo.count("/") == 1 and not repo.startswith(".") and all(repo.split("/")):
+        return repo
+    return ""
+
+
 def _links(rec: dict) -> list[str]:
+    """Plain-language pointers. A link only when we have a real slug to build it from."""
     out = []
-    repo = (os.environ.get("FLEET_REPO") or "").strip()
-    base = f"https://github.com/{repo}" if repo else ""
+    slug = repo_slug()
+    base = f"https://github.com/{slug}" if slug else ""
     if rec.get("pr"):
-        out.append(f"PR #{rec['pr']}" + (f": {base}/pull/{rec['pr']}" if base else ""))
+        out.append(f"The change: #{rec['pr']}" + (f" -- {base}/pull/{rec['pr']}" if base else ""))
     if rec.get("item_id"):
-        out.append(f"item #{rec['item_id']}" + (f": {base}/issues/{rec['item_id']}" if base else ""))
+        out.append(f"The item of work: #{rec['item_id']}" + (f" -- {base}/issues/{rec['item_id']}" if base else ""))
     if rec.get("lane"):
-        out.append(f"lane: {rec['lane']}")
+        out.append(f"Area of work: {rec['lane']}")
     return out
 
 
@@ -106,28 +136,46 @@ def plain_words(rec: dict) -> str:
 
 
 def compose(rec: dict, plain: str) -> str:
-    outcome = (rec.get("outcome") or "").strip()
-    head = f"# {rec.get('member')} · {rec.get('status')}" + (f" · {outcome[:80]}" if outcome else "")
-    md = [head, ""]
+    """The email. Plain English is the WHOLE body, not a summary bolted on top of jargon.
+
+    Reif, 2026-09-12, on the first real run mail: "reports in plain english please" -- the
+    top section read plainly and everything under it was raw member output. The member's own
+    words still travel, but as a clearly-labelled appendix a reader can ignore: deleting the
+    evidence outright would break the report contract's "every claim traces to something that
+    was actually run" (persona_law.md 10c).
+    """
+    status_plain = {
+        "ok": "finished",
+        "quiet": "found nothing to do",
+        "reported_nothing": "finished but did not say what it did",
+        "killed": "was interrupted", "timed_out": "ran out of time",
+        "budget_declined": "stopped to stay inside its budget", "paced": "was held back to save budget",
+        "no_vision_link": "finished but did not say which goal it moved",
+        "incomplete_fanout": "handed work out but never reported back",
+        "report_lost": "finished but its report was lost",
+    }.get(rec.get("status"), rec.get("status") or "finished")
+
+    md = [f"# {rec.get('member')} {status_plain}", ""]
     if plain:
-        md += ["## In plain words", "", plain, ""]
+        md += [plain.strip(), ""]
     else:
-        md += ["*(plain-words rewrite unavailable this run -- the member's own words follow)*", ""]
-    for line in _links(rec):
-        md.append(f"- {line}")
-    if _links(rec):
-        md.append("")
-    if outcome:
-        md += ["## What it did", "", outcome, ""]
+        md += ["This run could not be rewritten in plain words -- the helper's own report is below.", ""]
+    links = _links(rec)
+    if links:
+        md += ["## Where to look", ""] + [f"- {line}" for line in links] + [""]
+    md += ["---", "",
+           "<small>The rest is the helper's own words, kept so every claim above can be checked.</small>", ""]
+    if (rec.get("outcome") or "").strip():
+        md += ["**What it reported:** " + rec["outcome"].strip(), ""]
     if rec.get("report"):
-        md += ["## The member's report", "", rec["report"].strip(), ""]
+        md += [rec["report"].strip(), ""]
     if rec.get("evidence"):
-        md += ["## Evidence", "", rec["evidence"].strip(), ""]
+        md += ["**How it checked:** " + rec["evidence"].strip(), ""]
     if rec.get("self_critique"):
-        md += [f"Self-critique: {rec['self_critique'].strip()}", ""]
+        md += ["**What it thinks it got wrong:** " + rec["self_critique"].strip(), ""]
     tok = rec.get("tokens") or {}
     if tok.get("cost_usd") is not None or tok.get("num_turns") is not None:
-        md.append(f"cost ${tok.get('cost_usd') or 0:.2f} · {tok.get('num_turns') or 0} turns · run {rec.get('run_id')}")
+        md.append(f"<small>cost ${tok.get('cost_usd') or 0:.2f} · {tok.get('num_turns') or 0} turns · run {rec.get('run_id')}</small>")
     return "\n".join(md).rstrip() + "\n"
 
 
