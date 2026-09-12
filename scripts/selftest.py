@@ -4628,9 +4628,12 @@ def _messenger_is_scheduled_three_times_a_day_with_creds_mounted():
     ep = (ROOT / "entrypoint.sh").read_text()
     assert "dont-shoot-the-messenger)" in ep.split("ALL_CRON_MEMBERS=(")[1].split("\n")[0], "messenger not in ALL_CRON_MEMBERS"
     for minute_hour, slot in (("30 11", "morning"), ("30 17", "afternoon"), ("30 22", "wrap")):
-        assert re.search(rf'^\s*echo "{minute_hour} \* \* \* root .*run_member\.sh dont-shoot-the-messenger --task {slot} ', ep, re.M), \
+        assert re.search(rf'^\s*messenger_slot_enabled {slot} && echo "{minute_hour} \* \* \* root .*run_member\.sh dont-shoot-the-messenger --task {slot} ', ep, re.M), \
             f"no {slot} cron line at {minute_hour} UTC"
     assert "if cron_member_enabled dont-shoot-the-messenger; then" in ep
+    # FLEET_MESSENGER_SLOTS gates each slot independently; unset keeps all three.
+    fn = ep.split("messenger_slot_enabled() {")[1].split("\n      }")[0]
+    assert "FLEET_MESSENGER_SLOTS" in fn and "return 0" in fn
     dep = (ROOT / "scripts" / "deploy.sh").read_text()
     assert ".config/maxx/alert.env:ro" in dep and '"${alert_mounts[@]}"' in dep, "deploy.sh does not mount alert.env"
     spec = json.loads((ROOT / "members" / "dont-shoot-the-messenger" / "dont-shoot-the-messenger.fleet.json").read_text())
