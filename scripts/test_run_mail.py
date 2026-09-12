@@ -34,18 +34,62 @@ class WhichRunsMail(unittest.TestCase):
 
 
 class Compose(unittest.TestCase):
-    def test_plain_words_come_first_then_the_members_own_report(self):
+    """Reif, 2026-09-12: "reports in plain english please" -- the WHOLE mail reads plainly,
+    not a plain paragraph stapled on top of the member's raw jargon."""
+
+    def test_plain_words_are_the_body_and_jargon_sits_below_the_line(self):
         md = run_mail.compose(REC, "The helper opened a change for you to look at.")
-        self.assertTrue(md.startswith("# minion · ok · Opened PR #12"))
-        self.assertLess(md.index("In plain words"), md.index("BOTTOM LINE"))
-        self.assertIn("PR #12", md)
-        self.assertIn("item #7", md)
-        self.assertIn("gh pr view 12", md)
+        self.assertTrue(md.startswith("# minion finished"), md[:60])
+        # The plain rewrite comes before the divider; the raw report comes after it.
+        self.assertLess(md.index("The helper opened a change"), md.index("---"))
+        self.assertGreater(md.index("BOTTOM LINE"), md.index("---"))
+        # Raw status words never reach the reader as the headline.
+        self.assertNotIn("# minion · ok", md)
+
+    def test_every_status_gets_plain_words_not_a_code_word(self):
+        for status, want in (("killed", "was interrupted"),
+                             ("budget_declined", "stopped to stay inside its budget"),
+                             ("reported_nothing", "did not say what it did")):
+            md = run_mail.compose({**REC, "status": status}, "x")
+            self.assertIn(want, md.splitlines()[0])
+
+    def test_orphan_bold_marker_from_a_member_is_not_rendered(self):
+        """Live: a minion report began with `**\\n\\n`, printing a bare ** in Reif's inbox."""
+        md = run_mail.compose({**REC, "report": "**\n\nBOTTOM LINE: shipped."}, "x")
+        self.assertNotIn("\n**\n", md)
+        self.assertIn("BOTTOM LINE: shipped.", md)
 
     def test_missing_rewrite_says_so_and_still_carries_the_report(self):
         md = run_mail.compose(REC, "")
-        self.assertIn("rewrite unavailable", md)
+        self.assertIn("could not be rewritten in plain words", md)
         self.assertIn("BOTTOM LINE: shipped.", md)
+
+
+class RepoLinks(unittest.TestCase):
+    """The first real run mail linked to https://github.com//repo/issues/4996 -- FLEET_REPO is
+    the checkout PATH inside the container, never an owner/name slug."""
+
+    def test_a_container_path_never_becomes_a_link(self):
+        with unittest.mock.patch.dict(os.environ, {"FLEET_REPO": "/repo", "FLEET_REPO_URL": ""}, clear=False):
+            self.assertEqual(run_mail.repo_slug(), "")
+            md = run_mail.compose(REC, "x")
+        self.assertNotIn("github.com//repo", md)
+        self.assertNotIn("github.com/", md)
+
+    def test_slug_comes_from_the_git_remote(self):
+        with unittest.mock.patch.dict(os.environ, {
+                "FLEET_REPO": "/repo",
+                "FLEET_REPO_URL": "https://github.com/The-Good-Project-Team/philanthropy.git"}, clear=False):
+            self.assertEqual(run_mail.repo_slug(), "The-Good-Project-Team/philanthropy")
+            md = run_mail.compose(REC, "x")
+        self.assertIn("https://github.com/The-Good-Project-Team/philanthropy/pull/12", md)
+        self.assertIn("https://github.com/The-Good-Project-Team/philanthropy/issues/7", md)
+
+    def test_ssh_remote_and_no_remote_both_handled(self):
+        with unittest.mock.patch.dict(os.environ, {"FLEET_REPO_URL": "git@github.com:owner/name.git"}, clear=False):
+            self.assertEqual(run_mail.repo_slug(), "owner/name")
+        with unittest.mock.patch.dict(os.environ, {"FLEET_REPO": "", "FLEET_REPO_URL": ""}, clear=False):
+            self.assertEqual(run_mail.repo_slug(), "")
 
 
 class Delivery(unittest.TestCase):
