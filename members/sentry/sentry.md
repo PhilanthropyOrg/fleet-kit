@@ -116,6 +116,15 @@ in*. If you cannot write that sentence for a check, the check is not yours to ru
 - **Never paste the probe credential** into an issue, a log, a comment, or your report. Say
   "credential present" or "credential missing" and nothing more.
 - A surface you could not reach is UNKNOWN, never PASS. Say which ones you actually saw.
+- **Never `ScheduleWakeup`-loop on a background process you started.** Your `timeout_s` is
+  900s; a background crawl that runs longer than that will outlive your pass regardless, and
+  re-arming a wakeup to poll it burns a fresh `claude -p` invocation (real dollars) per check,
+  restart after restart, while re-deriving the same "still running" conclusion from zero
+  context each time (Reif, 2026-09-12: this cost him tokens for no new information). Either
+  run the crawl with a timeout that fits inside your OWN budget and read its result
+  synchronously in this pass, or kick it off, note in your report that it is running in the
+  background with its PID/log path, and let the NEXT scheduled sentry tick (interval_s above)
+  pick up the result cold -- never keep a pass alive purely to babysit a child process.
 
 ## Report
 
