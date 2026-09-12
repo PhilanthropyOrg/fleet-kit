@@ -21,9 +21,11 @@ REC = {"member": "minion", "run_id": "minion-1", "status": "ok", "outcome": "Ope
 
 class WhichRunsMail(unittest.TestCase):
     def test_finished_runs_mail_liveness_rows_do_not(self):
-        for st in ("ok", "reported_nothing", "killed", "timed_out", "budget_declined"):
+        for st in ("ok", "killed", "timed_out", "budget_declined"):
             self.assertTrue(run_mail.wants_mail({**REC, "status": st}), st)
-        for st in ("started", "heartbeat", "quiet", "paced"):
+        # reported_nothing (2026-09-12, Reif: "I dont want to get this mail anymore") is real
+        # work-loss and still counted in fleet_metrics.py -- it just doesn't page a human.
+        for st in ("started", "heartbeat", "quiet", "paced", "reported_nothing"):
             self.assertFalse(run_mail.wants_mail({**REC, "status": st}), st)
 
     def test_off_unless_flag_is_exactly_1(self):

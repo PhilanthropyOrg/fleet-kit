@@ -31,7 +31,11 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 KIT = pathlib.Path(__file__).resolve().parent.parent
-SKIP_STATUSES = frozenset({"started", "heartbeat", "quiet", "paced"})
+# reported_nothing added 2026-09-12 (Reif): "I dont want to get this mail anymore" -- a pass
+# that ran to completion and said nothing is still tracked in runs.jsonl/fleet_metrics.py for
+# signal_rate, it just no longer pages a human. See run_report.py's classify() docstring for
+# why the STATUS stays distinct from budget_declined/timed_out -- only the mail is silenced.
+SKIP_STATUSES = frozenset({"started", "heartbeat", "quiet", "paced", "reported_nothing"})
 PLAIN_MODEL = os.environ.get("FLEET_RUN_MAIL_MODEL", "haiku")
 PLAIN_BUDGET_USD = os.environ.get("FLEET_RUN_MAIL_BUDGET_USD", "0.05")
 PLAIN_TIMEOUT_S = int(os.environ.get("FLEET_RUN_MAIL_TIMEOUT_S", "120"))
