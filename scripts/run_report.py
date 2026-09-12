@@ -431,6 +431,14 @@ def main(argv=None) -> int:
                        item_id=a.item_id, pr=a.pr, lane=a.lane, trailing_loss=a.trailing_loss,
                        heartbeat=a.heartbeat)
     print(json.dumps(rec))
+    # Reif, 2026-09-12: "have those reports sent to me each time something runs." One mail per
+    # finished run, plain English on top -- see scripts/run_mail.py. Off unless FLEET_RUN_MAIL=1;
+    # a mail failure is a messenger.log line, never this exit code (the record above is the run).
+    try:
+        import run_mail
+        run_mail.maybe_mail(rec)
+    except Exception:  # noqa: BLE001 -- side channel
+        pass
     return 0
 
 

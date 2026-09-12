@@ -42,7 +42,7 @@ If the diff touches a template, a static file, or a route (anything a person can
 DIFF:
 {{DIFF}}
 
-Answer with a verdict of block unless there is truly nothing blocking, plus one finding per blocking issue (file, line, severity, what_breaks). A block with zero findings is not a valid answer.
+Answer with a verdict of block unless there is truly nothing blocking, plus one finding per blocking issue (file, line, severity, what_breaks, plain). `plain` is one or two short sentences for a smart person who is not a programmer: what would go wrong for a person if this shipped, and what has to change. No file names, no code words, no acronyms in it. A block with zero findings is not a valid answer.
 
 ## Why this prompt is shaped this way
 

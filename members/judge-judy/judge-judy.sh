@@ -68,7 +68,7 @@ CONTEXT="fleet-code-review"
 # schema mismatch is retried internally by the CLI before this script ever sees the output, so
 # what lands in $RAW is either a schema-valid object or nothing parseable at all. No regex over
 # prose left to scrape. See scripts/judge_judy_verdict.py for the parser.
-VERDICT_SCHEMA='{"type":"object","properties":{"verdict":{"type":"string","enum":["approve","block"]},"findings":{"type":"array","items":{"type":"object","properties":{"file":{"type":"string"},"line":{"type":"integer"},"severity":{"type":"string"},"what_breaks":{"type":"string"}},"required":["file","line","severity","what_breaks"]}}},"required":["verdict","findings"]}'
+VERDICT_SCHEMA='{"type":"object","properties":{"verdict":{"type":"string","enum":["approve","block"]},"findings":{"type":"array","items":{"type":"object","properties":{"file":{"type":"string"},"line":{"type":"integer"},"severity":{"type":"string"},"what_breaks":{"type":"string"},"plain":{"type":"string"}},"required":["file","line","severity","what_breaks","plain"]}}},"required":["verdict","findings"]}'
 
 mkdir -p "$LOG_DIR" "$STRIKE_DIR"
 ts() { date '+%Y-%m-%d %H:%M:%S %Z'; }
@@ -407,7 +407,7 @@ If the diff touches a template, a static file, or a route (anything a person can
 DIFF:
 $(cat "$DIFF_FILE")
 
-Answer with a verdict of block unless there is truly nothing blocking, plus one finding per blocking issue (file, line, severity, what_breaks). A block with zero findings is not a valid answer."
+Answer with a verdict of block unless there is truly nothing blocking, plus one finding per blocking issue (file, line, severity, what_breaks, plain). \`plain\` is one or two short sentences for a smart person who is not a programmer: what would go wrong for a person if this shipped, and what has to change. No file names, no code words, no acronyms in it. A block with zero findings is not a valid answer."
 
   # --output-format json + --json-schema: the verdict comes back as validated structured data
   # (see judge_judy_verdict.py), not prose grepped for a magic line (gh#806). pass_accounting.py

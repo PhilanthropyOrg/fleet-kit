@@ -46,7 +46,9 @@ KIT = pathlib.Path(__file__).resolve().parent.parent
 LOG_DIR = pathlib.Path(os.environ.get("FLEET_LOG_DIR") or os.path.expanduser("~/Library/Logs/fleet-kit"))
 ALERT_ENV = pathlib.Path(os.environ.get("FLEET_ALERT_ENV") or "/home/ubuntu/.config/maxx/alert.env")
 RESEND_URL = os.environ.get("RESEND_API_URL", "https://api.resend.com/emails")
-KINDS = ("morning", "afternoon", "wrap", "ask")
+KINDS = ("morning", "afternoon", "wrap", "ask", "run")
+# "ask" and "run" are per-event, not per-day: every ask and every finished run is its own mail.
+PER_EVENT_KINDS = ("ask", "run")
 CENTRAL = dt.timezone(dt.timedelta(hours=-5))  # CDT; the crontab is in UTC, see entrypoint.sh
 
 
@@ -390,16 +392,22 @@ def read_alert_env() -> dict[str, str]:
 def subject_for(kind: str, md: str, when: dt.datetime) -> str:
     first = next((l.lstrip("# ").strip() for l in md.splitlines() if l.startswith("#")), "")
     day = when.astimezone(CENTRAL).strftime("%a %b %-d")
-    label = {"morning": "Morning brief", "afternoon": "Afternoon block", "wrap": "Wrap", "ask": "Fleet ask"}[kind]
+    label = {"morning": "Morning brief", "afternoon": "Afternoon block", "wrap": "Wrap", "ask": "Fleet ask", "run": "Run"}[kind]
     return f"{label} · {day}" + (f" · {first}" if first and kind != "ask" else "")
 
 
 def send(kind: str, md_path: pathlib.Path, want_pdf: bool, force: bool) -> int:
     if kind not in KINDS:
         print(f"kind must be one of {KINDS}", file=sys.stderr); return 2
-    md = md_path.read_text()
+    rc, word = deliver(kind, md_path.read_text(), want_pdf, force)
+    print(word); return rc
+
+
+def deliver(kind: str, md: str, want_pdf: bool, force: bool) -> tuple[int, str]:
+    """The I/O half of send(): markdown in, (exit code, result word) out. run_mail.py calls
+    this directly with the text already in hand -- no temp file, no stdout."""
     if not md.strip():
-        log(f"send {kind}: brief file is empty, refusing to send a blank email"); return 2
+        log(f"send {kind}: brief file is empty, refusing to send a blank email"); return 2, "empty"
     now = dt.datetime.now(dt.timezone.utc)
     today = now.astimezone(CENTRAL).strftime("%Y-%m-%d")
     state_path = LOG_DIR / "messenger_sent.json"
@@ -407,14 +415,14 @@ def send(kind: str, md_path: pathlib.Path, want_pdf: bool, force: bool) -> int:
         state = json.loads(state_path.read_text()) if state_path.exists() else {}
     except json.JSONDecodeError:
         state = {}
-    if kind != "ask" and state.get(kind) == today and not force:
+    if kind not in PER_EVENT_KINDS and state.get(kind) == today and not force:
         log(f"send {kind}: already sent today ({today}) -- no-op (pass --force to resend)")
-        print("already-sent"); return 0
+        return 0, "already-sent"
 
     creds = read_alert_env()
     missing = [k for k in ("RESEND_API_KEY", "MAIL_FROM", "FLEET_ALERT_EMAIL") if not creds.get(k)]
     if missing:
-        log(f"send {kind}: missing {missing} (looked in env and {ALERT_ENV}) -- not sent"); print("no-credentials"); return 1
+        log(f"send {kind}: missing {missing} (looked in env and {ALERT_ENV}) -- not sent"); return 1, "no-credentials"
 
     html_text = render_html(md, kind, now.astimezone(CENTRAL).strftime("%Y-%m-%d %H:%M CT"))
     payload: dict = {
@@ -446,13 +454,14 @@ def send(kind: str, md_path: pathlib.Path, want_pdf: bool, force: bool) -> int:
     except urllib.error.HTTPError as exc:
         code, body = exc.code, exc.read(300).decode(errors="ignore")
     except (urllib.error.URLError, OSError) as exc:
-        log(f"send {kind}: transport error {exc} -- not sent"); print("transport-error"); return 1
+        log(f"send {kind}: transport error {exc} -- not sent"); return 1, "transport-error"
     if code >= 300:
-        log(f"send {kind}: Resend HTTP {code}: {body}"); print(f"http-{code}"); return 1
-    state[kind] = today
-    state_path.write_text(json.dumps(state))
+        log(f"send {kind}: Resend HTTP {code}: {body}"); return 1, f"http-{code}"
+    if kind not in PER_EVENT_KINDS:
+        state[kind] = today
+        state_path.write_text(json.dumps(state))
     log(f"send {kind}: delivered to {len(payload['to'])} recipient(s), subject={payload['subject']!r}, pdf={'attachments' in payload}")
-    print("sent"); return 0
+    return 0, "sent"
 
 
 def main(argv=None) -> int:
