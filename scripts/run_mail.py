@@ -89,8 +89,10 @@ def plain_words(rec: dict) -> str:
         return ""
     script = (
         f'. "{pool}"; account_pool_run claude -p "$1" --model "$2" --output-format text '
-        f'--max-budget-usd "$3" --dangerously-skip-permissions'
+        f'--max-budget-usd "$3"'
     )
+    # No --dangerously-skip-permissions: the container runs as root, where the CLI refuses that
+    # flag, and a text-only rewrite never calls a tool, so it never needs one approved.
     try:
         r = subprocess.run(["bash", "-c", script, "run_mail", PLAIN_PROMPT + raw_text(rec)[:6000],
                             PLAIN_MODEL, PLAIN_BUDGET_USD],
