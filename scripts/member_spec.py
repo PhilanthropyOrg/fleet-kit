@@ -283,7 +283,7 @@ def behavior_path(spec: dict, members_dir: str | os.PathLike | None = None, *,
     `llm.prompt_file_item` instead, so a member with two genuinely different jobs can ship two
     charters and load only the one this run needs. Absent the key, nothing changes for anybody.
 
-    WHY (fleet-kit#997). One member = one prompt_file was fine until a second job was folded
+    WHY (fleet-kit#998). One member = one prompt_file was fine until a second job was folded
     into an existing member. When `vp` became dumbledore's review mode (2026-09-12), every
     acceptance review began loading dumbledore.md -- 118 lines of ledger/rot-hunt/epic/ops
     instructions whose own second paragraph says "STOP reading here, go Read review.md" -- and

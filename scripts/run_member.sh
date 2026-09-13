@@ -367,7 +367,7 @@ fi
 # apostrophes in its mandate text, so this bug shipped invisible until a second member with
 # ordinary prose hit it.
 #
-# ITEM_MODE (fleet-kit#997): a member whose spec declares `llm.prompt_file_item` loads THAT
+# ITEM_MODE (fleet-kit#998): a member whose spec declares `llm.prompt_file_item` loads THAT
 # charter instead when the run carries --item. One member can then hold two genuinely
 # different jobs without every run of one paying to read the other's charter first -- the
 # exact tax dumbledore's acceptance reviews started paying when `vp` was folded into it

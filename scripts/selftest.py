@@ -91,7 +91,7 @@ def _member_specs_validate():
 
 
 def _item_mode_charter_routes_and_exists():
-    """fleet-kit#997: a spec declaring `llm.prompt_file_item` loads THAT charter on an --item
+    """fleet-kit#998: a spec declaring `llm.prompt_file_item` loads THAT charter on an --item
     run, and its OWN charter on a plain one. The bug this catches is the expensive shape, not
     a crash: dumbledore's acceptance reviews ran for two days loading dumbledore.md -- the
     118-line headmaster charter whose own second paragraph tells the run to discard it and go
@@ -14637,7 +14637,7 @@ def _pacing_hold_check_sparse_single_row_hours_never_page_gh812():
 if __name__ == "__main__":
     check("PR tile rollup reflects mergeability, not just CI (#179)", _pr_tile_rollup_reflects_mergeability_not_just_ci)
     check("member specs load and validate", _member_specs_validate)
-    check("an --item pass loads llm.prompt_file_item, and that charter is in git (fk#997)",
+    check("an --item pass loads llm.prompt_file_item, and that charter is in git (fk#998)",
           _item_mode_charter_routes_and_exists)
     check("member_spec's OWN default MEMBERS_DIR resolves (not just an explicit path)", _members_dir_default_is_right)
     check("report contract: ok + silence is recorded", _report_contract)
