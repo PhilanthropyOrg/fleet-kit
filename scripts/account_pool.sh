@@ -216,6 +216,25 @@ _account_pool_clear_streak() {
   mv "${ACCOUNT_POOL_STREAK_FILE}.tmp" "$ACCOUNT_POOL_STREAK_FILE" 2>/dev/null || true
 }
 
+# _account_pool_gate_message <account> <verdict> -- turn the pool's internal verdict string
+# (kept as the literal `gated:exhausted_until_<epoch>` shape forever -- account_status.sh:86
+# and account_health_check.sh:244/257 already pattern-match and parse exactly that, so this
+# function does NOT change it) into a human-legible reason for run_member.sh's `pass end` log
+# line. Reads the tag the state file's own writers already record in column 3
+# (_account_pool_note_other_failure writes "other", _account_pool_note_unauthenticated writes
+# "unauthenticated") so a gated skip names WHICH gate tripped, not just that one did.
+# _account_pool_mark_exhausted's plain budget gate writes only 2 columns -- no tag means that
+# case, so it defaults to "exhausted".
+_account_pool_gate_message() {
+  local account="$1" verdict="$2" epoch tag human
+  epoch="${verdict##*_}"
+  [[ "$epoch" =~ ^[0-9]+$ ]] || { printf '%s\n' "$verdict"; return; }
+  tag=$(awk -v a="$account" '$1==a{print $3}' "$ACCOUNT_POOL_STATE_FILE" 2>/dev/null | tail -1)
+  human=$(date -u -d "@$epoch" '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null \
+    || date -u -r "$epoch" '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || echo "epoch $epoch")
+  printf 'gated:%s until %s\n' "${tag:-exhausted}" "$human"
+}
+
 # Extension point: define this yourself (before sourcing this file, or export the function)
 # to consult your own budget-tracking API. Must print one of: ok | gated:<reason> | unknown.
 # Default here reads the exhaustion state file this module writes on its own (see
@@ -523,7 +542,14 @@ account_pool_run() {
     verdict=$(_account_pool_budget_verdict "$account" 2>/dev/null || echo "unknown")
     case "$verdict" in
       gated*)
-        _account_pool_log "account=$account budget verdict=$verdict, skipping without spending a call"
+        # A skip must be visible exactly like a real failure is, below -- otherwise it
+        # silently discards a sub-pass's claim and worktree with an empty `reason=` (the
+        # reason file was only written on an ATTEMPTED failure, not a skip), and the next
+        # reader cannot tell "gated" from "crashed". (philanthropy#5701)
+        reason=$(_account_pool_gate_message "$account" "$verdict")
+        _account_pool_log "account=$account budget verdict=$verdict, skipping without spending a call (reason=$reason)"
+        export ACCOUNT_POOL_LAST_REASON="$reason"
+        [ -n "${ACCOUNT_POOL_REASON_FILE:-}" ] && printf '%s\n' "$reason" > "$ACCOUNT_POOL_REASON_FILE" 2>/dev/null
         continue
         ;;
     esac
