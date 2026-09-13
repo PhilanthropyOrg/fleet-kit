@@ -50,7 +50,10 @@ class WorktreeLockSourceTests(unittest.TestCase):
         code_lines = [l for l in LOCK_SCRIPT.read_text().splitlines() if not l.strip().startswith("#")]
         code = "\n".join(code_lines)
         self.assertIn("flock", code)
-        self.assertNotIn("mkdir", code)
+        # gh#5632: `mkdir -p` on the waiters-count dir is a legitimate, unrelated use -- the
+        # thing this guards against is the OLD polling-lock anti-pattern (`mkdir "$LOCK"` as
+        # the lock itself), not any appearance of mkdir at all.
+        self.assertNotIn('mkdir "$LOCK"', code)
 
 
 class WorktreeLockContentionTests(unittest.TestCase):
@@ -125,6 +128,102 @@ class WorktreeLockContentionTests(unittest.TestCase):
         # just no-longer-starved).
         self.assertLess(rank, len(acquired) - 1,
                          f"'first' was served last ({rank+1}/{len(acquired)}) -- starved: {lines}")
+
+
+class WorktreeLockScaledTimeoutTests(unittest.TestCase):
+    """gh#5632: the fixed 120s create-path budget was sized for ordinary concurrency and
+    starts throwing FATAL at wide fanout (20/32 minions in one pass). worktree_lock_timeout_for
+    is the pure scaling function -- test it directly, no real waiters needed."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="fleet-worktree-lock-scale-test-")
+        self.env = dict(os.environ)
+        self.env["TMPDIR"] = self.tmp
+
+    def _timeout_for(self, base: int, n_waiters: int, extra_env: dict | None = None) -> int:
+        waiters_dir = os.path.join(self.tmp, "fleet-kit-worktree-add.waiters")
+        os.makedirs(waiters_dir, exist_ok=True)
+        for i in range(n_waiters):
+            Path(os.path.join(waiters_dir, f"fake{i}")).touch()
+        env = dict(self.env)
+        if extra_env:
+            env.update(extra_env)
+        out = run_bash(f'. "{LOCK_SCRIPT}"; worktree_lock_timeout_for {base}', env)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        return int(out.stdout.strip())
+
+    def test_single_waiter_leaves_base_timeout_unchanged(self):
+        """AC: existing single/few-minion concurrency continues to work unchanged."""
+        self.assertEqual(self._timeout_for(120, n_waiters=1), 120)
+
+    def test_wide_fanout_scales_the_create_path_budget(self):
+        """32-wide fanout (this issue's reproduction) must clear a scaled budget that a fixed
+        120s could not: 31 other waiters ahead * ~20s/add comfortably exceeds 120s."""
+        timeout = self._timeout_for(120, n_waiters=32)
+        self.assertGreater(timeout, 120)
+        self.assertEqual(timeout, 640)  # 32 * 20
+
+    def test_cleanup_path_budget_is_never_scaled(self):
+        """Non-goal: the exit-time cleanup call (worktree_lock_acquire 30) stays exactly as
+        bounded as it already was, even under the same heavy contention that scales create."""
+        self.assertEqual(self._timeout_for(30, n_waiters=32), 30)
+
+    def test_scaling_is_capped(self):
+        timeout = self._timeout_for(120, n_waiters=1000,
+                                     extra_env={"WORKTREE_LOCK_MAX_TIMEOUT": "300"})
+        self.assertEqual(timeout, 300)
+
+
+class WorktreeLockEndToEndScalingTests(unittest.TestCase):
+    """Same shape as WorktreeLockContentionTests above, but with a base timeout too small for
+    the real concurrency to clear unscaled -- proving the scaling actually prevents the FATAL
+    this issue reports, not just that the formula computes a number."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="fleet-worktree-lock-e2e-test-")
+        self.env = dict(os.environ)
+        self.env["TMPDIR"] = self.tmp
+        # Scaled down from the real 10-20s/add, 120s budget so the test runs in ~seconds while
+        # keeping the same ratio that made the real incident fail: ~14x more queued wait than
+        # the fixed per-attempt budget allows.
+        self.env["WORKTREE_LOCK_SEC_PER_WAITER"] = "0.2"
+        self.env["WORKTREE_LOCK_SCALE_MIN_TIMEOUT"] = "0"
+        self.order_file = os.path.join(self.tmp, "order.log")
+
+    def _waiter_script(self, tag: str, base_timeout: str, hold_s: float = 0.15) -> str:
+        return textwrap.dedent(f"""
+            set -u
+            . "{LOCK_SCRIPT}"
+            worktree_lock_acquire {base_timeout} || {{ echo "TIMEOUT {tag}" >> "{self.order_file}"; exit 1; }}
+            echo "OK {tag}" >> "{self.order_file}"
+            sleep {hold_s}
+            worktree_lock_release
+        """)
+
+    def test_unscaled_fixed_budget_times_out_under_wide_fanout(self):
+        """Control: reproduce the reported failure. With scaling disabled (per-waiter cost 0),
+        a too-small fixed budget cannot clear 15 waiters each holding 0.15s."""
+        env = dict(self.env)
+        env["WORKTREE_LOCK_SEC_PER_WAITER"] = "0"  # disable scaling for this control case
+        procs = [subprocess.Popen(["bash", "-c", self._waiter_script(f"w{i}", "1")], env=env)
+                 for i in range(15)]
+        for p in procs:
+            p.wait(timeout=15)
+        lines = Path(self.order_file).read_text().splitlines()
+        self.assertTrue(any(l.startswith("TIMEOUT") for l in lines),
+                         f"expected at least one timeout with scaling disabled: {lines}")
+
+    def test_scaled_budget_clears_the_same_wide_fanout(self):
+        """gh#5632 fix: the same 15-way contention, same tiny base timeout, but with scaling
+        live -- nobody times out."""
+        procs = [subprocess.Popen(["bash", "-c", self._waiter_script(f"w{i}", "1")], env=self.env)
+                 for i in range(15)]
+        for p in procs:
+            p.wait(timeout=15)
+        lines = Path(self.order_file).read_text().splitlines()
+        self.assertEqual(len(lines), 15, lines)
+        self.assertTrue(all(l.startswith("OK ") for l in lines),
+                         f"a waiter timed out despite scaling: {lines}")
 
 
 if __name__ == "__main__":
