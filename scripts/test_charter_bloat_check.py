@@ -8,7 +8,9 @@ never actually touched the file) must not count at all.
 """
 from __future__ import annotations
 
+import os
 import sys
+import tempfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -90,6 +92,56 @@ def test_tied_mergedat_mixing_int_and_str_number_does_not_raise():
     r = cbc.analyze(["members/x/x.md"], prs)["members/x/x.md"]
     assert r["count_since_consolidation"] == 2
     assert r["last_consolidation_pr"] is None
+
+
+def _root_with_charter(td, rel, n_lines):
+    path = os.path.join(td, rel)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as fh:
+        fh.write("line\n" * n_lines)
+    return td
+
+
+def test_charter_over_the_line_ceiling_flags_even_with_zero_churn():
+    """A long charter is a per-pass cost whatever its churn ratio (marie.md: 646 lines and
+    `ok` on every run, because one net-reductive PR resets `since_consolidation` forever)."""
+    prs = [_pr(1, "2026-09-01T00:00:00Z", "members/x/x.md", 5, 40)]  # consolidation, since=0
+    with tempfile.TemporaryDirectory() as td:
+        _root_with_charter(td, "members/x/x.md", 600)
+        r = cbc.analyze(["members/x/x.md"], prs, root=td, line_ceiling=450)["members/x/x.md"]
+    assert r["count_since_consolidation"] == 0, r
+    assert r["lines"] == 600
+    assert r["over_ceiling"] is True
+    assert r["needs_consolidation"] is True
+
+
+def test_charter_under_the_line_ceiling_stays_ok():
+    prs = [_pr(1, "2026-09-01T00:00:00Z", "members/x/x.md", 5, 40)]
+    with tempfile.TemporaryDirectory() as td:
+        _root_with_charter(td, "members/x/x.md", 100)
+        r = cbc.analyze(["members/x/x.md"], prs, root=td, line_ceiling=450)["members/x/x.md"]
+    assert r["lines"] == 100
+    assert r["over_ceiling"] is False
+    assert r["needs_consolidation"] is False
+
+
+def test_unreadable_charter_never_flags_on_the_ceiling():
+    """fk#908's rule, applied to the new arm: never print a verdict over data we did not read."""
+    prs = [_pr(1, "2026-09-01T00:00:00Z", "members/x/x.md", 5, 40)]
+    with tempfile.TemporaryDirectory() as td:  # file deliberately absent
+        r = cbc.analyze(["members/x/x.md"], prs, root=td, line_ceiling=450)["members/x/x.md"]
+    assert r["lines"] is None
+    assert r["over_ceiling"] is False
+    assert r["needs_consolidation"] is False
+
+
+def test_churn_still_flags_independently_of_the_ceiling():
+    prs = [_pr(i, f"2026-09-0{i}T00:00:00Z", "members/x/x.md", 10, 0) for i in range(1, 7)]
+    with tempfile.TemporaryDirectory() as td:
+        _root_with_charter(td, "members/x/x.md", 20)
+        r = cbc.analyze(["members/x/x.md"], prs, root=td, line_ceiling=450)["members/x/x.md"]
+    assert r["over_ceiling"] is False
+    assert r["needs_consolidation"] is True  # churn arm alone
 
 
 if __name__ == "__main__":

@@ -36,12 +36,26 @@ from __future__ import annotations
 import argparse
 import glob
 import json
+import os
 import re
 import subprocess
 import sys
 
 REPO_SLUG_DEFAULT = "The-Good-Project-Team/fleet-kit"
 CONSOLIDATION_THRESHOLD = 5
+
+# An ABSOLUTE ceiling, because churn alone cannot see a charter that is simply too long.
+# `since_consolidation` measures the ratio of additive to net-reductive passes, so a 646-line
+# charter reads `ok` forever as long as somebody deleted a line recently -- and on 2026-09-13
+# every one of 17 charters did read `ok` while marie.md sat at 646 lines, 83.8 turns and $5.50
+# a pass, the most expensive member in the fleet. Measured the same day across 11 members with
+# 7 days of runs, charter length vs mean turns-per-pass is Spearman rho=0.727 (646 marie/83.8
+# turns ... 84 judge-judy/14.2). A charter is a prompt re-read on every single pass, not a
+# design doc; length is a per-pass cost, so it gets a bound of its own.
+#
+# 450 is a RATCHET, not a discovered constant: it is set just under today's three longest
+# charters so the duty has somewhere to bite, and it should be lowered as they come down.
+LINE_CEILING = 450
 
 
 class SourceUnavailable(RuntimeError):
@@ -141,7 +155,17 @@ def fetch_merged_prs_from_git(root: str, limit: int, ref: str) -> list[dict]:
     return parse_git_numstat(out.stdout)
 
 
-def analyze(paths: list[str], prs: list[dict]) -> dict:
+def charter_line_count(root: str, rel: str) -> int | None:
+    """Lines in the charter, or None if we could not read it. None never flags (fk#908)."""
+    try:
+        with open(os.path.join(root, rel), errors="ignore") as fh:
+            return sum(1 for _ in fh)
+    except OSError:
+        return None
+
+
+def analyze(paths: list[str], prs: list[dict], root: str = ".",
+            line_ceiling: int = LINE_CEILING) -> dict:
     results = {}
     for rel in paths:
         touching = []
@@ -172,11 +196,18 @@ def analyze(paths: list[str], prs: list[dict]) -> dict:
                 break
             since += 1
 
+        lines = charter_line_count(root, rel)
+        over_ceiling = lines is not None and lines > line_ceiling
         results[rel] = {
             "count_since_consolidation": since,
             "last_consolidation_pr": last_consolidation_pr,
             "last_consolidation_date": last_consolidation_date,
-            "needs_consolidation": since >= CONSOLIDATION_THRESHOLD,
+            "lines": lines,
+            "line_ceiling": line_ceiling,
+            "over_ceiling": over_ceiling,
+            # Either arm flags. Churn catches a charter accumulating patches; the ceiling
+            # catches one that is already too long to keep paying for every pass.
+            "needs_consolidation": since >= CONSOLIDATION_THRESHOLD or over_ceiling,
         }
     return results
 
@@ -187,6 +218,8 @@ def main():
     ap.add_argument("--root", default=".", help="repo root containing members/")
     ap.add_argument("--members-glob", default="members/*/*.md")
     ap.add_argument("--limit", type=int, default=300, help="merged PRs to scan")
+    ap.add_argument("--line-ceiling", type=int, default=LINE_CEILING,
+                    help="flag any charter longer than this many lines, whatever its churn")
     ap.add_argument("--git-ref", default="origin/main",
                     help="ref the git fallback reads when gh is unavailable")
     ap.add_argument("--no-git-fallback", action="store_true",
@@ -227,17 +260,25 @@ def _run(args):
     if not prs:
         return _no_verdict(f"{source} returned 0 merged PRs")
 
-    results = analyze(paths, prs)
+    results = analyze(paths, prs, root=args.root, line_ceiling=args.line_ceiling)
 
     # Stdout names its own provenance: a degraded run must never be mistakable for a clean one.
     print(f"# source: {source}\t scanned={len(prs)} merged PRs")
     any_flagged = False
     for rel in sorted(results):
         r = results[rel]
-        flag = "NEEDS CONSOLIDATION" if r["needs_consolidation"] else "ok"
+        flag = "ok"
+        if r["needs_consolidation"]:
+            why = []
+            if r["count_since_consolidation"] >= CONSOLIDATION_THRESHOLD:
+                why.append("churn")
+            if r["over_ceiling"]:
+                why.append(f"over {r['line_ceiling']}-line ceiling")
+            flag = "NEEDS CONSOLIDATION (" + ", ".join(why) + ")"
         any_flagged = any_flagged or r["needs_consolidation"]
         print(
-            f"{rel}\tsince_consolidation={r['count_since_consolidation']}\t"
+            f"{rel}\tlines={r['lines']}\t"
+            f"since_consolidation={r['count_since_consolidation']}\t"
             f"last_consolidation_pr={r['last_consolidation_pr']}\t"
             f"last_consolidation_date={r['last_consolidation_date']}\t{flag}"
         )

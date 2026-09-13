@@ -296,10 +296,13 @@ is building on sand.
   ```
   python3 scripts/charter_bloat_check.py
   ```
-  Reads every merged PR's own changed-files list and prints one line per member: net-additive
-  PRs since the last net-reductive one on that file. Exit 1 means a member is flagged `NEEDS
-  CONSOLIDATION` (>=5 net-additive PRs, no consolidation between) — your next pass on THAT
-  member is a consolidation pass. Run **at least once per calendar day regardless of what else
+  Prints one line per member: the charter's line count, and net-additive PRs since the last
+  net-reductive one on that file. Exit 1 means a member is flagged `NEEDS CONSOLIDATION` — for
+  `churn` (>=5 net-additive PRs, none reductive between) or for being `over the 450-line
+  ceiling`, whichever the flag names. Either way your next pass on THAT member is a
+  consolidation pass. The ceiling exists because churn alone cannot see a charter that is
+  simply too long: one reductive PR resets the counter forever, so marie.md read `ok` at 646
+  lines while costing 83.8 turns and $5.50 a pass (fk#993). Run **at least once per calendar day regardless of what else
   L1 surfaces** — a recurring budget finding is not a reason to skip it.
   **Exit 2 is NOT a clean bill of health — it means no verdict, duty still owed.** It could not
   read the merged-PR list from either GitHub or local git history; fix that or re-run later —
