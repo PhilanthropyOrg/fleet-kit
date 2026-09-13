@@ -14532,7 +14532,7 @@ def _pacing_hold_check_sparse_single_row_hours_never_page_gh812():
         assert not ntfy_calls.exists(), "a sparse single-row hold reached the alert helper at all"
 
 
-def _judge_judy_records_pool_declines_and_stops_the_walk_fk991():
+def _judge_judy_records_pool_declines_and_stops_the_walk_fk989():
     """A tick the account pool declined is recorded as budget_declined, not as nothing at all.
 
     MEASURED 2026-09-13 on the philanthropy instance: judge-judy.log carried 559
@@ -15021,7 +15021,7 @@ if __name__ == "__main__":
     check("pacing_hold_check pages once on a sustained fleet-wide hold, suppresses the repeat, resolves on recovery (gh#812 AC1/AC2/AC3/AC4)", _pacing_hold_check_pages_on_sustained_hold_gh812)
     check("pacing_hold_check never pages a single held tick that clears on its own (gh#812 AC6)", _pacing_hold_check_single_tick_does_not_page_gh812)
     check("pacing_hold_check never pages on two sparse single-row hours (one early ticker each, not a real fleet-wide hold)", _pacing_hold_check_sparse_single_row_hours_never_page_gh812)
-    check("judge-judy records a pool-declined tick as budget_declined and stops the walk (fk#991)", _judge_judy_records_pool_declines_and_stops_the_walk_fk991)
+    check("judge-judy records a pool-declined tick as budget_declined and stops the walk (fk#989)", _judge_judy_records_pool_declines_and_stops_the_walk_fk989)
     for n in ok:
         print(f"  ok    {n}")
     for n, why in skipped:
