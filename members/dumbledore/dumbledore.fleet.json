@@ -29,6 +29,7 @@
   "llm": {
     "model": "opus",
     "prompt_file": "dumbledore.md",
+    "prompt_file_item": "review.md",
     "tools": {
       "allow": [
         "Read",
