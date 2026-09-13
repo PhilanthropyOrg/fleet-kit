@@ -10571,6 +10571,87 @@ def _success_clears_the_other_failure_streak():
     )
 
 
+def _gated_skip_writes_a_non_empty_reason_and_never_invokes_the_command():
+    """philanthropy#5701 AC1/AC2/AC4: a gated single-account pool must not exit silently.
+
+    Before this fix, the `gated*)` branch of account_pool_run's for-loop did a bare
+    `continue` and never wrote to $ACCOUNT_POOL_REASON_FILE -- only an ATTEMPTED failure did
+    (see the `reason=$(_account_pool_classify_failure ...)` branch further down) -- so
+    run_member.sh's `pass end` log line read `reason=` empty, indistinguishable from a crash.
+    Live: 11 minions dead with zero commits during exactly this gate window (issue thread,
+    2026-09-13 ~11:05-11:06Z).
+
+    Trips the gate for real via gh#134's own consecutive-'other'-failure mechanism (three
+    failures), not by hand-writing the state file, then makes ONE MORE account_pool_run call
+    against the now-gated account and asserts: the reason is non-empty and names the gate
+    ('other', not just 'gated'); the underlying command never ran a second time (a marker file
+    only the command itself would write); and the pool's own log line carries the same reason.
+    """
+    import subprocess
+    pool = ROOT / "scripts" / "account_pool.sh"
+    with tempfile.TemporaryDirectory() as tmp:
+        marker = pathlib.Path(tmp) / "invoked.marker"
+        reason_file = pathlib.Path(tmp) / "reason"
+        log_file = pathlib.Path(tmp) / "account-pool.log"
+        script = "\n".join([
+            "set -uo pipefail",
+            f'export FLEET_LOG_DIR="{tmp}"',
+            f'export ACCOUNT_POOL_LOG_FILE="{log_file}"',
+            'export FLEET_ACCOUNTS="acct"',
+            f'source "{pool}"',
+            f"account_pool_run bash -c {json.dumps(_OTHER_FAIL)} >/dev/null 2>&1 || true",
+            f"account_pool_run bash -c {json.dumps(_OTHER_FAIL)} >/dev/null 2>&1 || true",
+            f"account_pool_run bash -c {json.dumps(_OTHER_FAIL)} >/dev/null 2>&1 || true",
+            f'export ACCOUNT_POOL_REASON_FILE="{reason_file}"',
+            f'account_pool_run bash -c {json.dumps("echo ran >> " + str(marker) + "; echo ok")} >/dev/null 2>&1',
+            'echo "RC=$?"',
+        ])
+        proc = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=30)
+        assert "RC=3" in proc.stdout, (
+            f"gated single-account call did not return rc=3: stdout={proc.stdout!r} stderr={proc.stderr.strip()[:300]!r}"
+        )
+        assert not marker.exists(), (
+            "the underlying command ran while the account was gated -- a skip must never spend a call"
+        )
+        reason_text = reason_file.read_text().strip() if reason_file.exists() else ""
+        assert reason_text, (
+            "ACCOUNT_POOL_REASON_FILE was empty/missing on a gated skip -- run_member.sh's "
+            "`pass end` line would read `reason=` empty, indistinguishable from a crash"
+        )
+        assert reason_text.startswith("gated:other until "), (
+            f"gated reason does not name the gate and the wait: {reason_text!r}"
+        )
+        log_text = log_file.read_text() if log_file.exists() else ""
+        assert f"reason={reason_text}" in log_text, (
+            f"the pool's own log line does not carry the same reason written to the reason file: {log_text[-500:]!r}"
+        )
+
+
+def _ungated_single_account_pool_still_invokes_every_concurrent_call():
+    """philanthropy#5701 AC4: prove the gated-skip fix did not make the HEALTHY path more
+    conservative -- an ungated single-account pool must still invoke the real command on every
+    call, sequentially or concurrently, with no rc=3.
+    """
+    import subprocess
+    pool = ROOT / "scripts" / "account_pool.sh"
+    with tempfile.TemporaryDirectory() as tmp:
+        script = "\n".join([
+            "set -uo pipefail",
+            f'export FLEET_LOG_DIR="{tmp}"',
+            'export FLEET_ACCOUNTS="acct"',
+            f'source "{pool}"',
+            "for i in 1 2 3; do",
+            "  account_pool_run bash -c 'echo ok' >/dev/null 2>&1",
+            '  echo "RC$i=$?"',
+            "done",
+        ])
+        proc = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=30)
+        for i in (1, 2, 3):
+            assert f"RC{i}=0" in proc.stdout, (
+                f"call {i} on an ungated pool did not succeed: {proc.stdout!r}"
+            )
+
+
 def _exhausted_gate_is_still_visibly_tagged_exhausted():
     """gh#134 AC4/AC5: the pre-existing exhausted branch's state-file format (2 columns, no
     reason) must still read back correctly through the extended readiness output -- a missing
@@ -14754,6 +14835,10 @@ if __name__ == "__main__":
     check("a single 'other' failure does not gate the account", _single_other_failure_does_not_gate_the_account)
     check("'other' failures gate only after the consecutive threshold", _other_failure_gates_after_consecutive_threshold)
     check("a success clears the 'other' failure streak", _success_clears_the_other_failure_streak)
+    check("a gated skip writes a non-empty reason and never spends a call (philanthropy#5701)",
+          _gated_skip_writes_a_non_empty_reason_and_never_invokes_the_command)
+    check("an ungated single-account pool still invokes every call (philanthropy#5701)",
+          _ungated_single_account_pool_still_invokes_every_concurrent_call)
     check("an exhausted gate still reads back tagged 'exhausted' via readiness", _exhausted_gate_is_still_visibly_tagged_exhausted)
     check("a non-primary account with no override does not inherit the ambient oauth token", _non_primary_account_without_override_does_not_inherit_the_ambient_token)
     check("pool logs successes so outage length is measurable", _pool_logs_successes_so_downtime_is_measurable)
