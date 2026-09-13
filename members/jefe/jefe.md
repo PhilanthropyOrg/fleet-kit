@@ -302,7 +302,7 @@ is building on sand.
   ceiling`, whichever the flag names. Either way your next pass on THAT member is a
   consolidation pass. The ceiling exists because churn alone cannot see a charter that is
   simply too long: one reductive PR resets the counter forever, so marie.md read `ok` at 646
-  lines while costing 83.8 turns and $5.50 a pass (fk#993). Run **at least once per calendar day regardless of what else
+  lines while costing 83.8 turns and $5.50 a pass (fk#992). Run **at least once per calendar day regardless of what else
   L1 surfaces** — a recurring budget finding is not a reason to skip it.
   **Exit 2 is NOT a clean bill of health — it means no verdict, duty still owed.** It could not
   read the merged-PR list from either GitHub or local git history; fix that or re-run later —
