@@ -27,10 +27,10 @@ WORKTREE_LOCK_FILE="${TMPDIR:-/tmp}/fleet-kit-worktree-add.flock"
 # Confirmed at concurrency as low as 3-8 over the two days before the 32-wide fanout made it
 # unmissable.
 #
-# Fix: scale the wait budget to how many OTHER processes are ALSO mid-attempt on this lock right
-# now -- a live count on disk, not a config knob a caller has to know or pass -- so the timeout
-# tracks whatever concurrency a given pass actually produces instead of a number tuned for a
-# different one. At ordinary (single/few-minion) concurrency the scaled value is smaller than
+# Fix: scale the wait budget to how many processes (this one included) are mid-attempt on this
+# lock right now -- a live count on disk, not a config knob a caller has to know or pass -- so
+# the timeout tracks whatever concurrency a given pass actually produces instead of a number
+# tuned for a different one. At ordinary (single/few-minion) concurrency the scaled value is smaller than
 # the caller's own timeout, so the caller's number wins unchanged (AC: "existing single/few-
 # minion concurrency continues to work unchanged"). Only budgets >= WORKTREE_LOCK_SCALE_MIN_TIMEOUT
 # scale at all -- run_member.sh's/worktree_builder.sh's exit-time cleanup call
@@ -51,9 +51,12 @@ worktree_lock_timeout_for() {
     return
   fi
   local waiters scaled
-  # -mmin -10: a marker from a process that died mid-attempt (kill -9, OOM) without reaching
-  # worktree_lock_release would otherwise leak forever and inflate every later estimate; capping
-  # at 10 minutes self-heals that without needing anyone to clean the dir up.
+  # A marker from a process that died mid-attempt (kill -9, OOM) without reaching
+  # worktree_lock_release would otherwise leak forever: excluded from the COUNT past 10 minutes
+  # (self-heals every later estimate), and actually deleted past 30 minutes (comfortably past any
+  # real attempt's lifetime) so the directory itself doesn't grow unbounded over a long-lived
+  # container -- no separate reaper needed, this is the only place that reads it.
+  find "$WORKTREE_LOCK_WAITERS_DIR" -type f -mmin +30 -delete 2>/dev/null || true
   waiters=$(find "$WORKTREE_LOCK_WAITERS_DIR" -type f -mmin -10 2>/dev/null | wc -l)
   [ "$waiters" -lt 1 ] && waiters=1
   scaled=$(awk -v w="$waiters" -v s="$WORKTREE_LOCK_SEC_PER_WAITER" 'BEGIN { printf "%d", (w * s) + 0.999 }')

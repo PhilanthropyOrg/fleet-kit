@@ -19,6 +19,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 import unittest
 from pathlib import Path
 
@@ -50,10 +51,15 @@ class WorktreeLockSourceTests(unittest.TestCase):
         code_lines = [l for l in LOCK_SCRIPT.read_text().splitlines() if not l.strip().startswith("#")]
         code = "\n".join(code_lines)
         self.assertIn("flock", code)
-        # gh#5632: `mkdir -p` on the waiters-count dir is a legitimate, unrelated use -- the
-        # thing this guards against is the OLD polling-lock anti-pattern (`mkdir "$LOCK"` as
-        # the lock itself), not any appearance of mkdir at all.
-        self.assertNotIn('mkdir "$LOCK"', code)
+        # gh#5632: `mkdir -p "$WORKTREE_LOCK_WAITERS_DIR"` is a legitimate, unrelated use -- the
+        # thing this guards against is the OLD polling-lock anti-pattern (some `mkdir` variant
+        # used AS the lock itself), not any appearance of mkdir at all. Rather than matching one
+        # exact quoting of the old anti-pattern (which a re-quoted/re-spaced reintroduction could
+        # slip past), assert every `mkdir` line in the file is this one known-legitimate use.
+        mkdir_lines = [l.strip() for l in code_lines if "mkdir" in l]
+        for line in mkdir_lines:
+            self.assertIn('mkdir -p "$WORKTREE_LOCK_WAITERS_DIR"', line,
+                          f"unexpected mkdir usage, possible lock-as-mkdir regression: {line!r}")
 
 
 class WorktreeLockContentionTests(unittest.TestCase):
@@ -172,6 +178,18 @@ class WorktreeLockScaledTimeoutTests(unittest.TestCase):
         timeout = self._timeout_for(120, n_waiters=1000,
                                      extra_env={"WORKTREE_LOCK_MAX_TIMEOUT": "300"})
         self.assertEqual(timeout, 300)
+
+    def test_stale_marker_past_30min_is_deleted_not_just_excluded(self):
+        """A marker from a process that died mid-attempt (kill -9) must not leak forever: past
+        30 minutes it is actually removed, not just excluded from the waiter count."""
+        waiters_dir = os.path.join(self.tmp, "fleet-kit-worktree-add.waiters")
+        os.makedirs(waiters_dir, exist_ok=True)
+        stale = Path(os.path.join(waiters_dir, "dead12345"))
+        stale.touch()
+        old_time = time.time() - 31 * 60
+        os.utime(stale, (old_time, old_time))
+        self._timeout_for(120, n_waiters=1)  # any call reaps as a side effect
+        self.assertFalse(stale.exists(), "a marker older than 30 minutes should be deleted")
 
 
 class WorktreeLockEndToEndScalingTests(unittest.TestCase):
