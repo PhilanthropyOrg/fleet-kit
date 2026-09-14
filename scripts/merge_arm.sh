@@ -25,12 +25,16 @@ set -u
 # On failure: prints the failure message, returns non-zero -- a drop-in replacement for the
 # `arm_err="$(gh pr merge "$pr" --auto 2>&1 >/dev/null)"` shape both callers already used.
 arm_pr_auto_merge() {
-  local pr="$1" err
-  if err="$(gh pr merge "$pr" --auto 2>&1 >/dev/null)"; then
+  local pr="$1" repo="${2:-}" err
+  # Optional second arg: an owner/repo slug, for arming a PR in a repo that is not the cwd's.
+  # Callers that pass nothing keep the original one-arg behaviour exactly.
+  local -a R=()
+  [ -n "$repo" ] && R=(-R "$repo")
+  if err="$(gh pr merge "$pr" ${R[@]+"${R[@]}"} --auto 2>&1 >/dev/null)"; then
     return 0
   fi
   if [[ "$err" == *"required when not running interactively"* ]]; then
-    if err="$(gh pr merge "$pr" --auto --squash 2>&1 >/dev/null)"; then
+    if err="$(gh pr merge "$pr" ${R[@]+"${R[@]}"} --auto --squash 2>&1 >/dev/null)"; then
       return 0
     fi
   fi

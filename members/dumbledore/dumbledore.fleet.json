@@ -38,7 +38,8 @@
         "Write",
         "Bash",
         "WebFetch",
-        "TodoWrite"
+        "TodoWrite",
+        "Bash(bash /fleet-kit/scripts/pr_arm.sh:*)"
       ],
       "deny": [
         "Bash(gh pr merge:*)",
