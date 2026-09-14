@@ -50,8 +50,15 @@ import re
 import subprocess
 import sys
 
+# fk-item5620 (philanthropy#5620): the `#?` used to make the `#` OPTIONAL, so ordinary prose
+# like "this is fix 5 of the 7-item work order" or "**Fix 3** (post the counts...)" parsed as
+# `fix #5` / `fix #3` -- a real closing reference GitHub itself never recognises, since GitHub
+# requires the literal `#` (or `gh#`, or the issues/<n> URL form). Each alternative below now
+# REQUIRES one of those three markers immediately after the keyword; a bare number never
+# matches, so prose that merely contains a digit near "fix"/"close"/"resolve" is inert.
 CLOSE_RE = re.compile(
-    r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s+(?:https://github\.com/[^\s/]+/[^\s/]+/issues/)?#?(\d+)",
+    r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s+"
+    r"(?:https://github\.com/[^\s/]+/[^\s/]+/issues/|gh#|#)(\d+)",
     re.I,
 )
 PARTIAL_RE = re.compile(
