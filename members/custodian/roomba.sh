@@ -1,5 +1,7 @@
 #!/bin/bash
 # roomba.sh -- the worktree sweep as a plain script, not a 30-turn LLM pass (fleet-kit#514).
+# 2026-09-12: folded into custodian (the cleaner) -- roster 18 -> 10, "a member is a finger".
+# Runs from custodian's cron block in entrypoint.sh; reports as member=custodian, kind=shell.
 #
 # WHY: measured on the last 1,000 runs per container, roomba burned 25-30 turns of window per
 # tick to run roomba.py twice and write a report, and 43 of 93 passes on the fleet-kit instance
@@ -29,12 +31,12 @@ mkdir -p "$LOG_DIR"
 
 report() { # <outcome> <evidence> <self-critique> <exit-code>
   printf 'Outcome: %s\nEvidence: %s\nSelf-critique: %s\n' "$1" "$2" "$3" | python3 "$KIT_DIR/scripts/run_report.py" \
-    --member roomba --run-id "$RUN_ID" --kind shell --exit-code "${4:-0}" \
+    --member custodian --run-id "$RUN_ID" --kind shell --exit-code "${4:-0}" \
     --pass-file - >> "$LOG_DIR/runs.jsonl" 2>>"$LOG"
 }
 
 # Dry-run first, same as the charter always did. Its stdout is the evidence.
-DRY=$(cd "$REPO" && python3 "$KIT_DIR/members/roomba/roomba.py" --repo "$REPO" 2>&1); RC=$?
+DRY=$(cd "$REPO" && python3 "$KIT_DIR/members/custodian/roomba.py" --repo "$REPO" 2>&1); RC=$?
 if [ "$RC" -ne 0 ]; then
   report "QUIET — worktree sweep could not run (roomba.py rc=$RC); nothing removed" \
          "$(printf '%s' "$DRY" | tail -n 3 | tr '\n' ' ' | cut -c1-300)" \
@@ -57,7 +59,7 @@ if [ "${CANDIDATES:-0}" -eq 0 ]; then
 fi
 
 # Candidates exist and every one passed roomba.py's own checks: execute, record what went.
-EXEC=$(cd "$REPO" && python3 "$KIT_DIR/members/roomba/roomba.py" --repo "$REPO" --execute 2>&1); RC=$?
+EXEC=$(cd "$REPO" && python3 "$KIT_DIR/members/custodian/roomba.py" --repo "$REPO" --execute 2>&1); RC=$?
 REMOVED=$(printf '%s' "$EXEC" | grep -cE '^\s*removed' || true)
 if [ "$RC" -ne 0 ]; then
   report "worktree sweep (${EVALUATED:-0} evaluated, ${REMOVED:-0} removed) before roomba.py failed rc=$RC" \

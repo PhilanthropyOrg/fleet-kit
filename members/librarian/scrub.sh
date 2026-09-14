@@ -1,5 +1,7 @@
 #!/bin/bash
-# librarian-scrub.sh -- the hourly credential scrub + retention sweep, as a SHELL member.
+# scrub.sh -- the hourly credential scrub + retention sweep, as a plain script.
+# 2026-09-12: was the `librarian-scrub` member; folded into librarian (roster 18 -> 10).
+# Runs from librarian's cron block in entrypoint.sh; reports as member=librarian, kind=shell.
 #
 # WHY (fleet-kit#784): `librarian` was an LLM member on sonnet whose whole hourly pass was
 # "run librarian.py --execute and read its report" -- 24 model passes a day to invoke one
@@ -16,7 +18,7 @@ mkdir -p "$LOG_DIR"
 
 report() { # <outcome> <evidence> <self-critique> <exit-code>
   printf 'Outcome: %s\nEvidence: %s\nSelf-critique: %s\n' "$1" "$2" "$3" | python3 "$KIT_DIR/scripts/run_report.py" \
-    --member librarian-scrub --run-id "$RUN_ID" --kind shell --exit-code "${4:-0}" \
+    --member librarian --run-id "$RUN_ID" --kind shell --exit-code "${4:-0}" \
     --pass-file - >> "$LOG_DIR/runs.jsonl" 2>>"$LOG"
 }
 

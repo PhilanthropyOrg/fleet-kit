@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""red_walker.py -- drives members/red/attacks.yaml against philanthropy.org with Playwright
+"""red_walker.py -- drives members/sentry/attacks.yaml (members/red/ until 2026-09-12) against philanthropy.org with Playwright
 and writes qa-out/<run>/red/results.json (fleet-kit#785). AUTHORIZED adversarial testing of
 our OWN product only.
 
@@ -305,7 +305,7 @@ def select_attacks(attacks: list[dict], item_text: str | None, attacks_filter: l
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--catalog", type=Path, default=ROOT / "members" / "red" / "attacks.yaml")
+    ap.add_argument("--catalog", type=Path, default=ROOT / "members" / "sentry" / "attacks.yaml")
     ap.add_argument("--out", type=Path, default=Path("qa-out"))
     ap.add_argument("--run-id", default=None)
     ap.add_argument("--attacks", nargs="*", default=None)

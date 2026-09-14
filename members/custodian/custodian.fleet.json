@@ -1,47 +1,60 @@
 {
   "name": "custodian",
-  "emoji": "🧹",
+  "purpose": "The cleaner. Finds parts of the site that do the same job twice and picks one to keep, finds code nothing uses any more and proposes deleting it, and sweeps abandoned work folders every hour by script. Never deletes site code on its own \u2014 it files the work for review.",
+  "emoji": "\ud83e\uddf9",
   "lane": "product",
   "mandate": {
-    "target": "every job in the product serves exactly one surface: each pass measures surface debt (sum of surfaces-minus-one per job), files ONE retirement for the worst job, and refreshes the fleet's rework numbers -- as a script, not a model pass. Reif, 2026-09-10: 'a system that keeps looking at our surfaces, and either removing them or perfecting them... it needs to be recursive.'",
+    "target": "every job in the product serves exactly one surface, and no script exists that nothing calls. Reif, 2026-09-10: 'a system that keeps looking at our surfaces, and either removing them or perfecting them... it needs to be recursive.' TWO AXES, and they need different machinery. SURFACE AXIS (model): duplicate surfaces ARE called -- ops-hud is 7 live routes serving one job -- so no caller-scan can find them and no arithmetic can say which of the 7 should survive or how the other 6 fold into it. That is judgment, and it is why this member is an llm and not a shell (Reif, 2026-09-12). Each pass names the real surfaces of the worst job, picks the survivor with a stated reason, and files ONE retirement. DEAD-CODE AXIS (deterministic, in the runner): scripts with tests and no non-test caller are proposed for deletion one at a time. Never deletes or edits product code itself -- it files the work behind a PR and CI.",
     "checklist": [
+      "STEP 1 (deterministic, run it first, every pass): the rework cache. `python3 /fleet-kit/scripts/rework_collect.py --repo \"$KIT_REPO_SLUG\" --limit 400 --print`. dumbledore's predictions ledger resolves rework_pct/churn_ratio off this cache and a stale one reads as 'unavailable' rather than resolving a row either way, so it must refresh even on a pass that files nothing. This used to run in custodian.sh; custodian became an llm member on 2026-09-12 and run_member.sh dispatches a custom llm.runner INSTEAD of a model pass (run_member.sh:343), so the runner was removed and these steps are now yours to run.",
+      "STEP 2 (deterministic): the dead-code axis. Run `python3 -c \"import sys;sys.path.insert(0,'scripts');from pathlib import Path;import dead_code_lib as d;print(chr(10).join(d.find_orphan_scripts(Path('.'))))\"` from FLEET_REPO, and report the count. Also report analyzer_available() verbatim -- if it is False, say so LOUDLY in the report: an unavailable analyzer is not a clean result.",
       "surface_debt.py --json computes the debt; only the worst job is filed",
       "no item is filed while a previous surface-debt item is open -- one retirement at a time",
       "rework_collect.py refreshes the cache so fleet_metrics rework_pct/churn_ratio resolve for dumbledore's ledger",
       "a job at 0 surfaces is UNCLASSIFIED, never counted as clean (superadmin reads 0 across 25 route files)",
-      "never edits product code and never retires a surface itself -- it files the work behind a PR and CI"
+      "never edits product code and never retires a surface itself -- it files the work behind a PR and CI",
+      "surface axis -- WHY A MODEL, NOT A SCRIPT (Reif, 2026-09-12): 'duplicate surfaces do get called even though one of them should be consolidated'. A dead-code scan keys on 'no caller' and is structurally blind to them: all 7 ops-hud routes are live and routed. surface_debt.py counts HOW MANY extras exist; it cannot say which page should survive, what each one does that the others do not, or how to fold them together without losing a feature. Do that reading yourself, every pass.",
+      "surface axis -- enumerate the REAL surfaces, never file a counts-only item. `surface_debt.py --json/--next` degrades to the committed ui_surfaces_baseline.json whenever the app will not import (measured 2026-09-12: ModuleNotFoundError fastapi on the dino host, psycopg inside the container -- so NO environment in the fleet can currently import it), and the item it writes then literally says '(not enumerated here)'. That is unactionable. Get the routes without importing the app: `python3 -c \"import sys;sys.path.insert(0,'scripts/qa');import ui_surfaces;print(ui_surfaces.JOBS)\"` returns [job, [routes], [handlers]] as static data. Then READ the handler and template of each route before judging.",
+      "surface axis -- pick the survivor and SAY WHY. For the worst job: list each surface with the one thing it does that the others do not, name which survives, and name what must be folded in so no capability is lost. A retirement item that does not name the survivor is not actionable and must not be filed.",
+      "surface axis -- retired routes REDIRECT, never 404: ui_surfaces.py counts a redirect-only endpoint as not-a-surface, so a 3xx is how a retired page stays reachable and still lowers the debt. The PR must rerun `ui_surfaces.py --baseline` in the same PR so test_ui_surfaces_ratchet.py freezes the lower count -- that ratchet is the recursion.",
+      "surface axis -- ONE retirement in flight at a time, gated on no open surface-debt item. A 13-item cleanup epic is exactly the garbage nobody picks up.",
+      "surface axis -- Vision-link must name a KR from docs/VISION.md, never MRR. surface_debt.py --next still emits 'Vision-link: THE NUMBER ($25k/mo MRR)', which is the SUPERSEDED plan (2026-09-12: MRR is downstream, claimed orgs is #1). Duplicate surfaces split the claim->HQ path a claiming org walks, so the honest link is KR1 or KR3. Rewrite the line; never file it as generated.",
+      "surface axis -- a debt this member cannot compute is never guessed at: a fabricated 0 would read as 'no duplication left' and silently retire the whole loop.",
+      "dead-code axis (runner, deterministic): dead_code_lib.find_orphan_scripts names scripts that have tests but NO non-test caller; only one is filed per pass, gated on no open dead-code item. This axis is complementary to the surface axis, not a substitute -- it finds files nothing calls, it CANNOT find duplicate pages that are all called.",
+      "dead-code axis: NEVER delete a script -- file it. The scan reads one repo, so a caller in a fleet member charter, a CI runner or a runbook is invisible to it. marie_collapse.py was listed as an orphan the same hour it was wired into marie's PART E; it is now allowlisted in _KNOWN_EXTERNAL_ENTRYPOINTS. Assume the next one could be the same and grep the fleet-kit repo before proposing a removal.",
+      "dead-code axis: a scan that could not run reports LOUD, never clean -- maint_dead_code.py on the box printed 'no dead code detected' weekly from 2026-07-15 while 42 orphans accumulated, because neither pyflakes nor ruff was installed there and it could not tell 'clean' from 'I could not look'.",
+      "hourly worktree sweep (was the roomba member, folded 2026-09-12): members/custodian/roomba.sh runs roomba.py dry-run then --execute only for candidates that pass every merge/clean/protect/min-age/dead-PID check; a candidate it cannot decide is never listed, so never removed. Runs from cron as a script, not in your model pass -- do not re-run it yourself"
     ],
     "limits": {
-      "timeout_s": 600
+      "timeout_s": 2700
     },
     "escalation": "surface_debt.py cannot run (route walker broken, app deps missing) -- report QUIET with the error and file nothing. A debt this member cannot compute is never guessed at: a fabricated 0 reads as 'no duplication left' and would silently retire the whole loop."
   },
   "schedule": {
     "daily_at": "13:17"
   },
-  "timeout_s": 600,
+  "timeout_s": 2700,
   "enabled": true,
   "llm": {
     "model": "sonnet",
     "prompt_file": "custodian.md",
     "tools": {
       "allow": [
-        "none"
-      ],
-      "deny": [
         "Read",
-        "Edit",
-        "Write",
         "Bash",
         "Grep",
         "Glob",
-        "WebFetch"
+        "TodoWrite"
+      ],
+      "deny": [
+        "Bash(gh pr merge:*)",
+        "Bash(git push --force:*)",
+        "Bash(git push origin main:*)"
       ]
-    },
-    "runner": "members/custodian/custodian.sh"
+    }
   },
   "report": {
     "vision_link": "optional"
   },
-  "kind": "shell"
+  "kind": "llm"
 }

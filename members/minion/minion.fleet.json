@@ -1,6 +1,8 @@
 {
   "name": "minion",
-  "emoji": "\ud83d\udc65",
+  "purpose": "The builder. Gets one job from Gru and turns it into finished work, ready to go live. This is where most of the actual building happens.",
+  "spawned_by": "gru",
+  "emoji": "👥",
   "kind": "llm",
   "lane": "build",
   "mandate": {

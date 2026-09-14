@@ -1,6 +1,7 @@
 {
   "name": "datta",
-  "emoji": "🧮",
+  "purpose": "The analyst. Every few hours it checks the scoreboard for every area of the product, spots which area has gone stale or fallen behind, and sends itself to dig into that area's real numbers and write up at least one concrete finding worth acting on.",
+  "emoji": "\ud83e\uddee",
   "kind": "llm",
   "lane": "analysis",
   "mandate": {
@@ -11,7 +12,8 @@
       "PART B -- spawn one nerd per lane that qualifies, N bounded by the hour's allowance the same way gru bounds minions. A lane whose KPI is fresh, whose guardrail holds, and which was examined recently does NOT need a pass this hour -- say so rather than spawning to look busy",
       "spawn with: FLEET_RUN_NOW=1 bash scripts/run_member.sh nerd --task \"lane=<lane> ...\" & -- record each PID and wait on every one inside THIS turn (you are one-shot; ending your turn to await a notification means nobody ever sees the result)",
       "PART C -- collect each nerd's real result from its own run record, never assume it succeeded. A nerd that never reported back is a FAILURE you name explicitly, not a silent gap",
-      "never analyse a lane yourself and never file its findings for it -- datta measures coverage and dispatches; the nerd examines and files. Same split as gru/minion: gru chooses, minion builds"
+      "never analyse a lane yourself and never file its findings for it -- datta measures coverage and dispatches; the nerd examines and files. Same split as gru/minion: gru chooses, minion builds",
+      "LANE MODE (was the nerd member, folded 2026-09-12): when the operator instruction starts with lane=<name>, you are the analyst for THAT lane only -- Read /fleet-kit/members/datta/lane.md and follow it instead of the dispatcher steps; file at least one evidence-backed finding or say in one line what you examined and why nothing qualified; never spawn, never build"
     ],
     "limits": {
       "timeout_s": 3600
@@ -32,7 +34,9 @@
         "Bash",
         "Grep",
         "Glob",
-        "TodoWrite"
+        "TodoWrite",
+        "WebFetch",
+        "WebSearch"
       ],
       "deny": [
         "Bash(gh pr merge:*)",

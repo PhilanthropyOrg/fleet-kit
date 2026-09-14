@@ -77,10 +77,8 @@ GitHub Issues (board)  ->  rank (RICE)  ->  build (fresh worktree, claude -p)
   GitHub already serializes it.
 - **Deploy** — a 3-function driver contract (`scripts/deploy_driver.md`): `current_sha`,
   `deploy`, `health`. Bring your own — how you deploy is the most product-specific thing here.
-- **jefe** (`members/jefe/jefe.md`) — a recurring deep session that keeps the fleet's own
-  guardrails intact and unblocks stalled work, on a priority ladder (self → tools → policy →
-  prod → backlog) so it never polishes features while its own tooling is broken. Never gates a
-  merge — that's judge-judy's job, via auto-merge on green checks.
+- **(jefe, retired 2026-09-12)** — its ops ladder lives in dumbledore, its stuck-green merge
+  exception in gru, and epic closing in marie. A member is a finger; ten is the roster.
 - **dumbledore** (`members/dumbledore/dumbledore.md`) — a once-daily opus pass with two jobs:
   find what's ROTTING and fix it at the causal layer (persona/flag/gate/prompt, not the
   symptom), and — the architect's job, folded in — decompose the product vision into ONE epic

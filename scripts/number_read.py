@@ -5,8 +5,11 @@ fleet-kit#513. Fleet-kit owns the loop; the venture owns the number. An instance
 FLEET_NUMBER_URL (and FLEET_NUMBER_TOKEN) in its fleet.env, pointing at an endpoint that
 answers:
 
-    {"as_of": "...", "number": {name, value, unit, delta_7d}, "guardrail": {...},
-     "channel": {...}, "errors": [...]}
+    {"as_of": "...", "number": {name, value, unit, delta_7d}, "kr1": {...}, "kr3": {...},
+     "revenue": {...}, "channel": {...}, "target": {...}, "errors": [...]}
+
+Keys other than "number" are optional and rendered only when present; "kr1"/"kr3" are the
+other key results of the number's OKR, "revenue" is downstream of it and labelled so.
 
 Two modes:
 
@@ -101,13 +104,22 @@ def render(payload: dict, now: float | None = None) -> str:
         head += f" -- STALE, last read {age / 3600:.0f}h ago; treat every figure below as unverified"
     lines.append(head)
     target = payload.get("target") or {}
-    # The target is human-written at the endpoint (Reif, 2026-09-06: $25k MRR by 2026-12-31).
-    # Rendered on the Number line only, as "of <target> by <date> (<pct>%)", so distance to
-    # it is a ranking input for gru and not a separate line nobody reads.
+    # The target is human-written at the endpoint (Reif, 2026-09-05: 100,000 entities with a
+    # real interaction; a destination, so it may carry no date). Rendered on the Number line
+    # only, as "of <target>[ by <date>] (<pct>%)", so distance to it is a ranking input for
+    # gru and not a separate line nobody reads.
     tgt = ""
     if target.get("value") is not None:
-        tgt = f" of {_fmt(target.get('value'))} {target.get('unit', '')}".rstrip() + f" by {target.get('by', '?')}"
-    for key, label in (("number", "Number"), ("guardrail", "Guardrail"), ("channel", "Channel")):
+        tgt = f" of {_fmt(target.get('value'))} {target.get('unit', '')}".rstrip()
+        if target.get("by"):
+            tgt += f" by {target['by']}"
+    # Only "number" is required. The rest render when the endpoint sends them, in this order:
+    # the other key results first, then what sits downstream of them.
+    keys = [("number", "Number"), ("kr1", "KR1"), ("kr3", "KR3"),
+            ("guardrail", "Guardrail"), ("revenue", "Revenue"), ("channel", "Channel")]
+    for key, label in keys:
+        if key not in payload and key != "number":
+            continue
         block = payload.get(key)
         if not block:
             lines.append(f"{label}: unmeasured (the endpoint could not read it)" + (f" -- target{tgt}" if key == "number" and tgt else ""))
@@ -120,6 +132,12 @@ def render(payload: dict, now: float | None = None) -> str:
             except (TypeError, ValueError, ZeroDivisionError):
                 pct = ""
             line += tgt + pct
+        if key == "kr1" and block.get("completion_rate_pct") is not None:
+            line += (f"; {block['completion_rate_pct']}% of all claims reached verified"
+                     f"; median waiting claim is {_fmt(block.get('median_pending_age_days'))} days old")
+        if block.get("unmeasured"):
+            lines.append(line + " -- not instrumented yet, never read this as zero")
+            continue
         lines.append(line + f" ({_delta(block.get('delta_7d'))})")
     errs = payload.get("errors") or []
     tail = f"as of {payload.get('as_of', '?')}."

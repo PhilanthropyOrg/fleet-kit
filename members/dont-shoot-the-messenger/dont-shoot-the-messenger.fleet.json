@@ -1,5 +1,6 @@
 {
   "name": "dont-shoot-the-messenger",
+  "purpose": "Writes your emails. The morning brief at 6:30am, an afternoon update at 12:30, and a wrap-up at 5:30pm. Nobody else on the team emails you.",
   "emoji": "📮",
   "lane": "plumbing",
   "mandate": {

@@ -3,7 +3,7 @@
 # quality:world-class item whose newest merged PR is newer than its newest VP verdict.
 # Deterministic on purpose: the loop that gets a spec up to par must not depend on a
 # charter remembering to run it (2026-09-08: gru did not, for 2.5h after the redo merged).
-# See scripts/vp_due.py for the rule; members/vp/vp.md for what the review does.
+# See scripts/vp_due.py for the rule; members/dumbledore/review.md for what the review does.
 set -u
 KIT="$(cd "$(dirname "$0")/.." && pwd)"
 REPO="${FLEET_REPO:?set FLEET_REPO (env or fleet.env)}"
@@ -31,8 +31,8 @@ fi
 # setsid + nohup: the pass must outlive this cron tick and never die with a parent (a minion
 # spawned from inside a vp pass was killed the minute vp ended, 2026-09-08 16:53Z).
 for n in $due; do
-  log "spawning vp --item $n"
-  FLEET_RUN_NOW=1 setsid nohup bash "$KIT/scripts/run_member.sh" vp --item "$n" >> "$LOG_DIR/vp.log" 2>&1 < /dev/null &
+  log "spawning dumbledore --item $n (review mode; was vp until 2026-09-12)"
+  FLEET_RUN_NOW=1 setsid nohup bash "$KIT/scripts/run_member.sh" dumbledore --item "$n" >> "$LOG_DIR/vp.log" 2>&1 < /dev/null &
 done
 if [ -n "$redo_lines" ]; then
   while IFS="$(printf '\t')" read -r target source why; do

@@ -27,7 +27,16 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 ROOT = HERE.parent
 
-ok, fail = [], []
+ok, fail, skipped = [], [], []
+
+
+def check_skip(name: str, reason: str) -> None:
+    """fk#854 AC5: record a step whose SPEC this repo already states but whose BUILD is a
+    different issue's job (here, fk#653's closes_gate.py label read) -- distinct from `fail`,
+    which means broken, not "known gap, tracked elsewhere." Never used to quietly weaken an
+    assertion to match today's bug; the caller still runs the real assertion first and only
+    calls this when it raises (see `_world_class_path_walks_end_to_end_gh854`)."""
+    skipped.append((name, reason))
 
 
 def _redact_secrets(text):
@@ -980,6 +989,67 @@ def _claim_history_blocks_an_item_that_keeps_dead_ending():
         assert "ok" in out_clean.stdout, out_clean.stdout
 
 
+def _claim_history_does_not_double_count_a_runs_started_and_terminal_rows():
+    """gh#4966: `runs` has a composite (run_id, recorded_at) PRIMARY KEY (fleet-kit#212), so one
+    real minion attempt is written as TWO rows sharing a single `run_id` -- a `started` row and
+    a terminal-status row. Before this fix, neither `minion_runs_for_item`'s query nor
+    `dead_end_claim_count` de-duplicated on `run_id`, so every real attempt counted twice and
+    the documented 3-strike threshold (module docstring) actually fired at 2 real attempts --
+    exactly the live #4761/#4814 discrepancy this issue was filed against (BLOCKED count=4 for
+    2 real attempts). This must fail against the pre-fix code (no de-dup) and pass after.
+    """
+    import time
+    import claim_history
+    import fleet_db
+
+    # Pure core: dead_end_claim_count must de-dup even when handed a raw, undeduped run_id list.
+    run_ids_with_duplicates = [
+        "minion-item64-111-1", "minion-item64-111-1",  # same run: started + terminal rows
+        "minion-item64-222-2", "minion-item64-222-2",
+    ]
+    assert claim_history.dead_end_claim_count(run_ids_with_duplicates, 64) == 2, (
+        "2 distinct real runs, each written twice, must count as 2 -- not 4")
+    assert not claim_history.is_dead_end_blocked(run_ids_with_duplicates, 64, threshold=3)
+
+    # A NULL/empty run_id must still not raise and must still not count (gh#4966 AC6).
+    assert claim_history.dead_end_claim_count(
+        run_ids_with_duplicates + [None, ""], 64) == 2
+
+    # Real integration through fleet.db: 2 real attempts, each recorded as a started + a
+    # terminal row sharing one run_id -- the exact shape live in fleet.db.
+    with tempfile.TemporaryDirectory() as d:
+        d = Path(d)
+        runs_file = d / "runs.jsonl"
+        now = time.time()
+        recs = [
+            {"run_id": "minion-item4761-141190-1788808104", "member": "minion", "item_id": "4761",
+             "status": "started", "_recorded_at": now - 3 * 86400},
+            {"run_id": "minion-item4761-141190-1788808104", "member": "minion", "item_id": "4761",
+             "status": "budget_declined", "_recorded_at": now - 3 * 86400 + 60},
+            {"run_id": "minion-item4761-12091-1788818817", "member": "minion", "item_id": "4761",
+             "status": "started", "_recorded_at": now - 2 * 86400},
+            {"run_id": "minion-item4761-12091-1788818817", "member": "minion", "item_id": "4761",
+             "status": "budget_declined", "_recorded_at": now - 2 * 86400 + 60},
+        ]
+        runs_file.write_text("\n".join(json.dumps(r) for r in recs) + "\n")
+        conn = fleet_db.connect(d / "fleet.db")
+        fleet_db.sync(conn, runs_file=runs_file)
+
+        run_ids = claim_history.minion_runs_for_item(conn, 4761, window_days=14.0)
+        assert len(run_ids) == 2, run_ids  # DISTINCT: 2 real runs, not 4 rows
+        assert claim_history.dead_end_claim_count(run_ids, 4761) == 2
+        assert not claim_history.is_dead_end_blocked(run_ids, 4761, threshold=3), (
+            "2 real attempts must stay below the 3-strike threshold")
+
+        import subprocess
+        out = subprocess.run(
+            [sys.executable, str(HERE / "claim_history.py"), "--item", "4761",
+             "--db-path", str(d / "fleet.db")],
+            capture_output=True, text=True)
+        assert out.returncode == 0, (out.returncode, out.stdout, out.stderr)
+        assert "count=2" in out.stdout, out.stdout
+
+
 def _gru_md_gates_candidates_on_vision_link():
     """fleet-kit#523: Reif, 2026-09-06 -- "I don't care about the number of PRs we hit ... I
     just want to make autonomous progress on agreed upon goals." Measured the same night:
@@ -1414,6 +1484,11 @@ def _maxx_share_ceiling_uses_hourly_headroom_not_the_week_bank():
         "sustainable_pct_per_hour": 0.35,
         "per_diem_hourly_pct": 0.10,
         "reserved_pct": 0,
+        # Anchored block: nothing spent, full 5h window left -- keeps the fail-closed
+        # block-pace clamp (maxx_share_ceiling.block_over_pace) out of a test about the
+        # HOURLY slice formula. An unanchored budget now clamps to 0.0 on purpose.
+        "session_used_pct": 0.0,
+        "five_reset_in_sec": 5 * 3600,
     }
     orig = maxx_share_ceiling.get_headroom
     try:
@@ -1504,6 +1579,8 @@ def _maxx_share_ceiling_subtracts_local_leases_not_just_the_remotes_reserved_pct
             remote_budget = {
                 "verdict": "ok", "sustainable_pct_per_hour": 0.35,
                 "per_diem_hourly_pct": 0.10, "reserved_pct": 0,
+                # Anchored block -- see the note on the other budget fixtures.
+                "session_used_pct": 0.0, "five_reset_in_sec": 5 * 3600,
             }
             maxx_share_ceiling.get_headroom = lambda: (1.0, "ok", remote_budget)
 
@@ -1547,6 +1624,11 @@ def _maxx_share_ceiling_respects_a_real_over_verdict_not_just_unreadable_meters(
         "sustainable_pct_per_hour": 0.35,
         "per_diem_hourly_pct": 0.10,
         "reserved_pct": 0,
+        # Anchored block: nothing spent, full 5h window left -- keeps the fail-closed
+        # block-pace clamp (maxx_share_ceiling.block_over_pace) out of a test about the
+        # HOURLY slice formula. An unanchored budget now clamps to 0.0 on purpose.
+        "session_used_pct": 0.0,
+        "five_reset_in_sec": 5 * 3600,
     }
     orig = maxx_share_ceiling.get_headroom
     try:
@@ -4546,9 +4628,12 @@ def _messenger_is_scheduled_three_times_a_day_with_creds_mounted():
     ep = (ROOT / "entrypoint.sh").read_text()
     assert "dont-shoot-the-messenger)" in ep.split("ALL_CRON_MEMBERS=(")[1].split("\n")[0], "messenger not in ALL_CRON_MEMBERS"
     for minute_hour, slot in (("30 11", "morning"), ("30 17", "afternoon"), ("30 22", "wrap")):
-        assert re.search(rf'^\s*echo "{minute_hour} \* \* \* root .*run_member\.sh dont-shoot-the-messenger --task {slot} ', ep, re.M), \
+        assert re.search(rf'^\s*messenger_slot_enabled {slot} && echo "{minute_hour} \* \* \* root .*run_member\.sh dont-shoot-the-messenger --task {slot} ', ep, re.M), \
             f"no {slot} cron line at {minute_hour} UTC"
     assert "if cron_member_enabled dont-shoot-the-messenger; then" in ep
+    # FLEET_MESSENGER_SLOTS gates each slot independently; unset keeps all three.
+    fn = ep.split("messenger_slot_enabled() {")[1].split("\n      }")[0]
+    assert "FLEET_MESSENGER_SLOTS" in fn and "return 0" in fn
     dep = (ROOT / "scripts" / "deploy.sh").read_text()
     assert ".config/maxx/alert.env:ro" in dep and '"${alert_mounts[@]}"' in dep, "deploy.sh does not mount alert.env"
     spec = json.loads((ROOT / "members" / "dont-shoot-the-messenger" / "dont-shoot-the-messenger.fleet.json").read_text())
@@ -6146,10 +6231,13 @@ def _judge_judy_verdict_reads_validated_json_not_prose():
 
     # Prefer the CLI's own already-parsed structured_output over a second parse of .result.
     rc, out = run(json.dumps({"structured_output": {"verdict": "block", "findings": [
-        {"file": "a.py", "line": 10, "severity": "high", "what_breaks": "null deref"}]},
+        {"file": "a.py", "line": 10, "severity": "high", "what_breaks": "null deref",
+         "plain": "The page would crash for anyone who opens it."}]},
         "result": "{\"verdict\": \"approve\", \"findings\": []}"}))
     assert rc == 0 and out["verdict"] == "block", "must prefer structured_output over .result"
-    assert out["findings_text"] == "- a.py:10 (high): null deref", out["findings_text"]
+    # Reif, 2026-09-12: the plain sentence leads; file:line + technical detail on the next line.
+    assert out["findings_text"] == ("- **high** -- The page would crash for anyone who opens it.\n"
+                                    "  Where: a.py:10. Technical: null deref"), out["findings_text"]
 
     # AC2/AC5: deliberately unparseable output -- the outer envelope itself is not JSON. Must
     # hold (ok=False, exit 1), never come back looking like a valid, silently-approved answer.
@@ -9802,7 +9890,11 @@ def _share_ceiling_is_a_slice_of_the_hour_not_the_leftovers():
         (stub / "maxx_reader.py").write_text(
             "def get_headroom():\n"
             "    return (1.0, 'ok', {'sustainable_pct_per_hour': 1.0,\n"
-            "                        'per_diem_hourly_pct': 0.50, 'reserved_pct': 0})\n")
+            "                        'per_diem_hourly_pct': 0.50, 'reserved_pct': 0,\n"
+            # Anchored block -- the fail-closed block-pace clamp must not fire in a
+            # test about the hourly slice formula.
+            "                        'session_used_pct': 0.0,\n"
+            "                        'five_reset_in_sec': 5 * 3600})\n")
         (stub / "maxx_lease.py").write_text(
             "def total_reserved_pct():\n    return 0.0\n"
             "def reserved_pct_for(*a, **k):\n    return 0.0\n")
@@ -12179,6 +12271,92 @@ def _filer_ensure_label_forwards_repo_gh922():
     assert label_create, "ensure_label never called label create"
 
 
+def _filer_dedupes_a_markerless_hand_filed_issue_gh849():
+    # gh#849: journey_issue_filer's dedupe only ever matched its own marker, so a hand-filed
+    # issue for the same journey/step (no marker, and #724 proved sometimes not even the
+    # fleet:sentry-journey label) got re-filed every run -- live: #847/#848 re-filed #814/#724
+    # inside an hour of each other on 2026-09-11. This module does not have this fallback on
+    # `main` before this change -- find_open_issue() only ever issues one `gh issue list` call
+    # there, so the widened, unlabelled second call this test drives never happens and the
+    # markerless issue below is invisible to it, filing a duplicate instead of commenting.
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("jif", ROOT / "scripts" / "journey_issue_filer.py")
+    jif = importlib.util.module_from_spec(spec); sys.modules[spec.name] = jif; spec.loader.exec_module(jif)
+
+    # #724's real shape: no fleet:sentry-journey label, no marker -- journey id and step number
+    # named only in prose.
+    def gh(cmd):
+        if cmd[1] == "label":
+            return 0, "ok"
+        if cmd[2] == "list":
+            return 0, json.dumps([{
+                "number": 724,
+                "title": "journey_walker: fleet-console journey has wrong default URL + selector",
+                "body": "Re-ran the `fleet-console-loads-with-runs` journey ... that explains "
+                        "step 0 failing in the run that filed #690/#691.",
+            }])
+        if cmd[2] == "comment":
+            return 0, "commented"
+        raise AssertionError(cmd)
+
+    d = Path(tempfile.mkdtemp())
+    results = {"run": "r1", "deploy_sha": "sha", "journeys": [
+        {"id": "fleet-console-loads-with-runs", "name": "The fleet console loads with runs",
+         "steps": [{"index": 0, "action": "Navigate to the fleet console URL.",
+                    "observable_result": "loads", "status": "fail"}]}]}
+    (d / "results.json").write_text(json.dumps(results))
+    summary = jif.process(d / "results.json", d / "state.json", runner=gh)
+    assert summary["filed"] == [], f"must not re-file #724 as a new issue: {summary}"
+    assert len(summary["commented"]) == 1 and summary["commented"][0]["issue"] == 724, summary
+
+    # AC5: a different step index in the same journey is real new information, must still file.
+    def gh_other_step(cmd):
+        if cmd[1] == "label":
+            return 0, "ok"
+        if cmd[2] == "list":
+            return 0, json.dumps([{
+                "number": 724, "title": "x",
+                "body": "the fleet-console-loads-with-runs journey fails at step 0",
+            }])
+        if cmd[2] == "create":
+            return 0, "https://github.com/x/y/issues/900"
+        raise AssertionError(cmd)
+
+    d2 = Path(tempfile.mkdtemp())
+    results2 = {"run": "r1", "deploy_sha": "sha", "journeys": [
+        {"id": "fleet-console-loads-with-runs", "name": "The fleet console loads with runs",
+         "steps": [{"index": 3, "action": "Click a run row.",
+                    "observable_result": "opens", "status": "fail"}]}]}
+    (d2 / "results.json").write_text(json.dumps(results2))
+    summary2 = jif.process(d2 / "results.json", d2 / "state.json", runner=gh_other_step)
+    assert len(summary2["filed"]) == 1, f"a different step must still file: {summary2}"
+    assert summary2["commented"] == [], summary2
+
+    # AC3: the marker fast path is unchanged -- a marker match short-circuits before the
+    # widened (unlabelled) fallback list call is ever made.
+    calls = []
+    def gh_marker(cmd):
+        calls.append(cmd)
+        if cmd[1] == "label":
+            return 0, "ok"
+        if cmd[2] == "list":
+            key = jif.step_key("send-message", 0)
+            return 0, json.dumps([{"number": 5, "title": "x", "body": jif.marker_for(key)}])
+        if cmd[2] == "comment":
+            return 0, "commented"
+        raise AssertionError(cmd)
+
+    d3 = Path(tempfile.mkdtemp())
+    results3 = {"run": "r1", "deploy_sha": "sha", "journeys": [
+        {"id": "send-message", "name": "Send a message",
+         "steps": [{"index": 0, "action": "send it", "observable_result": "sent", "status": "fail"}]}]}
+    (d3 / "results.json").write_text(json.dumps(results3))
+    summary3 = jif.process(d3 / "results.json", d3 / "state.json", runner=gh_marker)
+    assert summary3["commented"] and summary3["commented"][0]["issue"] == 5, summary3
+    list_calls = [c for c in calls if c[2] == "list"]
+    assert len(list_calls) == 1, f"marker match must not trigger the widened fallback: {list_calls}"
+
+
 def _red_member_paced_and_vp_gates_on_red_gh785():
     import member_spec
     red = member_spec.by_name("red", ROOT / "members")
@@ -12612,7 +12790,7 @@ def _maxx_share_ceiling_holds_a_5h_block_ahead_of_pace_gh781():
     hourly ceiling stayed 0.015-0.048 while the account burned 77% of its 5h window in the
     first 90 minutes (session_used_pct=77, five_reset_in_sec=12534 at 16:51Z), walled, then
     sat budget_declined for 3.5h. The ceiling must read 0.0000 while the block is ahead of
-    linear pace, and the usual number once it is not. Missing fields fail open."""
+    linear pace, and the usual number once it is not. Missing fields fail CLOSED."""
     import io
     from contextlib import redirect_stdout
     import maxx_share_ceiling
@@ -12640,8 +12818,17 @@ def _maxx_share_ceiling_holds_a_5h_block_ahead_of_pace_gh781():
     # Fresh block, small burst inside the slack -> run; past the slack -> hold.
     assert ceiling({**live, "session_used_pct": 9, "five_reset_in_sec": 18000}) != "0.0000"
     assert ceiling({**live, "session_used_pct": 11, "five_reset_in_sec": 18000}) == "0.0000"
-    # No block fields at all (older maxx, or a stripped reading) -> fail open, unchanged.
-    assert abs(float(ceiling(healthy_hour)) - 0.25) < 1e-6
+    # No block fields at all (older maxx, or a stripped reading) -> fail CLOSED. Inverted
+    # 2026-09-11 (Reif locked out 40min mid-block): a null session_used_pct means the handle
+    # has no live anchor, not that the block is healthy, and failing open made this clamp
+    # dead code on every unanchored handle. Eyes-open opt-out restores the old reading.
+    assert ceiling(healthy_hour) == "0.0000", ceiling(healthy_hour)
+    import os as _os
+    _os.environ["FLEET_BLOCK_PACE_REQUIRE_ANCHOR"] = "0"
+    try:
+        assert abs(float(ceiling(healthy_hour)) - 0.25) < 1e-6, ceiling(healthy_hour)
+    finally:
+        del _os.environ["FLEET_BLOCK_PACE_REQUIRE_ANCHOR"]
     # The reader passes both fields through, otherwise the clamp can never see them.
     import maxx_reader
     _, _, allowance = maxx_reader.get_headroom(
@@ -13850,6 +14037,79 @@ def _vp_md_authorizes_every_label_vp_due_spawns_on_gh855():
         f"vp_due.VP_LABELS has label(s) vp.md never mentions -- {missing} (gh#855/fk#805 desync)"
 
 
+def _world_class_path_walks_end_to_end_gh854():
+    """fk#854 AC5: `docs/quality-standard.md`'s whole world-class chain -- label -> gate blocks
+    -> `References:` criteria -> gate allows the research pass -> `Design approved (VP
+    review):` -> gate allows a build slice -> a `Closes` PR is blocked -> the acceptance ask is
+    filed and answered -> the issue closes -- had no single test walking it end to end. Half the
+    steps had tests in isolation; the joins between them had none, which is how fix 3
+    (`closes_gate.py` never reading `fleet:reif-asked`/`quality:world-class`) survived three VP
+    review rounds on fk#634 undetected. Every step here asserts; the `Closes`-blocked step is
+    the one fix 3 owns (fk#653, still open) and is recorded via `check_skip`, not weakened."""
+    import ask, fleet_db, closes_gate as cg
+    import quality_gate as qg
+
+    n = 634
+    labels = [{"name": "quality:world-class"}]
+    item = {"number": n, "labels": labels, "body": "", "comments": []}
+
+    # 1. label world-class, nothing else yet -> gate blocks
+    ok1, why1 = qg.classify_candidate(labels, item["body"], item["comments"])
+    assert not ok1, f"a bare world-class label with no criteria must not be eligible, got {why1!r}"
+
+    # 2. add `References:` criteria (the research pass) -> gate allows it
+    gwt = ("Given the reference screenshots in docs/design/634/references/, when the parity "
+           "matrix is reviewed, then every affordance has a RAIL budget.")
+    item["comments"].append({"body": f"References: Telegram, iMessage, WhatsApp\n{gwt}"})
+    ok2, why2 = qg.classify_candidate(labels, item["body"], item["comments"])
+    assert ok2 and "research-pass" in why2, f"a References: research-pass slice must be eligible, got {why2!r}"
+
+    # 3. post `Design approved (VP review):` -> gate allows a build slice
+    item["comments"].append({"body": "Design approved (VP review): clears the bar"})
+    ok3, why3 = qg.classify_candidate(labels, item["body"], item["comments"])
+    assert ok3 and "design approved" in why3, f"a Design approved verdict must allow a build slice, got {why3!r}"
+
+    # 4. a PR writing `Closes` on it is blocked -- fk#653's job, not built yet. Run the SPEC'd
+    # assertion first; only if it raises (today's real gap) do we record the skip, naming #653,
+    # rather than weakening the assertion to match the bug.
+    issue_for_gate = {"title": "t", "labels": labels + [{"name": "fleet:reif-asked"}],
+                       "body": item["body"], "comments": item["comments"], "state": "OPEN"}
+    result = cg.evaluate(f"Closes #{n}", ["app/chat.py"], {n: issue_for_gate})
+    try:
+        assert result["verdict"] == "block", (
+            f"a Closes PR on an unaccepted world-class/reif-asked item should block, got {result}"
+        )
+    except AssertionError as exc:
+        check_skip(
+            "closes_gate blocks a Closes PR on an unaccepted world-class/reif-asked item (fk#854 AC5)",
+            f"known gap, tracked at fk#653 (closes_gate.py never reads fleet:reif-asked/"
+            f"quality:world-class), not this PR's Non-goal: {exc}",
+        )
+    else:
+        raise AssertionError(
+            "closes_gate now blocks a reif-asked world-class Closes -- fk#653 looks landed; "
+            "promote this from a skip to a real assertion instead"
+        )
+
+    # 5. the acceptance ask is filed and answered
+    with tempfile.TemporaryDirectory() as d:
+        conn = fleet_db.connect(Path(d) / "fleet.db")
+        ask_id = ask.file_ask(conn, "marie", f"accept #{n}: does this meet the bar?",
+                              ask_class="acceptance")
+        answered = ask.answer_ask(conn, ask_id, "yes, ships", "reif")
+        assert answered, "the acceptance ask must record Reif's answer exactly once"
+        rows = [a for a in ask.list_asks(conn, status="all") if a["id"] == ask_id]
+        assert rows and rows[0]["status"] == "answered" and rows[0]["answer"] == "yes, ships", \
+            f"acceptance ask must round-trip its answer, got {rows}"
+
+        # 6. the issue closes -- the definition of done rule 5 (docs/quality-standard.md) is
+        # that nothing else counts as acceptance for a request in Reif's own words; the
+        # answered acceptance-class ask is that evidence, and it is what the finishing PR
+        # quotes when it claims `Closes #634`.
+        assert rows[0]["class"] == "acceptance", \
+            "the evidence a Closes PR quotes must be an acceptance-class ask, not any other class"
+
+
 def _authority_absent_file_is_byte_identical_to_pre_authority_ask_gh771():
     """gh#771 AC1: no authority.json at all (or a --class the file has no row for) must file
     an open ask exactly as every ask.py release before this one did -- an absent or unreadable
@@ -14294,6 +14554,7 @@ if __name__ == "__main__":
     check("fanout packs the hour by complexity, in percent", _fanout_packs_the_hour_by_complexity)
     check("cost_bridge converts real spend into fanout's --observed shape", _cost_bridge_converts_real_spend_into_fanouts_observed_shape)
     check("claim_history blocks an item that keeps dead-ending", _claim_history_blocks_an_item_that_keeps_dead_ending)
+    check("claim_history does not double-count a run's started and terminal rows (gh#4966)", _claim_history_does_not_double_count_a_runs_started_and_terminal_rows)
     check("gru.md checks claim_history before claiming", _gru_md_checks_claim_history_before_claiming)
     check("vision_link_gate applies gh#525's eligibility rule", _vision_link_gate_eligibility_rule)
     check("vision_link_gate's fleet:severity-live escape hatch survives crowding-out (gh#726)", _vision_link_gate_severity_escape_hatch_gh726)
@@ -14570,6 +14831,7 @@ if __name__ == "__main__":
     check("journey_issue_filer red profile files under fleet:red-team with its own marker, sentry unchanged (gh#785 AC4)", _filer_red_profile_uses_red_label_and_marker_gh785)
     check("journey_issue_filer never files a duplicate when the dedup lookup itself fails (gh#914)", _filer_lookup_failure_never_files_a_duplicate_gh914)
     check("journey_issue_filer ensure_label forwards --repo to every gh call, label create included (gh#922)", _filer_ensure_label_forwards_repo_gh922)
+    check("journey_issue_filer dedupes a markerless hand-filed issue by journey id + step, not just its own marker (gh#849)", _filer_dedupes_a_markerless_hand_filed_issue_gh849)
     check("red is a paced 6h member and vp requires a red pass before Accepted (gh#785 AC5)", _red_member_paced_and_vp_gates_on_red_gh785)
     check("worktree_guard_hook blocks an Edit under the shared $REPO when isolated (gh#592 AC2)", _worktree_guard_blocks_edit_under_shared_repo_gh592)
     check("worktree_guard_hook allows an Edit under the pass's own $WT_PATH (gh#592 AC5)", _worktree_guard_allows_edit_under_own_worktree_gh592)
@@ -14652,6 +14914,7 @@ if __name__ == "__main__":
     check("closes_gate.py --epic reads the epic's own thread for a stays-open marker, ignores stale ones (fk#879)", _closes_gate_epic_stays_open_when_its_own_thread_says_so_gh879)
     check("jefe.md runs closes_gate.py --epic before closing a fleet:epic issue (fk#652)", _jefe_runs_the_epic_close_check_before_closing_an_epic)
     check("vp.md authorizes every label vp_due.VP_LABELS spawns on (gh#855 AC5)", _vp_md_authorizes_every_label_vp_due_spawns_on_gh855)
+    check("the world-class path walks label->gate->research->design->build->accept->close end to end (fk#854 AC5)", _world_class_path_walks_end_to_end_gh854)
 
     check("authority: no authority.json files an open ask exactly as before (gh#771 AC1)", _authority_absent_file_is_byte_identical_to_pre_authority_ask_gh771)
     check("authority: an act grant authorizes and leaves no open row, but a countable record lands (gh#771 AC2/AC3)", _authority_act_grant_authorizes_and_leaves_no_open_row_gh771)
@@ -14675,7 +14938,9 @@ if __name__ == "__main__":
     check("pacing_hold_check never pages on two sparse single-row hours (one early ticker each, not a real fleet-wide hold)", _pacing_hold_check_sparse_single_row_hours_never_page_gh812)
     for n in ok:
         print(f"  ok    {n}")
+    for n, why in skipped:
+        print(f"  SKIP  {n}\n        {why}")
     for n, why in fail:
         print(f"  FAIL  {n}\n        {why}")
-    print(f"\n{len(ok)} passed, {len(fail)} failed")
+    print(f"\n{len(ok)} passed, {len(skipped)} skipped, {len(fail)} failed")
     raise SystemExit(1 if fail else 0)

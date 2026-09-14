@@ -215,12 +215,14 @@ _NERD_PATTERNS = [
 # member name -> (pattern list, fallback unit label if any pattern matches with no explicit unit)
 _KPI_TABLE: dict[str, list[tuple[re.Pattern, str]]] = {
     "roomba": _ROOMBA_PATTERNS,
+    "custodian": _ROOMBA_PATTERNS,  # roomba.sh reports as custodian since 2026-09-12
     "marie": _MARIE_PATTERNS,
     "judge-judy": _JUDGE_JUDY_PATTERNS,
     "gru": _PR_SHIPPED_PATTERNS,
     "jefe": _PR_SHIPPED_PATTERNS,
     "minion": _PR_SHIPPED_PATTERNS,
     "nerd": _NERD_PATTERNS,
+    "datta": _NERD_PATTERNS,  # lane-mode passes report as datta since 2026-09-12
 }
 
 # gh#230 AC3: these three must report a real (0, "PRs shipped") -- not None -- on a pass that

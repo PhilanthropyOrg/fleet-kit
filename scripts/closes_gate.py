@@ -17,7 +17,7 @@ when the PR cannot possibly be finishing the issue:
   2. the PR touches only docs (docs/ or *.md) while the issue carries a non-docs lane label
      (lane:ui, lane:backend, ...) -- prose cannot finish a product item;
   3. the target issue carries `fleet:epic` (fk#652, docs/quality-standard.md rule 3 --
-     "jefe closes epics, not PRs"): a docs/tests-only PR can never close an epic, and any PR
+     "marie closes epics, not PRs"): a docs/tests-only PR can never close an epic, and any PR
      closing an epic with an unaccepted (open) child is blocked, naming each open child. An
      epic with no children discoverable (neither real GitHub sub-issues nor marie's
      `decomposed into #a, #b` comment) is left alone -- an unlinked epic must never become
@@ -191,8 +191,8 @@ def stays_open_marker(iss: dict) -> tuple[str, str] | None:
 
 
 def epic_closable(iss: dict, issues: dict[int, dict]) -> dict:
-    """Whether an epic issue can be closed right now -- jefe's own pre-close check
-    (members/jefe/jefe.md), independent of any PR. {"closable": bool, "reason": str}.
+    """Whether an epic issue can be closed right now -- marie's own pre-close check
+    (members/marie/marie.md Part A2; jefe's until 2026-09-12), independent of any PR. {"closable": bool, "reason": str}.
     See the module docstring for the three distinct meanings `closable: true` can carry."""
     found, open_children = epic_open_children(iss, issues)
     if open_children:
@@ -255,7 +255,7 @@ def evaluate(pr_body: str, pr_files: list[str], issues: dict[int, dict]) -> dict
             )
         if epic and docs_or_test_only:
             reasons.append(
-                f"PR changes only docs/tests but closes #{n}, an epic (`fleet:epic`). jefe closes "
+                f"PR changes only docs/tests but closes #{n}, an epic (`fleet:epic`). marie closes "
                 f"epics, not PRs, and only once every child is accepted -- write `Part of #{n}` instead."
             )
         elif epic:
@@ -264,7 +264,7 @@ def evaluate(pr_body: str, pr_files: list[str], issues: dict[int, dict]) -> dict
                 reasons.append(
                     f"#{n} is an epic (`fleet:epic`) with unaccepted children: "
                     + ", ".join(f"#{c}" for c in open_children)
-                    + f". jefe closes epics, not PRs -- write `Part of #{n}` and let jefe close it "
+                    + f". marie closes epics, not PRs -- write `Part of #{n}` and let marie close it "
                     "once every child is accepted."
                 )
         spec = ac if ac else (iss.get("body") or "").strip()[:1500] or "(empty issue body)"
@@ -321,7 +321,7 @@ def main(argv=None) -> int:
         "--epic",
         type=int,
         help="check whether THIS issue (an epic) can be closed right now, no PR involved "
-        "-- the check members/jefe/jefe.md runs before it closes an epic (fk#652). "
+        "-- the check members/marie/marie.md runs before it closes an epic (fk#652). "
         "closable:true means one of three things: goal met, no children discoverable, or "
         "a stays-open marker was outranked by a later child close -- read `reason` (fk#879)",
     )

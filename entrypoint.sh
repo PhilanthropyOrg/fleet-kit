@@ -152,7 +152,7 @@ case "${1:-cron-foreground}" in
     # `FLEET_CRON_MEMBERS=judge-judy`) to schedule only those. dont-shoot-the-messenger is
     # excluded from ALL_CRON_MEMBERS because its own cron line is already commented out
     # (archived 2026-09-04, see below) -- re-enabling it is a separate step from this mechanism.
-    ALL_CRON_MEMBERS=(the-fixer judge-judy gru jefe roomba marie datta dumbledore sentry librarian librarian-scrub red custodian dont-shoot-the-messenger)
+    ALL_CRON_MEMBERS=(the-fixer judge-judy gru marie datta dumbledore sentry librarian custodian dont-shoot-the-messenger)
     if [ -n "${FLEET_CRON_MEMBERS:-}" ]; then
       IFS=', ' read -ra RESOLVED_CRON_MEMBERS <<< "$FLEET_CRON_MEMBERS"
       for m in "${RESOLVED_CRON_MEMBERS[@]}"; do
@@ -241,10 +241,19 @@ case "${1:-cron-foreground}" in
       # dont-shoot-the-messenger (fk#558 deliverable 8): the one voice to Reif. 06:30 / 12:30 /
       # 17:30 Central = 11:30 / 17:30 / 22:30 UTC while CDT holds (UTC-5). When DST ends these
       # drift an hour late; fix here, not in the member. Each slot is passed as the task line.
+      # FLEET_MESSENGER_SLOTS: which of the three slots to schedule (space/comma-separated
+      # subset of morning|afternoon|wrap). Unset = all three. `FLEET_MESSENGER_SLOTS="morning wrap"`
+      # drops the 12:30 afternoon block without silencing the whole member.
+      messenger_slot_enabled() {
+        local slot="$1" s
+        [ -z "${FLEET_MESSENGER_SLOTS:-}" ] && return 0
+        for s in ${FLEET_MESSENGER_SLOTS//,/ }; do [ "$s" = "$slot" ] && return 0; done
+        return 1
+      }
       if cron_member_enabled dont-shoot-the-messenger; then
-        echo "30 11 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh dont-shoot-the-messenger --task morning >> $LOG_DIR/dont-shoot-the-messenger.log 2>&1"
-        echo "30 17 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh dont-shoot-the-messenger --task afternoon >> $LOG_DIR/dont-shoot-the-messenger.log 2>&1"
-        echo "30 22 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh dont-shoot-the-messenger --task wrap >> $LOG_DIR/dont-shoot-the-messenger.log 2>&1"
+        messenger_slot_enabled morning && echo "30 11 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh dont-shoot-the-messenger --task morning >> $LOG_DIR/dont-shoot-the-messenger.log 2>&1"
+        messenger_slot_enabled afternoon && echo "30 17 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh dont-shoot-the-messenger --task afternoon >> $LOG_DIR/dont-shoot-the-messenger.log 2>&1"
+        messenger_slot_enabled wrap && echo "30 22 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh dont-shoot-the-messenger --task wrap >> $LOG_DIR/dont-shoot-the-messenger.log 2>&1"
       fi
       if cron_member_enabled judge-judy; then
         echo "*/15 * * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh judge-judy >> $LOG_DIR/judge-judy.log 2>&1"
@@ -271,21 +280,21 @@ case "${1:-cron-foreground}" in
       if cron_member_enabled gru; then
         echo "3 ${FLEET_GRU_CADENCE:-*} * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_gru_fanout.sh >> $LOG_DIR/gru.log 2>&1"
       fi
-      if cron_member_enabled jefe; then
-        echo "21 * * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh jefe >> $LOG_DIR/jefe.log 2>&1"
-      fi
-      if cron_member_enabled roomba; then
-        echo "41 * * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh roomba >> $LOG_DIR/roomba.log 2>&1"
-      fi
       # custodian (fk#807): one surface per job, driven DOWN. ui_surfaces.py's ratchet already
       # stops a job GAINING a surface; nothing drove an existing count down, so duplication sat
       # frozen at 26 extra surfaces across 19 jobs (ops-hud 6, collections 4, org-console 4).
       # Daily, not hourly: a retirement is a human-reviewed PR, so filing more than one a day
       # just builds the backlog this member exists to prevent -- it files ONE item and refuses
-      # to file again while that one is open. kind: shell, so it costs no model turns.
+      # to file again while that one is open. Became kind: llm 2026-09-12 (Reif): duplicate
+      # surfaces ARE called, so no caller-scan finds them and no arithmetic can say WHICH
+      # of a job's 7 routes should survive -- that is judgment, and it costs model turns.
       # 13:17 is off the hourly grids above and well clear of gru's :03 fanout.
       if cron_member_enabled custodian; then
         echo "17 13 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh custodian >> $LOG_DIR/custodian.log 2>&1"
+        # custodian's hourly worktree sweep (was the `roomba` member until 2026-09-12): a plain
+        # script, no model, reports as member=custodian kind=shell. Folded because a member is
+        # a finger and this one only ever ran a script.
+        echo "41 * * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) FLEET_LOG_DIR=$LOG_DIR && [ -f "\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}" ] && { set -a; . "\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}"; set +a; }; bash /fleet-kit/members/custodian/roomba.sh >> $LOG_DIR/roomba.log 2>&1"
       fi
       # librarian (philanthropy#4439, nonprofit-atlas#4410 seq:1): scrubs credential-shaped
       # strings out of session transcripts and enforces the compress/drop retention window.
@@ -295,13 +304,13 @@ case "${1:-cron-foreground}" in
       # runs. :06 runs right after the hour's headroom resets, matching the schedule
       # librarian.fleet.json's schedule.hourly_at_minute already declared -- fleet.json edits
       # do not update this line by themselves (see the selftest check that now compares them).
-      # fleet-kit#784: the hourly scrub is a shell member now (no model); librarian itself is
+      # fleet-kit#784: the hourly scrub is a plain script (no model); librarian itself is
       # the daily reader (memory under cap, INTENT.md) at 05:15 UTC, before the morning brief.
-      if cron_member_enabled librarian-scrub; then
-        echo "6 * * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh librarian-scrub >> $LOG_DIR/librarian-scrub.log 2>&1"
-      fi
       if cron_member_enabled librarian; then
         echo "15 5 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh librarian >> $LOG_DIR/librarian.log 2>&1"
+        # librarian's hourly credential scrub (was the `librarian-scrub` member until
+        # 2026-09-12): a plain script, no model, reports as member=librarian kind=shell.
+        echo "6 * * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) FLEET_LOG_DIR=$LOG_DIR && [ -f "\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}" ] && { set -a; . "\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}"; set +a; }; bash /fleet-kit/members/librarian/scrub.sh >> $LOG_DIR/librarian-scrub.log 2>&1"
       fi
       if cron_member_enabled marie; then
         echo "33 * * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh marie >> $LOG_DIR/marie.log 2>&1"
@@ -337,11 +346,12 @@ case "${1:-cron-foreground}" in
       # its pattern each day. :17 is unclaimed (:03/:12/:13/:21/:33/:41 are taken).
       if cron_member_enabled sentry; then
         echo "17 0,3,6,9,12,15,18,21 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh sentry >> $LOG_DIR/sentry.log 2>&1"
+        # sentry's red-team pass (was the `red` member, every 6h, until 2026-09-12): weekly,
+        # Sunday 04:23 UTC -- a window the 03:17 watch pass (timeout 3000s) is always out of, so
+        # the per-member dispatch lock never skips it. On demand: run_member.sh sentry --task red-team
+        echo "23 4 * * 0 root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh sentry --task red-team >> $LOG_DIR/red.log 2>&1"
       fi
       # fleet-kit#785: red, the adversary, every 6h (paced -- held when the hour has no headroom).
-      if cron_member_enabled red; then
-        echo "23 0,6,12,18 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh red >> $LOG_DIR/red.log 2>&1"
-      fi
       # self_improve_score.sh: NOT a member (no members/*/*.fleet.json), so it was invisible
       # to selftest's "every scheduled member is actually on cron" check (#114) and had no
       # line here at all -- the exact same missing-cron-line failure class that bit datta
@@ -367,7 +377,7 @@ case "${1:-cron-foreground}" in
       # comfortably inside the default 4h staleness budget (FLEET_DEPLOY_STALENESS_BUDGET_S).
       echo "57 * * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/deploy_staleness_check.sh >> $LOG_DIR/deploy_staleness_check.log 2>&1"
       # vp_due.sh: spawn a VP review for each due item whose newest merged PR is newer than
-      # its newest VP verdict (members/vp/vp.md). Deterministic on purpose -- gru is a
+      # its newest VP verdict (members/dumbledore/review.md; was members/vp until 2026-09-12). Deterministic on purpose -- gru is a
       # prompt and did not spawn vp for 2.5h after a redo merged (2026-09-08).
       #
       # Minute field is instance-tunable via FLEET_VP_DUE_CADENCE (default "*/15", the

@@ -158,7 +158,10 @@ def _number_html(data: dict) -> str:
     payload = data.get("payload") or {}
     stale = data.get("stale", False)
     cells = []
-    for key, label in (("number", "Number"), ("guardrail", "Guardrail"), ("channel", "Channel")):
+    for key, label in (("number", "Number"), ("kr1", "KR1"), ("kr3", "KR3"), ("guardrail", "Guardrail"),
+                       ("revenue", "Revenue"), ("channel", "Channel")):
+        if key not in payload and key != "number":
+            continue
         block = payload.get(key)
         if not block:
             cells.append(

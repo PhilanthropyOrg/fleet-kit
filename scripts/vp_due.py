@@ -245,7 +245,7 @@ def _issue_is_open(repo_dir: str, n: int) -> bool:
         return False
 
 
-RUN_TIMEOUT_S = 2400  # minion and vp both carry timeout_s 2400 in their fleet.json
+RUN_TIMEOUT_S = 3600  # dumbledore (review mode) carries timeout_s 3600; minion 2400
 
 
 def running_items(rows: list[dict], member: str, now: float | None = None,
@@ -287,7 +287,7 @@ def _runs_rows() -> list[dict]:
 
 
 def running_vp_items() -> set[int]:
-    return running_items(_runs_rows(), "vp")
+    return running_items(_runs_rows(), "dumbledore")  # review runs report as dumbledore since 2026-09-12
 
 
 def main(argv=None) -> int:

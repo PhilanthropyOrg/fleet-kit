@@ -18,17 +18,23 @@
   Design width is 390px; desktop is the same page, wider. Tap targets are 44px.
 -->
 <style>
-  :root { --bg:#f6f7f8; --panel:#fff; --text:#161616; --muted:#6b7280; --line:#e5e7eb;
-          --ok:#1f8b4c; --warn:#a6720f; --bad:#c13a2e; --accent:#2166c4; --off:#b9bcc2; }
+  /* philanthropy's operator token set (repo OPERATOR_TOKENS.md, design_tokens.py
+     DESIGN_TOKENS_OPERATOR_CSS_ROOT): same ink/paper as the product's superadmin console,
+     Stripe-purple accent, IBM Plex type with system fallbacks. Reif, 2026-09-12. */
+  :root { --bg:#f5f7f3; --panel:#fff; --text:#1a1c19; --muted:#6b736b; --line:#e6e9e4;
+          --ok:#3e694a; --warn:#9a7b3f; --bad:#b4552d; --accent:#635bff; --accent-soft:#f0ebff; --off:#c9cdc6;
+          --card-shadow:0 1px 3px rgba(0,0,0,.06);
+          --sans:"IBM Plex Sans",ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+          --font-label:"Ysabeau",ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
   @media (prefers-color-scheme: dark) {
-    :root { --bg:#111214; --panel:#1b1c1f; --text:#ececec; --muted:#9aa0a6; --line:#2a2c30; --off:#4a4d52; }
+    :root { --bg:#141613; --panel:#1c1f1b; --text:#ececec; --muted:#9aa39b; --line:#2b2f2a; --off:#4a4f49; --accent-soft:#2a2547; }
   }
   * { box-sizing: border-box; }
   html, body { margin:0; background:var(--bg); color:var(--text);
-    font: 16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+    font: 16px/1.45 var(--sans); }
   main { max-width: 760px; margin: 0 auto; padding: 12px 12px 40px; }
-  h1 { font-size: 15px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; color: var(--muted); margin: 22px 0 8px; }
-  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+  h1 { font: 600 13px/1.2 var(--font-label); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 22px 0 8px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; box-shadow: var(--card-shadow); }
   .big { font-size: 34px; font-weight: 700; line-height: 1.1; letter-spacing: -.01em; }
   .sub { color: var(--muted); font-size: 14px; }
   .delta { font-weight: 600; }
@@ -60,6 +66,11 @@
   .ask .why { font-weight: 600; }
   .ask .why-detail { margin: 4px 0; }
   .ask .why-detail summary { cursor: pointer; color: var(--accent); font-size: 13px; }
+  .ask .kind { display: inline-block; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+    color: var(--accent); background: var(--accent-soft); border-radius: 999px; padding: 2px 8px; margin-right: 6px; vertical-align: middle; }
+  .asks-head { display: flex; align-items: center; gap: 10px; }
+  .asks-head .sub { flex: 1; }
+  button.quiet { font-size: 13px; min-height: 32px; padding: 0 10px; color: var(--muted); }
   .ask .why-full { color: var(--muted); font-size: 13px; margin-top: 6px; white-space: pre-wrap; }
   .ask .prop { color: var(--muted); font-size: 14px; margin: 4px 0 8px; }
   .ask input { font: inherit; font-size: 15px; min-height: 44px; padding: 0 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--text); width: 100%; }
@@ -228,10 +239,12 @@ function renderBanner() {
 }
 
 function nextCheckpoint(plan) {
-  // "Checkpoints on the number: $1,000 MRR by 2026-10-31 · $8,000 by 2026-11-30 · ..."
+  // "Checkpoints on the number: 1,000 entities by 2026-10-31 · 2,500 entities by 2026-12-31 · ..."
+  // (the older "$1,000 MRR by ..." shape still parses; the unit is whatever word follows the amount).
   const line = (plan && plan.checkpoints) || '';
   const today = centralDay(new Date());
-  const hits = [...line.matchAll(/\$([\d,]+)[^·]*?by (\d{4}-\d{2}-\d{2})/g)].map(m => ({amount: m[1], by: m[2]}));
+  const hits = [...line.matchAll(/(\$?)([\d,]+)\s*([A-Za-z$/]+)?[^·]*?by (\d{4}-\d{2}-\d{2})/g)]
+    .map(m => ({amount: m[1] + m[2], unit: m[3] && !/^by$/i.test(m[3]) ? m[3] : '', by: m[4]}));
   return hits.find(h => h.by >= today) || hits[hits.length - 1] || null;
 }
 
@@ -239,18 +252,36 @@ function renderNumber() {
   const d = STATE.number;
   if (!d || !d.configured) { $('number').innerHTML = `<div class="sub">No number configured for this fleet.</div>`; return; }
   if (!d.present || !d.payload || !d.payload.number) { $('number').innerHTML = `<div class="sub">Not measured yet.</div>`; return; }
-  const p = d.payload, n = p.number, t = p.target || {}, g = p.guardrail, c = p.channel;
+  // The payload is the venture's OKR (philanthropy routes_number.py): `number` is the
+  // objective (KR2), `kr1`/`kr3` the other key results, `revenue` downstream of them, `channel`
+  // the acquisition source. Money is money, everything else is a count.
+  const p = d.payload, n = p.number, t = p.target || {}, k1 = p.kr1, k3 = p.kr3, r = p.revenue, g = p.guardrail, c = p.channel;
+  const isMoney = u => u === '$/mo' || u === 'USD';
+  const fmtFor = u => isMoney(u) ? money : num;
+  const unitTail = u => isMoney(u) ? '/mo' : (u ? ` ${u}` : '');
+  const nf = fmtFor(n.unit);
   const cp = nextCheckpoint(STATE.plan);
   const pct = t.value ? (100 * n.value / t.value) : null;
+  const tgt = t.value ? ` · target ${fmtFor(t.unit)(t.value)}${unitTail(t.unit)}${t.by ? ` by ${esc(t.by)}` : ''}${pct !== null ? ` · ${pct.toFixed(2)}% there` : ''}` : '';
+  const rows = [];
+  if (k1) {
+    rows.push(['KR1 · Claims started, last 7 days', num(k1.value), signed(k1.delta_7d, num)]);
+    if (k1.completion_rate_pct !== null && k1.completion_rate_pct !== undefined) rows.push(['KR1 · Claims that reach verified', `${k1.completion_rate_pct}%`, '']);
+    if (k1.median_pending_age_days !== null && k1.median_pending_age_days !== undefined) rows.push(['KR1 · Median age of a waiting claim', `${num(k1.median_pending_age_days)} days`, '']);
+  }
+  rows.push([isMoney(n.unit) ? esc(n.name) : 'KR2 · Orgs and people with at least one real interaction', nf(n.value), signed(n.delta_7d, nf)]);
+  if (k3) rows.push(['KR3 · Days from sign-up to first interaction', (k3.value === null || k3.value === undefined) ? 'not measured yet' : `${num(k3.value)} days`, '']);
+  if (g && !k1) rows.push([esc(g.name || 'Guardrail'), fmtFor(g.unit)(g.value), signed(g.delta_7d, fmtFor(g.unit))]);
+  if (r) rows.push(['Revenue · Stripe MRR (downstream, not a key result)', `${money(r.value)}/mo`, signed(r.delta_7d, money)]);
+  if (c) rows.push(['Visits, last full week', num(c.value), signed(c.delta_7d, num)]);
   $('number').innerHTML = `
     <div class="sub">${esc(n.name)}${d.stale ? ' · <span class="err">stale reading</span>' : ''}</div>
-    <div class="big">${money(n.value)}<span class="sub">/mo</span></div>
-    <div class="sub">${signed(n.delta_7d, money)} · target ${money(t.value)}/mo by ${esc(t.by || '?')}${pct !== null ? ` · ${pct.toFixed(2)}% there` : ''}</div>
-    ${cp ? `<div class="sub">Next checkpoint: $${esc(cp.amount)}/mo by ${esc(cp.by)}</div>` : ''}
+    <div class="big">${nf(n.value)}<span class="sub">${esc(unitTail(n.unit))}</span></div>
+    <div class="sub">${signed(n.delta_7d, nf)}${tgt}</div>
+    ${cp ? `<div class="sub">Next checkpoint: ${esc(cp.amount)}${cp.unit ? ` ${esc(cp.unit)}` : esc(unitTail(n.unit))} by ${esc(cp.by)}</div>` : ''}
     <table>
       <tr><th>Key result</th><th class="num">Now</th><th class="num">7 days</th></tr>
-      ${g ? `<tr><td>Orgs and people with at least one real interaction</td><td class="num">${num(g.value)}</td><td class="num">${signed(g.delta_7d, num)}</td></tr>` : ''}
-      ${c ? `<tr><td>Visits, last full week</td><td class="num">${num(c.value)}</td><td class="num">${signed(c.delta_7d, num)}</td></tr>` : ''}
+      ${rows.map(([l, v, d7]) => `<tr><td>${l}</td><td class="num">${v}</td><td class="num">${d7}</td></tr>`).join('')}
     </table>`;
 }
 
@@ -310,8 +341,18 @@ function renderAsks() {
   const nho = needsHumanOp();
   $('asksSub').textContent = nho.count ? `${nho.count} waiting on human, oldest ${Math.round(nho.oldest_age_hours)}h` : '';
   const asks = STATE.asks;
-  if (!asks.length) { $('asks').innerHTML = `<div class="empty">Nothing waiting on you.</div>`; return; }
-  $('asks').innerHTML = asks.map(a => {
+  // The count above comes from GitHub (open fleet:needs-human-op issues); the asks below
+  // came from ask.py. They are two stores, and the page used to show the count of one and
+  // the items of the other. Both are listed now, and both can be cleared (Reif, 2026-09-12).
+  const ghItems = (nho.items || []).map(i => `
+    <div class="ask" data-issue="${esc(i.number)}">
+      <div class="why"><span class="kind">issue</span>${esc(i.title)}</div>
+      <div class="prop">#${esc(i.number)} · filed ${esc(ago(Date.parse(i.createdAt) / 1000))} · <a href="${esc(repoBase() || 'https://github.com')}/issues/${esc(i.number)}" target="_blank">open on GitHub</a></div>
+      <div class="btns"><button class="quiet" data-act="ghclear">Clear</button></div>
+      <div class="err" data-act="err"></div>
+    </div>`).join('');
+  if (!asks.length && !ghItems) { $('asks').innerHTML = `<div class="empty">Nothing waiting on you.</div>`; return; }
+  $('asks').innerHTML = ghItems + asks.map(a => {
     const why = String(a.why || '');
     // gh#877: a filer-authored plain-language summary, when present, IS the headline and the
     // full `why` trace moves behind the tap -- even if `why` alone would have fit on one line,
@@ -329,6 +370,7 @@ function renderAsks() {
         ${a.proposed ? `<button class="primary" data-act="answer" data-answer="${esc(a.proposed)}">Yes, do that</button>` : ''}
         <input placeholder="or answer in a sentence" data-act="text">
         <button data-act="send">Send</button>
+        <button class="quiet" data-act="clear" title="Close this without a decision; the member re-files if it still matters">Clear</button>
       </div>
       <div class="err" data-act="err"></div>
     </div>`;
@@ -358,12 +400,12 @@ function renderAgents() {
     return `
       <div class="row" data-agent="${esc(name)}" data-last-ts="${last && last.ts ? esc(String(last.ts)) : ''}">
         <span class="dot ${dotClass(last, enabled)}"></span>
-        <span class="name">${esc(m.spec.emoji || '')} ${esc(name)}${enabled ? '' : ' <span class="sub">(paused)</span>'}</span>
+        <span class="name">${esc(m.spec.emoji || '')} ${esc(name)}${enabled ? '' : ` <span class="sub">${esc(m.spec.spawned_by ? 'spawned by ' + m.spec.spawned_by : 'paused')}</span>`}</span>
         <span class="meta">${last ? esc(ago(last.ts)) : 'never run'}${count ? `<br>${esc(count)}` : ''}</span>
       </div>
-      ${last && last.outcome ? `<div class="outcome">${esc(String(last.outcome).slice(0, 140))}</div>` : ''}
+      ${last && last.outcome && !open ? `<div class="outcome">${esc(String(last.outcome).slice(0, 140))}</div>` : ''}
       ${open ? `<div class="drawer">
-          <div class="role"><span class="role-label">Purpose</span>${esc((m.spec.mandate || {}).target || '')}</div>
+          <div class="role"><span class="role-label">Purpose</span>${esc(m.spec.purpose || (m.spec.mandate || {}).target || '')}</div>
           ${runs.map(r => `<div class="run" data-run="${esc(r.run_id || '')}"><span class="dot ${dotClass(r, true)}" style="display:inline-block;vertical-align:middle;margin-right:6px"></span>${esc(ago(r.ts))} · ${esc(r.status || '')}${r.pr ? ` · <a href="${esc(String(r.pr).startsWith('http') ? r.pr : '#')}" target="_blank">PR</a>` : ''}<br><span class="sub">${esc(String(r.outcome || '').slice(0, 200))}</span></div>`).join('') || '<div class="sub">no runs yet</div>'}
           <div class="btns">
             <button class="primary" data-act="rerun" data-member="${esc(name)}">Rerun now</button>
@@ -479,6 +521,15 @@ document.addEventListener('click', async e => {
   try {
     if (btn.dataset.act === 'rerun') { await postJSON('/api/run_now', {member: btn.dataset.member}); btn.textContent = 'Started'; }
     else if (btn.dataset.act === 'toggle') { await postJSON('/api/fleet_toggle', {target: btn.dataset.member, value: btn.dataset.on !== 'true'}); await load(); }
+    else if (btn.dataset.act === 'clear') {
+      await postJSON('/api/asks/answer', {id: Number(box.dataset.id), answer: 'Cleared from Home without a decision; re-file if it still matters.'});
+      await load();
+    }
+    else if (btn.dataset.act === 'ghclear') {
+      await postJSON('/api/needs_human/clear', {number: Number(box.dataset.issue)});
+      box.remove();
+      await refreshHealth();
+    }
     else if (btn.dataset.act === 'answer' || btn.dataset.act === 'send') {
       const answer = btn.dataset.act === 'answer' ? btn.dataset.answer : (box.querySelector('[data-act="text"]').value || '').trim();
       if (!answer) throw new Error('write an answer first');

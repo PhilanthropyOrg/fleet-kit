@@ -673,7 +673,9 @@ def poll_gh_state() -> dict:
         except ValueError:
             continue
         oldest_age_hours = max(oldest_age_hours, age_hours)
-    needs_human_op = {"count": len(needs_human_op_issues), "oldest_age_hours": oldest_age_hours}
+    needs_human_op = {"count": len(needs_human_op_issues), "oldest_age_hours": oldest_age_hours,
+                      "items": [{"number": i.get("number"), "title": i.get("title", ""), "createdAt": i.get("createdAt", "")}
+                                for i in sorted(needs_human_op_issues, key=lambda i: i.get("createdAt") or "")[:40]]}
     return {"prs": prs, "issues": issues, "merged": merged,
             "self_evolution": self_evolution, "needs_human_op": needs_human_op,
             "polled_at": time.time()}
@@ -1722,6 +1724,26 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"ok": False, "error": (p.stderr or p.stdout).strip()[:300]}, 409)
                 return
             self._json({"ok": True, "id": ask_id})
+            return
+
+        if path == "/api/needs_human/clear":
+            # Clear one fleet:needs-human-op item: the label comes off, the issue stays open in
+            # the backlog. Reversible with one `gh issue edit --add-label`.
+            try:
+                number = int(body.get("number"))
+            except (TypeError, ValueError):
+                self._json({"ok": False, "error": "number must be an integer"}, 400)
+                return
+            try:
+                r = subprocess.run(["gh", "issue", "edit", str(number), "--remove-label", "fleet:needs-human-op"],
+                                   cwd=REPO or None, capture_output=True, text=True, timeout=20)
+            except (subprocess.TimeoutExpired, OSError) as exc:
+                self._json({"ok": False, "error": str(exc)[:200]}, 502)
+                return
+            if r.returncode != 0:
+                self._json({"ok": False, "error": (r.stderr or r.stdout).strip()[:300]}, 502)
+                return
+            self._json({"ok": True, "number": number})
             return
 
         if path == "/api/run_now":

@@ -1,6 +1,7 @@
 {
   "name": "librarian",
-  "emoji": "📚",
+  "purpose": "Keeps the team's notes tidy once a day and writes a short summary of what you decided, corrected, and asked for recently. Also scrubs anything password-shaped out of saved conversation logs every hour, by script.",
+  "emoji": "\ud83d\udcda",
   "kind": "llm",
   "lane": "hygiene",
   "mandate": {
@@ -11,7 +12,8 @@
       "run members/librarian/intent_digest.py (captures + asks + Reif: comments) and write $FLEET_LOG_DIR/INTENT.md: standing decisions, corrections/reversals, open asks; short quotes with dates, never a secret",
       "0 captures in the listing is a finding: the capture cron on the human's machine stopped -- name it for a human",
       "a lesson recurring across several members is a charter bug: name it for dumbledore, never edit a charter",
-      "credential classes librarian-scrub keeps finding name a leaking member; a shape it cannot see is a gap for a human, never a hand-written regex"
+      "credential classes the hourly scrub (members/librarian/scrub.sh) keeps finding name a leaking member; a shape it cannot see is a gap for a human, never a hand-written regex",
+      "hourly scrub (was the librarian-scrub member, folded 2026-09-12): scrub.sh runs librarian.py --execute from cron as a script and reports under your name, kind=shell -- redaction is never rotation; classes found are named for a human"
     ],
     "limits": {
       "timeout_s": 1800

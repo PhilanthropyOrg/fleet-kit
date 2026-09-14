@@ -128,7 +128,7 @@ slice for the planner, not a slice of the product, and it can never close the pa
 An epic closes only when every child is accepted. GitHub sub-issues carry that structure.
 
 Enforced by: marie decomposes into vertical slices and links them as sub-issues; the closes
-gate refuses a `Closes` from a docs-only PR on a product item; jefe closes epics, not PRs.
+gate refuses a `Closes` from a docs-only PR on a product item; marie closes epics, not PRs.
 
 ### 4. The reviewer reads the ticket, and asks for proof per criterion
 
@@ -148,7 +148,7 @@ thing and says yes or no. Nothing else counts as acceptance for a request in Rei
 
 Enforced by: issues Reif filed or quoted get the label `fleet:reif-asked`. The closes gate
 blocks every `Closes` on them. When all criteria have evidence, the finishing PR files an ask
-of class `acceptance` with the demo link; Reif answers from the brief; jefe closes the issue
+of class `acceptance` with the demo link; Reif answers from the brief; marie closes the issue
 with the answer quoted.
 
 ### 6. Quality gates in CI, not in opinions
@@ -193,5 +193,5 @@ Built in this PR: closes gate (rules 1, 3), judge reads acceptance criteria (rul
 
 Filed as the next items: marie's Given/When/Then + parity-matrix template and the spike-first
 rule for "X-level" asks (rules 2, 7); vertical-slice decomposition with sub-issues and
-jefe-closes-epics (rule 3); `fleet:reif-asked` plus the acceptance ask (rule 5); product-repo
+marie-closes-epics (rule 3); `fleet:reif-asked` plus the acceptance ask (rule 5); product-repo
 CI gates (rule 6); the learner's outcome read-back (rule 8).

@@ -114,4 +114,136 @@ case "$NEW" in
     echo "QUIET file failed"
     ;;
 esac
+# --- SECOND AXIS: dead code ------------------------------------------------------------------
+# Reif, 2026-09-12: "actively deleting code that should not exist" -- and "I'd rather it be in the
+# fleet vs on the box and have it owned by one of our members." This is that axis, in the same
+# shape as surface debt above: a deterministic count, ONE item filed at a time, nothing deleted by
+# this member. It lands here rather than in a new member because the charter already says it --
+# "either removing them or perfecting them... it needs to be recursive" -- one level down from
+# surfaces.
+#
+# WHY NOT THE BOX CRON: scripts/box/crontab line 518 runs maint_dead_code.py weekly on atlas-serve.
+# It has printed "no dead code detected" since 2026-07-15 while 42 orphans accumulated, because
+# neither pyflakes nor ruff is installed there and the tool cannot tell "clean" from "I could not
+# look". Measured on dino 2026-09-12: ANALYZER UNAVAILABLE, orphan scripts 43. The fleet has the
+# repo, the gates and the PR path; the box has none of them.
+#
+# NEVER AUTO-DELETES, and that is not caution for its own sake: the 2026-09-12 scan listed
+# scripts/fleet/marie_collapse.py as an orphan in the same hour it was wired into marie's PART E.
+# It was uncalled only because its caller lives in the fleet-kit repo, which this scan cannot see.
+# An auto-deleter would have removed the fix for the largest measured source of wasted spend.
+# Orphans are PROPOSED here; a human-reviewed PR removes them.
+DEAD_MARKER="dead-code"
+ORPHANS=$(cd "$REPO" && timeout 120s python3 -c '
+import sys
+from pathlib import Path
+sys.path.insert(0, "scripts")
+try:
+    import dead_code_lib as d
+except Exception as e:
+    print("ERR " + str(e)[:120]); raise SystemExit(3)
+try:
+    print("\n".join(d.find_orphan_scripts(Path("."))))
+except Exception as e:
+    print("ERR " + str(e)[:120]); raise SystemExit(3)
+' 2>&1); ORC=$?
+
+if [ "$ORC" -ne 0 ] || printf '%s' "$ORPHANS" | head -n1 | grep -q '^ERR '; then
+  # Same rule as surface debt: a count this member cannot compute is never guessed at. This is
+  # the exact failure maint_dead_code.py hid for 13 months -- it must read as LOUD, not as clean.
+  report "QUIET — orphan scan could not run (rc=$ORC); nothing filed" \
+         "$(printf '%s' "$ORPHANS" | tail -n 1 | cut -c1-200)" \
+         "a scan that cannot look must never report clean -- that is the bug this axis exists to not repeat" "$ORC"
+  echo "QUIET orphan scan rc=$ORC"
+  exit 0
+fi
+
+ORPHAN_N=$(printf '%s' "$ORPHANS" | grep -c '[^[:space:]]' || true)
+ANALYZER=$(cd "$REPO" && timeout 30s python3 -c '
+import sys
+sys.path.insert(0, "scripts")
+import dead_code_lib as d
+ok, which = d.analyzer_available()
+print(("yes: " if ok else "NO -- unused-import/local scan did not run: ") + str(which))
+' 2>/dev/null || echo "unknown")
+
+if [ "${ORPHAN_N:-0}" -eq 0 ]; then
+  report "QUIET — no orphan scripts; every tested script has a live caller" \
+         "analyzer: $ANALYZER" "none -- deterministic over git ls-files" 0
+  echo "QUIET orphans=0"
+  exit 0
+fi
+
+# One dead-code retirement in flight at a time, same as surface debt.
+DOPEN=$(cd "$REPO" && timeout 25s gh issue list --state open --search "in:title $DEAD_MARKER" --limit 5 \
+  --json number --jq '.[0].number' 2>/dev/null || true)
+if [ -n "$DOPEN" ] && [ "$DOPEN" != "null" ]; then
+  report "QUIET — $ORPHAN_N orphan scripts but #$DOPEN is still open; one retirement at a time" \
+         "analyzer: $ANALYZER | orphans: $ORPHAN_N" \
+         "none -- a 42-item deletion epic is exactly the garbage nobody picks up" 0
+  echo "QUIET orphans=$ORPHAN_N open=#$DOPEN"
+  exit 0
+fi
+
+# Oldest-first: the longest-uncalled file is the least likely to be work in flight.
+TARGET=$(cd "$REPO" && for f in $ORPHANS; do
+    [ -f "$f" ] || continue
+    printf '%s %s\n' "$(git log -1 --format=%ct -- "$f" 2>/dev/null || echo 0)" "$f"
+  done | sort -n | head -n1 | cut -d" " -f2)
+
+if [ -z "$TARGET" ]; then
+  report "QUIET — $ORPHAN_N orphans but none resolved to a file on disk; nothing filed" \
+         "analyzer: $ANALYZER" "the scan and the working tree disagree; not guessing" 1
+  echo "QUIET no target"
+  exit 0
+fi
+
+LASTTOUCH=$(cd "$REPO" && git log -1 --format=%as -- "$TARGET" 2>/dev/null || echo unknown)
+DBODY=$(mktemp); trap 'rm -f "$BODY" "$DBODY"' EXIT
+{
+  echo "\`$TARGET\` has tests but **no non-test caller** anywhere in the repo."
+  echo "Last touched: $LASTTOUCH. It is one of **$ORPHAN_N** such scripts right now."
+  echo
+  echo "## What to do"
+  echo "Delete the script **and its test** — a test-only script is still dead, the test goes with it."
+  echo "If it is NOT dead, do not delete it: add it to \`_KNOWN_EXTERNAL_ENTRYPOINTS\` in"
+  echo "\`scripts/dead_code_lib.py\` with a one-line comment saying who calls it. Either outcome"
+  echo "closes this item; both shrink the number."
+  echo
+  echo "## Before deleting, check the caller is not outside this repo"
+  echo "This scan reads only this repo. A script called by a fleet member charter, a CI runner, or"
+  echo "a runbook looks identical to a dead one. On 2026-09-12 the scan listed"
+  echo "\`scripts/fleet/marie_collapse.py\` as an orphan in the same hour it was wired into marie's"
+  echo "PART E — its caller lives in the fleet-kit repo. That one is now allowlisted; assume the"
+  echo "next one could be the same and grep the fleet-kit repo before removing anything."
+  echo
+  echo "## Note on one-shot migrations"
+  echo "Several orphans are \`backfill_*\` / \`fix_*\` scripts that ran once against prod and are"
+  echo "correctly uncalled afterwards. Those are still dead code — delete them; git history keeps"
+  echo "the record of what they did."
+  echo
+  echo "Analyzer status this pass: $ANALYZER"
+  echo
+  echo "---"
+  echo "Filed by the \`custodian\` member (dead-code axis). The next pass files the next orphan"
+  echo "only after this one lands, so the queue never grows a backlog nobody picks up."
+} > "$DBODY"
+
+DTITLE="$DEAD_MARKER: $TARGET has tests but no caller, retire it"
+DNEW=$(cd "$REPO" && timeout 40s gh issue create --title "$DTITLE" --body-file "$DBODY" \
+  --label fleet:backlog --label quality:solid 2>&1 | tail -n 1)
+case "$DNEW" in
+  http*)
+    report "filed one dead-code retirement: $TARGET (of $ORPHAN_N orphans)" \
+           "$DNEW | analyzer: $ANALYZER | last touched $LASTTOUCH" \
+           "proposed, never auto-deleted -- an out-of-repo caller is invisible to this scan" 0
+    echo "OK filed $DNEW"
+    ;;
+  *)
+    report "QUIET — $ORPHAN_N orphans but filing failed; nothing was created" \
+           "gh issue create said: $(printf '%s' "$DNEW" | cut -c1-200)" \
+           "the next tick retries; no partial state is left behind" 1
+    echo "QUIET dead-code file failed"
+    ;;
+esac
 exit 0

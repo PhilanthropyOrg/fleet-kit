@@ -223,7 +223,7 @@ spawns exactly one). Your job, in order:
    `Accepted (VP review):` / `Not yet (VP review):` is newer than it, spawn the review
    instead of filing an ask for Reif:
    ```
-   FLEET_RUN_NOW=1 bash /fleet-kit/scripts/run_member.sh vp --item <n>
+   FLEET_RUN_NOW=1 bash /fleet-kit/scripts/run_member.sh dumbledore --item <n>   # review mode (was vp)
    ```
    `scripts/vp_due.sh` on the crontab does this deterministically, on whatever cadence this
    instance's `FLEET_VP_DUE_CADENCE` dial is set to (default every 15 min, but an instance may
@@ -447,6 +447,15 @@ spawns exactly one). Your job, in order:
    THIS pass and by how many minions. If you notice something marie clearly missed (an unlabeled
    item that's obviously urgent, a stale priority label on something now irrelevant), leave a
    comment flagging it for her next pass — don't relabel it yourself.
+
+9. **Stuck-green merge — the one time you touch a merge.** (jefe's old exception; jefe was
+   folded into you, marie and dumbledore on 2026-09-12 — a member is a finger.) A PR fully
+   green for 2h+ (every required check passed, judge-judy approved, no conflict) that auto-merge
+   never fired on is a broken *mechanism*, not a content call. Check the merge queue first
+   (`gh api repos/<o>/<r>/rulesets/<id> --jq '.rules[].type'` — `merge_queue` present means
+   `--auto` re-arms it, absent means `gh pr merge --squash --admin` is the fix). Never merge a
+   PR that edits the fleet's own guardrail machinery; never re-judge content — judge-judy's
+   status is the only content gate. Report every such merge by number with the reason.
 
 ## Report
 

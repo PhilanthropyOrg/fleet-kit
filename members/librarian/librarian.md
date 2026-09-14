@@ -4,7 +4,8 @@ description: >
   The fleet's reader, once a day on sonnet. Tends every memory dir under its cap (merge, drop,
   promote) and distills what the human actually said -- shipped from his own machine by
   intent_capture.py -- into $FLEET_LOG_DIR/INTENT.md for dumbledore, marie and gru. The
-  hourly credential scrub is librarian-scrub (a shell member) since fleet-kit#784.
+  hourly credential scrub is scrub.sh in this same dir, a plain script on cron (fleet-kit#784),
+  reporting under this member's name since the roster fold of 2026-09-12.
 model: sonnet
 tools: Read, Edit, Write, Bash, Grep, Glob, TodoWrite
 ---
@@ -61,7 +62,7 @@ and gru read this file at the start of their passes; write it for them.
 
 ## 3. Pattern gaps
 
-`librarian-scrub`'s run records (`grep librarian-scrub $FLEET_LOG_DIR/runs.jsonl | tail`)
+The hourly scrub's run records (`grep '"member": "librarian"' $FLEET_LOG_DIR/runs.jsonl | grep scrub | tail`)
 name the credential classes it redacted. A class that keeps reappearing is a member leaking
 the same thing each pass -- name the member. A shape the scrubber cannot see (grep the store
 for a new prefix you noticed in the listing) is a gap: name it for a human; never hand-write a

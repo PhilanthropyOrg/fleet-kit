@@ -1,25 +1,32 @@
 {
   "name": "sentry",
-  "emoji": "👁️",
+  "purpose": "Uses the site the way a real person would \u2014 loads pages, clicks, searches, reads \u2014 and files an issue within 3 hours if something stops doing its job. Once a week it also tries to break the live site on purpose (authorised testing of our own product) and files anything that works.",
+  "emoji": "\ud83d\udc41\ufe0f",
   "lane": "quality",
   "mandate": {
-    "target": "every USER-FACING surface is exercised as a person would use it -- loaded, clicked, searched, read -- and any surface that stops doing its job becomes a filed issue within 3 hours, never a silent entry in a report nobody opens",
+    "target": "every USER-FACING surface is exercised as a person would use it -- loaded, clicked, searched, read, AT PHONE WIDTH FIRST -- and any surface that stops doing its job becomes a filed issue within 3 hours, never a silent entry in a report nobody opens. This is a WATCH, not a gate: it fires on a clock, so it still runs in a week when nothing deployed. Reif, 2026-09-12: 'it's more like a night watch that touches every surface and every button every day. We don't hire an inspector just after a building is completed, instead we should be always walking every surface.'",
     "checklist": [
       "run scripts/qa_crawl.py against philanthropy.org -- reuse it, never write a second crawler",
       "assert CONTENT, not status: a search must return result rows, a report must show real financials, superadmin must render its sign-in form. HTTP 200 proves a server answered, not that a human got what they came for",
       "distinguish BLOCKED from BROKEN: a WAF challenge means the CHECKER lost its credential; a real error means the PRODUCT is down. Reporting one as the other sends a human debugging the wrong system",
       "check the fleet dashboard too (dino.luckymachines.co) -- charts must render WITH DATA, and an all-zero chart during a working hour is a finding, not a pass",
-      "file ONE issue per distinct broken surface, dedup by surface+symptom so a persisting break does not refile every 3 hours -- and CLOSE the issue when the surface recovers"
+      "file ONE issue per distinct broken surface, dedup by surface+symptom so a persisting break does not refile every 3 hours -- and CLOSE the issue when the surface recovers",
+      "A ZERO-CONTROL CRAWL IS A BLOCKED CRAWL, NEVER A CLEAN ONE. Cloudflare answers an unauthenticated crawler with a 403 challenge page, and click_crawl.py will then enumerate THE CHALLENGE PAGE's controls -- which reads as 'the site has almost no buttons', not as 'I was blocked'. click_crawl.py's IGNORED_CONSOLE filter also drops all 4xx console errors, so a WAF block is silent AND looks clean. Measured 2026-09-12 from the fleet container: https://philanthropy.org returned 403 and the crawl reported '0 controls actuated, 0 findings'. Check the base URL's status YOURSELF first; if ATLAS_TEST_BYPASS is unset or the base 403s, report BLOCKED and file nothing. Note the bypass header is a NO-OP on ordinary pages (2026-09-12: /network/verify and /990/sectors return identical bytes with and without it) and matters ONLY on the scraper-gated paths -- /990/report*, /990/similar-to*, /990/person*, /990/vendor/*, /990/vendors-for*, search.",
+      "WALK EVERY SURFACE, not a list someone wrote down. Get the route inventory from the app itself: `python3 -c \"import sys;sys.path.insert(0,'scripts/qa');import ui_surfaces;print(ui_surfaces.JOBS)\"` returns [job, [routes], [handlers]] as static data with no app import (surface_debt.py silently degrades to a stale baseline when the app won't import -- psycopg is missing inside the container -- so never trust its enumeration). 19 jobs, ~228 HTML routes. Coverage that depends on someone remembering to add a route decays with every feature.",
+      "CLICK EVERY CONTROL, PHONE FIRST (390x844): `python3 scripts/qa/click_crawl.py --base <prod> --paths <routes> --max-per-route 12`. It enumerates from the ACCESSIBILITY TREE (role + accessible name), so a button added today is covered today with no code change, and it is SAFE ON PROD BY CONSTRUCTION: every non-GET is answered in-browser with an empty 204 and never reaches the server. NEVER pass --allow-writes against prod -- that flag is for a disposable target only and would send real email, file real claims, charge real cards. A control must: not log a console error, not fetch >=400, not blank the page, NOT INTRODUCE HORIZONTAL OVERFLOW, and actually DO SOMETHING (URL, DOM, or aria-expanded/dialog state changes). That last property catches a button wired to nothing, which renders perfectly and no screenshot diff will ever find.",
+      "OVERFLOW IS A DATA-WIDTH BUG AS OFTEN AS A TEMPLATE BUG -- this is why the watch exists and a deploy gate cannot replace it. The 2026-09-12 sector tape clipped off the right edge of a phone because a real sector name ('Philanthropy, Voluntarism & Grantmaking Foundations') is longer than the column that renders it. NO TEMPLATE CHANGED, so nothing diff-triggered would ever have fired. Report the actual STRING that overflowed and the viewport width, not just a selector. Screenshot every finding at 390x844 and attach it -- a person must see the defect without reproducing it.",
+      "BASELINE HONESTLY. click_crawl carries a baseline of known findings and reports which no longer reproduce. Ratchet it DOWN (--accept) only when a finding genuinely stopped reproducing, never to silence one that is still live. A baseline that absorbs real defects is how this watch goes blind.",
+      "RED-TEAM MODE (was the red member, folded 2026-09-12): when the operator instruction is `red-team`, Read /fleet-kit/members/sentry/red-team.md and follow it instead of the watch steps -- run scripts/red_walker.py against our own product only, file landed attacks with journey_issue_filer.py --profile red, never fix, never a rate/volume attack, never paste a credential"
     ],
     "limits": {
-      "timeout_s": 900
+      "timeout_s": 3000
     },
-    "escalation": "a surface is ambiguous (challenge page, timeout, or a 5xx that could be a deploy cutover) -- re-check once after 60s before filing; a blue-green cutover returns 502 for ~10-20s and is NOT an outage. If the probe credential is missing, say so LOUDLY as a checker defect and do not report the surfaces as healthy."
+    "escalation": "a surface is ambiguous (challenge page, timeout, or a 5xx that could be a deploy cutover) -- re-check once after 60s before filing; a blue-green cutover returns 502 for ~10-20s and is NOT an outage. If the probe credential is missing, or the click-walk actuates ZERO controls, say so LOUDLY as a checker defect and do not report the surfaces as healthy. If a whole job's routes are unreachable, say which and why rather than filing 20 issues that share one cause."
   },
   "schedule": {
     "interval_s": 10800
   },
-  "timeout_s": 900,
+  "timeout_s": 3000,
   "enabled": true,
   "llm": {
     "model": "sonnet",
@@ -35,11 +42,12 @@
       ],
       "deny": [
         "Bash(git push:*)",
-        "Bash(gh pr merge:*)"
+        "Bash(gh pr merge:*)",
+        "Bash(gh pr create:*)"
       ]
     }
   },
   "report": {
-    "vision_link": "optional"
+    "vision_link": "required"
   }
 }

@@ -79,9 +79,13 @@ NUMBER_PAYLOAD = {
     "configured": True, "present": True, "stale": False,
     "payload": {
         "as_of": "2026-09-06T18:00:00Z",
-        "number": {"name": "Stripe MRR", "value": 1234, "unit": "USD", "delta_7d": 56},
-        "guardrail": {"name": "Refund rate", "value": 0.4, "unit": "%", "delta_7d": 0},
+        "number": {"name": "entities with >=1 real interaction", "value": 1234, "unit": "entities", "delta_7d": 56},
+        "kr1": {"name": "claims started, last 7 days", "value": 4, "unit": "claims/wk", "delta_7d": 1,
+                "completion_rate_pct": 55.9, "median_pending_age_days": 24.0},
+        "kr3": {"name": "median days from sign-up to first interaction", "value": None, "unit": "days", "unmeasured": True},
+        "revenue": {"name": "Stripe MRR (downstream, not a key result)", "value": 21.67, "unit": "$/mo", "delta_7d": 10.83},
         "channel": {"name": "Signups", "value": 12, "unit": "", "delta_7d": 2},
+        "target": {"value": 100000, "unit": "entities", "by": None},
     },
 }
 MEMBERS = [{"spec": {"name": "datta", "kind": "worker"},

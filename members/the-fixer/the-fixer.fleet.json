@@ -1,5 +1,6 @@
 {
   "name": "the-fixer",
+  "purpose": "The emergency responder. When something breaks or the site goes dark, it produces one fix within a single cycle.",
   "emoji": "🔧",
   "lane": "incident",
   "mandate": {

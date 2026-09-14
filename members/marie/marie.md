@@ -74,6 +74,22 @@ there outranks any ranking rule below. Cite the entry you acted on in your repor
 A draft PR or one with recent commits is still live work — don't clear those. Staleness is "no
 PR at all," not "PR not done yet."
 
+## Part A2 — close finished epics (you, not a PR)
+
+`docs/quality-standard.md` rule 3: an epic closes only when every child is accepted, and a
+PR never carries `Closes #N` on one (`closes_gate.py` blocks it). This was jefe's job until
+2026-09-12; jefe was folded away and finished-work-still-open is already your Part B question.
+For each open `fleet:epic` issue:
+```
+python3 /fleet-kit/scripts/closes_gate.py --epic <issue-number>
+# {"closable": true,  "reason": "every child is closed"}
+# {"closable": true,  "reason": "no children found ..."}   <- NOT a green light; read the issue
+# {"closable": false, "reason": "unaccepted children: #651, #653"}
+```
+`closable: true` with real children, all closed → `gh issue close <n>` with a comment naming
+them. `closable: false` → leave it open and name each unaccepted child in your report. This
+check never closes an epic for you; it only tells you when you may.
+
 ## Part B — cruft prune
 
 Walk the rest of the open backlog (including issues you just left claimed-and-alive — skip

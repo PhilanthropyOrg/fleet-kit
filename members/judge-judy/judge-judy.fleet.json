@@ -1,5 +1,6 @@
 {
   "name": "judge-judy",
+  "purpose": "The code reviewer. Every piece of finished work waiting to go live gets one verdict from her before it ships.",
   "emoji": "🔍",
   "kind": "llm",
   "lane": "review",
