@@ -81,16 +81,80 @@ def recent_minion_costs(conn, member: str = "minion", hours: float = 2.0) -> lis
     return [{"item_id": item_id, "cost_usd": cost_usd} for item_id, cost_usd in cur.fetchall()]
 
 
+def recent_minion_batch_turns(conn, member: str = "minion", hours: float = 48.0) -> list[dict]:
+    """Real (item_id, num_turns) pairs from fleet.db, DISTINCT on run_id -- fanout.py's
+    `pack_batches`/`calibrate_batch_turns` need whole-PASS turn totals, one row per real batch
+    RUN, not per underlying issue -- a batched minion's item_id is underscore-joined
+    ("64_99_143", from run_member.sh's --items) and its num_turns already covers the whole
+    batch pass, so no further grouping is needed here beyond de-duping the started/terminal
+    row pair every real run leaves (same (run_id, recorded_at) composite-key shape
+    claim_history.py's minion_runs_for_item already de-dupes for the identical reason).
+
+    A longer default window than recent_minion_costs (48h vs 2h): batching is new as of
+    2026-09-14, so real batch-pass history accumulates slowly at first -- a 2h window would
+    read empty for days. Widen back toward 2h once enough real batch passes exist that a
+    shorter window reliably has usable rows; that crossover is a judgment call for whoever
+    reads a thin `[]` result and notices the window is still too tight.
+    """
+    since = time.time() - hours * 3600
+    cur = conn.execute(
+        "SELECT run_id, item_id, MAX(num_turns) FROM runs "
+        "WHERE member = ? AND recorded_at >= ? AND num_turns IS NOT NULL "
+        "GROUP BY run_id",
+        (member, since),
+    )
+    return [{"run_id": run_id, "item_id": item_id, "num_turns": num_turns}
+            for run_id, item_id, num_turns in cur.fetchall()]
+
+
+def to_batch_observed(runs: list[dict],
+                      complexity_by_item: dict[str, int] | None = None) -> list[dict]:
+    """[{"run_id":.., "item_id":"64_99_143", "num_turns":..}, ...] -> fanout.py
+    `pack_batches`'s --observed shape: [{"turns": float, "items": [{"complexity":c}, ...]}, ...].
+
+    `item_id` is underscore-split into its individual issue numbers (run_member.sh's --items
+    join, see its own comment for why); each is looked up in `complexity_by_item` (same
+    median-default convention as to_observed above -- an item missing from the map is treated
+    as fanout.DEFAULT_COMPLEXITY, never free, so it still counts toward the batch's weight).
+
+    A single-item run's item_id (no underscore) still works unchanged -- split("_") on a
+    string with no underscore returns a one-element list, so a legacy `--item <n>` (never
+    `--items`) run calibrates exactly like a batch of size 1.
+
+    Returns [] when there is nothing usable -- same refuse-to-invent discipline as
+    to_observed(): the caller (fanout.py's calibrate_batch_turns, fed this as --observed)
+    already errors loudly on an empty/unusable --observed.
+    """
+    complexity_by_item = complexity_by_item or {}
+    usable = [r for r in runs
+             if isinstance(r.get("num_turns"), (int, float)) and r["num_turns"] > 0
+             and r.get("item_id")]
+    return [
+        {
+            "turns": r["num_turns"],
+            "items": [
+                {"complexity": complexity_by_item.get(n, fanout.DEFAULT_COMPLEXITY)}
+                for n in str(r["item_id"]).split("_") if n
+            ],
+        }
+        for r in usable
+    ]
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(
-        description="Convert real fleet.db cost_usd into fanout.py's --observed %-of-week shape.")
-    ap.add_argument("--allowance-pct", type=float, required=True,
+        description="Convert real fleet.db cost_usd into fanout.py's --observed %-of-week shape, "
+                     "or real batch-pass num_turns into fanout.py batches' --observed shape.")
+    ap.add_argument("--allowance-pct", type=float,
                     help="this pass's per_diem_hourly_pct-derived allowance (already buffered, "
-                         "same value passed to fanout.py --allowance-pct)")
+                         "same value passed to fanout.py --allowance-pct); required unless --batch-turns")
+    ap.add_argument("--batch-turns", action="store_true",
+                    help="emit fanout.py batches' --observed shape (real minion batch-pass "
+                         "num_turns) instead of the default %%-of-week cost shape")
     ap.add_argument("--member", default="minion",
                     help="whose runs to calibrate from (default: minion, the real builders)")
-    ap.add_argument("--hours", type=float, default=2.0,
-                    help="lookback window in hours (default: 2, matches gru.md step 3b)")
+    ap.add_argument("--hours", type=float,
+                    help="lookback window in hours (default: 2 for cost, 48 for --batch-turns)")
     ap.add_argument("--complexity",
                     help='JSON map of item_id -> fleet:complexity-<n>, e.g. \'{"3253":3}\'; '
                          'an item missing from this map is treated as median, never free')
@@ -99,8 +163,17 @@ def main(argv=None) -> int:
 
     conn = fleet_db.connect(Path(a.db_path) if a.db_path else None)
     fleet_db.sync(conn)
-    runs = recent_minion_costs(conn, member=a.member, hours=a.hours)
     complexity_by_item = json.loads(a.complexity) if a.complexity else {}
+
+    if a.batch_turns:
+        runs = recent_minion_batch_turns(conn, member=a.member, hours=a.hours or 48.0)
+        print(json.dumps(to_batch_observed(runs, complexity_by_item)))
+        return 0
+
+    if a.allowance_pct is None:
+        print("ERROR: --allowance-pct is required unless --batch-turns is set", file=sys.stderr)
+        return 2
+    runs = recent_minion_costs(conn, member=a.member, hours=a.hours or 2.0)
     observed = to_observed(runs, a.allowance_pct, complexity_by_item)
     print(json.dumps(observed))
     return 0

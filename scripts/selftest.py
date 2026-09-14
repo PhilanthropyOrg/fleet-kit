@@ -846,6 +846,76 @@ def _fanout_packs_the_hour_by_complexity():
         raise AssertionError("unit_pct=0 silently accepted")
 
 
+def _fanout_batches_by_real_turn_cost_not_a_fixed_count():
+    """gru batches its chosen items into minion PASSES sized by real complexity-weighted turn
+    cost against minion's timeout_s -- NOT a flat item count.
+
+    Reif, 2026-09-14, on discovering fanout.py's own module docstring already made this exact
+    argument once for item COUNT vs item WEIGHT at the hour level: "can't we just give it
+    budget and a goal and have it innovate to maximum units per run" -- a flat
+    MINION_BATCH_SIZE=3 was the same fixed-count mistake `pack()` already fixed for N, just
+    reintroduced one layer down. This guards the fix at that layer: `pack_batches()`'s batch
+    SIZE is an output of packing turn cost, never a hardcoded count.
+    """
+    import fanout
+
+    items = [{"number": 1, "complexity": 3}, {"number": 2, "complexity": 4},
+             {"number": 3, "complexity": 9}, {"number": 4, "complexity": 2},
+             {"number": 5, "complexity": 3}]
+    r = fanout.pack_batches(items, turn_budget=60, unit_turns=10, safety_margin=0.7,
+                            solo_complexity_floor=8)
+
+    # Priority order preserved across batches -- never reordered by size, same law as pack().
+    flat = [it["number"] for b in r["batches"] for it in b["items"]]
+    assert flat == [1, 2, 3, 4, 5], flat
+
+    # The complexity-9 item is ALWAYS its own batch, regardless of room in the batch before it
+    # or after it -- a struggling big item must not risk small items sharing its pass.
+    solo_batches = [b for b in r["batches"] if any(it["number"] == 3 for it in b["items"])]
+    assert len(solo_batches) == 1 and len(solo_batches[0]["items"]) == 1, solo_batches
+
+    # No batch's estimated turns exceed turn_budget * safety_margin (the whole point).
+    for b in r["batches"]:
+        assert b["est_turns"] <= 60 * 0.7 + 1e-6, (b, "batch exceeded its packed budget")
+
+    # A single expensive item alone must not silently vanish or error -- it's still one batch.
+    assert r["n_items"] == 5 and sum(len(b["items"]) for b in r["batches"]) == 5
+
+    # THE regression this guards: a flat count would put items 1,2,3 in "batch 1" (size 3) with
+    # no regard for item 3's real weight (complexity 9, ~9x a median item) -- that would blow
+    # any real turn budget instantly. Confirm batch sizes are NOT uniform/count-driven: the
+    # solo item's batch has exactly 1 item while at least one other batch has more than 1.
+    sizes = [len(b["items"]) for b in r["batches"]]
+    assert 1 in sizes and max(sizes) > 1, sizes
+
+    # calibrate_batch_turns derives the per-median-item turn cost from real observed batches,
+    # normalised by each batch's own total complexity weight -- same self-correction law as
+    # calibrate() for %-of-week cost. 38 turns spent on a (complexity-4 + complexity-3) batch.
+    weight = fanout.complexity_multiplier(4) + fanout.complexity_multiplier(3)
+    unit = fanout.calibrate_batch_turns(
+        [{"turns": 38 * weight, "items": [{"complexity": 4}, {"complexity": 3}]}])
+    assert abs(unit - 38) < 1e-6, unit
+
+    # Refuses to invent one when there is nothing usable -- same refusal law as calibrate().
+    assert fanout.calibrate_batch_turns([]) is None
+    assert fanout.calibrate_batch_turns([{"turns": 0, "items": [{"complexity": 5}]}]) is None
+    assert fanout.calibrate_batch_turns([{"turns": 10, "items": []}]) is None
+
+    try:
+        fanout.pack_batches(items, 60, 0)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("unit_turns=0 silently accepted")
+
+    try:
+        fanout.pack_batches(items, 60, 10, safety_margin=0)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("safety_margin=0 silently accepted")
+
+
 def _cost_bridge_converts_real_spend_into_fanouts_observed_shape():
     """gh#4020 / fleet-kit#260: fanout.py's own docstring promises `unit_pct` is derived from
     what passes ACTUALLY spent, but nothing ever built that derivation -- every gru pass since
@@ -908,6 +978,86 @@ def _cost_bridge_converts_real_spend_into_fanouts_observed_shape():
         fleet_db.sync(conn, runs_file=runs_file)
         real = cost_bridge.recent_minion_costs(conn, member="minion", hours=2.0)
         assert {r["item_id"] for r in real} == {"10", "20"}, real
+
+
+def _cost_bridge_converts_real_batch_turns_into_fanouts_pack_batches_observed_shape():
+    """2026-09-14 (minion batching): gru.md step 5 calibrates `pack_batches`'s turn cost from
+    real batch-pass history the same way step 3 already calibrates `pack`'s %-of-week cost --
+    `to_batch_observed()` is the missing function that turns fleet.db's real num_turns rows
+    into fanout.py `batches`' --observed shape, same split (pure core / thin DB seam / CLI) as
+    to_observed()/recent_minion_costs() above.
+    """
+    import cost_bridge
+    import fanout
+
+    runs = [
+        {"run_id": "r1", "item_id": "64_99", "num_turns": 38},
+        {"run_id": "r2", "item_id": "64", "num_turns": 22},
+    ]
+    observed = cost_bridge.to_batch_observed(runs, complexity_by_item={"64": 4, "99": 3})
+    assert len(observed) == 2, observed
+    batch = next(o for o in observed if len(o["items"]) == 2)
+    assert batch["turns"] == 38, batch
+    assert sorted(it["complexity"] for it in batch["items"]) == [3, 4], batch
+    solo = next(o for o in observed if len(o["items"]) == 1)
+    assert solo["turns"] == 22 and solo["items"][0]["complexity"] == 4, solo
+
+    # An item missing from complexity_by_item is median, never free -- same convention as
+    # to_observed() and everywhere else in this file.
+    unlabelled = cost_bridge.to_batch_observed([{"run_id": "r3", "item_id": "999", "num_turns": 5}])
+    assert unlabelled[0]["items"][0]["complexity"] == fanout.DEFAULT_COMPLEXITY, unlabelled
+
+    # Refuses to invent when there's nothing usable -- same discipline as to_observed()/
+    # fanout.calibrate(): a zero, missing, or null num_turns, or a missing item_id, drops the row.
+    assert cost_bridge.to_batch_observed([]) == []
+    assert cost_bridge.to_batch_observed([{"run_id": "r4", "item_id": "1", "num_turns": 0}]) == []
+    assert cost_bridge.to_batch_observed([{"run_id": "r5", "item_id": "1", "num_turns": None}]) == []
+    assert cost_bridge.to_batch_observed([{"run_id": "r6", "item_id": None, "num_turns": 5}]) == []
+
+    # The output feeds fanout.calibrate_batch_turns() directly.
+    unit = fanout.calibrate_batch_turns(observed)
+    assert unit is not None and unit > 0, unit
+
+    # recent_minion_batch_turns() is the thin DB seam -- exercised through fleet.db, not
+    # mocked, same pattern as recent_minion_costs() above. A real batch run leaves TWO rows
+    # (started null-turns + terminal real-turns) sharing one run_id -- MAX(num_turns) GROUP BY
+    # run_id must pick the real terminal value, not double-count or pick the null started row.
+    import fleet_db
+    with tempfile.TemporaryDirectory() as d:
+        d = Path(d)
+        runs_file = d / "runs.jsonl"
+        now = time.time()
+        recs = [
+            {"run_id": "b1", "member": "minion", "item_id": "64_99",
+             "_recorded_at": now, "status": "started"},  # started row: no tokens yet
+            {"run_id": "b1", "member": "minion", "item_id": "64_99",
+             "_recorded_at": now + 5, "tokens": {"num_turns": 38}},  # terminal row
+            # gh#4966 shape: a THIRD row on the same run_id at a different recorded_at, both
+            # non-null -- an intermediate progress write or a re-synced retry. Without
+            # GROUP BY run_id + MAX(), this would return TWO rows for b1 (38 and 20) and
+            # to_batch_observed would double-count the batch's real turns.
+            {"run_id": "b1", "member": "minion", "item_id": "64_99",
+             "_recorded_at": now + 2, "tokens": {"num_turns": 20}},
+            {"run_id": "b2", "member": "minion", "item_id": "64",
+             "_recorded_at": now, "tokens": {"num_turns": 22}},
+            # a different member's turns must not leak into minion's calibration.
+            {"run_id": "b3", "member": "gru", "item_id": "99",
+             "_recorded_at": now, "tokens": {"num_turns": 99}},
+            # stale (outside the lookback window) must not count either.
+            {"run_id": "b4", "member": "minion", "item_id": "40",
+             "_recorded_at": now - 999999, "tokens": {"num_turns": 5}},
+        ]
+        runs_file.write_text("\n".join(json.dumps(r) for r in recs) + "\n")
+        conn = fleet_db.connect(d / "fleet.db")
+        fleet_db.sync(conn, runs_file=runs_file)
+        real = cost_bridge.recent_minion_batch_turns(conn, member="minion", hours=2.0)
+        # Exactly one row per run_id even though b1 has three underlying rows -- MAX() picks
+        # the larger terminal value (38), never sums or returns multiple rows for one run.
+        assert len(real) == 2, real
+        by_run = {r["run_id"]: r for r in real}
+        assert set(by_run) == {"b1", "b2"}, by_run
+        assert by_run["b1"]["num_turns"] == 38, by_run["b1"]  # MAX of {38, 20}, not either alone
+        assert by_run["b1"]["item_id"] == "64_99", by_run["b1"]
 
 
 def _claim_history_blocks_an_item_that_keeps_dead_ending():
