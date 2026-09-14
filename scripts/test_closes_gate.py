@@ -87,5 +87,59 @@ class DecomposedChildrenTests(unittest.TestCase):
         self.assertTrue(ec["closable"])
 
 
+# The real body of philanthropy#5492 (head 16f6673a66d2) -- the PR the bare-digit false
+# positive was blocking (fk-item5620 / philanthropy#5620). Verbatim, not a paraphrase, per
+# marie's PRD AC4/AC5 (2026-09-13T08:05:10Z comment).
+PHILANTHROPY_PR_5492_BODY = """\
+## What this does
+Someone who paid $10 for network verification, started the photo-ID check, and put their phone \
+down currently hears nothing from us again — the "finish the ID check" reminder only ever \
+showed up if they happened to land on their own account page.
+
+## What changed
+This is fix 5 of the 7-item VP round-2 work order on gh#5084 — `Part of #5084`, not a close.
+
+- `_masthead.html`: the banner itself, deliberately **outside** `.mutil` (the nav utility row \
+already regressed once at phone widths from a similar addition — gh#5453/fix 1) — a full-width \
+strip below the nav instead.
+
+**Still open on gh#5084** (left for a follow-up, not silently dropped):
+- **Fix 3** (post the entitled/verified/stuck-unverified counts to the issue thread): \
+re-investigated this pass.
+- **Fix 6** (capped email nudge via `lifecycle_messaging`, 72h/14d): the in-product banner in \
+this PR is the VP-specified first step.
+
+**See it:** (internal) — not reproducible from a fresh anonymous view of production, confirming \
+placement and that it doesn't crowd the nav row fix 1 already had to fix once.
+"""
+
+
+class ClosingNumbersTests(unittest.TestCase):
+    """fk-item5620 (philanthropy#5620): CLOSE_RE used to make the `#` optional, so ordinary
+    prose like "fix 5 of the" or "**Fix 3**" parsed as a real closing reference. Covers AC1-4
+    of marie's PRD comment (philanthropy#5620, 2026-09-13T08:05:10Z)."""
+
+    def test_ac1_bare_number_prose_is_not_a_closing_reference(self):
+        body = "This is fix 5 of the 7-item VP round-2 work order on gh#5084 — `Part of #5084`, not a close."
+        self.assertNotIn(5, cg.closing_numbers(body))
+
+    def test_ac2_bolded_and_bare_prose_forms_are_ignored_but_real_keyword_still_caught(self):
+        body = "**Fix 3**, **Fix 6**, fix 1 and Fixes #4321 together."
+        self.assertEqual(cg.closing_numbers(body), [4321])
+
+    def test_ac3_every_real_closing_keyword_still_detected_with_hash(self):
+        for kw in ("close", "closes", "closed", "fix", "fixes", "fixed", "resolve", "resolves", "resolved"):
+            with self.subTest(kw=kw):
+                self.assertEqual(cg.closing_numbers(f"{kw} #42"), [42])
+
+    def test_ac3_every_real_closing_keyword_still_detected_with_gh_hash(self):
+        for kw in ("close", "closes", "closed", "fix", "fixes", "fixed", "resolve", "resolves", "resolved"):
+            with self.subTest(kw=kw):
+                self.assertEqual(cg.closing_numbers(f"{kw} gh#42"), [42])
+
+    def test_ac4_philanthropy_pr_5492_real_body_yields_no_closing_reference(self):
+        self.assertEqual(cg.closing_numbers(PHILANTHROPY_PR_5492_BODY), [])
+
+
 if __name__ == "__main__":
     unittest.main()
