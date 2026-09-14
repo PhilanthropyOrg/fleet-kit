@@ -138,6 +138,16 @@ log() {
     echo "$line" >> "$DEPLOY_LOG"
 }
 
+# gh#5848 (philanthropy) / fleet-kit#990 / fleet-kit#1000: both build call sites used to fall
+# back to the literal string "unknown" on any `git rev-parse` failure (`|| echo unknown`), so a
+# build that could not identify its own commit still shipped and got tagged -- the only signal
+# was deploy_staleness_check.log going permanently dark, with no build-time trace at all. An
+# image nobody can name the SHA of is not a successful deploy: resolve or fail the build, never
+# ship "unknown" again.
+resolve_deploy_sha() {
+    git -C "$KIT_DIR" rev-parse HEAD 2>/dev/null
+}
+
 # One place both the green candidate and the real cutover build their `podman run` args from --
 # duplicating this list between call sites is exactly how a mount silently drifts between "what
 # we tested" and "what we shipped" (the same defect class as the-fixer's own opus/sonnet drift).
@@ -368,7 +378,8 @@ proxy_deploy() {
     exists "${CONTAINER}-green" && podman rm -f "${CONTAINER}-green" >/dev/null 2>&1 || true
 
     log "building $IMAGE from $KIT_DIR"
-    local sha; sha="$(git -C "$KIT_DIR" rev-parse HEAD 2>/dev/null || echo unknown)"
+    local sha
+    sha="$(resolve_deploy_sha)" || { log "FATAL: cannot resolve DEPLOY_SHA -- git -C \"$KIT_DIR\" rev-parse HEAD failed. Refusing to build an image that can't say what it deployed."; return 1; }
     podman build --build-arg DEPLOY_SHA="$sha" -t "$IMAGE" "$KIT_DIR"
 
     log "starting ${CONTAINER}-green on $nv/$nw"
@@ -653,7 +664,7 @@ log "building $IMAGE from $KIT_DIR"
 # /fleet-kit` with .git excluded (.dockerignore) -- never a real checkout on any instance built
 # from this Dockerfile -- so this SHA baked at build time is the only way a later staleness
 # check can know what was actually shipped, without needing podman/host access itself.
-DEPLOY_SHA="$(git -C "$KIT_DIR" rev-parse HEAD 2>/dev/null || echo unknown)"
+DEPLOY_SHA="$(resolve_deploy_sha)" || { log "FATAL: cannot resolve DEPLOY_SHA -- git -C \"$KIT_DIR\" rev-parse HEAD failed. Refusing to build an image that can't say what it deployed."; exit 1; }
 podman build --build-arg DEPLOY_SHA="$DEPLOY_SHA" -t "$IMAGE" "$KIT_DIR"
 
 log "starting green candidate (${CONTAINER}-green) on alt ports $GREEN_VIEW_PORT/$GREEN_WEBHOOK_PORT"

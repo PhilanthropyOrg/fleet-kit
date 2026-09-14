@@ -116,7 +116,15 @@ fi
 #    2026-08-21 -- the running container was 13 commits behind despite `up.sh` having been run
 #    after those commits landed in the checkout.
 echo "[up] building $IMAGE_TAG (podman reuses cached layers for anything unchanged)..."
-UP_DEPLOY_SHA="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
+# gh#5848 (philanthropy) / fleet-kit#990 / fleet-kit#1000: this used to fall back to the literal
+# string "unknown" on any `git rev-parse` failure, so a build that could not identify its own
+# commit still shipped and got tagged -- the only signal was deploy_staleness_check.log going
+# permanently dark, with no build-time trace at all. Mirrors deploy.sh's resolve_deploy_sha
+# guard: fail the build instead of shipping an image nobody can name the SHA of.
+if ! UP_DEPLOY_SHA="$(git rev-parse HEAD 2>/dev/null)"; then
+  echo "[up] FATAL: cannot resolve DEPLOY_SHA -- git rev-parse HEAD failed. Refusing to build an image that can't say what it deployed." >&2
+  exit 1
+fi
 podman build --build-arg DEPLOY_SHA="$UP_DEPLOY_SHA" -t "$IMAGE_TAG" .
 
 # 2. Generate this project's fleet.env from the template on first run only — never overwrite
