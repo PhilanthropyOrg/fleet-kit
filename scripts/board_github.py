@@ -85,6 +85,34 @@ def is_claimed(issue: dict) -> bool:
     return any(lb.get("name") == LABEL_CLAIMED for lb in issue.get("labels") or [])
 
 
+LABEL_HUMAN_BLOCKED = f"{PREFIX}needs-human-op"
+
+
+def is_human_blocked(issue: dict) -> bool:
+    """True when the issue is code-complete and blocked only on a one-time human action
+    (a prod credential, an OAuth registration, an --apply run) that no sandboxed builder can
+    perform. Ported from nonprofit-atlas's `scripts/fleet/board_github.py` (gh#5870): this
+    file forked from that one and never picked up the exclusion, so `fleet:needs-human-op`
+    was a silent no-op for every claim made through this copy."""
+    return any(lb.get("name") == LABEL_HUMAN_BLOCKED for lb in issue.get("labels") or [])
+
+
+BLOCKED_BY_RE = re.compile(
+    r"(?:blocked by|blocked on|blocks on|depends on)\s*:?\s*\**\s*(?:gh)?#(\d+)", re.I)
+
+
+def blocked_by_numbers(issue: dict) -> list[int]:
+    """Issue numbers this item declares itself blocked by, parsed from a `Blocked by #N` line
+    in the body. Ported alongside is_human_blocked (gh#5870) -- see that repo's gh#4996 for why
+    a bare `#N` in prose is never enough to count as a declared dependency."""
+    return [int(m) for m in BLOCKED_BY_RE.findall(issue.get("body") or "")]
+
+
+def is_blocked_by_open_issue(issue: dict, open_numbers: set[int]) -> bool:
+    """True when any issue named by `Blocked by #N` is still open on this board."""
+    return any(n in open_numbers for n in blocked_by_numbers(issue))
+
+
 def to_board_item(issue: dict) -> dict:
     """The {'id','text','context'} shape every caller consumes."""
     return {
@@ -131,6 +159,8 @@ def ensure_labels(priority: str = "") -> None:
         (LABEL_BACKLOG, "3e694a", "fleet work queue item"),
         (LABEL_CLAIMED, "d4a72c", "claimed by a fleet worker"),
         _SEVERITY_LABEL_META,
+        (LABEL_HUMAN_BLOCKED, "b60205",
+         "code-complete, blocked on a one-time human action -- excluded from claim selection"),
     ]
     if priority:
         color, desc = _PRIORITY_LABEL_META.get(priority, ("ededed", f"priority: {priority}"))
@@ -152,6 +182,8 @@ def file_item(title: str, body: str, lane: str = "", priority: str = "") -> int:
 
 
 def list_unclaimed() -> list[dict]:
+    """What a builder may pick up: open, unclaimed, not human-blocked, and not waiting on
+    another open board item (gh#5870)."""
     rc, out = _run(build_list_cmd())
     if rc != 0:
         print(f"board_github: list FAILED: {out[:300]}", file=sys.stderr)
@@ -160,7 +192,10 @@ def list_unclaimed() -> list[dict]:
         issues = json.loads(out)
     except json.JSONDecodeError:
         return []
-    return [to_board_item(i) for i in issues if not is_claimed(i)]
+    open_numbers = {i["number"] for i in issues if i.get("number") is not None}
+    return [to_board_item(i) for i in issues
+            if not is_claimed(i) and not is_human_blocked(i)
+            and not is_blocked_by_open_issue(i, open_numbers)]
 
 
 def release_item(number: int, note: str) -> bool:
