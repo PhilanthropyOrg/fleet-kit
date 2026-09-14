@@ -23,7 +23,9 @@
 #         run_member.sh roomba --dry-run     # print the resolved command, run nothing
 #         run_member.sh minion --item 3072   # gru spawns a single-item minion this way (legacy path, still valid)
 #         run_member.sh minion --items 3072,3081,3090
-#                                            # gru batches up to MINION_BATCH_SIZE items per minion this way -- see gru.md
+#                                            # gru spawns a batched minion this way -- batch size is
+#                                            # sized from real turn cost (fanout.py batches), not a
+#                                            # fixed count -- see gru.md step 5
 #         run_member.sh marie --task "rescore complexity on everything opened today"
 #                                            # ad-hoc: the member's full charter PLUS one instruction
 set -uo pipefail

@@ -123,21 +123,108 @@ def pack(items: list[dict], allowance_pct: float, unit_pct: float,
     }
 
 
-def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(
-        description="Pack one hour's token allowance with backlog work (percent of week).")
-    ap.add_argument("--allowance-pct", type=float, required=True,
-                    help="this pass's share, already buffered (e.g. per_diem_hourly_pct * 0.70)")
-    ap.add_argument("--unit-pct", type=float,
-                    help="cost of one complexity-5 item as %% of week; omit to derive from --observed")
-    ap.add_argument("--items", required=True,
-                    help='JSON list in priority order: [{"number":123,"complexity":4}, ...] or "-" for stdin')
-    ap.add_argument("--observed",
-                    help='JSON list of real past passes to calibrate from: [{"pct":0.08,"complexity":5}, ...]')
-    ap.add_argument("--min-items", type=int, default=0)
-    ap.add_argument("--base", type=float, default=COMPLEXITY_BASE)
-    a = ap.parse_args(argv)
+def calibrate_batch_turns(observed: list[dict], base: float = COMPLEXITY_BASE) -> float | None:
+    """Derive the turn cost of ONE median (complexity-5) item inside a minion BATCH pass, from
+    real observed batches. Same shape as calibrate() above, different currency: turns spent on
+    a batch, not % of week spent on an hour.
 
+    `observed` is [{"turns": <real num_turns the batch pass spent>, "items": [{"complexity":c},
+    ...]}, ...] -- one entry per real completed minion batch run. A batch's total complexity
+    weight is the SUM of its items' multipliers (building 3 items costs roughly 3x one, same
+    additive assumption pack() makes for a hard allowance; this is calibrating turns, not
+    reusing pack()'s own unit, because a batch pass's real overhead -- worktree setup, one
+    fetch/merge/test cycle shared across N items -- is NOT visible to the hourly cost model at
+    all, only to whoever actually measures a batch run's real turns end to end).
+
+    Returns None when there is nothing usable -- the caller must say so, never invent a number
+    (same law as calibrate()).
+    """
+    per_item_units = []
+    for o in observed:
+        turns = o.get("turns")
+        batch_items = o.get("items") or []
+        if not isinstance(turns, (int, float)) or turns <= 0 or not batch_items:
+            continue
+        weight = sum(complexity_multiplier(it.get("complexity"), base) for it in batch_items)
+        if weight > 0:
+            per_item_units.append(turns / weight)
+    return (sum(per_item_units) / len(per_item_units)) if per_item_units else None
+
+
+def pack_batches(items: list[dict], turn_budget: float, unit_turns: float,
+                 base: float = COMPLEXITY_BASE, safety_margin: float = 0.7,
+                 solo_complexity_floor: int = 8) -> dict:
+    """Group an already-chosen, priority-ordered item list into minion batches, sized by real
+    complexity-weighted turn cost against `turn_budget` -- NOT a fixed item count.
+
+    2026-09-14 (Reif: "can't we just give it budget and a goal and have it innovate to maximum
+    units per run" -- correctly calling out that a flat MINION_BATCH_SIZE=3 repeats the exact
+    mistake fanout.py's own module docstring already named and fixed once for item COUNT vs
+    item WEIGHT: "N is an output of packing the hour, never an input." A batch's size is the
+    same kind of output, just packed against minion's timeout_s instead of the hourly
+    allowance.
+
+    Greedy in `items`' given order (marie's priority, gru's own selection order -- never
+    reordered, same law as pack()): keep adding items to the current batch while
+    `running_turns + next_item_cost <= turn_budget * safety_margin` (margin leaves headroom for
+    the shared per-batch overhead -- worktree setup, one fetch/merge/test cycle across the
+    whole batch -- that per-item calibration alone can't see), then close the batch and start a
+    new one. An item at or above `solo_complexity_floor` is ALWAYS its own batch, even with
+    room left in the current one -- a big item struggling should not risk the smaller items
+    sharing its pass (minion.md's own escalation rule already says a batch's items are built
+    independently, but a shared worktree means a truly pathological big item can still burn the
+    whole pass's wall-clock before the small ones are ever touched).
+
+    unit_turns must come from calibrate_batch_turns() against real history, or be explicitly
+    supplied -- never guessed inline; same refusal-to-invent law as pack().
+    """
+    if unit_turns <= 0:
+        raise ValueError(f"unit_turns must be > 0, got {unit_turns!r}")
+    if not (0 < safety_margin <= 1):
+        raise ValueError(f"safety_margin must be in (0, 1], got {safety_margin!r}")
+
+    effective_budget = turn_budget * safety_margin
+    batches: list[list[dict]] = []
+    current: list[dict] = []
+    current_turns = 0.0
+
+    for it in items:
+        c = it.get("complexity")
+        c_int = max(1, min(10, int(c))) if c is not None else DEFAULT_COMPLEXITY
+        cost = unit_turns * complexity_multiplier(c, base)
+
+        if c_int >= solo_complexity_floor:
+            if current:
+                batches.append(current)
+                current, current_turns = [], 0.0
+            batches.append([{**it, "est_turns": round(cost, 2)}])
+            continue
+
+        if current and current_turns + cost > effective_budget:
+            batches.append(current)
+            current, current_turns = [], 0.0
+
+        current.append({**it, "est_turns": round(cost, 2)})
+        current_turns += cost
+
+    if current:
+        batches.append(current)
+
+    return {
+        "n_items": len(items),
+        "n_batches": len(batches),
+        "batches": [
+            {"items": b, "est_turns": round(sum(x["est_turns"] for x in b), 2)}
+            for b in batches
+        ],
+        "unit_turns": round(unit_turns, 3),
+        "turn_budget": turn_budget,
+        "safety_margin": safety_margin,
+        "avg_batch_size": round(len(items) / len(batches), 2) if batches else 0,
+    }
+
+
+def _run_pack(a) -> int:
     items = json.loads(sys.stdin.read() if a.items == "-" else a.items)
     unit = a.unit_pct
     if unit is None:
@@ -158,6 +245,83 @@ def main(argv=None) -> int:
         return 1
     print(json.dumps(result, indent=2))
     return 0
+
+
+def _run_pack_batches(a) -> int:
+    items = json.loads(sys.stdin.read() if a.items == "-" else a.items)
+    unit = a.unit_turns
+    if unit is None:
+        if not a.observed:
+            print("ERROR: pass --unit-turns or --observed; refusing to invent a unit cost",
+                  file=sys.stderr)
+            return 2
+        unit = calibrate_batch_turns(json.loads(a.observed), base=a.base)
+        if unit is None:
+            print("ERROR: --observed had no usable batch; refusing to invent a unit cost",
+                  file=sys.stderr)
+            return 2
+
+    try:
+        result = pack_batches(items, a.turn_budget, unit, base=a.base,
+                              safety_margin=a.safety_margin,
+                              solo_complexity_floor=a.solo_complexity_floor)
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    print(json.dumps(result, indent=2))
+    return 0
+
+
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(
+        description="Pack one hour's token allowance with backlog work (percent of week), or "
+                     "group a chosen item list into minion batches sized by real turn cost.")
+    sub = ap.add_subparsers(dest="cmd")
+
+    pack_p = sub.add_parser("pack", help="pack one hour's allowance with backlog items (default)")
+    pack_p.add_argument("--allowance-pct", type=float, required=True,
+                        help="this pass's share, already buffered (e.g. per_diem_hourly_pct * 0.70)")
+    pack_p.add_argument("--unit-pct", type=float,
+                        help="cost of one complexity-5 item as %% of week; omit to derive from --observed")
+    pack_p.add_argument("--items", required=True,
+                        help='JSON list in priority order: [{"number":123,"complexity":4}, ...] or "-" for stdin')
+    pack_p.add_argument("--observed",
+                        help='JSON list of real past passes to calibrate from: [{"pct":0.08,"complexity":5}, ...]')
+    pack_p.add_argument("--min-items", type=int, default=0)
+    pack_p.add_argument("--base", type=float, default=COMPLEXITY_BASE)
+
+    batches_p = sub.add_parser(
+        "batches",
+        help="group an already-chosen item list into minion batches sized by real turn cost "
+             "against minion's timeout_s -- NOT a fixed item count (2026-09-14, gru.md step 5)")
+    batches_p.add_argument("--turn-budget", type=float, required=True,
+                           help="minion's timeout_s-equivalent turn budget for one pass")
+    batches_p.add_argument("--unit-turns", type=float,
+                           help="turns for one complexity-5 item inside a batch pass; omit to derive from --observed")
+    batches_p.add_argument("--items", required=True,
+                           help='JSON list, ALREADY chosen and in priority order: '
+                                '[{"number":123,"complexity":4}, ...] or "-" for stdin')
+    batches_p.add_argument("--observed",
+                           help='JSON list of real past BATCH passes to calibrate from: '
+                                '[{"turns":38,"items":[{"complexity":4},{"complexity":3}]}, ...]')
+    batches_p.add_argument("--base", type=float, default=COMPLEXITY_BASE)
+    batches_p.add_argument("--safety-margin", type=float, default=0.7,
+                           help="fraction of turn-budget to actually pack against, leaving "
+                                "headroom for shared batch overhead (default 0.7)")
+    batches_p.add_argument("--solo-complexity-floor", type=int, default=8,
+                           help="an item at or above this complexity is always its own batch (default 8)")
+
+    # Backward compatible: no subcommand and --allowance-pct present -> old `pack` behavior,
+    # unchanged interface for any existing caller that predates the `pack`/`batches` split.
+    if argv is None:
+        argv = sys.argv[1:]
+    if argv and argv[0] not in ("pack", "batches", "-h", "--help"):
+        argv = ["pack", *argv]
+    a = ap.parse_args(argv)
+
+    if a.cmd == "batches":
+        return _run_pack_batches(a)
+    return _run_pack(a)
 
 
 if __name__ == "__main__":
