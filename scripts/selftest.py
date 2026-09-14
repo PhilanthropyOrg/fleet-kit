@@ -1050,6 +1050,56 @@ def _claim_history_does_not_double_count_a_runs_started_and_terminal_rows():
         assert "count=2" in out.stdout, out.stdout
 
 
+def _minion_runs_for_item_finds_a_batched_minions_claim_history():
+    """2026-09-14 (minion batching, gru.md step 5): a batched minion's item_id is
+    underscore-joined ("64_99_143", from run_member.sh's --items), not one bare number. Before
+    this fix, minion_runs_for_item's exact `item_id = ?` match would find NOTHING for any item
+    that shipped as part of a batch, silently blinding claim_history.py's dead-end detection
+    for every batched item -- gru would keep re-picking a genuinely stuck batched item forever,
+    the exact failure this module exists to catch, because its own instrumentation went blind
+    the moment batching shipped.
+
+    Also proves the fix does not INTRODUCE a false positive: item 6 must not match a batch
+    containing 64 or 164 just because "6" is a substring of both (SQLite LIKE's `_` wildcard
+    would silently do exactly that -- this is why the fix uses GLOB, not LIKE).
+    """
+    import claim_history
+    import fleet_db
+
+    with tempfile.TemporaryDirectory() as d:
+        d = Path(d)
+        runs_file = d / "runs.jsonl"
+        now = time.time()
+        recs = [
+            # a real batch: one minion pass built items 64, 99, and 143 in one PR.
+            {"run_id": "minion-item64_99_143-500-1", "member": "minion", "item_id": "64_99_143",
+             "status": "ok", "_recorded_at": now - 1 * 86400},
+            # substring traps: must NOT count toward item 6's history.
+            {"run_id": "minion-item6_164-500-2", "member": "minion", "item_id": "6_164",
+             "status": "ok", "_recorded_at": now - 1 * 86400},
+            {"run_id": "minion-item164-500-3", "member": "minion", "item_id": "164",
+             "status": "ok", "_recorded_at": now - 1 * 86400},
+        ]
+        runs_file.write_text("\n".join(json.dumps(r) for r in recs) + "\n")
+        conn = fleet_db.connect(d / "fleet.db")
+        fleet_db.sync(conn, runs_file=runs_file)
+
+        # Every item in the batch finds the SAME batched run.
+        for item in (64, 99, 143):
+            found = claim_history.minion_runs_for_item(conn, item, window_days=14.0)
+            assert found == ["minion-item64_99_143-500-1"], (item, found)
+
+        # item 6 is a substring of "64" and "164" but must find only its OWN batch (6_164).
+        found_6 = claim_history.minion_runs_for_item(conn, 6, window_days=14.0)
+        assert found_6 == ["minion-item6_164-500-2"], found_6
+
+        # item 164 must find its own two rows (the "6_164" batch AND the bare "164" single),
+        # never the unrelated "64_99_143" batch.
+        found_164 = sorted(claim_history.minion_runs_for_item(conn, 164, window_days=14.0))
+        assert found_164 == sorted(
+            ["minion-item6_164-500-2", "minion-item164-500-3"]), found_164
+
+
 def _gru_md_gates_candidates_on_vision_link():
     """fleet-kit#523: Reif, 2026-09-06 -- "I don't care about the number of PRs we hit ... I
     just want to make autonomous progress on agreed upon goals." Measured the same night:
@@ -6897,10 +6947,16 @@ def _marie_writes_a_prd_and_minion_reads_it():
     minion must READ it. A PRD posted where nobody looks is worse than none -- it costs a pass
     and changes nothing.
 
-    Bounded to gru's next-build queue (unclaimed priority-high, cap 5/pass) on purpose: a PRD
-    for every open item would eat the pass that keeps the board true, and most of the backlog
-    is never built. Honest UNKNOWNs over invention, because a plausible invented requirement
-    is a bug that ships, while a named gap is a 30-second fix for a human.
+    Bounded to gru's next-build queue (unclaimed priority-high) on purpose: a PRD for every
+    open item would eat the pass that keeps the board true, and most of the backlog is never
+    built. Honest UNKNOWNs over invention, because a plausible invented requirement is a bug
+    that ships, while a named gap is a 30-second fix for a human.
+
+    2026-09-14 (Reif: "limit Marie on turns not on PRDs"): the old fixed "cap 5 per pass" was
+    replaced with the timeout_s/turn budget itself as the real limit, so this no longer asserts
+    a hardcoded count -- it asserts the count cap is explicitly GONE and a turn-based limit
+    took its place, so a future pass can't silently reintroduce a headcount cap without this
+    test noticing the language changed back.
     """
     marie = (Path(__file__).parent.parent / "members" / "marie" / "marie.md").read_text()
     assert "## Part C4" in marie, "marie writes no PRD -- ranking a vague issue lower never fixes it"
@@ -6908,7 +6964,10 @@ def _marie_writes_a_prd_and_minion_reads_it():
         assert section in marie, f"PRD format missing {section}"
     assert "UNKNOWN" in marie, "PRD has no honest-gap escape -- invites invented requirements"
     assert "fleet:prd" in marie, "no label marking an item as spec'd; passes would rewrite PRDs"
-    assert "5 per pass" in marie or "Cap: 5" in marie, "PRD writing is unbounded"
+    assert "5 per pass" not in marie and "Cap: 5" not in marie, \
+        "the fixed PRD-count cap should be gone -- turns/timeout_s is the limit now (2026-09-14)"
+    assert "limit marie on turns" in marie.lower() or "turn budget" in marie.lower(), \
+        "no turns-based limit language found -- PRD writing needs SOME stated bound, just not a count"
     assert "never edit the body" in marie.lower() or "never edit the body" in marie, \
         "PRD must be a comment -- the body is the reporter's record"
 

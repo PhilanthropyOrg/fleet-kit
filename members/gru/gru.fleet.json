@@ -4,15 +4,15 @@
   "kind": "llm",
   "lane": "build",
   "mandate": {
-    "target": "one pass -> runway computed, N items chosen from marie's priority ranking and claimed, N minions spawned and their real reports collected into one combined result",
+    "target": "one pass -> runway computed, N items chosen from marie's priority ranking and claimed, batched into ceil(N/MINION_BATCH_SIZE) minions and spawned, real reports collected into one combined result",
     "checklist": [
       "read real runway: maxx_reader.py's pacing if configured (fail-open), plus this box's own real cost history for a minion pass (fleet_db.py spend --member minion)",
       "read the open backlog filtered by fleet:priority-high first, falling back to -medium then -low only once the tier above is exhausted -- never re-rank yourself, that is marie's job",
       "size N to the smaller of what runway affords and how many genuinely claimable high-tier items exist -- don't pad with low-tier items just to spend the full budget, but don't spawn fewer than runway affords if a lower tier can fill the gap",
       "claim your chosen N items yourself, serially, before spawning anything (gh issue edit --add-label fleet:claimed + a claimed-by comment naming gru)",
-      "spawn one minion per claimed item in the background, each told its EXACT issue number, with FLEET_RUN_NOW=1 (minion ships enabled:false since it never self-fires on cron)",
+      "batch the claimed items into groups of up to MINION_BATCH_SIZE (default 3, env override), walking marie's priority order without re-sorting; spawn ONE minion per batch in the background, each told its EXACT comma-separated issue numbers, with FLEET_RUN_NOW=1 (minion ships enabled:false since it never self-fires on cron) -- more items per PR means fewer CI-billed runs per item shipped (2026-09-14, Reif)",
       "wait for every minion to finish before reporting -- poll, respect your own timeout, never assume a fixed sleep is long enough",
-      "read each minion's real result back (its run record, or the PR it should have opened) and report explicitly on every one -- a minion that never reported is a named failure, not a silent gap",
+      "read each minion's real result back (its run record, or the PR it should have opened) and report explicitly per item within its batch -- a minion that never reported is a named failure for every issue in its batch, not a silent gap",
       "never build, edit, or write code yourself -- if you want to change a file, that means you should have handed the item to a minion instead",
       "never assign a fleet:priority-* label yourself -- flag a miss to marie in a comment, don't correct it"
     ],

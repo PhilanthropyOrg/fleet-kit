@@ -18,10 +18,12 @@
 # own helper script (roomba.py, the-fixer.sh) as one Bash-reachable tool among its allowlist,
 # same as any other tool, rather than the script BEING the member's whole behavior.
 #
-# Usage: run_member.sh <member-name> [--dry-run] [--item <issue-number>] [--task "<instruction>"]
+# Usage: run_member.sh <member-name> [--dry-run] [--item <issue-number> | --items <n1,n2,...>] [--task "<instruction>"]
 #   e.g.  run_member.sh dumbledore
 #         run_member.sh roomba --dry-run     # print the resolved command, run nothing
-#         run_member.sh minion --item 3072   # gru spawns minion this way -- see gru.md
+#         run_member.sh minion --item 3072   # gru spawns a single-item minion this way (legacy path, still valid)
+#         run_member.sh minion --items 3072,3081,3090
+#                                            # gru batches up to MINION_BATCH_SIZE items per minion this way -- see gru.md
 #         run_member.sh marie --task "rescore complexity on everything opened today"
 #                                            # ad-hoc: the member's full charter PLUS one instruction
 set -uo pipefail
@@ -60,7 +62,7 @@ export REPO="${FLEET_REPO:?set FLEET_REPO in fleet.env}"
 LOG_DIR="${FLEET_LOG_DIR:-$HOME/Library/Logs/fleet-kit}"
 mkdir -p "$LOG_DIR"
 
-MEMBER="${1:?usage: run_member.sh <member-name> [--dry-run] [--item <issue-number>] [--task \"<instruction>\"]}"
+MEMBER="${1:?usage: run_member.sh <member-name> [--dry-run] [--item <n> | --items <n1,n2,...>] [--task \"<instruction>\"]}"
 shift || true
 DRY_RUN=0
 ITEM=""
@@ -75,6 +77,22 @@ while [ $# -gt 0 ]; do
       # here (a stray newline, a git-ref-hostile character) belongs caught here, not silently
       # forwarded into a log meant to be a trustworthy cross-member incident feed.
       case "$ITEM" in (*[!0-9]*) echo "FATAL: --item must be a plain issue number, got: $ITEM" >&2; exit 2 ;; esac
+      shift 2 ;;
+    --items)
+      # 2026-09-14 (Reif: batch minions to cut Blacksmith CI cost -- see gru.md step 5): gru
+      # hands minion a comma-separated batch instead of one --item. Validated the same way,
+      # per number, then joined with underscore into ITEM so every existing $ITEM call site
+      # below (RUN_ID, worktree branch name, --item-id) keeps working unchanged -- underscore
+      # is git-ref-safe and log-safe, same as the bare digits it replaces.
+      RAW_ITEMS="${2:?--items needs one or more comma-separated issue numbers}"
+      ITEM=""
+      OLD_IFS="$IFS"; IFS=','
+      for n in $RAW_ITEMS; do
+        case "$n" in (*[!0-9]*|"") echo "FATAL: --items must be comma-separated plain issue numbers, got: $RAW_ITEMS" >&2; exit 2 ;; esac
+        ITEM="${ITEM:+${ITEM}_}${n}"
+        ITEM_LIST="${ITEM_LIST:+${ITEM_LIST}, }#${n}"
+      done
+      IFS="$OLD_IFS"
       shift 2 ;;
     --task) TASK="${2:?--task needs an instruction}"; shift 2 ;;
     *) shift ;;
@@ -520,10 +538,18 @@ if [ -n "$NUMBER_HEADER" ]; then
 $PROMPT"
 fi
 
-# --item is how gru hands a minion its pre-claimed issue number -- prepended as the very
-# first thing the minion reads, before its own charter, so "which item" is never ambiguous
-# even though every concurrently-spawned minion runs the exact same charter file.
-if [ -n "$ITEM" ]; then
+# --item/--items is how gru hands a minion its pre-claimed issue number(s) -- prepended as the
+# very first thing the minion reads, before its own charter, so "which item(s)" is never
+# ambiguous even though every concurrently-spawned minion runs the exact same charter file.
+# ITEM_LIST (only set by --items, the human-readable "#1, #2, #3" form) takes priority over
+# ITEM's underscore-joined RUN_ID form -- #123_456 read literally as a prompt would look like
+# one mangled issue number instead of three separate ones (2026-09-14, batching for minion.md).
+if [ -n "${ITEM_LIST:-}" ]; then
+  PROMPT="Your assigned issue numbers for this run are: $ITEM_LIST. Build each one in this
+order, in one PR covering all of them. Do not work any issue outside this list.
+
+$PROMPT"
+elif [ -n "$ITEM" ]; then
   PROMPT="Your assigned issue number for this run is #$ITEM. Do not work any other issue.
 
 $PROMPT"

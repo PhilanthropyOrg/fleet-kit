@@ -74,11 +74,23 @@ def minion_runs_for_item(conn, item_number: int,
     (started + terminal-status rows) is two rows sharing one `run_id`. Grepped every caller of
     this function (just `main()` below, plus selftest.py) -- none wants the raw duplicate rows
     (no cost/duration calc reads this), so de-duping at the query is the smaller, correct fix.
+
+    2026-09-14 (minion batching, gru.md step 5): a batched minion's `item_id` is an
+    underscore-joined list ("64_99_143"), not one bare number -- run_member.sh's RUN_ID uses
+    the same join so both stay consistent with each other, but it means an exact `item_id = ?`
+    match here would silently stop finding a batched run's claim history for every item except
+    the one lucky enough to be alone in its batch. Matched as a whole token instead: GLOB, not
+    LIKE -- SQLite's LIKE treats `_` as a single-character wildcard, which would make the `_`
+    boundary markers below match ANY character and let item 6 falsely match a batch containing
+    64 or 164; GLOB's `*` has no such special-casing of `_`, so the underscore boundaries here
+    are literal. Verified: item 6 against item_ids ("64","64_99","6_164","164") matches only
+    "6_164"; item 64 matches only "64" and "64_99".
     """
     since = time.time() - window_days * 86400
     cur = conn.execute(
-        "SELECT DISTINCT run_id FROM runs WHERE member = 'minion' AND item_id = ? AND recorded_at >= ?",
-        (str(item_number), since),
+        "SELECT DISTINCT run_id FROM runs WHERE member = 'minion' AND recorded_at >= ?"
+        " AND ('_' || item_id || '_') GLOB ('*_' || ? || '_*')",
+        (since, str(item_number)),
     )
     return [row[0] for row in cur.fetchall()]
 
