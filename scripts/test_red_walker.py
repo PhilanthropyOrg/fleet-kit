@@ -100,6 +100,123 @@ class SelectAttacksEmptyAttacksFilterTest(unittest.TestCase):
         self.assertEqual([a["id"] for a in selected], [a["id"] for a in FIXTURE_ATTACKS])
 
 
+class RunAttackExceptionHandlingTest(unittest.TestCase):
+    """gh#5469 criteria 1, 4, 5, 6: a runner exception -- Playwright's TimeoutError or any
+    other -- must raise Blocked out of run_attack(), never get swallowed into a fake "pass"
+    step (red_walker.py:239 as it read before this fix). Stand-in TimeoutError/ValueError are
+    used here since run_attack() catches Exception generically, with no Playwright-specific
+    branch, so a plain builtin exception exercises the identical code path without needing a
+    real Playwright install for this pure-unit test file.
+
+    This class is RED against unpatched red_walker.py:239 (the assertRaises(Blocked) calls
+    fail because the old code swallowed the exception and returned a "pass" step instead) and
+    GREEN after the fix -- run `python3 scripts/test_red_walker.py` before and after."""
+
+    class _FakePage:
+        def screenshot(self, path):
+            pass
+
+    class _FakeCtx:
+        def __init__(self):
+            self.closed = False
+
+        def new_page(self):
+            return RunAttackExceptionHandlingTest._FakePage()
+
+        def route(self, pattern, handler):
+            pass
+
+        def close(self):
+            self.closed = True
+
+    class _FakeBrowser:
+        def __init__(self):
+            self.ctx = RunAttackExceptionHandlingTest._FakeCtx()
+
+        def new_context(self, viewport):
+            return self.ctx
+
+    @staticmethod
+    def _attack():
+        return {"id": "fixture-attack", "kind": "_fixture-kind", "name": "Fixture attack",
+                "steps": [{"action": "goto", "landed_when": "some payload executes"}]}
+
+    def _run(self, runner_fn):
+        rw.RUNNERS["_fixture-kind"] = runner_fn
+        browser = self._FakeBrowser()
+        with tempfile.TemporaryDirectory() as tmp:
+            result = rw.run_attack(self._attack(), rw.Config({}), browser, Path(tmp), "run1",
+                                    "desktop", {"width": 100, "height": 100})
+        return result, browser
+
+    def test_criterion1_timeout_raises_blocked_not_a_fake_pass(self):
+        def timeout_runner(page, cfg, attack, step):
+            raise TimeoutError("Timeout 20000ms exceeded.")
+
+        with self.assertRaises(rw.Blocked) as ctx:
+            self._run(timeout_runner)
+        self.assertIn("TimeoutError", str(ctx.exception))
+
+    def test_criterion4_a_genuine_pass_is_unaffected(self):
+        def clean_runner(page, cfg, attack, step):
+            return False, "nothing found"
+
+        result, browser = self._run(clean_runner)
+        self.assertEqual(result["steps"][0]["status"], "pass")
+        self.assertEqual(result["steps"][0]["detail"], "nothing found")
+        self.assertTrue(browser.ctx.closed)  # context still closes on the clean path
+
+    def test_criterion5_a_non_timeout_exception_also_routes_to_blocked_with_its_type(self):
+        def buggy_runner(page, cfg, attack, step):
+            raise ValueError("boom")
+
+        with self.assertRaises(rw.Blocked) as ctx:
+            self._run(buggy_runner)
+        self.assertIn("ValueError", str(ctx.exception))
+        self.assertIn("boom", str(ctx.exception))
+
+    def test_context_still_closes_when_the_runner_times_out(self):
+        def timeout_runner(page, cfg, attack, step):
+            raise TimeoutError("Timeout 20000ms exceeded.")
+
+        rw.RUNNERS["_fixture-kind"] = timeout_runner
+        browser = self._FakeBrowser()
+        with tempfile.TemporaryDirectory() as tmp:
+            try:
+                rw.run_attack(self._attack(), rw.Config({}), browser, Path(tmp), "run1",
+                               "desktop", {"width": 100, "height": 100})
+            except rw.Blocked:
+                pass
+        self.assertTrue(browser.ctx.closed)
+
+
+class ExitCodeTest(unittest.TestCase):
+    """Criteria 2 and 3, isolated from Playwright: _exit_code() is the pure function main()
+    now delegates the summary/exit-code decision to."""
+
+    def test_criterion3_every_selected_attack_blocked_is_nonzero(self):
+        # e.g. 3 of 4 attacks time out and the 4th is missing a fixture -- nothing genuinely
+        # ran, so a caller must not read exit 0 as a clean sweep.
+        selected = [{"id": "a"}, {"id": "b"}, {"id": "c"}]
+        self.assertNotEqual(rw._exit_code(landed=0, selected=selected, attacks_out=[]), 0)
+
+    def test_a_real_landed_finding_always_wins(self):
+        self.assertEqual(rw._exit_code(landed=1, selected=[{"id": "a"}], attacks_out=[{"id": "a"}]), 1)
+
+    def test_criterion2_a_clean_run_with_some_real_passes_is_zero(self):
+        # 3 of 4 selected time out (blocked), the 4th genuinely runs and finds nothing --
+        # the summary reports "1 attacks, 0 landed, 3 blocked", exit 0, per criterion 2's shape.
+        selected = [{"id": "a"}, {"id": "b"}, {"id": "c"}, {"id": "d"}]
+        attacks_out = [{"id": "d"}]
+        self.assertEqual(rw._exit_code(landed=0, selected=selected, attacks_out=attacks_out), 0)
+
+    def test_nothing_selected_is_zero_here_too(self):
+        # main()'s own zero-selection branch (MainZeroSelectionTest) returns 2 before this
+        # function is ever called; _exit_code itself must not invent a different code for
+        # the empty-selected case.
+        self.assertEqual(rw._exit_code(landed=0, selected=[], attacks_out=[]), 0)
+
+
 class MainZeroSelectionTest(unittest.TestCase):
     """Criteria 2 and 3: a scoped run that selects zero attacks writes a distinguishing
     field into the same results object vp reads (red_walker.py:307) and exits non-zero --
