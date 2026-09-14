@@ -101,7 +101,9 @@ def render(payload: dict, now: float | None = None) -> str:
         head += f" -- STALE, last read {age / 3600:.0f}h ago; treat every figure below as unverified"
     lines.append(head)
     target = payload.get("target") or {}
-    # The target is human-written at the endpoint (Reif, 2026-09-06: $25k MRR by 2026-12-31).
+    # The target is human-written at the endpoint (Reif, 2026-09-14: 3,000 orgs that claimed
+    # their page, by 2026-12-31 -- it replaced the 100,000-entities objective, which replaced
+    # the $25k MRR one on 2026-09-12; the venture owns the number, this only renders it).
     # Rendered on the Number line only, as "of <target> by <date> (<pct>%)", so distance to
     # it is a ranking input for gru and not a separate line nobody reads.
     tgt = ""
