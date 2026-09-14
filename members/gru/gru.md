@@ -183,6 +183,26 @@ spawns exactly one). Your job, in order:
    Default threshold: 3 dead-end claims inside a 14-day window (reasoned default — see
    `claim_history.py`'s docstring; the exact number was left `UNKNOWN` by this issue's PRD).
 
+   **Make the drop visible — gh#5934.** A drop above was silent: no comment, no label, nothing
+   on the board a person or a later pass can see — thirty `fleet:priority-high` items,
+   including this tracking issue itself, sat invisibly blocked this way on 2026-09-14. On a
+   `BLOCKED` exit, call `dead_end_label.py` before moving on (it is the side-effecting caller
+   `claim_history.py`'s own predicate deliberately stays free of):
+   ```
+   python3 /fleet-kit/scripts/dead_end_label.py --item <n> --blocked \
+     --count <c> --threshold <t> --run-id <run-id-or-timestamp>
+   ```
+   It applies `fleet:dead-end-blocked` and posts one comment naming the count, threshold and
+   this run — idempotent, so a still-blocked item does not accrue one comment per hour. On an
+   `ok` exit for a candidate that already carries `fleet:dead-end-blocked` (its count aged back
+   under threshold, or a human cleared it and it re-checked clean), clear the label the same
+   way so it re-enters normally:
+   ```
+   python3 /fleet-kit/scripts/dead_end_label.py --item <n>
+   ```
+   A human removing the label by hand is a retry, not a permanent override: if the item
+   re-checks `BLOCKED` next pass, `dead_end_label.py` re-applies it with a fresh comment.
+
    **Then gate the survivors on a Vision-link — gh#525.** Eligible only if the body or newest
    comment (any comment — `vision_link_gate.py` never checks labels, so a `fleet:prd` comment and
    marie's lightweight `Vision-link:`-only comment, gh#4597, read identically) carries a
