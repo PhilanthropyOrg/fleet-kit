@@ -24,7 +24,9 @@ Usage: red_walker.py [--catalog PATH] [--out qa-out] [--run-id ID] [--attacks id
                      [--item N] [--headed]
 --item N restricts to attacks whose target path a PRD names (best-effort substring match) and
 tags the run so vp can post `Red team (adversarial): <n>` against that item.
-Exit: 1 if any attack landed (a finding), else 0.
+Exit: 1 if any attack landed (a finding); 2 if --item selected zero attacks; 3 if attacks were
+selected but every one ended up blocked (missing fixture, WAF-403, or a timeout -- fk#5469, so a
+caller can never read a fully-blocked run as a clean pass); else 0.
 """
 from __future__ import annotations
 
@@ -228,16 +230,19 @@ def run_attack(attack: dict, cfg: Config, browser, base_out: Path, run_id: str, 
     page = ctx.new_page()
     try:
         for i, step in enumerate(attack.get("steps", [])):
-            status, note, shot = "pass", "", None
+            shot = None
             try:
                 landed, detail = runner(page, cfg, attack, step)
                 status = "fail" if landed else "pass"
                 note = detail
             except Blocked:
                 raise
-            except Exception as exc:  # noqa: BLE001 -- a runner bug is data, not a crash
-                status, note = "pass", f"(red_walker internal error, treated as no-finding: {type(exc).__name__})"
+            except Exception as exc:  # noqa: BLE001 -- unattempted (timeout or runner bug) is
+                # BLOCKED, never PASS: a step that never ran must not read as the product
+                # having held (fk#5469 -- Playwright's TimeoutError used to land here and get
+                # counted as a clean pass).
                 traceback.print_exc()
+                raise Blocked(f"{type(exc).__name__}: {exc}") from exc
             aid = attack["id"] if viewport == "desktop" else f"{attack['id']}--{viewport}"
             shot_dir = base_out / run_id / "red" / attack["id"] / viewport
             try:
@@ -303,6 +308,17 @@ def select_attacks(attacks: list[dict], item_text: str | None, attacks_filter: l
     return selected
 
 
+def _exit_code(landed: int, selected: list[dict], attacks_out: list[dict]) -> int:
+    """1 if anything landed (a real finding). 3 if attacks were selected but every one of
+    them ended up blocked (missing fixture, WAF-403, or a timeout) -- nothing genuinely ran,
+    so a caller must not read this run as a clean sweep (fk#5469). 0 for an honest pass."""
+    if landed:
+        return 1
+    if selected and not attacks_out:
+        return 3
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--catalog", type=Path, default=ROOT / "members" / "red" / "attacks.yaml")
@@ -360,7 +376,7 @@ def main() -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "results.json").write_text(json.dumps(results, indent=2))
     print(f"red_walker: {len(attacks_out)} attacks, {landed} landed, {len(blocked)} blocked -> {out_dir}/results.json")
-    return 1 if landed else 0
+    return _exit_code(landed, selected, attacks_out)
 
 
 if __name__ == "__main__":
