@@ -414,14 +414,37 @@ buildable. Writing the spec does.
 
 **Scope: only what is about to be built.** Every open `fleet:priority-high` issue that is NOT
 `fleet:claimed` and does NOT already carry `fleet:prd`. That is gru's next-build queue, so
-this is where a spec converts. Do NOT PRD the whole backlog — most of it will never be built,
-and a PRD per item would eat the pass that keeps the board true. **Cap: 5 per pass.** If
-fewer than 5 qualify, do those and move on.
+this is where a spec converts. Do NOT PRD the whole backlog — most of it will never be built.
 
-**A `fleet:reif-priority` epic always goes first, outside the cap.** It's the standing top
-priority (see Part C's exception above) — it cannot be left un-spec'd because 5 other
+**No fixed count cap (2026-09-14, Reif: "limit Marie on turns not on PRDs").** The old rule
+capped this step at 5 PRDs per pass regardless of how cheap or how related they were. Your
+`timeout_s`/turn budget (`marie.fleet.json`) is now the real limit — write PRDs until you're
+genuinely low on budget for this pass, not until a headcount is hit. Reserve enough of your
+remaining budget to actually post the PRDs you've drafted (label + comment, step below) before
+you run out — a drafted-but-unposted PRD helps nobody next pass. If your budget runs dry
+mid-PRD, finish and post the one you're on, then stop; say in your report how many you wrote
+and whether backlog remains for next pass, same as Part A/B's "resume here" convention.
+
+**Combine PRDs for genuinely similar items into ONE shared PRD (2026-09-14, Reif) — this is
+what makes the count-vs-turns swap actually pay off, not just remove a guardrail.** When two
+or more `fleet:priority-high` candidates are the same underlying change applied to different
+surfaces (e.g. "fix the same broken pattern on three report pages," "add the same missing
+alt-text check to two upload flows") — NOT merely related-by-topic, but buildable together in
+one PR by one minion without the acceptance criteria for one contradicting another's — write
+ONE PRD comment that names every issue number it covers, with acceptance criteria broken out
+per-issue so each is still independently checkable (gru's batching, per gru.md, hands a shared
+PRD's issues to one minion as a batch and expects `Closes #N` per item individually, not one
+verdict for the whole group). Post that same comment on EVERY issue number it covers (`gh
+issue comment <n>` once per issue, identical body, each with `fleet:prd` added) so each issue's
+own thread carries its real spec — never rely on a reader following a link to a different
+issue to find their acceptance criteria. Two issues that are merely in the same area but need
+genuinely different acceptance criteria stay as two separate PRDs — combining is for the same
+change repeated, never for "this pass has time, might as well."
+
+**A `fleet:reif-priority` epic always goes first, outside any grouping.** It's the standing top
+priority (see Part C's exception above) — it cannot be left un-spec'd because other
 high-priority issues happened to queue ahead of it. If one is open and lacks `fleet:prd`,
-write its PRD before any of the capped 5, every single pass until it has one.
+write its PRD before anything else this pass, every single pass until it has one.
 
 This PRD is also what upgrades an epic's "done" check from a shallow signal to a real one:
 Part C's closing rule ("no open issue/PR references it") only proves nothing is IN PROGRESS,
