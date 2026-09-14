@@ -4189,7 +4189,7 @@ def _entrypoint_crontab_forwards_fleet_share_dir():
     crontab-wide block still forwards it so a future refactor can't silently drop it again.
     """
     entry = (Path(__file__).parent.parent / "entrypoint.sh").read_text()
-    assert 'echo "FLEET_SHARE_DIR=' in entry, (
+    assert 'emit_env_optional FLEET_SHARE_DIR "${FLEET_SHARE_DIR:-}"' in entry, (
         "entrypoint.sh's crontab-wide env block no longer forwards FLEET_SHARE_DIR -- "
         "check_share_sum.sh (and any other cron-triggered reader) will silently see it "
         "unset again (gh#569)")
@@ -4207,7 +4207,7 @@ def _entrypoint_crontab_forwards_fleet_instance_name():
     forwards it so a future refactor can't silently drop it again.
     """
     entry = (Path(__file__).parent.parent / "entrypoint.sh").read_text()
-    assert 'echo "FLEET_INSTANCE_NAME=' in entry, (
+    assert 'emit_env_optional FLEET_INSTANCE_NAME "${FLEET_INSTANCE_NAME:-}"' in entry, (
         "entrypoint.sh's crontab-wide env block doesn't forward FLEET_INSTANCE_NAME -- "
         "publish_share.sh (and any other cron-triggered reader) will silently fall back to "
         "the shared 'default' key again (gh#581)")
