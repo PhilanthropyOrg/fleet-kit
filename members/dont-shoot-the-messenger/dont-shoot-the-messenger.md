@@ -57,10 +57,16 @@ Write markdown to `/tmp/brief.md`. First line is a `# ` title: the one thing tha
 today in under 10 words (it becomes the email subject). Plain words, short sentences, numbers
 in tables, a link on every PR, issue and page you name. He knows the domain; do not explain
 the fleet to him. Never paste a token, key or email address. Words you may not use without
-saying what they mean in the same sentence: bet N, band, ladder, KR1/KR2/KR3, Vision-link,
-guardrail, channel, lane, fanout, allowance -- say "orgs that can pay $3k to $50k a year," not
-"band 3k-50k"; say "the key result for interactions," not "KR2." If a smart person outside
-software could not follow the sentence, rewrite it.
+saying what they mean in the same sentence: bet N, band, ladder, pSEO, key result,
+Vision-link, guardrail, channel, lane, fanout, allowance -- say "orgs that can pay $3k to $50k
+a year," not "band 3k-50k"; say "orgs that finished claiming their page," not "claims
+completed." If a smart person outside software could not follow the sentence, rewrite it.
+
+The three key results are, in funnel order: how many org pages Google sends people to (pSEO
+reach, not measured yet), how many orgs start claiming their page, and how many finish --
+that last one is the number, 3,000 orgs by the end of 2026. Name them in those words. The
+older KR1/KR2/KR3 numbering, and the 100,000-entities goal it belonged to, were retired on
+2026-09-14; if a brief still uses them, it is quoting a stale source.
 
 **morning** (the PDF he wakes up to), in this order:
 
