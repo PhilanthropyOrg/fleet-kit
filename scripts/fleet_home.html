@@ -242,13 +242,20 @@ function renderNumber() {
   const p = d.payload, n = p.number, t = p.target || {}, g = p.guardrail, c = p.channel;
   const cp = nextCheckpoint(STATE.plan);
   const pct = t.value ? (100 * n.value / t.value) : null;
+  // fk: the number is whatever the venture's endpoint says it is. It used to be MRR, so this
+  // page hardcoded "$" and "/mo"; when the objective moved to verified claims (3,000 by
+  // 2026-12-31) the console printed "$98/mo" for 98 claims. Format by the payload's unit.
+  const isMoney = /\$|usd|\/mo/i.test(String(n.unit || ''));
+  const fmt = isMoney ? money : num;
+  const k1 = p.kr1;
   $('number').innerHTML = `
     <div class="sub">${esc(n.name)}${d.stale ? ' · <span class="err">stale reading</span>' : ''}</div>
-    <div class="big">${money(n.value)}<span class="sub">/mo</span></div>
-    <div class="sub">${signed(n.delta_7d, money)} · target ${money(t.value)}/mo by ${esc(t.by || '?')}${pct !== null ? ` · ${pct.toFixed(2)}% there` : ''}</div>
-    ${cp ? `<div class="sub">Next checkpoint: $${esc(cp.amount)}/mo by ${esc(cp.by)}</div>` : ''}
+    <div class="big">${fmt(n.value)}${t.value ? `<span class="sub"> of ${fmt(t.value)}</span>` : ''}</div>
+    <div class="sub">${signed(n.delta_7d, fmt)} 7d · ${esc(n.unit || '')} · target ${fmt(t.value)} by ${esc(t.by || '?')}${pct !== null ? ` · ${pct.toFixed(1)}% there` : ''}</div>
+    ${cp ? `<div class="sub">Next checkpoint: ${esc(cp.amount)} by ${esc(cp.by)}</div>` : ''}
     <table>
       <tr><th>Key result</th><th class="num">Now</th><th class="num">7 days</th></tr>
+      ${k1 ? `<tr><td>${esc(k1.name)}</td><td class="num">${num(k1.value)}</td><td class="num">${signed(k1.delta_7d, num)}</td></tr>` : ''}
       ${g ? `<tr><td>Orgs and people with at least one real interaction</td><td class="num">${num(g.value)}</td><td class="num">${signed(g.delta_7d, num)}</td></tr>` : ''}
       ${c ? `<tr><td>Visits, last full week</td><td class="num">${num(c.value)}</td><td class="num">${signed(c.delta_7d, num)}</td></tr>` : ''}
     </table>`;
