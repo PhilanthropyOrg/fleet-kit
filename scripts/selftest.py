@@ -90,6 +90,27 @@ def _member_specs_validate():
         assert s["name"] and s["llm"]["prompt_file"]
 
 
+def _item_mode_charter_routes_and_exists():
+    """fleet-kit#998: a spec declaring `llm.prompt_file_item` loads THAT charter on an --item
+    run, and its OWN charter on a plain one. The bug this catches is the expensive shape, not
+    a crash: dumbledore's acceptance reviews ran for two days loading dumbledore.md -- the
+    118-line headmaster charter whose own second paragraph tells the run to discard it and go
+    read review.md -- and paid 62.2 turns / $4.37 a verdict against `vp`'s 24.8 / $1.23 for the
+    same work. It also pins the file to git: review.md ran 179 verdicts in 72h while existing
+    only inside a container image, one `auto_deploy.sh` refresh away from vanishing."""
+    import member_spec
+    members = ROOT / "members"
+    for spec in member_spec.load_all(members):
+        plain = member_spec.behavior_path(spec, members)
+        assert plain.name == spec["llm"]["prompt_file"], (
+            f"{spec['name']}: a plain pass must load {spec['llm']['prompt_file']}, got {plain.name}")
+        item = member_spec.behavior_path(spec, members, item=True)
+        want = spec["llm"].get("prompt_file_item") or spec["llm"]["prompt_file"]
+        assert item.name == want, (
+            f"{spec['name']}: an --item pass must load {want}, got {item.name}")
+        assert item.exists(), f"{spec['name']}: --item charter missing at {item}"
+
+
 def _report_contract():
     import run_report
     text = ("FLEET-REPORT\nOutcome: filed #12 for the broken hook\n"
@@ -14903,6 +14924,8 @@ def _pacing_hold_check_sparse_single_row_hours_never_page_gh812():
 if __name__ == "__main__":
     check("PR tile rollup reflects mergeability, not just CI (#179)", _pr_tile_rollup_reflects_mergeability_not_just_ci)
     check("member specs load and validate", _member_specs_validate)
+    check("an --item pass loads llm.prompt_file_item, and that charter is in git (fk#998)",
+          _item_mode_charter_routes_and_exists)
     check("member_spec's OWN default MEMBERS_DIR resolves (not just an explicit path)", _members_dir_default_is_right)
     check("report contract: ok + silence is recorded", _report_contract)
     check("a fan-out parent that never reports is incomplete_fanout, not reported_nothing", _incomplete_fanout_is_not_reported_nothing)

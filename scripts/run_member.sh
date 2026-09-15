@@ -386,12 +386,19 @@ fi
 # JSON and silently emptying BEHAVIOR downstream. gru's charter happened to have zero
 # apostrophes in its mandate text, so this bug shipped invisible until a second member with
 # ordinary prose hit it.
-BEHAVIOR=$(echo "$SPEC" | python3 -c "
-import sys, json
+#
+# ITEM_MODE (fleet-kit#998): a member whose spec declares `llm.prompt_file_item` loads THAT
+# charter instead when the run carries --item. One member can then hold two genuinely
+# different jobs without every run of one paying to read the other's charter first -- the
+# exact tax dumbledore's acceptance reviews started paying when `vp` was folded into it
+# (24.8 -> 62.2 turns per verdict, $1.23 -> $4.37). No key, no change: every other member
+# resolves through `prompt_file` exactly as before.
+BEHAVIOR=$(echo "$SPEC" | ITEM_MODE="${ITEM:+1}" python3 -c "
+import sys, json, os
 sys.path.insert(0, '$KIT_DIR/scripts')
 import member_spec
 spec = json.load(sys.stdin)
-print(member_spec.behavior_path(spec))
+print(member_spec.behavior_path(spec, item=bool(os.environ.get('ITEM_MODE'))))
 ")
 
 cd "$REPO" 2>/dev/null || { log "FATAL: repo missing at $REPO"; exit 1; }

@@ -238,14 +238,19 @@ def _check_charter(spec: dict, member_dir: Path) -> None:
     forever) at load time, the same place every other structural mistake here gets caught."""
     if "runner" in spec["llm"]:
         return
-    charter = member_dir / spec["llm"]["prompt_file"]
-    if not charter.exists():
-        return  # behavior_path() raises the "charter not found" error for this case
-    hits = sorted(set(_PLACEHOLDER_RE.findall(charter.read_text())))
-    _require(not hits,
-              f"{spec['name']}: charter {charter.name} has unfilled placeholder(s) {hits} and "
-              f"no llm.runner to fill them at runtime -- fill them in or the member silently "
-              f"no-ops every pass (see jefe #22 for the real incident)")
+    names = [spec["llm"]["prompt_file"]]
+    # An optional --item charter is loaded by real passes too, so it gets the same check.
+    if spec["llm"].get("prompt_file_item"):
+        names.append(spec["llm"]["prompt_file_item"])
+    for name in names:
+        charter = member_dir / name
+        if not charter.exists():
+            continue  # behavior_path() raises the "charter not found" error for this case
+        hits = sorted(set(_PLACEHOLDER_RE.findall(charter.read_text())))
+        _require(not hits,
+                  f"{spec['name']}: charter {charter.name} has unfilled placeholder(s) {hits} and "
+                  f"no llm.runner to fill them at runtime -- fill them in or the member silently "
+                  f"no-ops every pass (see jefe #22 for the real incident)")
 
 
 def load_all(members_dir: str | os.PathLike | None = None) -> list[dict]:
@@ -268,11 +273,29 @@ def by_name(name: str, members_dir: str | os.PathLike | None = None) -> dict:
     return load(p)
 
 
-def behavior_path(spec: dict, members_dir: str | os.PathLike | None = None) -> Path:
+def behavior_path(spec: dict, members_dir: str | os.PathLike | None = None, *,
+                  item: bool = False) -> Path:
     """Resolve a member's charter (llm.prompt_file) to an absolute path, relative to ITS OWN
     directory -- never the repo root or cwd. This is what keeps a persona folder
-    copy/paste-portable: the spec never needs to know where members/ itself lives."""
+    copy/paste-portable: the spec never needs to know where members/ itself lives.
+
+    `item=True` (run_member.sh passes it whenever the run carries --item) selects the optional
+    `llm.prompt_file_item` instead, so a member with two genuinely different jobs can ship two
+    charters and load only the one this run needs. Absent the key, nothing changes for anybody.
+
+    WHY (fleet-kit#998). One member = one prompt_file was fine until a second job was folded
+    into an existing member. When `vp` became dumbledore's review mode (2026-09-12), every
+    acceptance review began loading dumbledore.md -- 118 lines of ledger/rot-hunt/epic/ops
+    instructions whose own second paragraph says "STOP reading here, go Read review.md" -- and
+    then spending a tool call to read the 138-line charter it actually needed. Measured over
+    the fold: 09-11 as `vp`, 149 verdicts at 24.8 turns and $1.23 each; 09-13 as dumbledore's
+    review mode, 24 verdicts at 62.2 turns and $4.37 each. Same reviewer, same model (both
+    opus), same items -- 2.5x the turns, 3.6x the cost, for a charter the run is told to
+    discard. The headmaster contract leaks too: review passes write `Prediction: none -- review
+    mode files no ledger row` because dumbledore.md's report block demands a Prediction line
+    that review mode has no business filing."""
     d = Path(members_dir or MEMBERS_DIR) / spec["name"]
-    p = d / spec["llm"]["prompt_file"]
+    key = "prompt_file_item" if (item and spec["llm"].get("prompt_file_item")) else "prompt_file"
+    p = d / spec["llm"][key]
     _require(p.exists(), f"{spec['name']}: charter not found at {p}")
     return p
