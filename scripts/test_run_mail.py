@@ -98,7 +98,7 @@ class Delivery(unittest.TestCase):
     def test_delivers_as_kind_run_with_no_daily_dedupe(self):
         import messenger_brief as mb
         sent = []
-        with unittest.mock.patch.dict(os.environ, {"FLEET_RUN_MAIL": "1"}), \
+        with unittest.mock.patch.dict(os.environ, {"FLEET_RUN_MAIL": "1", "FLEET_RUN_MAIL_REENABLE": "1"}), \
              unittest.mock.patch.object(run_mail, "plain_words", return_value="Plain."), \
              unittest.mock.patch.object(mb, "deliver", side_effect=lambda k, md, want_pdf, force: (sent.append((k, md, force)) or (0, "sent"))):
             self.assertEqual(run_mail.maybe_mail(REC), "sent")
@@ -109,7 +109,7 @@ class Delivery(unittest.TestCase):
 
     def test_delivery_failure_never_raises(self):
         import messenger_brief as mb
-        with unittest.mock.patch.dict(os.environ, {"FLEET_RUN_MAIL": "1"}), \
+        with unittest.mock.patch.dict(os.environ, {"FLEET_RUN_MAIL": "1", "FLEET_RUN_MAIL_REENABLE": "1"}), \
              unittest.mock.patch.object(run_mail, "plain_words", return_value=""), \
              unittest.mock.patch.object(mb, "deliver", side_effect=RuntimeError("boom")), \
              unittest.mock.patch.object(mb, "log"):

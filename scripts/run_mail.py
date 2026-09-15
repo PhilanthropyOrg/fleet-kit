@@ -59,6 +59,20 @@ RUN:
 
 
 def enabled() -> bool:
+    # Reif, 2026-09-14: "shut that down ... and shut down the emails too, they are worthless".
+    # Measured that day: the plain-words rewrite behind these mails cost 902M weighted input
+    # tokens in 48h -- 13% of ALL fleet spend -- to produce at most 160 words per run about
+    # work that had already been done.
+    #
+    # Setting FLEET_RUN_MAIL=0 in the instance fleet.env did NOT stop it: mails kept landing
+    # nine minutes after the flip, because a run does not pick up that file's value the way
+    # the host shell does. So the kill lives HERE, in the one function both the summary model
+    # call and the send are gated on.
+    #
+    # Re-enabling is deliberately two keys, so a stale exported env var in some container
+    # cannot quietly resurrect a billion tokens of mail.
+    if os.environ.get("FLEET_RUN_MAIL_REENABLE", "").strip() != "1":
+        return False
     return os.environ.get("FLEET_RUN_MAIL", "").strip() == "1"
 
 
