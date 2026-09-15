@@ -133,9 +133,11 @@ state file so the same failing SHA never fires twice. It prints one line:
     at 15:47 and sat parked with nothing red anywhere to alarm on.
     FIX: arm it -- `gh pr merge <n> --auto --squash`. That is the whole repair, and it is NOT a merge:
     GitHub merges an armed PR only once every required check passes, so judge-judy's
-    fleet-code-review gate still decides. auto_update_branch.sh arms these every 15 minutes, so
-    seeing this reason at all means that sweep did not do its job -- check its log
-    (`auto_update_branch.log`) for the arm failure and its reason before re-arming by hand. If
+    fleet-code-review gate still decides. auto_update_branch.sh arms these every 15 minutes in
+    the PRODUCT repo only -- it resolves one `$FLEET_REPO` slug -- so on that repo, seeing this
+    reason means the sweep did not do its job (check `auto_update_branch.log` for the arm
+    failure before re-arming by hand), while a fleet-kit PR has no sweep at all and is simply
+    waiting for a hand arm (`scripts/pr_arm.sh <n> $KIT_REPO_SLUG`). If
     the arm fails again with the same error, apply the shared rule above (name the arm error) --
     a parked PR is waiting on delivery, not on judgment, and merging around the gate is the one
     thing this charter never sanctions.

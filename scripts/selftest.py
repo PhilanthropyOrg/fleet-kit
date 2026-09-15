@@ -1972,6 +1972,84 @@ exit $rc
         f"an unrelated failure must surface its real message, not be masked by the fallback: {out!r}"
 
 
+def _pr_arm_can_only_arm():
+    """A member denied `gh pr merge` still has to be able to ARM its own PR — arming is not
+    merging, and conflating the two stranded six consecutive dumbledore changes.
+
+    Measured 2026-09-14: fk#973/#984/#989/#992/#998/#1005 all had autoMergeRequest=null, four
+    of them CLEAN with every check green, the oldest open 2 days — while fk#1002/#1003/#1006/
+    #1008/#1009/#1010/#1011 each merged ~3 minutes after opening because their author armed at
+    creation. Nothing else covers a kit PR: worktree_builder.sh arms only PRs it opens, and
+    auto_update_branch.sh resolves ONE $FLEET_REPO slug (the product repo).
+
+    scripts/pr_arm.sh is the sanctioned narrow grant. What this pins is that it can never
+    become a merge: no strategy flag, no --admin, no raw `gh pr merge` of its own, and a failed
+    arm exits non-zero instead of printing success."""
+    import re as _re
+    import subprocess
+
+    f = ROOT / "scripts/pr_arm.sh"
+    assert f.exists(), "scripts/pr_arm.sh is gone -- dumbledore can no longer deliver its own changes"
+    src = f.read_text()
+    assert "arm_pr_auto_merge" in src, \
+        "pr_arm.sh must arm through scripts/merge_arm.sh's shared helper, not its own gh call"
+    # The whole safety argument: this wrapper never spells a merge itself. Checked against
+    # executable lines only -- the header prose has to be free to explain WHY --admin is wrong.
+    code = [l for l in src.splitlines() if not l.lstrip().startswith("#")]
+    for banned in ("--admin", "--squash", "--rebase", "--delete-branch"):
+        offenders = [l for l in code if banned in l]
+        assert not offenders, \
+            f"pr_arm.sh must never pass {banned} -- it would stop being arm-only: {offenders[:1]}"
+    assert not any(_re.search(r"\bgh\s+pr\s+merge\b", l) for l in code), \
+        "pr_arm.sh calls `gh pr merge` directly -- it must go through arm_pr_auto_merge only"
+
+    def run(stub_body: str, *args: str) -> tuple[int, str, str]:
+        script = f"""
+set -uo pipefail
+gh() {{
+{stub_body}
+}}
+export -f gh 2>/dev/null || true
+. "{ROOT / 'scripts/pr_arm.sh'}" {' '.join(args)}
+"""
+        proc = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=10)
+        return proc.returncode, proc.stdout, proc.stderr
+
+    # A repo slug must actually reach gh as `-R <slug>`; without it the arm lands on whatever
+    # repo the cwd happens to be, which for every fleet member is the PRODUCT repo, not the kit.
+    capture_stub = """
+  echo "$*" >> "$ARGLOG"
+  exit 0
+"""
+    import tempfile, os
+    with tempfile.TemporaryDirectory() as d:
+        arglog = os.path.join(d, "args")
+        open(arglog, "w").close()
+        script = f"""
+set -uo pipefail
+export ARGLOG={arglog}
+gh() {{
+{capture_stub}
+}}
+. "{ROOT / 'scripts/pr_arm.sh'}" 984 The-Good-Project-Team/fleet-kit
+"""
+        proc = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=10)
+        assert proc.returncode == 0, f"a successful arm must exit 0, got {proc.returncode}: {proc.stderr!r}"
+        seen = open(arglog).read()
+        assert "-R The-Good-Project-Team/fleet-kit" in seen, \
+            f"the repo slug never reached gh -- the arm would hit the wrong repo: {seen!r}"
+        assert "--auto" in seen, f"pr_arm.sh armed nothing: {seen!r}"
+
+    # A failed arm must fail loudly. Silence reading as health is the original #3108 bug.
+    rc, out, err = run('  echo "! not authorized" >&2\n  exit 1\n', "984")
+    assert rc != 0, "a failed arm must exit non-zero, never report success"
+    assert "not authorized" in err, f"a failed arm must surface gh's real reason: {err!r}"
+
+    # A non-numeric PR argument is a usage error, not something handed to gh.
+    rc, out, err = run("  exit 0\n", "--admin")
+    assert rc == 2, f"a non-numeric PR argument must be rejected as usage, got rc={rc}"
+
+
 def _minion_knows_the_browser_exists():
     """A capability the image ships must appear in the charter of whoever needs it.
 
@@ -14867,6 +14945,7 @@ if __name__ == "__main__":
     check("jefe.md's precedent citations are repo-qualified, and the verify-before-you-cite guard is present", _jefe_precedent_citations_are_repo_qualified)
     check("arming auto-merge passes no strategy flag, and checks it worked", _auto_merge_never_passes_a_strategy_flag_under_a_merge_queue)
     check("merge_arm.sh falls back to --squash only on the non-queue rejection string (gh#524)", _merge_arm_falls_back_only_on_the_right_error)
+    check("pr_arm.sh arms a PR (incl. a cross-repo one) and can never become a merge", _pr_arm_can_only_arm)
     check("--task adds to a charter, never replaces it", _adhoc_task_adds_to_the_charter_never_replaces_it)
     check("a killed pass is recorded, not silently lost", _a_killed_pass_is_recorded_not_lost)
     check("run_member.sh writes a started row before claude -p and before the SIGTERM trap arms", _run_member_writes_a_started_row_before_claude_p)
