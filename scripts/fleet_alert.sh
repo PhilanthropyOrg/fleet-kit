@@ -115,15 +115,20 @@ _send_email() {  # <title> <body> -> 0 on delivered
   [ "${FLEET_ALERT_EMAIL_LEG:-}" = "1" ] || { log "email leg off (FLEET_ALERT_EMAIL_LEG unset)"; return 1; }
   [ -n "${RESEND_API_KEY:-}" ] && [ -n "${FLEET_ALERT_EMAIL:-}" ] || { log "email skipped: no RESEND_API_KEY/FLEET_ALERT_EMAIL in alert.env"; return 1; }
   local payload code
+  # fk#1056: Reply-To is the Resend receiving address, so replying to an alarm or an ask
+  # lands in the fleet's inbox (webhook_receiver.py -> inbox.py) instead of hello@'s mailbox.
   payload=$(TITLE="$1" BODY="$2" FROM="${MAIL_FROM:-990 Scout <hello@philanthropy.org>}" \
-            TO="$FLEET_ALERT_EMAIL" python3 -c '
+            TO="$FLEET_ALERT_EMAIL" REPLY_TO="${FLEET_REPLY_TO:-}" python3 -c '
 import json, os
-print(json.dumps({
+p = {
     "from": os.environ["FROM"],
     "to": [os.environ["TO"]],
     "subject": os.environ["TITLE"],
     "text": os.environ["BODY"] + "\n\n-- dino fleet alarm",
-}))')
+}
+if os.environ.get("REPLY_TO"):
+    p["reply_to"] = [os.environ["REPLY_TO"]]
+print(json.dumps(p))')
   code=$(curl -s -o /tmp/fa_resp.json -w '%{http_code}' --max-time 25 \
     -X POST https://api.resend.com/emails \
     -H "Authorization: Bearer $RESEND_API_KEY" \

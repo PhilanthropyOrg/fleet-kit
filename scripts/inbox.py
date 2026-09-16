@@ -18,6 +18,14 @@ This module is the deterministic half: signature check, sender allowlist, fetch,
   inbox.py pending            -> JSON list of replies not yet processed
   inbox.py done <id>          -> mark one processed
   inbox.py parse <file>       -> JSON: ask answers + free text found in a reply body (for tests)
+  inbox.py apply <id>         -> the deterministic part of one reply (see apply())
+
+fk#1056 (Reif, 2026-09-16: "Getting these via email - can I respond to them via email or how
+do I resolve them?"). Two things a reply can carry need no model, so the receiver does them
+itself, in seconds, before the messenger's pass even starts: an ask answer (`yes 17`,
+`no 17: why`, `17: text`) becomes `ask.py answer`, and a mail whose subject starts with
+`backlog:` becomes a `fleet:backlog` issue in the product repo. Either way he gets one short
+mail back saying what happened. Only free text that is neither goes on to the messenger.
 """
 from __future__ import annotations
 
@@ -30,6 +38,7 @@ import json
 import os
 import pathlib
 import re
+import subprocess
 import sys
 import time
 import urllib.request
@@ -159,6 +168,101 @@ def parse_reply(text: str) -> dict:
     return {"answers": answers, "free_text": "\n".join(free).strip()}
 
 
+# ---------------------------------------------------------------- apply (fk#1056)
+
+BACKLOG_RE = re.compile(r"^\s*(?:(?:re|fwd?)\s*:\s*)*backlog\s*:\s*(.+?)\s*$", re.I)
+
+
+def backlog_title(subject: str) -> str | None:
+    """'backlog: fix the claim button' -> 'fix the claim button'; anything else -> None."""
+    m = BACKLOG_RE.match(subject or "")
+    return m.group(1) if m else None
+
+
+def repo_slug() -> str:
+    url = (os.environ.get("FLEET_REPO_URL") or "").strip()
+    slug = url.rsplit("github.com", 1)[-1].lstrip(":/").removesuffix(".git").strip("/")
+    return slug if slug.count("/") == 1 and all(slug.split("/")) else ""
+
+
+def answer_asks(answers: list[dict], run=None) -> list[str]:
+    """Each parsed answer -> `ask.py answer <id> --answer ... --answered-by "reif (email)"`.
+    Returns one plain line per ask. An already-answered ask is ask.py's own no-op."""
+    run = run or (lambda cmd: subprocess.run(cmd, capture_output=True, text=True, timeout=60))
+    out = []
+    ask_py = pathlib.Path(__file__).resolve().parent / "ask.py"
+    for a in answers:
+        r = run([sys.executable, str(ask_py), "answer", str(a["ask_id"]),
+                 "--answer", a["answer"], "--answered-by", "reif (email)"])
+        ok = r.returncode == 0
+        out.append(f"ask #{a['ask_id']}: {'answered' if ok else 'NOT answered'} -- {a['answer']}"
+                   + ("" if ok else f" ({(r.stderr or r.stdout).strip()[:120]})"))
+    return out
+
+
+def file_backlog(title: str, body: str, sender: str, run=None) -> str:
+    """`gh issue create` in the product repo, label fleet:backlog. Returns the issue URL."""
+    run = run or (lambda cmd: subprocess.run(cmd, capture_output=True, text=True, timeout=60))
+    slug = repo_slug()
+    if not slug:
+        raise RuntimeError("FLEET_REPO_URL does not name a GitHub repo")
+    text = (body or "").strip() or title
+    r = run(["gh", "issue", "create", "--repo", slug, "--label", "fleet:backlog",
+             "--title", title, "--body", f"{text}\n\nFiled by email from {sender} (fk#1056)."])
+    if r.returncode != 0:
+        raise RuntimeError((r.stderr or r.stdout).strip()[:300])
+    return r.stdout.strip().splitlines()[-1]
+
+
+def send_reply(to: str, subject: str, text: str, in_reply_to: str | None = None) -> bool:
+    """One short confirmation back to the sender, threaded under his mail."""
+    key = resend_key()
+    if not (key and to):
+        return False
+    payload = {"from": os.environ.get("MAIL_FROM") or "990 Scout <hello@philanthropy.org>",
+               "to": [to], "subject": subject, "text": text + "\n\n-- dino fleet"}
+    if os.environ.get("FLEET_REPLY_TO"):
+        payload["reply_to"] = [os.environ["FLEET_REPLY_TO"]]
+    if in_reply_to:
+        payload["headers"] = {"In-Reply-To": in_reply_to, "References": in_reply_to}
+    req = urllib.request.Request(f"{RESEND_API}/emails", data=json.dumps(payload).encode(),
+                                 headers={"Authorization": f"Bearer {key}",
+                                          "Content-Type": "application/json",
+                                          "User-Agent": "fleet-kit-inbox/1.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return 200 <= r.status < 300
+    except Exception as exc:  # noqa: BLE001
+        log(f"reply to {to} failed: {exc}")
+        return False
+
+
+def apply(row: dict, run=None, reply=None) -> dict:
+    """The no-model half of one stored reply. Returns {"lines": [...], "free_text": str,
+    "done": bool}: done means nothing is left for the messenger and the row is marked."""
+    reply = reply or send_reply
+    parsed = parse_reply(row.get("text") or "")
+    lines = answer_asks(parsed["answers"], run=run)
+    free = parsed["free_text"]
+    title = backlog_title(row.get("subject") or "")
+    if title:
+        try:
+            url = file_backlog(title, free, row.get("from") or "", run=run)
+            lines.append(f"backlog item filed: {url}")
+        except Exception as exc:  # noqa: BLE001
+            lines.append(f"backlog item NOT filed: {exc}")
+        free = ""
+    done = not free
+    if lines:
+        reply(row.get("from") or "", f"Re: {row.get('subject') or 'your reply'}",
+              "\n".join(lines) + ("" if done else "\n\nThe rest of your note went to the messenger."),
+              row.get("message_id"))
+        log(f"applied {row.get('id')}: " + "; ".join(lines))
+    if done and row.get("id"):
+        mark_done(row["id"])
+    return {"lines": lines, "free_text": free, "done": done}
+
+
 def pending() -> list[dict]:
     done = set(DONE.read_text().split()) if DONE.exists() else set()
     rows = []
@@ -186,7 +290,13 @@ def main(argv=None) -> int:
     sub.add_parser("pending")
     d = sub.add_parser("done"); d.add_argument("id")
     p = sub.add_parser("parse"); p.add_argument("file")
+    ap_ = sub.add_parser("apply"); ap_.add_argument("id")
     a = ap.parse_args(argv)
+    if a.cmd == "apply":
+        rows = [r for r in pending() if r["id"] == a.id]
+        if not rows:
+            print(f"no pending reply {a.id}", file=sys.stderr); return 1
+        json.dump(apply(rows[0]), sys.stdout, indent=1); print(); return 0
     if a.cmd == "pending":
         json.dump(pending(), sys.stdout, indent=1); print(); return 0
     if a.cmd == "done":

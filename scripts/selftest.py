@@ -4862,6 +4862,53 @@ def _reply_to_the_brief_steers_the_fleet():
     assert "**inbox**" in charter and "inbox.py pending" in charter and "inbox.py done" in charter and "Ask #<id>" in charter
 
 
+def _email_reply_answers_asks_and_files_backlog_without_a_model():
+    """fk#1056, Reif: "can I respond to them via email or how do I resolve them?" Pins the
+    deterministic intake: `yes 17` in a reply runs ask.py answer; a `backlog: <title>` mail
+    files a fleet:backlog issue in the product repo and is marked done; leftover free text
+    stays for the messenger; the sender gets one confirmation; the alert email carries
+    Reply-To; the ask mail says how to reply; the receiver applies before launching."""
+    import importlib.util, os
+    spec = importlib.util.spec_from_file_location("inbox", ROOT / "scripts" / "inbox.py")
+    ib = importlib.util.module_from_spec(spec); spec.loader.exec_module(ib)
+    assert ib.backlog_title("Re: Backlog: fix the claim button") == "fix the claim button"
+    assert ib.backlog_title("Re: fleet ask #17 from nerd") is None
+    calls, replies = [], []
+    class R:  # a fake subprocess result
+        def __init__(self, out): self.returncode, self.stdout, self.stderr = 0, out, ""
+    def run(cmd):
+        calls.append(cmd)
+        return R("https://github.com/o/r/issues/99\n" if cmd[0] == "gh" else "ask 17 answered\n")
+    def reply(to, subject, text, in_reply_to=None): replies.append((to, subject, text, in_reply_to))
+    with tempfile.TemporaryDirectory() as tmp:
+        ib.LOG_DIR = Path(tmp); ib.INBOX = Path(tmp) / "inbox.jsonl"; ib.DONE = Path(tmp) / "inbox.done"
+        os.environ["FLEET_REPO_URL"] = "https://github.com/o/r.git"
+        row = ib.store({"id": "e1", "from": "reif@philanthropy.org", "subject": "Re: fleet ask #17 from nerd",
+                        "text": "yes 17\n> quoted", "message_id": "<m1>"}, {})
+        res = ib.apply(row, run=run, reply=reply)
+        assert res["done"] and ib.pending() == [], res
+        assert calls[0][1].endswith("ask.py") and calls[0][2:4] == ["answer", "17"] and "reif (email)" in calls[0], calls
+        assert replies[0][0] == "reif@philanthropy.org" and "ask #17: answered" in replies[0][2] and replies[0][3] == "<m1>", replies
+        row = ib.store({"id": "e2", "from": "reif@philanthropy.org", "subject": "backlog: claim button dead on phone",
+                        "text": "tap does nothing on iOS", "message_id": "<m2>"}, {})
+        res = ib.apply(row, run=run, reply=reply)
+        gh = [c for c in calls if c[0] == "gh"][0]
+        assert gh[:6] == ["gh", "issue", "create", "--repo", "o/r", "--label"] and "fleet:backlog" in gh, gh
+        assert gh[gh.index("--title") + 1] == "claim button dead on phone" and "tap does nothing" in gh[gh.index("--body") + 1], gh
+        assert res["done"] and "issues/99" in replies[-1][2], (res, replies)
+        row = ib.store({"id": "e3", "from": "reif@philanthropy.org", "subject": "Re: brief",
+                        "text": "no 4: too soon\nAlso stop the person page.", "message_id": "<m3>"}, {})
+        res = ib.apply(row, run=run, reply=reply)
+        assert not res["done"] and res["free_text"] == "Also stop the person page." and [r["id"] for r in ib.pending()] == ["e3"], res
+        assert "messenger" in replies[-1][2]
+    rec = (ROOT / "scripts" / "webhook_receiver.py").read_text()
+    assert rec.index("inbox_mod.apply(row)") < rec.index('_launch_member("dont-shoot-the-messenger", ["--task", "inbox"])'), "receiver must apply before launching the messenger"
+    fa = (ROOT / "scripts" / "fleet_alert.sh").read_text()
+    assert 'p["reply_to"] = [os.environ["REPLY_TO"]]' in fa and 'REPLY_TO="${FLEET_REPLY_TO:-}"' in fa, "alert email has no Reply-To"
+    ask = (ROOT / "scripts" / "ask.py").read_text()
+    assert 'f"fleet ask #{ask_id} from {member}"' in ask and "Reply to this email with one line" in ask, "ask mail does not say how to reply"
+
+
 def _messenger_brief_restates_the_strategy_and_points_at_pages():
     """Reif, 2026-09-07, on the first brief: "we don't show the objective and the results",
     "show me the url where I can see it, make it concrete". collect() now carries the
@@ -15243,6 +15290,7 @@ if __name__ == "__main__":
     check("messenger is scheduled 3x/day with creds mounted and a send-only charter (fk#558)", _messenger_is_scheduled_three_times_a_day_with_creds_mounted)
     check("messenger brief restates the strategy and points every project step at a page (fk#558)", _messenger_brief_restates_the_strategy_and_points_at_pages)
     check("replying to the brief steers the fleet: svix, allowlist, parser, ledger, route, Reply-To (fk#669)", _reply_to_the_brief_steers_the_fleet)
+    check("a reply answers asks and a backlog: mail files an issue, no model in the way (fk#1056)", _email_reply_answers_asks_and_files_backlog_without_a_model)
     check("closes gate blocks a partial or docs-only PR from closing an issue (fk#629)", _closes_gate_blocks_a_partial_or_docs_only_pr_from_closing_an_issue)
     check("judge runs the closes gate and reads the issue; law has 13 and 14 (fk#629)", _judge_runs_the_closes_gate_and_reads_the_issue)
     check("git_pull_guard.sh self-heals a stray branch and leaves a normal pull unchanged", _git_pull_guard_self_heals_a_stray_branch_and_leaves_a_normal_pull_unchanged)
