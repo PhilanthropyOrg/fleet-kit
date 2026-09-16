@@ -72,6 +72,8 @@ _FIELD = {
     # matters, not whether the model dressed it up as a section title.
     "outcome": re.compile(r"^[ \t]*#{0,6}[ \t]*[*_]{0,2}Outcome[*_]{0,2}[ \t]*:[ \t]*[*_]{0,2}[ \t]*(.+?)[ \t]*$", re.MULTILINE | re.IGNORECASE),
     "evidence": re.compile(r"^[ \t]*#{0,6}[ \t]*[*_]{0,2}Evidence[*_]{0,2}[ \t]*:[ \t]*[*_]{0,2}[ \t]*(.+?)[ \t]*$", re.MULTILINE | re.IGNORECASE),
+    "lesson": re.compile(r"^[ \t]*#{0,6}[ \t]*[*_]{0,2}Lesson[*_]{0,2}[ \t]*:[ \t]*[*_]{0,2}[ \t]*(.+?)[ \t]*$", re.MULTILINE | re.IGNORECASE),
+    "broken": re.compile(r"^[ \t]*#{0,6}[ \t]*[*_]{0,2}Broken[*_]{0,2}[ \t]*:[ \t]*[*_]{0,2}[ \t]*(.+?)[ \t]*$", re.MULTILINE | re.IGNORECASE),
     # Captured, never enforced -- a missing self-critique never changes `status` the way a
     # missing outcome does. Reif, 2026-08-21: "it should be inherent in every member to log
     # its findings -- like having a post mortem on the run." persona_law.md §11 is what tells

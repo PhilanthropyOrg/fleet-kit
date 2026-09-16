@@ -5044,6 +5044,53 @@ def _an_open_ask_also_lands_on_the_board_for_an_agent():
     assert "url = issue_for_ask(ask_id, a.member, a.why, a.unblocks, a.proposed, a.ask_class)" in src
 
 
+def _every_pass_reads_the_handoff_and_a_broken_instrument_gets_an_owner():
+    """Reif, 2026-09-16: "the next run should be informed by the last set of runs, so the team
+    self learns ... if the meter is broken, like it was for gru, then who fixes it and how is
+    that tracked?" run_report parses Lesson:/Broken:; handoff.render puts each member's last
+    outcome, the lessons and the broken instruments in one file; run_member.sh prepends it to
+    every prompt; file_broken files one owner issue per distinct Broken: line, idempotently."""
+    import importlib.util, os
+    sys.path.insert(0, str(ROOT / "scripts"))
+    import run_report as rr
+    p = rr.parse_report("Outcome: shipped #5\nEvidence: gh pr view 5\nLesson: the queue rejects pushes while queued\nBroken: maxx_reader returns maxx_auth_rejected for philanthropy\nSelf-critique: fine")
+    assert p["lesson"] == "the queue rejects pushes while queued" and p["broken"].startswith("maxx_reader returns"), p
+    assert rr.parse_report("Outcome: QUIET\nEvidence: x\nLesson: none\nBroken: none")["broken"] == "none"
+    spec = importlib.util.spec_from_file_location("handoff", ROOT / "scripts" / "handoff.py")
+    ho = importlib.util.module_from_spec(spec); spec.loader.exec_module(ho)
+    now = 1_800_000_000.0
+    runs = [{"member": "gru", "status": "ok", "ts": now - 600, "outcome": "Shipped PR #6263", "lesson": "runway blind, fallback held", "broken": "maxx_reader returns maxx_auth_rejected", "run_id": "gru-1"},
+            {"member": "gru", "status": "started", "ts": now - 60},
+            {"member": "marie", "status": "ok", "ts": now - 3600, "outcome": "riced 29", "lesson": "none", "broken": "none", "run_id": "marie-1"},
+            {"member": "sentry", "status": "ok", "ts": now - 7200, "outcome": "7 journeys", "broken": "maxx_reader returns maxx_auth_rejected", "run_id": "s-1"},
+            {"member": "old", "status": "ok", "ts": now - 30 * 3600, "outcome": "ancient", "lesson": "too old to show"}]
+    asks = [{"id": 14, "status": "open", "class": "infra", "member": "gru", "filed_at": now - 13 * 3600, "why": "maxx blind"}]
+    text = ho.render(runs, asks, [{"title": "instrument: maxx_reader returns maxx_auth_rejected", "url": "https://x/1"}], now)
+    assert "**gru** 10m ago · ok · Shipped PR #6263" in text and "**marie**" in text and "ancient" not in text, text
+    assert "- gru: runway blind, fallback held" in text and "too old" not in text and "marie: none" not in text
+    assert "maxx_reader returns maxx_auth_rejected -- seen by gru, sentry -- https://x/1" in text, text
+    assert "ask #14 (infra, 13h ago, gru): maxx blind" in text
+    calls = []
+    class R:
+        def __init__(self, out, rc=0): self.stdout, self.returncode, self.stderr = out, rc, ""
+    def run(cmd):
+        calls.append(cmd)
+        if cmd[2] == "list": return R("[]")
+        return R("https://github.com/o/fleet-kit/issues/9\n")
+    urls = ho.file_broken(runs, now, run=run)
+    assert urls == ["https://github.com/o/fleet-kit/issues/9"], urls
+    creates = [c for c in calls if c[2] == "create"]
+    assert len(creates) == 1 and creates[0][creates[0].index("--title") + 1] == "instrument: maxx_reader returns maxx_auth_rejected", creates
+    assert "gru" in creates[0][creates[0].index("--body") + 1]
+    calls.clear()
+    run2 = lambda cmd: (calls.append(cmd) or (R(json.dumps([{"title": "instrument: maxx_reader returns maxx_auth_rejected", "url": "u"}])) if cmd[2] == "list" else R("x")))
+    assert ho.file_broken(runs, now, run=run2) == [] and [c[2] for c in calls] == ["list"], "an open instrument issue is not filed twice"
+    rm = (ROOT / "scripts" / "run_member.sh").read_text()
+    assert 'handoff.py" write --no-gh' in rm and rm.index('PROMPT="$(head -c 6000 "$HANDOFF_FILE")') < rm.index("REPORT_CONTRACT=$(awk"), "handoff must be prepended before the contract is appended"
+    law = (ROOT / "agents" / "persona_law.md").read_text()
+    assert "Lesson: <one line" in law and "Broken: <a fleet instrument" in law
+    ep = (ROOT / "entrypoint.sh").read_text()
+    assert "python3 /fleet-kit/scripts/handoff.py file-broken" in ep
 def _tiles_backfill_their_history_from_the_source_dates():
     """fk#1084, Reif: "we have history for all of these as well so..". open_per_day rebuilds
     open-count-per-day from createdAt/closedAt; _backfill_daily writes it once, only when no
@@ -15461,6 +15508,7 @@ if __name__ == "__main__":
     check("messenger brief restates the strategy and points every project step at a page (fk#558)", _messenger_brief_restates_the_strategy_and_points_at_pages)
     check("replying to the brief steers the fleet: svix, allowlist, parser, ledger, route, Reply-To (fk#669)", _reply_to_the_brief_steers_the_fleet)
     check("a reply answers asks and a backlog: mail files an issue, no model in the way (fk#1056)", _email_reply_answers_asks_and_files_backlog_without_a_model)
+    check("every pass reads the handoff; a Broken: instrument gets one owner issue (Reif 2026-09-16)", _every_pass_reads_the_handoff_and_a_broken_instrument_gets_an_owner)
     check("tiles backfill their history from the source dates, once, observed rows win (fk#1084)", _tiles_backfill_their_history_from_the_source_dates)
     check("reif_eyes files what Reif would have pointed out: churn, stale asks, dark tiles, jargon; idempotent; cron", _reif_eyes_files_what_reif_would_have_pointed_out)
     check("a finished run carries its plain-English words for the console, haiku, opt-in", _run_record_carries_plain_words_when_opted_in)
