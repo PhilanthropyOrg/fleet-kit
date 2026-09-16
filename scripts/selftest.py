@@ -4909,6 +4909,22 @@ def _email_reply_answers_asks_and_files_backlog_without_a_model():
     assert 'f"fleet ask #{ask_id} from {member}"' in ask and "Reply to this email with one line" in ask, "ask mail does not say how to reply"
 
 
+def _the_fixer_fires_only_for_the_default_branch():
+    """fk#1055: the webhook receiver launches the-fixer for a failed CI run on main, not for
+    a PR branch or a merge-queue batch (those fired ~20 paid passes an hour on dino)."""
+    import importlib.util, os
+    os.environ.setdefault("FLEET_WEBHOOK_SECRET", "x")
+    spec = importlib.util.spec_from_file_location("webhook_receiver", ROOT / "scripts" / "webhook_receiver.py")
+    wr = importlib.util.module_from_spec(spec); spec.loader.exec_module(wr)
+    repo = {"default_branch": "main"}
+    assert wr.should_fire({"workflow_run": {"head_branch": "main"}, "repository": repo})[0]
+    assert not wr.should_fire({"workflow_run": {"head_branch": "member/minion-item1-2"}, "repository": repo})[0]
+    assert not wr.should_fire({"workflow_run": {"head_branch": "gh-readonly-queue/main/pr-6259-abc"}, "repository": repo})[0]
+    assert wr.should_fire({"workflow_run": {"head_branch": "trunk"}, "repository": {"default_branch": "trunk"}})[0]
+    src = (ROOT / "scripts" / "webhook_receiver.py").read_text()
+    assert src.index("fire, why = should_fire(payload)") < src.index('_launch_member("the-fixer")'), "receiver must consult should_fire before launching"
+
+
 def _messenger_brief_restates_the_strategy_and_points_at_pages():
     """Reif, 2026-09-07, on the first brief: "we don't show the objective and the results",
     "show me the url where I can see it, make it concrete". collect() now carries the
@@ -15291,6 +15307,7 @@ if __name__ == "__main__":
     check("messenger brief restates the strategy and points every project step at a page (fk#558)", _messenger_brief_restates_the_strategy_and_points_at_pages)
     check("replying to the brief steers the fleet: svix, allowlist, parser, ledger, route, Reply-To (fk#669)", _reply_to_the_brief_steers_the_fleet)
     check("a reply answers asks and a backlog: mail files an issue, no model in the way (fk#1056)", _email_reply_answers_asks_and_files_backlog_without_a_model)
+    check("the-fixer fires only for a red run on the default branch (fk#1055)", _the_fixer_fires_only_for_the_default_branch)
     check("closes gate blocks a partial or docs-only PR from closing an issue (fk#629)", _closes_gate_blocks_a_partial_or_docs_only_pr_from_closing_an_issue)
     check("judge runs the closes gate and reads the issue; law has 13 and 14 (fk#629)", _judge_runs_the_closes_gate_and_reads_the_issue)
     check("git_pull_guard.sh self-heals a stray branch and leaves a normal pull unchanged", _git_pull_guard_self_heals_a_stray_branch_and_leaves_a_normal_pull_unchanged)
