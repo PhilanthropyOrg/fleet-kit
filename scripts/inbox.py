@@ -46,6 +46,8 @@ import urllib.request
 LOG_DIR = pathlib.Path(os.environ.get("FLEET_LOG_DIR") or os.path.expanduser("~/Library/Logs/fleet-kit"))
 INBOX = LOG_DIR / "inbox.jsonl"
 DONE = LOG_DIR / "inbox.done"
+THREADS = LOG_DIR / "threads.jsonl"   # one row per filed issue: where to say "resolved" (fk#1105)
+ALERT_ENV = pathlib.Path(os.environ.get("FLEET_ALERT_ENV") or "/home/ubuntu/.config/maxx/alert.env")
 ALERT_ENV = pathlib.Path(os.environ.get("FLEET_ALERT_ENV") or "/home/ubuntu/.config/maxx/alert.env")
 RESEND_API = os.environ.get("RESEND_API_URL_BASE", "https://api.resend.com")
 TOLERANCE_S = 300
@@ -286,6 +288,100 @@ def send_reply(to: str, subject: str, text: str, in_reply_to: str | None = None)
         return False
 
 
+def reif_address() -> str:
+    """Where a receipt goes when the sender is a machine: FLEET_ALERT_EMAIL (env, then the
+    alert env file the brief uses), else the first human in FLEET_INBOX_FROM."""
+    v = (os.environ.get("FLEET_ALERT_EMAIL") or "").strip()
+    if not v and ALERT_ENV.exists():
+        for line in ALERT_ENV.read_text().splitlines():
+            if line.startswith("FLEET_ALERT_EMAIL="):
+                v = line.split("=", 1)[1].strip().strip('"')
+    if not v:
+        v = (os.environ.get("FLEET_INBOX_FROM") or "").split(",")[0].strip()
+    return v.split(",")[0].strip()
+
+
+def notify_address(sender: str) -> str:
+    """Reif 2026-09-16: "no response back to the thread so that I can't know if there was some
+    resolution." A pager mail comes FROM the box (hello@philanthropy.org); replying to it tells
+    nobody. The receipt and the resolution go to Reif, threaded under the same message."""
+    bare = (re.search(r"<([^>]+)>", sender or "") or [None, sender or ""])[1].strip().lower()
+    humans = {a.strip().lower() for a in (os.environ.get("FLEET_INBOX_FROM") or "").split(",") if a.strip()}
+    if not humans or bare in humans:
+        return sender
+    return reif_address() or sender
+
+
+def record_thread(url: str, row: dict, to: str) -> None:
+    m = re.search(r"/issues/(\d+)", url or "")
+    if not m:
+        return
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    with open(THREADS, "a") as fh:
+        fh.write(json.dumps({"issue": int(m.group(1)), "url": url, "to": to, "subject": row.get("subject") or "",
+                             "message_id": row.get("message_id"), "filed_at": time.time()}) + "\n")
+
+
+def open_threads() -> list[dict]:
+    """Thread rows not yet resolved (a row with `resolved_at` closes the same issue number)."""
+    rows, resolved = [], set()
+    try:
+        for line in THREADS.read_text().splitlines():
+            try:
+                r = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if r.get("resolved_at"):
+                resolved.add(r.get("issue"))
+            else:
+                rows.append(r)
+    except OSError:
+        pass
+    return [r for r in rows if r.get("issue") not in resolved]
+
+
+def resolution_text(issue: dict) -> str:
+    """What closed it, in the words already on the issue: the closing PR, else the last comment."""
+    prs = [p for p in (issue.get("closedByPullRequestsReferences") or []) if p.get("title")]
+    if prs:
+        p = prs[-1]
+        return f"Fixed by PR #{p.get('number')}: {p.get('title')}\n{p.get('url') or ''}".strip()
+    comments = issue.get("comments") or []
+    if comments:
+        return (comments[-1].get("body") or "").strip()[:800]
+    reason = issue.get("stateReason") or "closed"
+    return f"Closed ({reason.lower().replace('_', ' ')}) with no comment."
+
+
+def resolve(run=None, reply=None, now: float | None = None) -> list[str]:
+    """For every filed thread whose issue has since closed: one 'Resolved' reply on the
+    original mail thread, then the thread row is marked. Deterministic, idempotent."""
+    run = run or (lambda cmd: subprocess.run(cmd, capture_output=True, text=True, timeout=60))
+    reply = reply or send_reply
+    now = now or time.time()
+    slug = repo_slug()
+    out = []
+    for t in open_threads():
+        r = run(["gh", "issue", "view", str(t["issue"]), "--repo", slug, "--json",
+                 "state,stateReason,closedAt,title,url,comments,closedByPullRequestsReferences"])
+        if r.returncode != 0:
+            continue
+        try:
+            issue = json.loads(r.stdout or "{}")
+        except json.JSONDecodeError:
+            continue
+        if (issue.get("state") or "").upper() != "CLOSED":
+            continue
+        how = resolution_text(issue)
+        text = f"Resolved: {issue.get('title') or t.get('subject')}\n\n{how}\n\n{issue.get('url') or t.get('url')}"
+        sent = reply(t.get("to") or reif_address(), f"Re: {t.get('subject') or 'your report'}", text, t.get("message_id"))
+        with open(THREADS, "a") as fh:
+            fh.write(json.dumps({**t, "resolved_at": now, "sent": bool(sent)}) + "\n")
+        out.append(f"#{t['issue']} resolved -> {t.get('to')}")
+        log(f"resolved #{t['issue']}: replied to {t.get('to')} ({'sent' if sent else 'NOT sent'})")
+    return out
+
+
 def apply(row: dict, run=None, reply=None) -> dict:
     """The no-model half of one stored reply. Returns {"lines": [...], "free_text": str,
     "done": bool}: done means nothing is left for the messenger and the row is marked."""
@@ -299,16 +395,18 @@ def apply(row: dict, run=None, reply=None) -> dict:
     lines = answer_asks(parsed["answers"], run=run)
     free = parsed["free_text"]
     title = backlog_title(row.get("subject") or "")
+    to = notify_address(row.get("from") or "")
     if title:
         try:
             url = file_backlog(title, free, row.get("from") or "", run=run)
             lines.append(f"backlog item filed: {url}")
+            record_thread(url, row, to)
         except Exception as exc:  # noqa: BLE001
             lines.append(f"backlog item NOT filed: {exc}")
         free = ""
     done = not free
     if lines:
-        reply(row.get("from") or "", f"Re: {row.get('subject') or 'your reply'}",
+        reply(to, f"Re: {row.get('subject') or 'your reply'}",
               "\n".join(lines) + ("" if done else "\n\nThe rest of your note went to the messenger."),
               row.get("message_id"))
         log(f"applied {row.get('id')}: " + "; ".join(lines))
@@ -345,7 +443,12 @@ def main(argv=None) -> int:
     d = sub.add_parser("done"); d.add_argument("id")
     p = sub.add_parser("parse"); p.add_argument("file")
     ap_ = sub.add_parser("apply"); ap_.add_argument("id")
+    sub.add_parser("resolve", help="reply 'Resolved' on every filed thread whose issue has closed (fk#1105)")
     a = ap.parse_args(argv)
+    if a.cmd == "resolve":
+        for line in resolve():
+            print(line)
+        return 0
     if a.cmd == "apply":
         rows = [r for r in pending() if r["id"] == a.id]
         if not rows:

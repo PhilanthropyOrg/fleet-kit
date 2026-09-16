@@ -4914,7 +4914,7 @@ def _email_reply_answers_asks_and_files_backlog_without_a_model():
         return R("https://github.com/o/r/issues/99\n" if cmd[0] == "gh" else "ask 17 answered\n")
     def reply(to, subject, text, in_reply_to=None): replies.append((to, subject, text, in_reply_to))
     with tempfile.TemporaryDirectory() as tmp:
-        ib.LOG_DIR = Path(tmp); ib.INBOX = Path(tmp) / "inbox.jsonl"; ib.DONE = Path(tmp) / "inbox.done"
+        ib.LOG_DIR = Path(tmp); ib.INBOX = Path(tmp) / "inbox.jsonl"; ib.DONE = Path(tmp) / "inbox.done"; ib.THREADS = Path(tmp) / "threads.jsonl"
         os.environ["FLEET_REPO_URL"] = "https://github.com/o/r.git"
         row = ib.store({"id": "e1", "from": "reif@philanthropy.org", "subject": "Re: fleet ask #17 from nerd",
                         "text": "yes 17\n> quoted", "message_id": "<m1>"}, {})
@@ -4929,11 +4929,34 @@ def _email_reply_answers_asks_and_files_backlog_without_a_model():
         assert gh[:6] == ["gh", "issue", "create", "--repo", "o/r", "--label"] and "fleet:backlog" in gh, gh
         assert gh[gh.index("--title") + 1] == "claim button dead on phone" and "tap does nothing" in gh[gh.index("--body") + 1], gh
         assert res["done"] and "issues/99" in replies[-1][2], (res, replies)
-        row = ib.store({"id": "e2b", "from": "hello@philanthropy.org", "subject": "990 Scout prod alert [app_error]: 20 timeouts",
+        # fk#1105: the filing is remembered as a thread, so the resolution can go back to it
+        threads = [json.loads(l) for l in ib.THREADS.read_text().splitlines()]
+        assert threads[-1]["issue"] == 99 and threads[-1]["message_id"] == "<m2>" and threads[-1]["to"] == "reif@philanthropy.org", threads
+        os.environ["FLEET_INBOX_FROM"] = "reif@philanthropy.org"; os.environ["FLEET_ALERT_EMAIL"] = "reif@thegoodproject.net"
+        row = ib.store({"id": "e2b", "from": "990 Scout <hello@philanthropy.org>", "subject": "990 Scout prod alert [app_error]: 20 timeouts",
                         "text": "20 Postgres statement timeouts", "message_id": "<m2b>"}, {})
         res = ib.apply(row, run=run, reply=reply)
         assert calls[-1][:3] == ["gh", "issue", "comment"] and calls[-1][5] == "7" and "Fired again" in calls[-1][-1], calls[-1]
         assert res["done"] and "issues/7" in replies[-1][2], (res, replies)
+        assert replies[-1][0] == "reif@thegoodproject.net" and replies[-1][3] == "<m2b>", "a pager mail's receipt goes to Reif on the same thread, not back to the box"
+        # resolve: a closed issue gets one 'Resolved' reply on its thread, with the closing PR; never twice; open ones wait
+        def run3(cmd):
+            calls.append(cmd)
+            if cmd[:3] == ["gh", "issue", "view"]:
+                n = cmd[3]
+                return R(json.dumps({"state": "CLOSED" if n == "99" else "OPEN", "title": "claim button dead on phone", "url": f"https://github.com/o/r/issues/{n}",
+                                     "comments": [{"body": "fixed in prod"}],
+                                     "closedByPullRequestsReferences": [{"number": 120, "title": "Claim button taps again on iOS", "url": "https://github.com/o/r/pull/120"}]}))
+            return R("")
+        out = ib.resolve(run=run3, reply=reply, now=now if "now" in dir() else 1_800_000_000.0)
+        assert out == ["#99 resolved -> reif@philanthropy.org"], out
+        assert replies[-1][0] == "reif@philanthropy.org" and replies[-1][3] == "<m2>" and replies[-1][2].startswith("Resolved: claim button dead on phone"), replies[-1]
+        assert "Fixed by PR #120: Claim button taps again on iOS" in replies[-1][2], replies[-1][2]
+        assert ib.resolve(run=run3, reply=reply) == [], "a resolved thread is not replied to twice"
+        assert [t["issue"] for t in ib.open_threads()] == [7], "the still-open issue keeps waiting"
+        ep = (ROOT / "entrypoint.sh").read_text()
+        assert "python3 /fleet-kit/scripts/inbox.py resolve >> $LOG_DIR/inbox.log" in ep, "no cron line for inbox.py resolve"
+        os.environ.pop("FLEET_ALERT_EMAIL", None)
         assert not any(c[:3] == ["gh", "issue", "create"] and "prod alert" in c[c.index("--title") + 1] for c in calls), "an open twin must not be filed again"
         row = ib.store({"id": "e3", "from": "reif@philanthropy.org", "subject": "Re: brief",
                         "text": "no 4: too soon\nAlso stop the person page.", "message_id": "<m3>"}, {})
