@@ -98,6 +98,10 @@ def render(runs: list[dict], asks: list[dict], instrument_issues: list[dict], no
             out.append(f"- {t} -- {u}")
     if not broken and not open_titles:
         out.append("- none reported")
+    sig = LOG_DIR / "SIGNALS.md"
+    if sig.exists():
+        out += ["", "## Yesterday in the product (signals)"]
+        out += [ln for ln in sig.read_text(errors="ignore").splitlines()[:20] if ln.strip() and not ln.startswith("# ")]
     open_asks = [a for a in asks if a.get("status") == "open"]
     out += ["", f"## Open asks waiting on a human: {len(open_asks)}"]
     for a in sorted(open_asks, key=lambda a: a.get("filed_at", 0))[:6]:
