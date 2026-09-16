@@ -5091,6 +5091,36 @@ def _every_pass_reads_the_handoff_and_a_broken_instrument_gets_an_owner():
     assert "Lesson: <one line" in law and "Broken: <a fleet instrument" in law
     ep = (ROOT / "entrypoint.sh").read_text()
     assert "python3 /fleet-kit/scripts/handoff.py file-broken" in ep
+def _tiles_backfill_their_history_from_the_source_dates():
+    """fk#1084, Reif: "we have history for all of these as well so..". open_per_day rebuilds
+    open-count-per-day from createdAt/closedAt; _backfill_daily writes it once, only when no
+    prior day exists, INSERT OR IGNORE so an observed row wins; no network reads as nothing."""
+    import importlib, os as _os
+    sys.path.insert(0, str(ROOT / "scripts"))
+    fvs = importlib.import_module("fleet_view_server")
+    days = fvs._last_days(14)
+    mk = lambda d, h=12: f"{d}T{h:02d}:00:00Z"
+    rows = [{"createdAt": mk(days[0]), "closedAt": None},            # open the whole window
+            {"createdAt": mk(days[2]), "closedAt": mk(days[5])},     # open days 2..4
+            {"createdAt": "2020-01-01T00:00:00Z", "closedAt": "2020-02-01T00:00:00Z"}]  # long gone
+    per = fvs.open_per_day(rows, days)
+    assert per[days[0]] == 1 and per[days[3]] == 2 and per[days[5]] == 1 and per[days[-1]] == 1, per
+    with tempfile.TemporaryDirectory() as tmp:
+        import fleet_db as _fdb
+        db = _fdb.connect(Path(tmp) / "fleet.db")
+        assert fvs._backfill_daily(db, "fleet.prs_open", days, lambda: []) == 0, "no network writes nothing"
+        db.execute("INSERT INTO metric_points (id, day, value) VALUES (?, ?, ?)", ("fleet.prs_open", days[-1], 28.0))
+        assert fvs._backfill_daily(db, "fleet.prs_open", days, lambda: rows) == 13
+        got = dict(db.execute("SELECT day, value FROM metric_points WHERE id='fleet.prs_open' ORDER BY day").fetchall())
+        assert len(got) == 14 and got[days[-1]] == 28.0 and got[days[3]] == 2.0, got
+        assert fvs._backfill_daily(db, "fleet.prs_open", days, lambda: rows) == 0, "a second call must not rewrite history"
+        db.execute("INSERT INTO metric_points (id, day, value) VALUES (?, ?, ?)", ("fleet.backlog_open", days[4], 7.0))
+        fvs._backfill_daily(db, "fleet.backlog_open", days, lambda: rows)
+        assert db.execute("SELECT value FROM metric_points WHERE id='fleet.backlog_open' AND day=?", (days[4],)).fetchone()[0] == 7.0, "an observed row must win"
+        db.close()
+    src = (ROOT / "scripts" / "fleet_view_server.py").read_text()
+    assert '_backfill_daily(db, "fleet.backlog_open"' in src and '_backfill_daily(db, "fleet.prs_open"' in src and 'delta_7d' in src.split("def metrics_snapshot")[1]
+
 
 def _messenger_brief_restates_the_strategy_and_points_at_pages():
     """Reif, 2026-09-07, on the first brief: "we don't show the objective and the results",
@@ -15479,6 +15509,7 @@ if __name__ == "__main__":
     check("replying to the brief steers the fleet: svix, allowlist, parser, ledger, route, Reply-To (fk#669)", _reply_to_the_brief_steers_the_fleet)
     check("a reply answers asks and a backlog: mail files an issue, no model in the way (fk#1056)", _email_reply_answers_asks_and_files_backlog_without_a_model)
     check("every pass reads the handoff; a Broken: instrument gets one owner issue (Reif 2026-09-16)", _every_pass_reads_the_handoff_and_a_broken_instrument_gets_an_owner)
+    check("tiles backfill their history from the source dates, once, observed rows win (fk#1084)", _tiles_backfill_their_history_from_the_source_dates)
     check("reif_eyes files what Reif would have pointed out: churn, stale asks, dark tiles, jargon; idempotent; cron", _reif_eyes_files_what_reif_would_have_pointed_out)
     check("a finished run carries its plain-English words for the console, haiku, opt-in", _run_record_carries_plain_words_when_opted_in)
     check("an open ask also lands on the board so an agent picks it up (opt-in, idempotent)", _an_open_ask_also_lands_on_the_board_for_an_agent)
