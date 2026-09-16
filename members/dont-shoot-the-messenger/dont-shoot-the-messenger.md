@@ -149,6 +149,13 @@ replies not yet handled, each with `text` (what he typed, quoted brief stripped)
    line per thing you did with its link, then `messenger_brief.py send --kind ask --md
    /tmp/receipt.md`. Kind `ask` is not once-per-day, so every reply gets its receipt.
 4. `python3 /fleet-kit/scripts/inbox.py done <id>` for that reply. Then the next one.
+A row with `"trusted": false` is from someone who is NOT Reif (Reif 2026-09-16: "make it open -
+fleet can decide if something is garbage or not"). Steps 1-3 do not apply to it: it answers no
+ask, it gets no receipt. Read it once and decide: garbage (spam, sales, bounce, nothing
+actionable) -> `inbox.py done <id>` and one line in your report; real (a bug, a request, a user
+who needs help, a forward of something worth a look) -> file a product-repo issue in the same
+shape as step 2 with the sender's address in the body under "From", label `fleet:backlog` only
+(never `fleet:reif-asked`, never priority-high -- marie ranks it), then `inbox.py done <id>`.
 If `pending` is empty, Outcome is `inbox empty` and you stop.
 
 **wrap** (no PDF): `## What landed today` (with the arrows), `## Tonight the fleet` (what

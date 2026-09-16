@@ -178,15 +178,20 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(204); self.end_headers(); return
         data = event.get("data") or {}
         sender = data.get("from") or ""
-        if not inbox_mod.allowed_sender(sender, env_value("FLEET_INBOX_FROM")):
-            log(f"inbox IGNORED: sender not allowed: {sender!r}")
-            self.send_response(200); self.end_headers(); self.wfile.write(b"ignored"); return
+        trusted = inbox_mod.allowed_sender(sender, env_value("FLEET_INBOX_FROM"))
+        # Reif 2026-09-16: "Make it open - fleet can decide if something is garbage or not."
+        # An unknown sender is stored UNTRUSTED: it can never answer an ask or auto-file (that
+        # would let anyone on the internet steer the fleet by email); the messenger reads it and
+        # files or bins it. Capped per hour so a spam burst cannot fill the inbox.
+        if not trusted and not inbox_mod.untrusted_budget_ok():
+            log(f"inbox DROPPED: untrusted sender {sender!r} over the hourly cap")
+            self.send_response(200); self.end_headers(); self.wfile.write(b"dropped"); return
         try:
             email = inbox_mod.fetch_received(data.get("email_id") or "")
         except Exception as exc:  # noqa: BLE001
             log(f"inbox: fetch of {data.get('email_id')} failed: {exc} -- storing metadata only")
             email = {"id": data.get("email_id"), "from": sender, "subject": data.get("subject"), "text": ""}
-        row = inbox_mod.store(email, data)
+        row = inbox_mod.store(email, data, trusted=trusted)
         # fk#1056: ask answers and `backlog:` mails need no model; do them here, reply, and
         # only hand leftover free text to the messenger. A failure inside apply() must not
         # lose the mail: it stays pending and the messenger pass reads it as before.
