@@ -163,7 +163,10 @@ def load_funnel(url: str | None = None, token: str | None = None) -> tuple[dict,
     if not url:
         return {}, "no FLEET_FUNNEL_URL / FLEET_NUMBER_URL"
     token = token or os.environ.get("FLEET_NUMBER_TOKEN") or ""
-    req = urllib.request.Request(url, headers={"X-PM-Token": token} if token else {})
+    headers = {"User-Agent": "fleet-kit/north"}
+    if token:
+        headers["X-PM-Token"] = token
+    req = urllib.request.Request(url, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=20) as resp:
             return json.loads(resp.read().decode()), None
