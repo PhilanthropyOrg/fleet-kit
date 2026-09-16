@@ -11885,6 +11885,12 @@ def _datta_cadence_is_a_validated_cron_hour_dial():
     for ok in ("", "*", "9", "*/6", "0,12", "1-5"):
         assert fvs._validate_dial_value("FLEET_DATTA_CADENCE", ok) is None, ok
     assert "FLEET_DATTA_CADENCE" in (ROOT / "fleet.env.example").read_text()
+    # fleet-kit#1092: marie joins the same family -- $5.50 an ok run, hourly, was the 3rd-biggest burn.
+    assert '33 ${FLEET_MARIE_CADENCE:-*} * * *' in entry, "marie line must splice FLEET_MARIE_CADENCE into the hour field"
+    assert "FLEET_MARIE_CADENCE" in fvs.DIAL_FIELDS and "FLEET_MARIE_CADENCE" in fvs._CRON_HOUR_FIELDS
+    assert fvs._validate_dial_value("FLEET_MARIE_CADENCE", "0,30"), "0,30 must be refused (it is minutes, not an hour)"
+    assert fvs._validate_dial_value("FLEET_MARIE_CADENCE", "*/4") is None
+    assert "FLEET_MARIE_CADENCE" in (ROOT / "fleet.env.example").read_text()
 
 
 def _sync_health_check_pages_on_a_real_stalled_offset_not_on_a_caught_up_one():

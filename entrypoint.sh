@@ -313,7 +313,7 @@ case "${1:-cron-foreground}" in
         echo "15 5 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh librarian >> $LOG_DIR/librarian.log 2>&1"
       fi
       if cron_member_enabled marie; then
-        echo "33 * * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh marie >> $LOG_DIR/marie.log 2>&1"
+        echo "33 ${FLEET_MARIE_CADENCE:-*} * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh marie >> $LOG_DIR/marie.log 2>&1"
       fi
       # datta (:12, analysis) -- the coverage dispatcher. It spawns nerds itself, so ONLY datta
       # gets a cron line; nerd ships enabled:false and never self-fires, exactly like minion
