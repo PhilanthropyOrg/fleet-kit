@@ -419,6 +419,14 @@ def deliver(kind: str, md: str, want_pdf: bool, force: bool) -> tuple[int, str]:
         log(f"send {kind}: already sent today ({today}) -- no-op (pass --force to resend)")
         return 0, "already-sent"
 
+    # Reif, 2026-09-15: "prune all the emails we have going out to internal and external."
+    # The brief is written to LOG_DIR and shown on the console; it is mailed only when the
+    # instance opts back in with FLEET_BRIEF_EMAIL=1. Same two-key shape as run_mail's kill.
+    if os.environ.get("FLEET_BRIEF_EMAIL", "").strip() != "1":
+        (LOG_DIR / f"brief-{kind}-{today}.md").write_text(md)
+        log(f"send {kind}: written to {LOG_DIR}/brief-{kind}-{today}.md, not mailed (FLEET_BRIEF_EMAIL unset)")
+        return 0, "written-not-mailed"
+
     creds = read_alert_env()
     missing = [k for k in ("RESEND_API_KEY", "MAIL_FROM", "FLEET_ALERT_EMAIL") if not creds.get(k)]
     if missing:

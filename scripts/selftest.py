@@ -4274,6 +4274,7 @@ def _auto_deploy_race_check_pages_through_fleet_alert_sh():
         env = {
             "FLEET_LOG_DIR": str(log_dir), "FLEET_ENV_FILE": "/nonexistent",
             "NTFY_TOPIC": "", "RESEND_API_KEY": "fake-key", "FLEET_ALERT_EMAIL": "ops@example.com",
+            "FLEET_ALERT_EMAIL_LEG": "1",  # email leg is opt-in since #1049; this test IS the opt-in case
             "FLEET_ALERT_LOG": str(fleet_alert_log), "FLEET_ALERT_QUEUE": str(tmp / "queue.jsonl"),
             "CURL_CALLS": str(curl_calls), "PATH": f"{bin_dir}:/usr/bin:/bin",
         }
@@ -4783,6 +4784,7 @@ def _messenger_brief_sends_through_resend_once_per_day():
             (tmp / "alert.env").write_text("RESEND_API_KEY=rk_test\nMAIL_FROM=Fleet <fleet@example.org>\nFLEET_ALERT_EMAIL=reif@example.org\n")
             (tmp / "brief.md").write_text("# Atlas CTA shipped\n\n## The number\n\n| | value |\n|---|---|\n| MRR | $10.83 |\n\n- one **bold** [link](https://example.org/x)\n")
             env = dict(os.environ, FLEET_LOG_DIR=str(tmp), FLEET_ALERT_ENV=str(tmp / "alert.env"),
+                       FLEET_BRIEF_EMAIL="1",  # mail is opt-in since #1049; this test IS the opt-in case
                        RESEND_API_URL=f"http://127.0.0.1:{srv.server_address[1]}/emails")
             for k in ("RESEND_API_KEY", "MAIL_FROM", "FLEET_ALERT_EMAIL"):
                 env.pop(k, None)
