@@ -152,6 +152,49 @@ def _notify(member: str, ask_id: int, why: str) -> None:
         pass
 
 
+LANE_FOR_CLASS = {"credential": "lane:devops", "infra": "lane:devops", "money": "lane:revenue",
+                  "pricing": "lane:revenue", "product-copy": "lane:ui"}
+
+
+def _repo_slug() -> str:
+    import os
+    url = (os.environ.get("FLEET_REPO_URL") or "").strip()
+    slug = url.rsplit("github.com", 1)[-1].lstrip(":/").removesuffix(".git").strip("/")
+    return slug if slug.count("/") == 1 and all(slug.split("/")) else ""
+
+
+def issue_for_ask(ask_id: int, member: str, why: str, unblocks: str | None, proposed: str | None,
+                  ask_class: str | None, run=None) -> str:
+    """Reif, 2026-09-16, on a gru report that had been blind for 13h on an open ask: "if
+    something is broken like this - I want to make darn sure that another agent picks it up."
+    An ask used to live only in fleet.db, where no builder looks. Now every open ask also
+    files ONE fleet:backlog issue in the product repo, priority-high, laned by class, titled
+    `ask #N`, so gru/marie rank it and a builder tries it; the ask row still waits for the
+    human. Opt-in (FLEET_ASK_ISSUES=1). Idempotent by title. Returns the URL or ''."""
+    import os
+    if os.environ.get("FLEET_ASK_ISSUES") != "1":
+        return ""
+    run = run or (lambda cmd: subprocess.run(cmd, capture_output=True, text=True, timeout=60))
+    slug = _repo_slug()
+    if not slug:
+        return ""
+    title = f"ask #{ask_id} ({ask_class or 'unclassed'}): {why.strip().splitlines()[0][:90]}"
+    have = run(["gh", "issue", "list", "--repo", slug, "--state", "open", "--search",
+                f'"ask #{ask_id} " in:title', "--json", "url", "--jq", ".[0].url"])
+    if have.returncode == 0 and have.stdout.strip():
+        return have.stdout.strip()
+    labels = ["fleet:backlog", "fleet:priority-high", LANE_FOR_CLASS.get(ask_class or "", "lane:coordination")]
+    body = (f"Filed by `{member}` as fleet ask #{ask_id} (class: {ask_class or 'unclassed'}).\n\n"
+            f"**Why a human was asked:** {why.strip()}\n\n"
+            + (f"**What it unblocks:** {unblocks.strip()}\n\n" if unblocks else "")
+            + (f"**Proposed:** {proposed.strip()}\n\n" if proposed else "")
+            + "An agent should try this first. If it truly needs a human (a secret, money, an account), "
+              "say exactly what and label `fleet:needs-human-op`; otherwise fix it and close this. "
+              "The ask row in fleet.db still waits for Reif's answer either way.")
+    r = run(["gh", "issue", "create", "--repo", slug, "--title", title, "--label", ",".join(labels), "--body", body])
+    return r.stdout.strip().splitlines()[-1] if r.returncode == 0 and r.stdout.strip() else ""
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(
         description="File, answer, or list fleet asks -- the structured channel for a member "
@@ -210,6 +253,12 @@ def main(argv=None) -> int:
             print(f"ask {ask_id} filed")
             if not a.no_notify:
                 _notify(a.member, ask_id, a.why)
+                try:
+                    url = issue_for_ask(ask_id, a.member, a.why, a.unblocks, a.proposed, a.ask_class)
+                    if url:
+                        print(f"ask {ask_id} also on the board: {url}")
+                except Exception:  # noqa: BLE001 -- best-effort, the ask is already filed
+                    pass
             return 0
 
         row = authority.show(store=authority_store).get(a.ask_class, {})
