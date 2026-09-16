@@ -5337,9 +5337,13 @@ def _console_run_panel_shows_everything_about_one_run_fk748():
     # are the behaviours, not the old whitespace.
     for needle in ('id="side"', 'id="sideBack"', 'width:33.333vw', '.side{width:100vw',
                    'data-run=', 'no written report for this run', '/api/pass_log', "e.key === 'Escape'",
-                   "section('Outcome', rec.outcome)", "section('Evidence', rec.evidence)", "section('Self-critique'",
-                   '<span class="role-label">Purpose</span>'):  # Reif 2026-09-09: "not clear that this is marie's purpose line"
+                   "section('Outcome', rec.outcome)", "section('Evidence', rec.evidence)", "section('Self-critique'"):
         assert needle in page, f"fleet_home.html lacks {needle!r}"
+    # Reif 2026-09-09 "not clear that this is marie's purpose line" put a labelled Purpose block in
+    # the drawer; Reif 2026-09-16 "purpose is doubled unnecessarily" -- the row under the name
+    # already says it, so the drawer no longer repeats it (fk#1077).
+    assert '<span class="role-label">Purpose</span>' not in page, "the agents drawer repeats the purpose line"
+    assert '<div class="role">${esc(m.spec.plain' in page, "the row must still carry the plain-language role"
     assert len(page.encode()) < 48_000, "the console must stay small"
     import run_report
     sh = run_report.build_record(member="roomba", run_id="r", kind="shell", exit_code=0,
