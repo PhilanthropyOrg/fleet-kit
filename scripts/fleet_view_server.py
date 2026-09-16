@@ -542,6 +542,65 @@ def _gh_actions_spend_series() -> tuple[float | None, list[dict], str]:
     return out
 
 
+def _day_end_ts(day: str) -> float:
+    import datetime as _dt
+    d = _dt.date.fromisoformat(day)
+    return _dt.datetime(d.year, d.month, d.day, 23, 59, 59, tzinfo=_central_tz()).timestamp()
+
+
+def _iso_ts(v) -> float | None:
+    import datetime as _dt
+    try:
+        return _dt.datetime.fromisoformat(str(v).replace("Z", "+00:00")).timestamp() if v else None
+    except ValueError:
+        return None
+
+
+def open_per_day(rows: list[dict], days: list[str]) -> dict[str, int]:
+    """How many of `rows` (createdAt / closedAt ISO strings) were open at the end of each
+    Central day. This is the history GitHub already holds for backlog and PR counts."""
+    parsed = [(_iso_ts(r.get("createdAt")), _iso_ts(r.get("closedAt"))) for r in rows]
+    out = {}
+    for day in days:
+        end = _day_end_ts(day)
+        out[day] = sum(1 for c, x in parsed if c is not None and c <= end and (x is None or x > end))
+    return out
+
+
+def _backfill_daily(db, mid: str, days: list[str], fetch) -> int:
+    """fk#1084 (Reif: "we have history for all of these"): when metric_points holds nothing
+    for `mid` before today, reconstruct the earlier days from the source's own dates and
+    INSERT OR IGNORE them -- an observed row always wins over a reconstructed one. Returns
+    rows written. fetch() -> list of {createdAt, closedAt} or [] (no network reads as none)."""
+    today = days[-1]
+    prior = db.execute("SELECT COUNT(*) FROM metric_points WHERE id=? AND day<?", (mid, today)).fetchone()[0]
+    if prior:
+        return 0
+    rows = fetch() or []
+    if not rows:
+        return 0
+    n = 0
+    for day, value in open_per_day(rows, days[:-1]).items():
+        db.execute("INSERT OR IGNORE INTO metric_points (id, day, value) VALUES (?, ?, ?)", (mid, day, float(value)))
+        n += 1
+    return n
+
+
+def _gh_dates(kind: str, *extra: str) -> list[dict]:
+    key = f"gh_dates:{kind}:{' '.join(extra)}"
+    hit = _TTL_CACHE.get(key)
+    if hit and time.time() - hit[0] < 6 * 3600:
+        return hit[1]  # type: ignore[return-value]
+    raw = _gh(kind, "list", "--state", "all", "--limit", "1000", "--json", "createdAt,closedAt", *extra, timeout=60)
+    try:
+        rows = json.loads(raw) if raw else []
+    except Exception:  # noqa: BLE001
+        rows = []
+    if rows:
+        _TTL_CACHE[key] = (time.time(), rows)
+    return rows
+
+
 def metrics_snapshot() -> dict:
     """Current value + sub + series for every registered metric. Never raises."""
     days = _last_days(14)
@@ -572,6 +631,10 @@ def metrics_snapshot() -> dict:
             tgt = ((nr.get("payload") or {}).get("target") or {}) if nr.get("present") else {}
             val = n.get("value")
             upsert("okr.verified_claims", val)
+            # fk#1084: the number endpoint carries delta_7d; that is one real earlier point.
+            if val is not None and n.get("delta_7d") is not None and len(days) >= 8:
+                db.execute("INSERT OR IGNORE INTO metric_points (id, day, value) VALUES (?, ?, ?)",
+                           ("okr.verified_claims", days[-8], float(val) - float(n["delta_7d"])))
             out["okr.verified_claims"] = {"value": val, "unit": n.get("unit") or "", "target": tgt.get("value"),
                                           "sub": (f"{n.get('name', '')}" + (f" · {'+' if (n.get('delta_7d') or 0) >= 0 else ''}{n.get('delta_7d')} 7d" if n.get("delta_7d") is not None else "")).strip(" ·"),
                                           "series": daily_series("okr.verified_claims"), "stale": bool(nr.get("stale"))}
@@ -582,6 +645,7 @@ def metrics_snapshot() -> dict:
         issues = gh.get("issues") or []
         claimed = sum(1 for i in issues if i.get("_claimed"))
         upsert("fleet.backlog_open", len(issues))
+        _backfill_daily(db, "fleet.backlog_open", days, lambda: _gh_dates("issue", "--label", "fleet:backlog"))
         out["fleet.backlog_open"] = {"value": len(issues), "sub": f"{claimed} claimed · {len(issues) - claimed} free",
                                      "series": daily_series("fleet.backlog_open")}
 
@@ -589,6 +653,7 @@ def metrics_snapshot() -> dict:
         prs = gh.get("prs") or []
         drafts = sum(1 for p in prs if p.get("isDraft"))
         upsert("fleet.prs_open", len(prs))
+        _backfill_daily(db, "fleet.prs_open", days, lambda: _gh_dates("pr"))
         out["fleet.prs_open"] = {"value": len(prs), "sub": f"{drafts} draft · {len(prs) - drafts} ready for review",
                                  "series": daily_series("fleet.prs_open")}
 
