@@ -67,7 +67,7 @@ viewports:
 journeys:
   - id: sign-in
     name: Sign in
-    description: A returning person signs in with their email and password.
+    description: A returning person signs in with their email (magic link; the product has no password).
     preconditions:
       - signed out
     test_users: [alice]
@@ -75,9 +75,8 @@ journeys:
     steps:
       - action: Navigate to https://philanthropy.org/login
         observable_result: >
-          The page renders a sign-in form containing an email field, a password field, and
-          a submit control.
-      - action: Fill the form with alice's test email and password and submit.
+          The page renders a sign-in form containing an email field and a submit control.
+      - action: Sign in as alice (the QA session link the product mints for its test users).
         observable_result: >
           Within 10s, the browser is no longer on /login (redirected to the signed-in
           landing page or account page).
