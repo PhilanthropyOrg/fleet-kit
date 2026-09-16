@@ -183,31 +183,19 @@ work done).
    green. You do not merge directly (a check might still be running), and you do not wait for
    a human to drive it through — arming auto-merge IS finishing the job.
 
-   **Check whether `main` is queue-controlled before picking a strategy flag — this shape
-   changes over time (fleet-kit's own `main` has flipped between the two), don't assume last
-   pass's answer still holds.** A bare arm with no strategy flag ERRORS on a repo with no queue
-   (`--merge, --rebase, or --squash required when not running interactively` — cost a wasted
-   retry on nearly every minion pass across #406/#407/#413/#414/#416/#417 in one day before
-   fleet-kit's `main` moved onto a queue); an explicit strategy flag ERRORS on a repo where
-   `main` IS queue-controlled instead (`! The merge strategy for main is set by the merge
-   queue`, confirmed on both nonprofit-atlas issue #3108 and fleet-kit). The ruleset LIST
-   endpoint alone can't tell you which — it returns only summaries (id/name/target/enforcement),
-   never the `rules` array, so an unrelated ruleset reads as "non-empty" too. Fetch each
-   ruleset's detail instead:
-   ```
-   gh api repos/<owner>/<repo>/rulesets --jq '.[].id' | while read -r id; do
-     gh api repos/<owner>/<repo>/rulesets/$id --jq '.rules[].type'
-   done
-   gh api repos/<owner>/<repo>/merge-queue
-   ```
-   A `merge_queue` rule type in any ruleset's detail (or a non-404 from the second call) means
-   a queue is live — use a bare `gh pr merge` and let `gh` pick the queue path. Neither means
-   no queue — use `gh pr merge --squash` (or your repo's equivalent) explicitly.
-   CHECK THE EXIT CODE regardless of shape — issue #3108's root cause was this exact command
-   failing silently, with the failure never mentioned in the final report, leaving
-   fully-green PRs stuck for hours with no human or orchestrator any the wiser. A non-zero
-   exit here is not a quiet detail; say so in your report the same way you would any other
-   failed step.
+   **Do not hand-detect the merge strategy — `scripts/merge_arm.sh` already does.** Source it
+   and call `arm_pr_auto_merge <pr>`: it tries the bare form first (the only form a
+   merge-queue branch accepts) and falls back to `--squash` on a plain branch's own
+   non-interactive rejection. Both shapes cost real passes to rediscover (#406/#407/#413 in
+   one day; nonprofit-atlas#3108), and which one a repo needs changes over time.
+
+   **CHECK THE EXIT CODE.** #3108's root cause was this command failing silently, with the
+   failure never mentioned in the report, leaving fully-green PRs stuck for hours. A non-zero
+   exit is not a quiet detail — put it in your report like any other failed step.
+
+   `scripts/pr_arm_sweep.sh` sweeps up green PRs nobody armed (every 20 min) — a backstop for
+   a pass that dies mid-step, not a licence to skip this step. It waits 30 minutes first, so
+   a PR you leave unarmed is a PR that does not merge for half an hour.
 10. **Systemic-failure rule**: if a gate fails you with the SAME error line other open PRs are
     also showing (check 2-3 sibling PRs' statuses), that's a broken GATE, not a broken PR.
     Say so in one line of your PR body ("gate <name> failing identically on #N #M —

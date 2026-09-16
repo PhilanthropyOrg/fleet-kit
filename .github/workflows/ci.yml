@@ -73,6 +73,8 @@ jobs:
         run: python3 scripts/test_run_mail.py
       - name: run test_judge_judy_verdict.py
         run: python3 scripts/test_judge_judy_verdict.py
+      - name: run test_pr_arm_sweep.py
+        run: python3 scripts/test_pr_arm_sweep.py
 
   # Not a required check (see selftest above for why) -- but still runs on every PR, and its
   # failures are still visible on the PR's checks tab. `--with-deps` here can still fail on an
