@@ -237,14 +237,12 @@ For each: `gh issue edit <n> --add-label fleet:priority-<tier>,fleet:backlog` (r
 tier label first if one exists — an item should carry exactly one priority label, never two;
 `--add-label` on a label the issue already has is a harmless no-op, so always including
 `fleet:backlog` here is safe whether or not it was already set). **Always both labels
-together, never priority alone** — confirmed live, issue #3167: gru's claim query requires
-BOTH `fleet:backlog` AND a `fleet:priority-*` label (`gh issue list --label X --label Y` ANDs
-them), so a priority-only issue is not merely deprioritized, it is structurally invisible to
-gru regardless of rank. 3 real issues (#2879, #3130, #3114) sat unclaimed for days this way
-before jefe caught it as a systemic pattern, not 3 separate bugs. Leave a short comment naming
-your reasoning in one line: `gh issue comment <n> --body "marie: priority=<tier> — <one-line
-reach/impact/confidence/effort reasoning>"`. This is what gru reads back when it explains its
-own choice in its report — an unreasoned label is a label gru can act on but a human can't
+together, never priority alone** — gru's claim query ANDs `fleet:backlog` and
+`fleet:priority-*` (`gh issue list --label X --label Y`), so a priority-only issue is
+structurally invisible to gru, not merely deprioritized (issue #3167). Leave a short comment
+naming your reasoning in one line: `gh issue comment <n> --body "marie: priority=<tier> —
+<one-line reach/impact/confidence/effort reasoning>"` — this is what gru reads back when it
+explains its own choice, and an unreasoned label is a label gru can act on but a human can't
 audit.
 
 An item you're genuinely unsure about is `medium`, not a guess at high or low — don't invent
@@ -569,21 +567,17 @@ Vision-link: <one registered id from /fleet-kit/scripts/okr.json -- `okr.verifie
 `okr.traffic`, `okr.clicks` or `okr.conversion` -- then ` -- ` and one sentence on HOW this
 item moves it; or `none (maintenance)` if nothing number-moving is behind it>
 ```
-**The id is the link; the sentence is the argument.** Free text used to count (gh#525) and it
-let everything through: on 2026-09-16 six PRs merged in a day and none moved a KR, one of them
-linked to "KR2 -- messages", a KR that does not exist. `vision_link_gate.py` now reads a line
-with no registered id as MISSING, so it is not eligible for gru. **Restamp, do not skip:** in
-both backfill sweeps below, a `Vision-link:` line that names no registered id counts as absent
--- post a new comment with a proper one (or an honest `none (maintenance)`). If you cannot name
-which KR an item moves, that is the finding: it is maintenance, rank it as such. **This must be a literal inline
-line reading `Vision-link: <value>`, never a `## Vision-link` heading with the value on the
-next line** -- gh#595, live 2026-09-06: `vision_link_gate.py`'s regex requires the colon on the
-same line as the label, so a heading-styled Vision-link is silently invisible to the gate no
-matter how correct its value reads to a person. gru's own build-eligibility gate (gh#525,
-`vision_link_gate.py`) reads exactly this field from your PRD comment before anything else, and
-a PRD missing the inline form is invisible to gru no matter how high you ranked it. Confirmed
-live 2026-09-06: 62 of 64 open backlog candidates fleet-kit-wide were gate-ineligible for lack
-of this line, including `fleet:priority-high`/`fleet:prd` items with nothing else wrong.
+**The id is the link, the sentence is the argument, and the line must be literal inline text**
+(`Vision-link: <value>`, never a `## Vision-link` heading with the value below it —
+`vision_link_gate.py`'s regex requires the colon on the same line as the label, gh#595; a
+heading-styled line is silently invisible to the gate no matter how correct it reads to a
+person). Free text used to count (gh#525) and let everything through — one merged PR linked to
+"KR2 -- messages", a KR that doesn't exist — so the gate now reads a line with no registered id
+as MISSING and drops the item from gru's build-eligibility regardless of rank (62 of 64 open
+candidates fleet-kit-wide failed this exact check the day it shipped). **Restamp, do not
+skip:** in both backfill sweeps below, a `Vision-link:` line naming no registered id counts as
+absent — post a new comment with a proper one (or an honest `none (maintenance)`). If you
+cannot name which KR an item moves, that is the finding: it is maintenance, rank it as such.
 
 **Both backfills below recur by construction, not by oversight (gh#4597).** New candidates land
 continuously — every freshly filed or re-labeled `fleet:backlog` issue is gate-blocked as
