@@ -100,7 +100,6 @@
   .pill{display:inline-block;font:500 11px var(--sans);padding:2px 8px;border-radius:10px;background:var(--tint-2);color:var(--ink-2);white-space:nowrap}
   .pill.bad{background:#fbe9e7;color:#8f2a20} .pill.ok{background:#e3f3e9;color:#1a5d36} .pill.warn{background:#fbf1d9;color:#6d4a05}
   .drawer td{background:var(--tint)}
-  .drawer .purpose{color:var(--ink-2);margin-bottom:8px}
   .drawer .role-label{display:block;font:600 10px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:2px}
   .drawer .run{padding:4px 0;border-top:1px solid var(--rule);cursor:pointer} .drawer .run:first-child{border-top:0}
   .drawer .run:hover{background:var(--tint-2)}
@@ -135,6 +134,7 @@
   .side .top .close:hover{background:var(--tint-2);color:var(--ink)}
   .side .top .close:focus-visible{outline:2px solid var(--muted);outline-offset:2px}
   .side .when{color:var(--muted);font-size:13px;margin:2px 0 12px}
+  .side .txt.plain{font-size:15px;line-height:1.5;color:var(--ink);white-space:pre-line}
   .side .badge{display:inline-block;font-size:12px;font-weight:600;padding:2px 8px;border-radius:999px;background:var(--tint);color:var(--muted)}
   .side .badge.ok{color:var(--ok)} .side .badge.warn{color:var(--warn)} .side .badge.bad{color:var(--bad)}
   .side h2{font:600 12px var(--sans);letter-spacing:.04em;text-transform:uppercase;color:var(--muted);margin:16px 0 6px}
@@ -374,7 +374,6 @@ function renderAgents() {
         <td class="num">${c.ok}</td><td class="num">${c.declined}</td><td class="num">${c.bad}</td>
         <td>${pillFor(c, enabled)}</td></tr>` +
       (open ? `<tr class="drawer"><td colspan="6">
-          <div class="purpose"><span class="role-label">Purpose</span>${esc(m.spec.plain || '')}</div>
           ${runs.map(r => `<div class="run" data-run="${esc(r.run_id || '')}"><span class="dot ${dotClass(r, true)}"></span>${esc(ago(r.ts))} · ${esc(r.status || '')}${r.pr ? ` · PR ${esc(r.pr)}` : ''}<br><span class="role">${esc(String(r.outcome || '').slice(0, 200))}</span></div>`).join('') || '<div class="role">no runs yet</div>'}
           <div class="btns">
             <button class="primary" data-act="rerun" data-member="${esc(name)}">Rerun now</button>
@@ -436,7 +435,7 @@ function renderRun() {
     <div class="top"><span class="name">${esc((m && m.spec.emoji) || '')} ${esc(rec.member)}</span><button class="close" data-act="closeRun" aria-label="close">×</button></div>
     <div class="when">${esc(ago(rec.ts))} · ${esc(new Date(rec.ts * 1000).toLocaleString('en-US', {timeZone: 'America/Chicago', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'}))} CT · <span class="badge ${statusClass(rec)}">${esc(live ? 'running' : rec.status || '')}</span></div>
     <dl class="facts"><dt>Took</dt><dd>${esc(dur)}</dd><dt>Cost</dt><dd>${t.cost_usd !== undefined ? esc(money(t.cost_usd)) : '--'}${t.num_turns ? ` · ${esc(t.num_turns)} turns` : ''}</dd>${links ? `<dt>Links</dt><dd>${links}</dd>` : ''}<dt>Run</dt><dd style="overflow-wrap:anywhere;color:var(--muted);font-size:12px">${esc(rec.run_id || '')}</dd></dl>
-    ${live ? `<h2>Report</h2><div class="none">still running; the outcome and report land here when the pass ends</div><h2>Live transcript</h2><pre class="live" id="liveLog">loading…</pre>` : `${section('Outcome', rec.outcome)}${section('Evidence', rec.evidence)}${rec.report ? section('Report', rec.report, 'report') : `<h2>Report</h2><div class="none">no written report for this run</div>`}${section('Self-critique', rec.self_critique)}`}`;
+    ${live ? `<h2>Report</h2><div class="none">still running; the outcome and report land here when the pass ends</div><h2>Live transcript</h2><pre class="live" id="liveLog">loading…</pre>` : `${rec.plain ? section('In plain words', rec.plain, 'plain') : ''}${section('Outcome', rec.outcome)}${section('Evidence', rec.evidence)}${rec.report ? section('Report', rec.report, 'report') : `<h2>Report</h2><div class="none">no written report for this run</div>`}${section('Self-critique', rec.self_critique)}`}`;
   side.hidden = false; back.hidden = false;
   requestAnimationFrame(() => side.classList.add('in'));
   if (LIVE_TIMER) { clearInterval(LIVE_TIMER); LIVE_TIMER = null; }
