@@ -134,6 +134,7 @@
   .side .top .close:hover{background:var(--tint-2);color:var(--ink)}
   .side .top .close:focus-visible{outline:2px solid var(--muted);outline-offset:2px}
   .side .when{color:var(--muted);font-size:13px;margin:2px 0 12px}
+  .side .txt.plain{font-size:15px;line-height:1.5;color:var(--ink);white-space:pre-line}
   .side .badge{display:inline-block;font-size:12px;font-weight:600;padding:2px 8px;border-radius:999px;background:var(--tint);color:var(--muted)}
   .side .badge.ok{color:var(--ok)} .side .badge.warn{color:var(--warn)} .side .badge.bad{color:var(--bad)}
   .side h2{font:600 12px var(--sans);letter-spacing:.04em;text-transform:uppercase;color:var(--muted);margin:16px 0 6px}
@@ -434,7 +435,7 @@ function renderRun() {
     <div class="top"><span class="name">${esc((m && m.spec.emoji) || '')} ${esc(rec.member)}</span><button class="close" data-act="closeRun" aria-label="close">×</button></div>
     <div class="when">${esc(ago(rec.ts))} · ${esc(new Date(rec.ts * 1000).toLocaleString('en-US', {timeZone: 'America/Chicago', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'}))} CT · <span class="badge ${statusClass(rec)}">${esc(live ? 'running' : rec.status || '')}</span></div>
     <dl class="facts"><dt>Took</dt><dd>${esc(dur)}</dd><dt>Cost</dt><dd>${t.cost_usd !== undefined ? esc(money(t.cost_usd)) : '--'}${t.num_turns ? ` · ${esc(t.num_turns)} turns` : ''}</dd>${links ? `<dt>Links</dt><dd>${links}</dd>` : ''}<dt>Run</dt><dd style="overflow-wrap:anywhere;color:var(--muted);font-size:12px">${esc(rec.run_id || '')}</dd></dl>
-    ${live ? `<h2>Report</h2><div class="none">still running; the outcome and report land here when the pass ends</div><h2>Live transcript</h2><pre class="live" id="liveLog">loading…</pre>` : `${section('Outcome', rec.outcome)}${section('Evidence', rec.evidence)}${rec.report ? section('Report', rec.report, 'report') : `<h2>Report</h2><div class="none">no written report for this run</div>`}${section('Self-critique', rec.self_critique)}`}`;
+    ${live ? `<h2>Report</h2><div class="none">still running; the outcome and report land here when the pass ends</div><h2>Live transcript</h2><pre class="live" id="liveLog">loading…</pre>` : `${rec.plain ? section('In plain words', rec.plain, 'plain') : ''}${section('Outcome', rec.outcome)}${section('Evidence', rec.evidence)}${rec.report ? section('Report', rec.report, 'report') : `<h2>Report</h2><div class="none">no written report for this run</div>`}${section('Self-critique', rec.self_critique)}`}`;
   side.hidden = false; back.hidden = false;
   requestAnimationFrame(() => side.classList.add('in'));
   if (LIVE_TIMER) { clearInterval(LIVE_TIMER); LIVE_TIMER = null; }

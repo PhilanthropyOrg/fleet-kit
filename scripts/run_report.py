@@ -30,6 +30,7 @@ counted zero-spend budget declines as evidence of a barren member.
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 import time
@@ -401,6 +402,21 @@ def build_record(*, member: str, run_id: str, kind: str, exit_code: int,
     return rec
 
 
+def plain_words_for(rec: dict) -> str:
+    """The plain-English rewrite for a finished run that said something, or ''."""
+    if os.environ.get("FLEET_RUN_PLAIN") != "1":
+        return ""
+    if not (rec.get("report") or rec.get("outcome")):
+        return ""
+    try:
+        import run_mail
+        if not run_mail.wants_mail(rec):
+            return ""
+        return run_mail.plain_words(rec)
+    except Exception:  # noqa: BLE001 -- side channel
+        return ""
+
+
 def main(argv=None) -> int:
     import argparse
     ap = argparse.ArgumentParser(description="Build one fleet run record from a pass.")
@@ -458,6 +474,14 @@ def main(argv=None) -> int:
                        pass_text=text, usage=usage, vision_required=a.vision_required,
                        item_id=a.item_id, pr=a.pr, lane=a.lane, trailing_loss=a.trailing_loss,
                        heartbeat=a.heartbeat, dispatch_skipped=a.dispatch_skipped)
+    # Reif, 2026-09-16, on a gru report in the console: "this needs to be in plain english and
+    # run on haiku - dont burn tokens for this." The same 160-word haiku rewrite run_mail.py
+    # already does for the email lands ON the record, so the console drawer opens with it.
+    # Opt-in (FLEET_RUN_PLAIN=1 in fleet.env): tests and fresh instances never call a model.
+    # Capped at run_mail's $0.05 per run; a failure is an empty field, never this exit code.
+    plain = plain_words_for(rec)
+    if plain:
+        rec["plain"] = plain
     print(json.dumps(rec))
     # Reif, 2026-09-12: "have those reports sent to me each time something runs." One mail per
     # finished run, plain English on top -- see scripts/run_mail.py. Off unless FLEET_RUN_MAIL=1;
