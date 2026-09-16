@@ -4873,11 +4873,22 @@ def _email_reply_answers_asks_and_files_backlog_without_a_model():
     ib = importlib.util.module_from_spec(spec); spec.loader.exec_module(ib)
     assert ib.backlog_title("Re: Backlog: fix the claim button") == "fix the claim button"
     assert ib.backlog_title("Re: fleet ask #17 from nerd") is None
+    # Reif 2026-09-16: a forward IS a backlog item; the box's pager mail files itself, priority-high on devops
+    assert ib.backlog_title("Fwd: claim page blank on iPad") == "claim page blank on iPad"
+    assert ib.backlog_title("FW: Re: claim page blank on iPad") == "Re: claim page blank on iPad"
+    assert ib.backlog_title("Re: brief") is None and ib.backlog_title("fleet ask #3 from gru") is None
+    assert ib.backlog_title("990 Scout prod alert [app_error]: 20 Postgres statement timeouts") == "prod alert [app_error]: 20 Postgres statement timeouts"
+    assert ib.backlog_labels("prod alert [app_error]: x") == "fleet:backlog,fleet:priority-high,lane:devops"
+    assert ib.backlog_labels("claim page blank") == "fleet:backlog"
     calls, replies = [], []
     class R:  # a fake subprocess result
         def __init__(self, out): self.returncode, self.stdout, self.stderr = 0, out, ""
     def run(cmd):
         calls.append(cmd)
+        if cmd[:3] == ["gh", "issue", "list"]:
+            # one open twin exists only for the prod-alert title, so the repeat becomes a comment
+            return R('[{"number": 7, "title": "prod alert [app_error]: 20 timeouts", "url": "https://github.com/o/r/issues/7"}]'
+                     if "prod alert" in cmd[cmd.index("--search") + 1] else "[]\n")
         return R("https://github.com/o/r/issues/99\n" if cmd[0] == "gh" else "ask 17 answered\n")
     def reply(to, subject, text, in_reply_to=None): replies.append((to, subject, text, in_reply_to))
     with tempfile.TemporaryDirectory() as tmp:
@@ -4892,10 +4903,16 @@ def _email_reply_answers_asks_and_files_backlog_without_a_model():
         row = ib.store({"id": "e2", "from": "reif@philanthropy.org", "subject": "backlog: claim button dead on phone",
                         "text": "tap does nothing on iOS", "message_id": "<m2>"}, {})
         res = ib.apply(row, run=run, reply=reply)
-        gh = [c for c in calls if c[0] == "gh"][0]
+        gh = [c for c in calls if c[:3] == ["gh", "issue", "create"]][0]
         assert gh[:6] == ["gh", "issue", "create", "--repo", "o/r", "--label"] and "fleet:backlog" in gh, gh
         assert gh[gh.index("--title") + 1] == "claim button dead on phone" and "tap does nothing" in gh[gh.index("--body") + 1], gh
         assert res["done"] and "issues/99" in replies[-1][2], (res, replies)
+        row = ib.store({"id": "e2b", "from": "hello@philanthropy.org", "subject": "990 Scout prod alert [app_error]: 20 timeouts",
+                        "text": "20 Postgres statement timeouts", "message_id": "<m2b>"}, {})
+        res = ib.apply(row, run=run, reply=reply)
+        assert calls[-1][:3] == ["gh", "issue", "comment"] and calls[-1][5] == "7" and "Fired again" in calls[-1][-1], calls[-1]
+        assert res["done"] and "issues/7" in replies[-1][2], (res, replies)
+        assert not any(c[:3] == ["gh", "issue", "create"] and "prod alert" in c[c.index("--title") + 1] for c in calls), "an open twin must not be filed again"
         row = ib.store({"id": "e3", "from": "reif@philanthropy.org", "subject": "Re: brief",
                         "text": "no 4: too soon\nAlso stop the person page.", "message_id": "<m3>"}, {})
         res = ib.apply(row, run=run, reply=reply)

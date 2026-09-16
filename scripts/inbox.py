@@ -170,13 +170,28 @@ def parse_reply(text: str) -> dict:
 
 # ---------------------------------------------------------------- apply (fk#1056)
 
-BACKLOG_RE = re.compile(r"^\s*(?:(?:re|fwd?)\s*:\s*)*backlog\s*:\s*(.+?)\s*$", re.I)
+BACKLOG_RE = re.compile(r"^\s*(?:(?:re|fwd?|fw)\s*:\s*)*backlog\s*:\s*(.+?)\s*$", re.I)
+# A forward from an allowlisted sender is a backlog item by definition (Reif 2026-09-16: "do we
+# have an email yet that I can forward things to that goes to the backlog") -- nobody forwards
+# a mail to the fleet to chat. A prod alert from the box's own pager (page.py) is the same
+# thing filed by a machine: title keeps the check name, and it lands priority-high on devops.
+FORWARD_RE = re.compile(r"^\s*(?:(?:re)\s*:\s*)*(?:fwd?|fw)\s*:\s*(.+?)\s*$", re.I)
+PROD_ALERT_RE = re.compile(r"^\s*(?:(?:re|fwd?|fw)\s*:\s*)*990 scout prod alert\s*(\[[^\]]+\]\s*:.+?)\s*$", re.I)
 
 
 def backlog_title(subject: str) -> str | None:
-    """'backlog: fix the claim button' -> 'fix the claim button'; anything else -> None."""
-    m = BACKLOG_RE.match(subject or "")
-    return m.group(1) if m else None
+    """'backlog: fix the claim button' -> 'fix the claim button'; 'Fwd: anything' -> 'anything';
+    '990 Scout prod alert [app_error]: 20 timeouts' -> 'prod alert [app_error]: 20 timeouts';
+    anything else -> None."""
+    for rx, prefix in ((BACKLOG_RE, ""), (PROD_ALERT_RE, "prod alert "), (FORWARD_RE, "")):
+        m = rx.match(subject or "")
+        if m:
+            return prefix + m.group(1)
+    return None
+
+
+def backlog_labels(title: str) -> str:
+    return "fleet:backlog,fleet:priority-high,lane:devops" if title.startswith("prod alert [") else "fleet:backlog"
 
 
 def repo_slug() -> str:
@@ -207,7 +222,20 @@ def file_backlog(title: str, body: str, sender: str, run=None) -> str:
     if not slug:
         raise RuntimeError("FLEET_REPO_URL does not name a GitHub repo")
     text = (body or "").strip() or title
-    r = run(["gh", "issue", "create", "--repo", slug, "--label", "fleet:backlog",
+    # Dedupe by exact open title: a pager that fires hourly must not file hourly. The repeat
+    # becomes a comment on the open item (so the count is visible), never a twin.
+    r = run(["gh", "issue", "list", "--repo", slug, "--state", "open", "--search", f'"{title}" in:title',
+             "--json", "number,title,url", "--limit", "20"])
+    if r.returncode == 0:
+        try:
+            for it in json.loads(r.stdout or "[]"):
+                if (it.get("title") or "").strip().lower() == title.strip().lower():
+                    run(["gh", "issue", "comment", "--repo", slug, str(it["number"]),
+                         "--body", f"Fired again by email from {sender}:\n\n{text[:1500]}"])
+                    return it.get("url") or f"https://github.com/{slug}/issues/{it['number']}"
+        except (json.JSONDecodeError, KeyError, TypeError):
+            pass
+    r = run(["gh", "issue", "create", "--repo", slug, "--label", backlog_labels(title),
              "--title", title, "--body", f"{text}\n\nFiled by email from {sender} (fk#1056)."])
     if r.returncode != 0:
         raise RuntimeError((r.stderr or r.stdout).strip()[:300])
