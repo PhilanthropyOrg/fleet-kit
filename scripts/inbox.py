@@ -126,11 +126,32 @@ def html_to_text(h: str) -> str:
     return html_mod.unescape(t)
 
 
-def store(email: dict, event: dict) -> dict:
+UNTRUSTED_PER_HOUR = int(os.environ.get("FLEET_INBOX_UNTRUSTED_PER_HOUR") or 20)
+
+
+def untrusted_budget_ok(now: float | None = None) -> bool:
+    """At most UNTRUSTED_PER_HOUR untrusted mails stored per hour; the rest are dropped."""
+    now = now or time.time()
+    n = 0
+    try:
+        for line in INBOX.read_text().splitlines()[-2000:]:
+            try:
+                r = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if r.get("trusted") is False and (r.get("received_at") or 0) > now - 3600:
+                n += 1
+    except OSError:
+        pass
+    return n < UNTRUSTED_PER_HOUR
+
+
+def store(email: dict, event: dict, trusted: bool = True) -> dict:
     text = email.get("text") or html_to_text(email.get("html") or "")
     row = {
         "id": email.get("id") or event.get("email_id"),
         "received_at": time.time(),
+        "trusted": bool(trusted),
         "from": email.get("from") or event.get("from"),
         "subject": email.get("subject") or event.get("subject"),
         "text": strip_quotes(text),
@@ -269,6 +290,11 @@ def apply(row: dict, run=None, reply=None) -> dict:
     """The no-model half of one stored reply. Returns {"lines": [...], "free_text": str,
     "done": bool}: done means nothing is left for the messenger and the row is marked."""
     reply = reply or send_reply
+    if row.get("trusted") is False:
+        # Not Reif: no ask gets answered and nothing is filed by rule. The messenger reads it
+        # (garbage -> `inbox.py done`, real -> it files with the sender named) and no receipt
+        # goes back, so a stranger learns nothing about the fleet from mailing it.
+        return {"lines": [], "free_text": row.get("text") or "", "done": False}
     parsed = parse_reply(row.get("text") or "")
     lines = answer_asks(parsed["answers"], run=run)
     free = parsed["free_text"]
