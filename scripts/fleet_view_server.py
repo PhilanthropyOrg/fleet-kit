@@ -296,7 +296,7 @@ def refresh_backlog_history_forever(interval_s: float = 60.0):
 # is: this is the ONLY set of keys /api/fleet_settings may write. Never widen to "any key".
 DIAL_FIELDS = [
     "FLEET_SHARE_FRACTION", "FLEET_GRU_ALLOWANCE_FRACTION", "FLEET_GRU_CADENCE",
-    "FLEET_DATTA_CADENCE", "FLEET_VP_DUE_CADENCE",
+    "FLEET_DATTA_CADENCE", "FLEET_MARIE_CADENCE", "FLEET_VP_DUE_CADENCE",
     "FLEET_CADENCE_BUILD", "FLEET_CADENCE_REVIEW", "FLEET_CADENCE_GITPULL",
     "FLEET_BUILDER_MODEL", "FLEET_CODE_REVIEW_MODEL",
     "FLEET_QUEUE_CAP", "FLEET_MAX_BUDGET_USD", "FLEET_DATTA_MAX_NERDS_PER_PASS",
@@ -332,7 +332,7 @@ _SHELL_METACHARS = set("$`;&|\n\r\\\"'<>(){}")
 # never read by entrypoint.sh or any container cron line. Validating them as a cron hour
 # field (0-23) would reject their own documented default of 3600. Validate each family by
 # what actually consumes it, not by name resemblance.
-_CRON_HOUR_FIELDS = {"FLEET_GRU_CADENCE", "FLEET_DATTA_CADENCE"}
+_CRON_HOUR_FIELDS = {"FLEET_GRU_CADENCE", "FLEET_DATTA_CADENCE", "FLEET_MARIE_CADENCE"}
 # FLEET_VP_DUE_CADENCE is spliced into the MINUTE position, not the hour one
 # (entrypoint.sh: `${FLEET_VP_DUE_CADENCE:-*/15} * * * *`), so it must be validated 0-59.
 # Validating it as an hour field would reject its own default of */15. This is the same
