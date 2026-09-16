@@ -97,10 +97,10 @@ older KR1/KR2/KR3 numbering, and the 100,000-entities goal it belonged to, were 
 - `## Today's project (4 hours)` -- ONE project, chosen from `plan_bets` in order: the first
   bet whose next step needs a human. **If `plan_bets` starts with the literal marker `no plan
   file at <path> yet`, print that first line verbatim, then print its second line (what would
-  create the file and what it's waiting on -- fk#559 VP review round 2 fix 3) as its own
-  sentence, and stop -- never invent a project from PRs or open issues instead (round 1 fix 4).
-  Reif needs to tell "no plan exists yet, here's the blocker" apart from "the brief is broken
-  and picked nothing."** Otherwise write it as:
+  create the file and what it's waiting on) as its own sentence, and stop -- never invent a
+  project from PRs or open issues instead (fk#559). Reif needs to tell "no plan exists yet,
+  here's the blocker" apart from "the brief is broken and picked nothing."** Otherwise write
+  it as:
   - **The outcome, in his words.** One sentence: what will be true at 5pm.
   - **Why this, today.** Two sentences, plain, naming the row it moves.
   - **Where to look.** A URL for every input. Use `pages` (the product's own admin pages)
