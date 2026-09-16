@@ -206,6 +206,10 @@ Vision-link: <only if your member's report.vision_link is "required" in its .fle
               a channel — or `none (maintenance)` when this instance carries no number or the
               work doesn't move one. See `scripts/vision_link_gate.py`.>
 Self-critique: <see §11 below>
+Lesson: <one line the NEXT member to run should know that it could not have known before
+         this run, or `none`. It lands in HANDOFF.md, which every pass reads first.>
+Broken: <a fleet instrument that did not work this run (a meter, a reader, a gate, a
+         check) named plainly, or `none`. handoff.py files one owner issue per name.>
 ```
 
 A pass with genuinely nothing to report writes `Outcome: QUIET` plus a real `Evidence:` line

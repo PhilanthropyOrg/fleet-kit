@@ -375,6 +375,9 @@ case "${1:-cron-foreground}" in
       # nerd pass stumbled onto it. Hourly at :57 is unclaimed on the minute map above and
       # comfortably inside the default 4h staleness budget (FLEET_DEPLOY_STALENESS_BUDGET_S).
       echo "57 * * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/deploy_staleness_check.sh >> $LOG_DIR/deploy_staleness_check.log 2>&1"
+      # handoff.py file-broken: every `Broken:` line a member wrote in 24h becomes one owner issue
+      # in the fleet-kit repo (idempotent). fleet.env is sourced FIRST, then exports (gh#716 guard).
+      echo "41 * * * * root [ -f \"\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}\" ] && { set -a; . \"\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}\"; set +a; }; export GH_TOKEN=\$(cat $TOKEN_FILE) FLEET_LOG_DIR=$LOG_DIR; python3 /fleet-kit/scripts/handoff.py file-broken >> $LOG_DIR/handoff.log 2>&1"
       # vp_due.sh: spawn a VP review for each due item whose newest merged PR is newer than
       # its newest VP verdict (members/vp/vp.md). Deterministic on purpose -- gru is a
       # prompt and did not spawn vp for 2.5h after a redo merged (2026-09-08).

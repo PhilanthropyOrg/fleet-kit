@@ -599,6 +599,18 @@ fi
 # Extracted from agents/persona_law.md §10b at RUN TIME (not copy-pasted here) so there is
 # exactly one source of truth for the exact wording -- editing that doc's §10b changes what
 # every member is told, with no second copy to fall out of sync.
+# The handoff (Reif 2026-09-16: "the next run should be informed by the last set of runs, so
+# the team self learns"): regenerated from runs.jsonl right now (deterministic, <1s) and put
+# FIRST in the prompt, before the charter, so a member starts from what the team just learned.
+HANDOFF_FILE="$LOG_DIR/HANDOFF.md"
+if [ "${FLEET_HANDOFF:-1}" = "1" ] && FLEET_LOG_DIR="$LOG_DIR" python3 "$KIT_DIR/scripts/handoff.py" write --no-gh >/dev/null 2>>"$LOG" && [ -s "$HANDOFF_FILE" ]; then
+  PROMPT="$(head -c 6000 "$HANDOFF_FILE")
+
+---
+
+$PROMPT"
+fi
+
 REPORT_CONTRACT=$(awk '/^## 10b\./{f=1} f{print} /^## 11\./{exit}' "$KIT_DIR/agents/persona_law.md" | sed '$d')
 if [ -n "$REPORT_CONTRACT" ]; then
   PROMPT="$PROMPT
