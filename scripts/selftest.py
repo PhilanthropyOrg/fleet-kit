@@ -4909,6 +4909,33 @@ def _email_reply_answers_asks_and_files_backlog_without_a_model():
     assert 'f"fleet ask #{ask_id} from {member}"' in ask and "Reply to this email with one line" in ask, "ask mail does not say how to reply"
 
 
+def _run_record_carries_plain_words_when_opted_in():
+    """Reif, 2026-09-16: "this needs to be in plain english and run on haiku". run_report's
+    record carries `plain` (run_mail.plain_words, haiku, $0.05 cap) when FLEET_RUN_PLAIN=1 and
+    the run said something; off by default, never for a quiet/skipped run; the drawer shows
+    it first."""
+    import importlib.util, os
+    spec = importlib.util.spec_from_file_location("run_report", ROOT / "scripts" / "run_report.py")
+    rr = importlib.util.module_from_spec(spec); spec.loader.exec_module(rr)
+    import run_mail
+    calls = []
+    orig = run_mail.plain_words
+    run_mail.plain_words = lambda rec: (calls.append(rec) or "Shipped the fix. Nothing to do.")
+    try:
+        rec = {"member": "gru", "status": "ok", "report": "BOTTOM LINE: shipped", "outcome": "PR #1"}
+        os.environ.pop("FLEET_RUN_PLAIN", None)
+        assert rr.plain_words_for(rec) == "" and not calls, "must be off by default"
+        os.environ["FLEET_RUN_PLAIN"] = "1"
+        assert rr.plain_words_for(rec) == "Shipped the fix. Nothing to do." and len(calls) == 1
+        assert rr.plain_words_for({"member": "gru", "status": "quiet", "report": "x"}) == "" and len(calls) == 1, "quiet runs never pay for a rewrite"
+        assert rr.plain_words_for({"member": "gru", "status": "ok"}) == "" and len(calls) == 1, "nothing said, nothing to rewrite"
+    finally:
+        run_mail.plain_words = orig
+        os.environ.pop("FLEET_RUN_PLAIN", None)
+    src = (ROOT / "scripts" / "run_report.py").read_text()
+    assert src.index("plain = plain_words_for(rec)") < src.rindex("print(json.dumps(rec))"), "plain must land on the record before it is printed"
+    html = (ROOT / "scripts" / "fleet_home.html").read_text()
+    assert html.index("section('In plain words', rec.plain") < html.index("section('Outcome', rec.outcome)"), "drawer shows plain words first"
 def _the_fixer_fires_only_for_the_default_branch():
     """fk#1055: the webhook receiver launches the-fixer for a failed CI run on main, not for
     a PR branch or a merge-queue batch (those fired ~20 paid passes an hour on dino)."""
@@ -5392,9 +5419,13 @@ def _console_run_panel_shows_everything_about_one_run_fk748():
     # are the behaviours, not the old whitespace.
     for needle in ('id="side"', 'id="sideBack"', 'width:33.333vw', '.side{width:100vw',
                    'data-run=', 'no written report for this run', '/api/pass_log', "e.key === 'Escape'",
-                   "section('Outcome', rec.outcome)", "section('Evidence', rec.evidence)", "section('Self-critique'",
-                   '<span class="role-label">Purpose</span>'):  # Reif 2026-09-09: "not clear that this is marie's purpose line"
+                   "section('Outcome', rec.outcome)", "section('Evidence', rec.evidence)", "section('Self-critique'"):
         assert needle in page, f"fleet_home.html lacks {needle!r}"
+    # Reif 2026-09-09 "not clear that this is marie's purpose line" put a labelled Purpose block in
+    # the drawer; Reif 2026-09-16 "purpose is doubled unnecessarily" -- the row under the name
+    # already says it, so the drawer no longer repeats it (fk#1077).
+    assert '<span class="role-label">Purpose</span>' not in page, "the agents drawer repeats the purpose line"
+    assert '<div class="role">${esc(m.spec.plain' in page, "the row must still carry the plain-language role"
     assert len(page.encode()) < 48_000, "the console must stay small"
     import run_report
     sh = run_report.build_record(member="roomba", run_id="r", kind="shell", exit_code=0,
@@ -15400,6 +15431,7 @@ if __name__ == "__main__":
     check("replying to the brief steers the fleet: svix, allowlist, parser, ledger, route, Reply-To (fk#669)", _reply_to_the_brief_steers_the_fleet)
     check("a reply answers asks and a backlog: mail files an issue, no model in the way (fk#1056)", _email_reply_answers_asks_and_files_backlog_without_a_model)
     check("reif_eyes files what Reif would have pointed out: churn, stale asks, dark tiles, jargon; idempotent; cron", _reif_eyes_files_what_reif_would_have_pointed_out)
+    check("a finished run carries its plain-English words for the console, haiku, opt-in", _run_record_carries_plain_words_when_opted_in)
     check("an open ask also lands on the board so an agent picks it up (opt-in, idempotent)", _an_open_ask_also_lands_on_the_board_for_an_agent)
     check("the-fixer fires only for a red run on the default branch (fk#1055)", _the_fixer_fires_only_for_the_default_branch)
     check("closes gate blocks a partial or docs-only PR from closing an issue (fk#629)", _closes_gate_blocks_a_partial_or_docs_only_pr_from_closing_an_issue)
