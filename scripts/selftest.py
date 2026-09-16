@@ -4952,6 +4952,61 @@ def _the_fixer_fires_only_for_the_default_branch():
     assert src.index("fire, why = should_fire(payload)") < src.index('_launch_member("the-fixer")'), "receiver must consult should_fire before launching"
 
 
+def _reif_eyes_files_what_reif_would_have_pointed_out():
+    """Reif, 2026-09-16: "I shouldnt be asking for it, something should be thinking about these
+    things itself." Each check reproduces one complaint from that day on synthetic data; the
+    filer is idempotent (state within 7 days, or an identical open title); the cron line exists."""
+    import importlib.util, os
+    spec = importlib.util.spec_from_file_location("reif_eyes", ROOT / "scripts" / "reif_eyes.py")
+    re_ = importlib.util.module_from_spec(spec); spec.loader.exec_module(re_)
+    now = 1_800_000_000.0
+    runs = ([{"member": "the-fixer", "status": "started", "ts": now - 100}] * 40
+            + [{"member": "the-fixer", "status": "dispatch_skipped", "ts": now - 100}] * 30
+            + [{"member": "the-fixer", "status": "ok", "ts": now - 100}] * 5
+            + [{"member": "marie", "status": "started", "ts": now - 100}] * 6 + [{"member": "marie", "status": "ok", "ts": now - 100}] * 6
+            + [{"member": "gru", "status": "ok", "ts": now - 100, "report": "BOTTOM LINE"}] * 4)
+    churn = re_.check_churn(runs, now)
+    assert [f["key"] for f in churn] == ["churn:the-fixer"], churn
+    assert "40 starts, 5 ok, 30 dispatch-skipped" in churn[0]["title"]
+    asks = [{"id": 14, "member": "gru", "class": "infra", "status": "open", "filed_at": now - 13 * 3600, "why": "maxx blind"},
+            {"id": 7, "member": "sentry", "class": "credential", "status": "open", "filed_at": now - 63 * 3600, "why": "missing FIXTURE_EIN\nmore"},
+            {"id": 9, "member": "sentry", "class": "credential", "status": "open", "filed_at": now - 63 * 3600, "why": "alice"},
+            {"id": 3, "member": "x", "status": "answered", "filed_at": now - 99 * 3600, "why": "old"}]
+    stale = re_.check_ask_stale(asks, ["ask #9 (credential): alice"], now)
+    assert [f["key"] for f in stale] == ["ask-stale:7"], stale
+    assert stale[0]["title"] == "ask #7 (credential): missing FIXTURE_EIN" and "63h" in stale[0]["body"]
+    reg = [{"id": "fleet.backlog_open", "label": "Backlog", "history": "daily", "source": "gh"},
+           {"id": "gh.actions_spend_mtd", "label": "GitHub Actions", "history": "native"},
+           {"id": "okr.verified_claims", "label": "The number", "history": "daily"}]
+    old_day = time.strftime("%Y-%m-%d", time.localtime(now - 3 * 86400))
+    metrics = {"fleet.backlog_open": {"value": 92, "series": [{"day": old_day, "value": 92}]},
+               "gh.actions_spend_mtd": {"value": None, "sub": "no org", "series": []},
+               "okr.verified_claims": {"value": None, "sub": "unreadable: KeyError", "series": []}}
+    dark = re_.check_tile_dark(metrics, reg, now)
+    assert sorted(f["key"] for f in dark) == ["tile-dark:fleet.backlog_open", "tile-dark:okr.verified_claims"], dark
+    os.environ["FLEET_RUN_PLAIN"] = "1"
+    try:
+        assert [f["key"] for f in re_.check_no_plain(runs, now)] == ["no-plain:gru"]
+        runs2 = [dict(r, plain="ok words") for r in runs]
+        assert re_.check_no_plain(runs2, now) == []
+    finally:
+        os.environ.pop("FLEET_RUN_PLAIN", None)
+    assert re_.check_no_plain(runs, now) == [], "off unless FLEET_RUN_PLAIN=1"
+    calls = []
+    class R:
+        def __init__(self, out, rc=0): self.stdout, self.returncode, self.stderr = out, rc, ""
+    run = lambda cmd: (calls.append(cmd) or R("https://github.com/o/r/issues/5\n"))
+    state = {}
+    urls = re_.file_findings(churn + stale, "o/r", state, ["ask #7 (credential): missing FIXTURE_EIN"], run=run, now=now)
+    assert urls == ["https://github.com/o/r/issues/5"] and [c[2] for c in calls] == ["create"], (urls, calls)
+    assert calls[0][calls[0].index("--label") + 1] == "fleet:backlog,fleet:priority-high,lane:fleet"
+    assert "reif-eyes:churn:the-fixer" in calls[0][calls[0].index("--body") + 1]
+    assert state["ask-stale:7"]["url"] == "(already open)"
+    calls.clear()
+    assert re_.file_findings(churn, "o/r", state, [], run=run, now=now + 3600) == [] and not calls, "a key filed this week is not filed twice"
+    assert re_.file_findings(churn, "o/r", state, [], run=run, now=now + 8 * 86400) == ["https://github.com/o/r/issues/5"], "after 7 days it may be filed again"
+    ep = (ROOT / "entrypoint.sh").read_text()
+    assert "python3 /fleet-kit/scripts/reif_eyes.py >> $LOG_DIR/reif_eyes.log" in ep, "no cron line for reif_eyes.py"
 def _an_open_ask_also_lands_on_the_board_for_an_agent():
     """Reif, 2026-09-16: "if something is broken like this - I want to make darn sure that
     another agent picks it up." ask.py files one fleet:backlog issue per open ask (opt-in,
@@ -15407,6 +15462,7 @@ if __name__ == "__main__":
     check("replying to the brief steers the fleet: svix, allowlist, parser, ledger, route, Reply-To (fk#669)", _reply_to_the_brief_steers_the_fleet)
     check("a reply answers asks and a backlog: mail files an issue, no model in the way (fk#1056)", _email_reply_answers_asks_and_files_backlog_without_a_model)
     check("tiles backfill their history from the source dates, once, observed rows win (fk#1084)", _tiles_backfill_their_history_from_the_source_dates)
+    check("reif_eyes files what Reif would have pointed out: churn, stale asks, dark tiles, jargon; idempotent; cron", _reif_eyes_files_what_reif_would_have_pointed_out)
     check("a finished run carries its plain-English words for the console, haiku, opt-in", _run_record_carries_plain_words_when_opted_in)
     check("an open ask also lands on the board so an agent picks it up (opt-in, idempotent)", _an_open_ask_also_lands_on_the_board_for_an_agent)
     check("the-fixer fires only for a red run on the default branch (fk#1055)", _the_fixer_fires_only_for_the_default_branch)
