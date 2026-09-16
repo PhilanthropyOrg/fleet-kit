@@ -1115,3 +1115,59 @@ class FleetConsoleActivityRowSelectorTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class QaSessionSignInTest(unittest.TestCase):
+    """fleet-kit#1033: a test user is an email + QA_SESSION_TOKEN; the venture mints a magic
+    link. Mutation: revert TestUsers/qa_session_url and these fail."""
+
+    @classmethod
+    def setUpClass(cls):
+        import socket
+        cls.calls = []
+
+        class _Handler(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *a):  # quiet
+                pass
+
+            def do_POST(self):
+                n = int(self.headers.get("Content-Length", "0"))
+                body = json.loads(self.rfile.read(n) or b"{}")
+                cls.calls.append((self.path, self.headers.get("X-QA-Token"), body))
+                if self.headers.get("X-QA-Token") != "tok":
+                    self.send_response(401); self.end_headers(); return
+                out = json.dumps({"url": f"https://philanthropy.org/990/auth/magic?token=t-{body['user']}",
+                                  "email": f"{body['user']}@990scout-qa.local"}).encode()
+                self.send_response(200); self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(out))); self.end_headers(); self.wfile.write(out)
+
+        with socket.socket() as s:
+            s.bind(("127.0.0.1", 0)); cls.port = s.getsockname()[1]
+        cls.httpd = http.server.ThreadingHTTPServer(("127.0.0.1", cls.port), _Handler)
+        threading.Thread(target=cls.httpd.serve_forever, daemon=True).start()
+        cls.base = f"http://127.0.0.1:{cls.port}"
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.httpd.shutdown()
+
+    def test_email_plus_token_is_a_test_user_and_password_is_optional(self):
+        users = jw.TestUsers(env={"ALICE_EMAIL": "a@x", "QA_SESSION_TOKEN": "tok"})
+        self.assertEqual(users.users["alice"], {"name": "alice", "email": "a@x", "password": None})
+        users.require_users("alice")
+        with self.assertRaises(jw.Blocked):
+            jw.TestUsers(env={"ALICE_EMAIL": "a@x"}).require_users("alice")
+
+    def test_qa_session_url_posts_the_user_and_returns_the_link(self):
+        users = jw.TestUsers(env={"BOB_EMAIL": "b@x", "QA_SESSION_TOKEN": "tok",
+                                  "PHILANTHROPY_BASE_URL": self.base})
+        url = jw.qa_session_url(users, users.users["bob"], "/990/x")
+        self.assertEqual(url, "https://philanthropy.org/990/auth/magic?token=t-bob")
+        path, token, body = self.calls[-1]
+        self.assertEqual((path, token, body), ("/990/api/qa/session", "tok", {"user": "bob", "next": "/990/x"}))
+
+    def test_wrong_token_is_blocked_not_broken(self):
+        users = jw.TestUsers(env={"BOB_EMAIL": "b@x", "QA_SESSION_TOKEN": "wrong",
+                                  "PHILANTHROPY_BASE_URL": self.base})
+        with self.assertRaises(jw.Blocked):
+            jw.qa_session_url(users, users.users["bob"])

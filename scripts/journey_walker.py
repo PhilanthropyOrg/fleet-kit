@@ -29,7 +29,8 @@ lacks a credential, not that the product broke):
                           assumption (the #4507 audit precedent this issue cites lives in the
                           product repo, not here, so the real mechanism was not visible to
                           build against) -- change BYPASS_HEADER in one place if it differs.
-  ALICE_EMAIL / ALICE_PASSWORD, BOB_EMAIL / BOB_PASSWORD  -- test user credentials.
+  ALICE_EMAIL, BOB_EMAIL + QA_SESSION_TOKEN (or *_PASSWORD for a venture with a sign-in
+  form)  -- test users; the product mints a magic link, fleet-kit#1033.
   FIXTURE_EIN             a known EIN with a filed 990, for open-990-report and the claim flow.
   FIXTURE_CLAIMED_ORG_URL path (relative to PHILANTHROPY_BASE_URL) of an org admin/settings
                           page alice can administer, for the Verified Org checkout journey.
@@ -176,11 +177,16 @@ class TestUsers:
             "FLEET_CONSOLE_URL",
             f"https://dino.luckymachines.co/fleet/{plan_rank.resolve_instance()}",
         )
+        # fleet-kit#1033: the product has no password sign-in (magic link + Google only), so a
+        # test user is an email plus the shared QA_SESSION_TOKEN; POST /990/api/qa/session
+        # returns a magic-link URL the walker opens. A password, if present, is still honoured
+        # for a venture whose sign-in is a form.
+        self.qa_session_token = env.get("QA_SESSION_TOKEN")
         self.users = {}
         for name in ("alice", "bob"):
             email, password = env.get(f"{name.upper()}_EMAIL"), env.get(f"{name.upper()}_PASSWORD")
-            if email and password:
-                self.users[name] = {"email": email, "password": password}
+            if email and (password or self.qa_session_token):
+                self.users[name] = {"name": name, "email": email, "password": password}
 
     def require_users(self, *names) -> None:
         missing = [n for n in names if n not in self.users]
@@ -214,6 +220,42 @@ def email_field(page):
 
 def password_field(page):
     return page.get_by_label(re.compile("password", re.I))
+
+
+def qa_session_url(users: "TestUsers", creds: dict, next_path: str = "/990") -> str:
+    """Ask the venture for a sign-in link for this QA user (POST /990/api/qa/session, guarded
+    by X-QA-Token). A 404 means the box has no QA_SESSION_TOKEN configured and is BLOCKED,
+    not broken; anything else non-200 is the product's fault."""
+    import urllib.error
+    import urllib.request
+
+    req = urllib.request.Request(
+        users.url("https://philanthropy.org/990/api/qa/session"),
+        data=json.dumps({"user": creds["name"], "next": next_path}).encode(),
+        headers={"Content-Type": "application/json", "X-QA-Token": users.qa_session_token or "",
+                 **({"x-atlas-test": users.bypass} if users.bypass else {})},
+        method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            return json.loads(resp.read().decode())["url"]
+    except urllib.error.HTTPError as exc:
+        if exc.code in (401, 404):
+            raise Blocked(f"QA session endpoint answered {exc.code}: QA_SESSION_TOKEN missing or not installed on the venture") from exc
+        raise
+
+
+def sign_in(page, users: "TestUsers", creds: dict) -> None:
+    """Sign `page` in as `creds`. Magic link via the QA session endpoint when the user has no
+    password; the email+password form otherwise. Ends with the browser off /login."""
+    if not creds.get("password"):
+        page.goto(users.url(qa_session_url(users, creds)), timeout=15000)
+        wait_path_no_longer_contains(page, "/auth/magic", timeout=10000)
+        return
+    page.goto(users.url("https://philanthropy.org/login"), timeout=15000)
+    email_field(page).first.fill(creds["email"])
+    password_field(page).first.fill(creds["password"])
+    submit_button(page).first.click()
+    wait_path_no_longer_contains(page, "/login", timeout=10000)
 
 
 def submit_button(page, pattern=r"sign in|log in|submit"):
@@ -412,17 +454,16 @@ def run_sign_in(ctx: JourneyCtx):
     def s0():
         page.goto(users.url("https://philanthropy.org/login"), timeout=15000)
         expect_visible(email_field(page))
-        expect_visible(password_field(page))
+        if alice.get("password"):
+            expect_visible(password_field(page))
         expect_visible(submit_button(page))
 
     if not ctx.step(0, s0, page):
         return
 
     def s1():
-        email_field(page).first.fill(alice["email"])
-        password_field(page).first.fill(alice["password"])
-        submit_button(page).first.click()
-        wait_path_no_longer_contains(page, "/login", timeout=10000)
+        sign_in(page, users, alice)
+        assert "/login" not in page.url
 
     if not ctx.step(1, s1, page):
         return
@@ -580,11 +621,7 @@ def run_claim_org_through_verify_screen(ctx: JourneyCtx):
     page = ctx.page("alice")
 
     def sign_in_alice():
-        page.goto(users.url("https://philanthropy.org/login"), timeout=15000)
-        email_field(page).first.fill(alice["email"])
-        password_field(page).first.fill(alice["password"])
-        submit_button(page).first.click()
-        wait_path_no_longer_contains(page, "/login", timeout=10000)
+        sign_in(page, users, alice)
 
     def s0():
         sign_in_alice()
@@ -650,15 +687,8 @@ def run_message_send_and_read_receipt(ctx: JourneyCtx):
     alice_page, bob_page = ctx.page("alice"), ctx.page("bob")
     marker = f"sentry-{ctx.run_id}-{int(time.time())}"
 
-    def sign_in(page, creds):
-        page.goto(users.url("https://philanthropy.org/login"), timeout=15000)
-        email_field(page).first.fill(creds["email"])
-        password_field(page).first.fill(creds["password"])
-        submit_button(page).first.click()
-        wait_path_no_longer_contains(page, "/login", timeout=10000)
-
     def s0():
-        sign_in(alice_page, users.users["alice"])
+        sign_in(alice_page, users, users.users["alice"])
         composer = alice_page.get_by_role("textbox")
         composer.first.fill(marker)
         alice_page.get_by_role("button", name=re.compile("send", re.I)).first.click()
@@ -668,7 +698,7 @@ def run_message_send_and_read_receipt(ctx: JourneyCtx):
         return
 
     def s1():
-        sign_in(bob_page, users.users["bob"])
+        sign_in(bob_page, users, users.users["bob"])
         bob_page.reload()
         wait_text_matches(bob_page, re.escape(marker), timeout=30000)
 
@@ -720,15 +750,8 @@ def run_typing_indicator(ctx: JourneyCtx):
     users.require_users("alice", "bob")
     alice_page, bob_page = ctx.page("alice"), ctx.page("bob")
 
-    def sign_in(page, creds):
-        page.goto(users.url("https://philanthropy.org/login"), timeout=15000)
-        email_field(page).first.fill(creds["email"])
-        password_field(page).first.fill(creds["password"])
-        submit_button(page).first.click()
-        wait_path_no_longer_contains(page, "/login", timeout=10000)
-
-    sign_in(alice_page, users.users["alice"])
-    sign_in(bob_page, users.users["bob"])
+    sign_in(alice_page, users, users.users["alice"])
+    sign_in(bob_page, users, users.users["bob"])
 
     def s0():
         alice_page.get_by_role("textbox").first.type("typing...", delay=50)
