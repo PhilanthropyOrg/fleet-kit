@@ -375,17 +375,14 @@ case "${1:-cron-foreground}" in
       # nerd pass stumbled onto it. Hourly at :57 is unclaimed on the minute map above and
       # comfortably inside the default 4h staleness budget (FLEET_DEPLOY_STALENESS_BUDGET_S).
       echo "57 * * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/deploy_staleness_check.sh >> $LOG_DIR/deploy_staleness_check.log 2>&1"
-<<<<<<< HEAD
       # handoff.py file-broken: every `Broken:` line a member wrote in 24h becomes one owner issue
       # in the fleet-kit repo (idempotent). fleet.env is sourced FIRST, then exports (gh#716 guard).
       echo "41 * * * * root [ -f \"\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}\" ] && { set -a; . \"\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}\"; set +a; }; export GH_TOKEN=\$(cat $TOKEN_FILE) FLEET_LOG_DIR=$LOG_DIR; python3 /fleet-kit/scripts/handoff.py file-broken >> $LOG_DIR/handoff.log 2>&1"
-=======
       # reif_eyes.py: looks at the console the way Reif does, hourly, and files what he would
       # (churn, stale asks, dark tiles, jargon reports). Deterministic, no model. Sources fleet.env
       # for FLEET_REPO_URL / FLEET_RUN_PLAIN FIRST, then exports this container's own view port
       # (gh#716: a port exported before the source gets clobbered by fleet.env's default).
       echo "38 * * * * root [ -f \"\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}\" ] && { set -a; . \"\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}\"; set +a; }; export GH_TOKEN=\$(cat $TOKEN_FILE) FLEET_LOG_DIR=$LOG_DIR FLEET_VIEW_PORT=${FLEET_VIEW_PORT:-8420}; python3 /fleet-kit/scripts/reif_eyes.py >> $LOG_DIR/reif_eyes.log 2>&1"
->>>>>>> origin/main
       # vp_due.sh: spawn a VP review for each due item whose newest merged PR is newer than
       # its newest VP verdict (members/vp/vp.md). Deterministic on purpose -- gru is a
       # prompt and did not spawn vp for 2.5h after a redo merged (2026-09-08).
