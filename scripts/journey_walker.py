@@ -251,7 +251,7 @@ def sign_in(page, users: "TestUsers", creds: dict) -> None:
         page.goto(users.url(qa_session_url(users, creds)), timeout=15000)
         wait_path_no_longer_contains(page, "/auth/magic", timeout=10000)
         return
-    page.goto(users.url("https://philanthropy.org/login"), timeout=15000)
+    page.goto(users.url("https://philanthropy.org/990/login"), timeout=15000)
     email_field(page).first.fill(creds["email"])
     password_field(page).first.fill(creds["password"])
     submit_button(page).first.click()
@@ -452,7 +452,7 @@ def run_sign_in(ctx: JourneyCtx):
     page = ctx.page("alice")
 
     def s0():
-        page.goto(users.url("https://philanthropy.org/login"), timeout=15000)
+        page.goto(users.url("https://philanthropy.org/990/login"), timeout=15000)
         expect_visible(email_field(page))
         if alice.get("password"):
             expect_visible(password_field(page))
@@ -659,7 +659,7 @@ def run_verified_org_checkout_to_stripe(ctx: JourneyCtx):
     page = ctx.page("alice")
 
     def s0():
-        page.goto(users.url("https://philanthropy.org/login"), timeout=15000)
+        page.goto(users.url("https://philanthropy.org/990/login"), timeout=15000)
         email_field(page).first.fill(alice["email"])
         password_field(page).first.fill(alice["password"])
         submit_button(page).first.click()
@@ -726,7 +726,7 @@ def run_open_thread_from_notification_link_and_send(ctx: JourneyCtx):
     marker = f"sentry-reply-{ctx.run_id}-{int(time.time())}"
 
     def s0():
-        page.goto(users.url("https://philanthropy.org/login"), timeout=15000)
+        page.goto(users.url("https://philanthropy.org/990/login"), timeout=15000)
         email_field(page).first.fill(bob["email"])
         password_field(page).first.fill(bob["password"])
         submit_button(page).first.click()
@@ -775,7 +775,7 @@ def run_sign_out(ctx: JourneyCtx):
     page = ctx.page("alice")
 
     def s0():
-        page.goto(users.url("https://philanthropy.org/login"), timeout=15000)
+        page.goto(users.url("https://philanthropy.org/990/login"), timeout=15000)
         email_field(page).first.fill(alice["email"])
         password_field(page).first.fill(alice["password"])
         submit_button(page).first.click()
