@@ -12328,10 +12328,10 @@ def _ask_file_rate_limits_ntfy_to_once_per_member_per_hour_gh568():
         assert p3.returncode == 0, f"ask.py file must exit 0: {p3.stderr[:300]}"
 
         sent = calls.read_text() if calls.exists() else ""
-        assert sent.count("fleet ask filed by marie") == 1, \
+        assert len(re.findall(r"fleet ask #\d+ from marie", sent)) == 1, \
             f"a second ask from the same member inside the hour must not page again: " \
             f"{_redact_secrets(sent)!r}"
-        assert "fleet ask filed by gru" in sent, \
+        assert re.search(r"fleet ask #\d+ from gru", sent), \
             f"a different member's first ask this hour must still page: {_redact_secrets(sent)!r}"
 
 
