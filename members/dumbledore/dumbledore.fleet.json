@@ -50,5 +50,7 @@
   },
   "report": {
     "vision_link": "required"
-  }
+  },
+  "plain": "Every 7 hours checks the fleet's own predictions, finds what is rotting, and fixes it at the layer that caused it: a charter, a gate, a prompt.",
+  "stage": "learn"
 }

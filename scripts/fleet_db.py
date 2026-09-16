@@ -76,6 +76,15 @@ CREATE INDEX IF NOT EXISTS idx_runs_item ON runs(item_id);
 -- Byte offset into runs.jsonl already synced, so sync() only reads what's new. Single row
 -- (id=0). If runs.jsonl shrinks (rotated/truncated) sync() resets this to 0 and re-reads.
 CREATE TABLE IF NOT EXISTS sync_state (id INTEGER PRIMARY KEY CHECK (id = 0), offset INTEGER NOT NULL);
+-- fk#1058: one row per metric per Central day, written by fleet_view_server's /api/metrics on
+-- every poll (upsert), so the console's sparklines accrue history from the day this shipped.
+-- The metric ids are scripts/metrics.json's; a tile never computes its own history.
+CREATE TABLE IF NOT EXISTS metric_points (
+  id    TEXT NOT NULL,
+  day   TEXT NOT NULL,
+  value REAL NOT NULL,
+  PRIMARY KEY (id, day)
+);
 
 -- gh#324: independent lane KPIs (e.g. devops's deploy_success_rate), computed by a job that
 -- shares no process context with the agent whose lane it grades (kpi-doctrine.md rule 1) --

@@ -5,115 +5,196 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Fleet</title>
 <!--
-  fleet_home.html -- Console v2 (fk#645). One page, phone first, five blocks:
-  the number, needs you, agents, landed today, footer. Nothing else.
+  fleet_home.html -- Console v3 (fk#1058). The 990 Scout superadmin sidebar shell (Reif,
+  2026-09-15: "borrow from the templates copy from nonprofitatlas - its got a sidebar admin
+  template that is pretty good"), operator purple, Inter, tabular numbers.
 
-  Reif, from his phone, 2026-09-07: "look at how unmobile friendly" and "likely a good time
-  for a simple rebuild. We have way too many things going on on this page and can simplify
-  down, way down." The question this page answers in ten seconds: is the fleet moving the
-  number, and does it need me?
+  Three pages, one file, no framework, no build step: Home (tiles + agents + landed today),
+  Roster (every member in unison, plain English, grouped by the value stage it serves, so a
+  hole shows up as a stage with nobody in it), and the run panel (fk#748). Every tile is a
+  row in scripts/metrics.json with a real id, a value and a hoverable sparkline; the OKR file
+  references tiles by id. No inbox block (#1054): an ask pages Reif.
 
-  No framework, no build step, no caching. Polls the existing JSON endpoints every 30s.
-  The previous console is served at /classic until Reif accepts this one, then it goes.
-  Design width is 390px; desktop is the same page, wider. Tap targets are 44px.
+  Polls the existing JSON endpoints every 30s. Served behind a path prefix; every URL goes
+  through withBase() (gh#553).
 -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-  :root { --bg:#f6f7f8; --panel:#fff; --text:#161616; --muted:#6b7280; --line:#e5e7eb;
-          --ok:#1f8b4c; --warn:#a6720f; --bad:#c13a2e; --accent:#2166c4; --off:#b9bcc2; }
-  @media (prefers-color-scheme: dark) {
-    :root { --bg:#111214; --panel:#1b1c1f; --text:#ececec; --muted:#9aa0a6; --line:#2a2c30; --off:#4a4d52; }
+  :root{
+    --ink:#1a1c19;--ink-2:#3a3f3a;--muted:#6b736b;--faint:#8b9188;
+    --paper:#fff;--tint:#f5f7f3;--tint-2:#eef1ea;--rule:#e6e9e4;
+    --accent:#635bff;--accent-soft:#f0ebff;
+    --ok:#1f8b4c;--warn:#a6720f;--bad:#c13a2e;--off:#b9bcc2;
+    --shadow:0 1px 3px rgba(0,0,0,.06);
+    --sans:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+    --mono:"IBM Plex Mono",ui-monospace,"SF Mono",Menlo,monospace;
   }
-  * { box-sizing: border-box; }
-  html, body { margin:0; background:var(--bg); color:var(--text);
-    font: 16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
-  main { max-width: 760px; margin: 0 auto; padding: 12px 12px 40px; }
-  h1 { font-size: 15px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; color: var(--muted); margin: 22px 0 8px; }
-  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
-  .big { font-size: 34px; font-weight: 700; line-height: 1.1; letter-spacing: -.01em; }
-  .sub { color: var(--muted); font-size: 14px; }
-  .delta { font-weight: 600; }
-  .up { color: var(--ok); } .down { color: var(--bad); }
-  .banner.paused { background: var(--bad); color: #fff; font-weight: 700; font-size: 18px; }
-  .banner-sub { font-weight: 500; font-size: 14px; margin-top: 6px; opacity: .95; }
-  table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 14px; }
-  td, th { text-align: left; padding: 6px 0; border-top: 1px solid var(--line); vertical-align: top; }
-  th { color: var(--muted); font-weight: 500; }
-  td.num, th.num { text-align: right; white-space: nowrap; }
-  .row { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 8px 4px; border-top: 1px solid var(--line); cursor: pointer; }
-  .row:first-of-type { border-top: 0; }
-  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--off); flex: none; }
-  .dot.ok { background: var(--ok); } .dot.warn { background: var(--warn); } .dot.bad { background: var(--bad); }
-  .name { font-weight: 600; white-space: nowrap; }
-  .meta { color: var(--muted); font-size: 13px; margin-left: auto; text-align: right; white-space: nowrap; }
-  .outcome { color: var(--muted); font-size: 13px; padding: 0 4px 10px 24px; margin-top: -6px; }
-  .drawer { padding: 8px 4px 12px 24px; border-top: 1px dashed var(--line); font-size: 14px; }
-  .drawer .role { color: var(--muted); margin-bottom: 8px; }
-  .drawer .role-label { display: block; font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-bottom: 2px; }
-  .drawer .run { padding: 4px 0; border-top: 1px solid var(--line); }
-  .drawer .run:first-child { border-top: 0; }
-  .btns { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
-  button, a.btn { font: inherit; font-size: 15px; font-weight: 600; min-height: 44px; padding: 0 16px; border-radius: 10px;
-    border: 1px solid var(--line); background: var(--panel); color: var(--text); cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; }
-  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-  button.danger { color: var(--bad); border-color: var(--bad); }
-  button:disabled { opacity: .5; }
-  .empty { color: var(--muted); padding: 6px 4px; }
-  .pr { display: block; padding: 8px 4px; border-top: 1px solid var(--line); color: var(--text); text-decoration: none; min-height: 44px; }
-  .pr:first-child { border-top: 0; }
-  .pr .t { font-weight: 500; } .pr .m { color: var(--muted); font-size: 13px; }
-  .banner { background: #fff4e5; color: #7a4b00; border: 1px solid #f3d9a4; border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; font-weight: 600; }
-  .err { color: var(--bad); font-size: 13px; }
-  footer { color: var(--muted); font-size: 13px; margin-top: 26px; line-height: 1.8; }
-  footer a { color: var(--accent); }
-  @media (min-width: 700px) { main { padding: 20px; } .big { font-size: 40px; } }
-  /* fk#748, Reif: "right slider, 1/3 page on click for more infos". One run, everything about
-     it, in a panel that slides in from the right; the list behind it stays put. */
-  .drawer .run[data-run] { cursor: pointer; border-radius: 6px; padding-left: 4px; margin-left: -4px; }
-  .drawer .run[data-run]:hover { background: var(--bg); }
-  .side-back { position: fixed; inset: 0; background: rgba(0,0,0,.18); z-index: 40; }
-  .side { position: fixed; top: 0; right: 0; bottom: 0; width: 33.333vw; min-width: 360px; max-width: 640px;
-    background: var(--panel); border-left: 1px solid var(--line); box-shadow: -12px 0 32px rgba(0,0,0,.12);
-    z-index: 41; overflow-y: auto; padding: 16px 18px 40px; transform: translateX(100%); transition: transform .18s ease-out; }
-  .side.in { transform: none; }
-  @media (max-width: 700px) { .side { width: 100vw; min-width: 0; max-width: none; padding: 14px 14px 40px; } }
-  .side .top { display: flex; align-items: flex-start; gap: 10px; }
-  .side .top .name { font-size: 18px; }
-  .side .top .close { margin-left: auto; min-width: 44px; padding: 0; font-size: 22px; line-height: 1; }
-  .side .when { color: var(--muted); font-size: 13px; margin: 2px 0 12px; }
-  .side .badge { display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: var(--bg); color: var(--muted); }
-  .side .badge.ok { color: var(--ok); } .side .badge.warn { color: var(--warn); } .side .badge.bad { color: var(--bad); }
-  .side h2 { font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); margin: 16px 0 6px; }
-  .side .txt { font-size: 14px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
-  .side .txt.report { border-left: 3px solid var(--accent); padding-left: 10px; }
-  .side .txt a { color: var(--accent); }
-  .side .none { color: var(--muted); font-style: italic; font-size: 14px; }
-  .side .facts { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 14px; }
-  .side .facts dt { color: var(--muted); } .side .facts dd { margin: 0; }
-  .side pre.live { font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--bg); border: 1px solid var(--line);
-    border-radius: 8px; padding: 8px 10px; max-height: 40vh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+  @media (prefers-color-scheme: dark){
+    :root{--ink:#eceef2;--ink-2:#c9cdd4;--muted:#a2a8b3;--faint:#7d838e;--paper:#1b1d21;--tint:#15171b;--tint-2:#262930;--rule:#2f333a;--accent:#8f88ff;--accent-soft:#2a2750;--off:#4b4f57;--shadow:0 1px 3px rgba(0,0,0,.4)}
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--tint);color:var(--ink);font:14px/1.45 var(--sans);-webkit-font-smoothing:antialiased}
+  a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+  .layout{display:grid;grid-template-columns:248px 1fr;min-height:100vh}
+  .sidebar{background:var(--paper);border-right:1px solid var(--rule);padding:24px;display:flex;flex-direction:column;gap:6px}
+  .brand{display:flex;align-items:baseline;gap:4px}
+  .brand-mark{font:700 15px var(--sans);letter-spacing:-.02em;color:var(--accent)}
+  .brand-word{font:700 15px var(--sans);letter-spacing:.08em}
+  .brand-env{display:block;font:500 10px var(--sans);letter-spacing:.1em;text-transform:uppercase;color:var(--faint);margin:2px 0 10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .sec{font:500 10px var(--mono);text-transform:uppercase;letter-spacing:.08em;color:var(--faint);margin:12px 0 4px}
+  .nav{display:flex;align-items:center;gap:10px;padding:8px;border-radius:6px;font-size:13px;color:var(--ink);cursor:pointer;min-height:36px}
+  .nav:hover{background:var(--tint);text-decoration:none}
+  .nav.active{background:var(--accent-soft);border-left:3px solid var(--accent);padding-left:5px;font-weight:600}
+  .nav .cnt{margin-left:auto;font:500 11px var(--mono);color:var(--muted);background:var(--tint-2);padding:1px 6px;border-radius:10px}
+  .nav .cnt.bad{background:var(--bad);color:#fff}
+  .sidebar-foot{margin-top:auto;font-size:12px;color:var(--faint);padding-top:16px;border-top:1px solid var(--rule);line-height:1.7}
+  .header{display:flex;align-items:center;gap:16px;border-bottom:1px solid var(--rule);padding:14px 32px;background:var(--paper)}
+  .header h1{font:600 18px var(--sans);letter-spacing:-.01em;margin:0}
+  .util{margin-left:auto;display:flex;align-items:center;gap:16px}
+  .util a{font:500 13px var(--sans);color:var(--muted)}
+  .toggle{display:inline-flex;align-items:center;gap:8px;font:500 13px var(--sans);cursor:pointer;background:none;border:0;color:var(--ink);padding:0;min-height:36px}
+  .toggle .sw{width:34px;height:20px;border-radius:10px;background:var(--off);position:relative;transition:background .15s}
+  .toggle .sw::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;transition:left .15s}
+  .toggle.on .sw{background:var(--ok)} .toggle.on .sw::after{left:16px}
+  .main{padding:24px 32px 48px;display:flex;flex-direction:column;gap:24px;min-width:0}
+  .banner{border-radius:8px;padding:12px 16px;font-weight:700;font-size:16px;background:#fff4e5;color:#7a4b00;border:1px solid #f3d9a4}
+  .banner.paused{background:var(--bad);color:#fff;border-color:var(--bad)}
+  .banner small{display:block;font-weight:500;font-size:13px;margin-top:4px;opacity:.95}
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}
+  .stat{background:var(--paper);border:1px solid var(--rule);border-radius:8px;padding:12px 16px;box-shadow:var(--shadow);min-width:0}
+  .stat .l{font:500 11px var(--sans);text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+  .stat .v{font:600 24px var(--sans);letter-spacing:-.02em;margin-top:2px;font-variant-numeric:tabular-nums}
+  .stat .v small{font:500 13px var(--sans);color:var(--muted);letter-spacing:0}
+  .stat .v.bad{color:var(--bad)} .stat .v.ok{color:var(--ok)}
+  .stat .s{font-size:12px;color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .spark{position:relative;margin-top:8px;height:38px}
+  .spark svg{display:block;width:100%;height:38px;overflow:visible}
+  .spark .line{fill:none;stroke:var(--accent);stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
+  .spark .area{fill:var(--accent);opacity:.10}
+  .spark .end{fill:var(--accent);stroke:var(--paper);stroke-width:2}
+  .spark .cross{stroke:var(--faint);stroke-width:1;stroke-dasharray:2 2;display:none}
+  .spark .pt{fill:var(--accent);stroke:var(--paper);stroke-width:2;display:none}
+  .spark .tip{position:absolute;top:-30px;transform:translateX(-50%);background:var(--ink);color:var(--paper);font:500 11px var(--mono);padding:3px 7px;border-radius:5px;white-space:nowrap;pointer-events:none;display:none;z-index:2}
+  .spark:hover .cross,.spark:hover .pt,.spark:hover .tip{display:block}
+  .spark .none{font:500 11px var(--mono);color:var(--faint);padding-top:12px}
+  .stat .rng{font:500 10px var(--mono);color:var(--faint);letter-spacing:.06em;text-transform:uppercase;margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .stat .rng .mid{text-transform:none;letter-spacing:0;color:var(--muted)}
+  .card{background:var(--paper);border:1px solid var(--rule);border-radius:8px;box-shadow:var(--shadow);overflow:hidden;min-width:0}
+  .card-head{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--rule)}
+  .card-head h2{font:600 14px var(--sans);margin:0}
+  .card-head .sub{color:var(--muted);font-size:12px}
+  .card-head .right{margin-left:auto;font-size:12px}
+  .two{display:grid;grid-template-columns:3fr 2fr;gap:24px}
+  .wrap{overflow-x:auto}
+  .tbl{width:100%;border-collapse:collapse;font-size:13px}
+  .tbl th{font:500 10px var(--mono);text-transform:uppercase;letter-spacing:.08em;color:var(--faint);text-align:left;padding:8px 16px;border-bottom:1px solid var(--rule);white-space:nowrap}
+  .tbl td{padding:9px 16px;border-bottom:1px solid var(--rule);vertical-align:middle;font-variant-numeric:tabular-nums}
+  .tbl tr:last-child td{border-bottom:0}
+  .tbl .num{text-align:right;font-family:var(--mono);font-size:12px;white-space:nowrap}
+  .tbl tr.agent{cursor:pointer} .tbl tr.agent:hover td{background:var(--tint)}
+  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:8px;vertical-align:middle;background:var(--off)}
+  .dot.ok{background:var(--ok)} .dot.warn{background:var(--warn)} .dot.bad{background:var(--bad)}
+  .name{font-weight:600;white-space:nowrap} .role{color:var(--muted);font-size:12px}
+  .tbl td.when{white-space:nowrap}
+  .pill{display:inline-block;font:500 11px var(--sans);padding:2px 8px;border-radius:10px;background:var(--tint-2);color:var(--ink-2);white-space:nowrap}
+  .pill.bad{background:#fbe9e7;color:#8f2a20} .pill.ok{background:#e3f3e9;color:#1a5d36} .pill.warn{background:#fbf1d9;color:#6d4a05}
+  .drawer td{background:var(--tint)}
+  .drawer .purpose{color:var(--ink-2);margin-bottom:8px}
+  .drawer .role-label{display:block;font:600 10px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:2px}
+  .drawer .run{padding:4px 0;border-top:1px solid var(--rule);cursor:pointer} .drawer .run:first-child{border-top:0}
+  .drawer .run:hover{background:var(--tint-2)}
+  .btns{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+  button,a.btn{font:inherit;font-size:13px;font-weight:600;min-height:36px;padding:0 14px;border-radius:6px;border:1px solid var(--rule);background:var(--paper);color:var(--ink);cursor:pointer;display:inline-flex;align-items:center}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  button.danger{color:var(--bad);border-color:var(--bad)}
+  button:disabled{opacity:.5}
+  .err{color:var(--bad);font-size:12px}
+  .empty{color:var(--muted);padding:12px 16px}
+  .landed{list-style:none;margin:0;padding:0}
+  .landed li a{display:flex;gap:12px;padding:9px 16px;border-bottom:1px solid var(--rule);font-size:13px;color:var(--ink)}
+  .landed li:last-child a{border-bottom:0}
+  .landed .who{color:var(--muted);font-family:var(--mono);font-size:12px;margin-left:auto;white-space:nowrap}
+  /* roster */
+  .stage{margin-bottom:8px}
+  .stage-head{display:flex;align-items:baseline;gap:12px;padding:12px 16px;border-bottom:1px solid var(--rule);background:var(--tint)}
+  .stage-head h3{font:600 13px var(--sans);margin:0;text-transform:uppercase;letter-spacing:.06em}
+  .stage-head .q{color:var(--muted);font-size:12px}
+  .stage-head .hole{margin-left:auto}
+  .member{display:grid;grid-template-columns:200px 1fr 130px;gap:16px;padding:10px 16px;border-bottom:1px solid var(--rule);align-items:center}
+  .member:last-child{border-bottom:0}
+  .member .plain{color:var(--ink-2)}
+  .member .when{color:var(--muted);font-size:12px;text-align:right;white-space:nowrap}
+  /* run panel (fk#748) */
+  .side-back{position:fixed;inset:0;background:rgba(0,0,0,.18);z-index:40}
+  .side{position:fixed;top:0;right:0;bottom:0;width:33.333vw;min-width:360px;max-width:640px;background:var(--paper);border-left:1px solid var(--rule);box-shadow:-12px 0 32px rgba(0,0,0,.12);z-index:41;overflow-y:auto;padding:16px 18px 40px;transform:translateX(100%);transition:transform .18s ease-out}
+  .side.in{transform:none}
+  .side .top{display:flex;align-items:flex-start;gap:10px} .side .top .name{font-size:18px}
+  .side .top .close{margin-left:auto;min-width:36px;padding:0;font-size:22px;line-height:1}
+  .side .when{color:var(--muted);font-size:13px;margin:2px 0 12px}
+  .side .badge{display:inline-block;font-size:12px;font-weight:600;padding:2px 8px;border-radius:999px;background:var(--tint);color:var(--muted)}
+  .side .badge.ok{color:var(--ok)} .side .badge.warn{color:var(--warn)} .side .badge.bad{color:var(--bad)}
+  .side h2{font:600 12px var(--sans);letter-spacing:.04em;text-transform:uppercase;color:var(--muted);margin:16px 0 6px}
+  .side .txt{font-size:14px;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere}
+  .side .txt.report{border-left:3px solid var(--accent);padding-left:10px}
+  .side .none{color:var(--muted);font-style:italic;font-size:14px}
+  .side .facts{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:14px} .side .facts dt{color:var(--muted)} .side .facts dd{margin:0}
+  .side pre.live{font:12px/1.5 var(--mono);background:var(--tint);border:1px solid var(--rule);border-radius:8px;padding:8px 10px;max-height:40vh;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere}
+  @media (max-width:760px){
+    .layout{grid-template-columns:1fr}
+    .sidebar{flex-direction:row;flex-wrap:wrap;gap:4px;padding:12px 16px;border-right:0;border-bottom:1px solid var(--rule)}
+    .sec,.sidebar-foot,.brand-env{display:none} .brand{width:100%;margin-bottom:6px}
+    .nav{padding:6px 10px;min-height:44px}
+    .main{padding:16px} .two{grid-template-columns:1fr} .header{padding:12px 16px}
+    .member{grid-template-columns:1fr;gap:4px} .member .when{text-align:left}
+    .side{width:100vw;min-width:0;max-width:none;padding:14px 14px 40px}
+  }
 </style>
 </head>
 <body>
-<main>
-  <div id="banner"></div>
-  <h1>The number</h1>
-  <div class="card" id="number"><div class="sub">loading…</div></div>
-
-  <!-- gh#553 fix 1: percent-of-week, alive/waiting-on-human/merged-24h and a link to Stats
-       belong on the page Reif actually lands on, not one footer tap away on /classic. This is
-       its OWN card, not folded into #number above -- renderNumber() returns early (unconfigured
-       number, not yet measured), and this card must still render when that happens. -->
-  <h1>Fleet</h1>
-  <div class="card" id="health"><div class="sub">loading…</div></div>
-
-  <h1>Agents</h1>
-  <div class="card" id="agents"><div class="empty">loading…</div></div>
-
-  <h1>Landed today</h1>
-  <div class="card" id="landed"><div class="empty">loading…</div></div>
-
-  <footer id="foot"></footer>
-</main>
+<div class="layout">
+  <aside class="sidebar">
+    <div class="brand"><span class="brand-mark">◆</span><span class="brand-word">FLEET</span></div>
+    <span class="brand-env" id="brandEnv">console</span>
+    <div class="sec">Run</div>
+    <a class="nav active" data-page="home" href="#home"><span>▣</span>Home</a>
+    <a class="nav" data-page="roster" href="#roster"><span>◉</span>Roster<span class="cnt" id="cntMembers">–</span></a>
+    <a class="nav" id="navPrs" href="#" target="_blank"><span>⇅</span>Pull requests<span class="cnt" id="cntPrs">–</span></a>
+    <a class="nav" id="navBacklog" href="#" target="_blank"><span>▤</span>Backlog<span class="cnt" id="cntBacklog">–</span></a>
+    <div class="sec">Spend</div>
+    <a class="nav" id="navAccounts" href="#home"><span>◐</span>Accounts<span class="cnt" id="cntAccounts">–</span></a>
+    <a class="nav" id="navClassicStats" href="#"><span>$</span>Budget and stats</a>
+    <div class="sidebar-foot"><a id="navClassic" href="#">Classic console</a><br><a id="navSettings" href="#">Settings and sign in</a><br><a id="navStatus" href="#">Status</a><br><span id="updated"></span></div>
+  </aside>
+  <div>
+    <header class="header">
+      <h1 id="pageTitle">Home</h1>
+      <div class="util">
+        <span id="build" style="font:500 12px var(--mono);color:var(--faint)"></span>
+        <button class="toggle" id="fleetToggle" data-act="fleet" title="Turn the whole fleet on or off">Fleet <span class="sw"></span></button>
+      </div>
+    </header>
+    <main class="main">
+      <div id="banner"></div>
+      <section id="pageHome">
+        <div class="stats" id="stats"><div class="empty">loading…</div></div>
+        <div class="two" style="margin-top:24px">
+          <div class="card">
+            <div class="card-head"><h2>Agents</h2><span class="sub">last 6h</span><a class="right" href="#roster">roster</a></div>
+            <div class="wrap"><table class="tbl" id="agents"><tbody><tr><td class="empty">loading…</td></tr></tbody></table></div>
+          </div>
+          <div class="card">
+            <div class="card-head"><h2>Landed today</h2><span class="sub" id="landedSub"></span><a class="right" id="landedAll" href="#" target="_blank">all merged</a></div>
+            <ul class="landed" id="landed"><li class="empty">loading…</li></ul>
+          </div>
+        </div>
+      </section>
+      <section id="pageRoster" hidden>
+        <div class="card" id="roster"><div class="empty">loading…</div></div>
+      </section>
+    </main>
+  </div>
+</div>
 <div id="sideBack" class="side-back" hidden></div>
 <aside id="side" class="side" hidden aria-label="run details"></aside>
 
@@ -125,31 +206,13 @@ const money = v => (v === null || v === undefined) ? '--' : '$' + Number(v).toLo
 const num = v => (v === null || v === undefined) ? '--' : Number(v).toLocaleString('en-US');
 const ago = ts => { if (!ts) return 'never'; const s = Math.max(0, Date.now()/1000 - ts);
   return s < 60 ? `${Math.round(s)}s ago` : s < 3600 ? `${Math.round(s/60)}m ago` : s < 86400 ? `${Math.round(s/3600)}h ago` : `${Math.round(s/86400)}d ago`; };
-const signed = (v, fmt) => v === null || v === undefined ? '' : `<span class="delta ${v >= 0 ? 'up' : 'down'}">${v >= 0 ? '+' : '−'}${fmt(Math.abs(v))}</span> 7d`;
 const centralDay = d => new Intl.DateTimeFormat('en-CA', {timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit'}).format(d);
+const ctTime = () => new Date().toLocaleTimeString('en-US', {timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit'}) + ' CT';
 
-let OPEN = null;        // which agent drawer is open, survives re-renders
-let OPEN_RUN = null;    // run_id shown in the side panel (fk#748), survives re-renders
-let LIVE_TIMER = null;
-let STATE = { number: null, plan: null, members: [], runs: [], gh: {}, kpi: {}, spend: null, build: null, fleet: null, budget: null };
-
-// gh#553 fix 1 (round 2): this console is served behind a path prefix (Caddy routes
-// /fleet/<instance>/* to this backend, e.g. /fleet/fleet-kit/), but this page's own root-
-// absolute URLs (`/api/...`, `/classic`, `/status`) ignore that prefix -- they resolve
-// against the DOMAIN root, not the console's own mount point. That 404s every link, and
-// worse: the unprefixed `/api/*` root is a *different* route that picks its backend from
-// the Referer header, so a browser that sends no Referer (privacy mode, an in-app webview,
-// `Referrer-Policy: no-referrer`) silently gets another instance's numbers under this
-// instance's brand. Every URL this page builds must instead resolve from the document's own
-// path, so it always lands back inside the same prefix Caddy already routed the browser to.
+// gh#553: served behind a path prefix; every URL resolves from the document's own path.
 const BASE_PATH = (() => { const p = location.pathname; return p.endsWith('/') ? p : p + '/'; })();
 const withBase = path => BASE_PATH + String(path).replace(/^\//, '');
-
-async function getJSON(path) {
-  const r = await fetch(withBase(path), {cache: 'no-store'});
-  if (!r.ok) throw new Error(`${path} ${r.status}`);
-  return r.json();
-}
+async function getJSON(path) { const r = await fetch(withBase(path), {cache: 'no-store'}); if (!r.ok) throw new Error(`${path} ${r.status}`); return r.json(); }
 async function postJSON(path, body) {
   const r = await fetch(withBase(path), {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
   const j = await r.json().catch(() => ({}));
@@ -158,149 +221,127 @@ async function postJSON(path, body) {
   return j;
 }
 
-// gh#553 VP review round 2, fix 5: FLEET card measured 2.20s to fill against a 1s budget
-// because render() used to wait on all 9 boot fetches before drawing anything -- including
-// kpi/spend/plan/members/build, none of which renderBanner()/renderHealth() read. Both
-// waves still start at the same instant (fired together below, same total network load), but
-// the card's own two dependencies -- snapshot and fleet_state -- are no longer stuck behind
-// whichever of the other seven happens to answer slowest.
+let OPEN = null, OPEN_RUN = null, LIVE_TIMER = null;
+let PAGE = (location.hash.replace('#', '') === 'roster') ? 'roster' : 'home';
+let STATE = { members: [], runs: [], gh: {}, kpi: {}, build: null, fleet: null, metrics: [] };
+
+// Two waves (gh#553 round 2): the tiles and the banner draw off the first, everything else off the second.
 async function load() {
-  const criticalP = Promise.all([
+  const [snap, fleet, metrics] = await Promise.all([
     getJSON('/api/snapshot').catch(() => ({runs: [], gh: {}})),
     getJSON('/api/fleet_state').catch(() => null),
+    getJSON('/api/metrics').catch(() => ({metrics: []})),
   ]);
-  const restP = Promise.all([
-    getJSON('/api/number').catch(() => null),
-    getJSON('/api/plan').catch(() => null),
+  STATE = { ...STATE, runs: snap.runs || [], gh: snap.gh || {}, fleet, metrics: metrics.metrics || [] };
+  renderChrome(); renderBanner(); renderStats();
+  const [members, kpi, build] = await Promise.all([
     getJSON('/api/members').catch(() => ({members: []})),
     getJSON('/api/kpi').catch(() => ({kpi: []})),
-    getJSON('/api/spend?hours=24').catch(() => null),
     getJSON('/api/build').catch(() => null),
   ]);
-  const [snap, fleet] = await criticalP;
-  STATE = { ...STATE, runs: snap.runs || [], gh: snap.gh || {}, fleet };
-  renderBanner(); renderHealth();
-
-  const [number, plan, members, kpi, spend, build] = await restP;
-  STATE = { ...STATE, number, plan, members: members.members || [],
-            kpi: Object.fromEntries((kpi.kpi || []).map(k => [k.member, k])), spend, build };
-  // renderBanner()/renderHealth() already ran above off the critical wave and don't depend on
-  // anything this second wave adds -- rerunning them here would just rewrite the same DOM twice.
-  renderNumber(); renderAgents(); renderLanded(); renderFoot();
+  STATE = { ...STATE, members: members.members || [], kpi: Object.fromEntries((kpi.kpi || []).map(k => [k.member, k])), build };
+  renderChrome(); renderAgents(); renderLanded(); renderRoster();
 }
 
-// gh#553 fix 1: /api/budget_preview shells out to a real remote meter (maxx_reader.py) and can
-// legitimately take seconds -- same reasoning fleet_view.html's refreshGlobalSpend() documents.
-// Fetched on its own, never inside load()'s Promise.all, so a slow or failing meter read never
-// delays or breaks the rest of the page.
-async function refreshHealth() {
-  // `STATE.budget = await ...` would resolve the STATE object reference before awaiting --
-  // if load()'s `STATE = {...STATE, ...}` reassignment (a NEW object, not a mutation) lands
-  // during that await, the write would go to the orphaned old object. Await into a local
-  // first, then assign, so the assignment always targets whatever STATE currently is.
-  let budget = null;
-  try { budget = await getJSON('/api/budget_preview'); } catch (ex) { budget = null; }
-  STATE.budget = budget;
-  renderHealth();
-}
-
-function render() {
-  renderBanner(); renderNumber(); renderHealth(); renderAgents(); renderLanded(); renderFoot();
-}
-
-// fk#1041: every Claude account gated = the fleet is PAUSED, whatever the cron ticks say.
-// 2026-09-15 it ran 8h like that reading "alive 33m ago". First line of the page, red.
-function poolPause() {
-  const p = STATE.fleet && STATE.fleet.POOL_PAUSE;
-  return (p && p.paused) ? p : null;
-}
+function metric(id) { return STATE.metrics.find(m => m.id === id) || null; }
+function poolPause() { const p = STATE.fleet && STATE.fleet.POOL_PAUSE; return (p && p.paused) ? p : null; }
 function pausedResumesCT(p) {
   if (!p.resumes_at) return 'unknown';
-  return new Intl.DateTimeFormat('en-US', { timeZone: 'America/Chicago', weekday: 'short', hour: 'numeric', minute: '2-digit' }).format(new Date(p.resumes_at * 1000)) + ' CT';
+  return new Intl.DateTimeFormat('en-US', {timeZone: 'America/Chicago', weekday: 'short', hour: 'numeric', minute: '2-digit'}).format(new Date(p.resumes_at * 1000)) + ' CT';
 }
+function repoBase() { const pr = (STATE.gh.merged || []).find(p => p.url); return pr ? String(pr.url).replace(/\/pull\/\d+.*$/, '') : (STATE.fleet && STATE.fleet.REPO_URL) || null; }
+
+function renderChrome() {
+  const f = STATE.fleet || {};
+  if (f.BRAND) { document.title = `${f.BRAND} fleet`; $('brandEnv').textContent = f.BRAND; }
+  const on = f.FLEET_ENABLED !== false;
+  $('fleetToggle').classList.toggle('on', on); $('fleetToggle').dataset.on = String(on);
+  $('cntMembers').textContent = STATE.members.length || '–';
+  $('cntPrs').textContent = (STATE.gh.prs || []).length;
+  const bl = metric('fleet.backlog_open'); $('cntBacklog').textContent = bl && bl.value !== null ? bl.value : '–';
+  const ac = metric('fleet.accounts_live');
+  const cnt = $('cntAccounts');
+  if (ac && ac.value !== null && ac.value !== undefined) { const gated = (ac.of || 0) - ac.value; cnt.textContent = gated ? `${gated} gated` : `${ac.value} live`; cnt.classList.toggle('bad', gated > 0 && ac.value === 0); cnt.classList.toggle('warn', gated > 0); }
+  const base = repoBase();
+  if (base) { $('navPrs').href = `${base}/pulls`; $('navBacklog').href = `${base}/issues?q=is%3Aopen+label%3Afleet%3Abacklog`; $('landedAll').href = `${base}/pulls?q=is%3Apr+is%3Amerged`; }
+  $('navClassic').href = withBase('/classic'); $('navSettings').href = withBase('/classic#settings'); $('navStatus').href = withBase('/status'); $('navClassicStats').href = withBase('/classic#stats');
+  const b = STATE.build; $('build').textContent = b && b.sha ? `build ${String(b.sha).slice(0, 7)}${b.started_at ? ` · up ${ago(b.started_at)}` : ''}` : '';
+  $('updated').textContent = `updated ${ctTime()}`;
+  document.querySelectorAll('.nav[data-page]').forEach(a => a.classList.toggle('active', a.dataset.page === PAGE));
+  $('pageHome').hidden = PAGE !== 'home'; $('pageRoster').hidden = PAGE !== 'roster';
+  $('pageTitle').textContent = PAGE === 'roster' ? 'Roster' : 'Home';
+}
+
+// fk#1041: every Claude account gated = PAUSED, whatever the cron ticks say. First line, red.
 function renderBanner() {
-  const f = STATE.fleet;
-  const p = poolPause();
+  const f = STATE.fleet, p = poolPause();
   $('banner').innerHTML = p
-    ? `<div class="banner paused" role="alert">PAUSED: Claude account exhausted, resumes ${esc(pausedResumesCT(p))}<div class="banner-sub">Every account in the pool is gated (${esc((p.pool || []).map(a => `${a}: ${(p.gated[a] || {}).reason || 'exhausted'}`).join(', '))}). Add an account to FLEET_ACCOUNTS in fleet.env and redeploy, or wait.</div></div>`
-    : (f && f.FLEET_ENABLED === false) ? `<div class="banner">The fleet is paused. Nothing new starts until it is turned back on.</div>` : '';
-  // gh#553 fix 5: the tab title comes from this instance's own config (FLEET_BRAND, or a name
-  // derived from its repo), never a hardcoded product name.
-  if (f && f.BRAND) document.title = f.BRAND;
+    ? `<div class="banner paused" role="alert">PAUSED: Claude account exhausted, resumes ${esc(pausedResumesCT(p))}<small>Every account in the pool is gated (${esc((p.pool || []).map(a => `${a}: ${(p.gated[a] || {}).reason || 'exhausted'}`).join(', '))}). Add an account to FLEET_ACCOUNTS in fleet.env and redeploy, or wait.</small></div>`
+    : (f && f.FLEET_ENABLED === false) ? `<div class="banner">The fleet is off. Nothing new starts until it is turned back on.</div>` : '';
 }
 
-function nextCheckpoint(plan) {
-  // "Checkpoints on the number: $1,000 MRR by 2026-10-31 · $8,000 by 2026-11-30 · ..."
-  const line = (plan && plan.checkpoints) || '';
-  const today = centralDay(new Date());
-  const hits = [...line.matchAll(/\$([\d,]+)[^·]*?by (\d{4}-\d{2}-\d{2})/g)].map(m => ({amount: m[1], by: m[2]}));
-  return hits.find(h => h.by >= today) || hits[hits.length - 1] || null;
+// ---- tiles: one per metrics.json row; value, sub, sparkline with hover, the id underneath.
+function sparkHtml(m) {
+  const pts = (m.series || []).filter(p => p.value !== null && p.value !== undefined);
+  if (pts.length < 2) return `<div class="spark"><div class="none">${pts.length ? 'history starts today' : 'no history yet'}</div></div>`;
+  const v = pts.map(p => Number(p.value)), n = v.length, W = 200, H = 38, pad = 3;
+  const lo = Math.min(...v), hi = Math.max(...v), span = (hi - lo) || 1;
+  const x = i => pad + i * (W - 2 * pad) / (n - 1), y = k => H - pad - (k - lo) * (H - 2 * pad) / span;
+  const path = v.map((k, i) => `${x(i).toFixed(1)},${y(k).toFixed(1)}`).join(' ');
+  return `<div class="spark" data-id="${esc(m.id)}">
+    <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+      <polygon class="area" points="${x(0)},${H} ${path} ${x(n - 1)},${H}"/>
+      <polyline class="line" points="${path}"/>
+      <line class="cross" x1="0" x2="0" y1="0" y2="${H}"/>
+      <circle class="pt" r="3.5"/>
+      <circle class="end" r="3" cx="${x(n - 1)}" cy="${y(v[n - 1])}"/>
+    </svg><div class="tip"></div></div>`;
+}
+function fmtValue(m) {
+  if (m.value === null || m.value === undefined) return '--';
+  return m.unit === 'USD' ? money(m.value) : num(m.value);
+}
+function renderStats() {
+  const ms = STATE.metrics;
+  if (!ms.length) { $('stats').innerHTML = `<div class="empty">no metrics registered (scripts/metrics.json)</div>`; return; }
+  $('stats').innerHTML = ms.map(m => {
+    let cls = '', v = fmtValue(m);
+    if (m.id === 'okr.verified_claims' && m.target) v += ` <small>of ${num(m.target)}</small>`;
+    if (m.id === 'fleet.accounts_live') { v = `${num(m.value)} <small>of ${num(m.of)}</small>`; cls = m.paused ? 'bad' : ''; }
+    if (m.id === 'fleet.merged_per_day' && m.value > 0) cls = 'ok';
+    if (m.id === 'fleet.ok_runs_per_hour') { const p = poolPause(); if (p) { v = 'PAUSED'; cls = 'bad'; } else if (m.newest_ok_ts) { v = esc(ago(m.newest_ok_ts)); cls = 'ok'; } }
+    const sub = (m.id === 'fleet.ok_runs_per_hour' && !poolPause()) ? 'newest ok run, any agent' : (m.sub || '');
+    return `<div class="stat" data-metric-id="${esc(m.id)}">
+      <div class="l">${esc(m.label)}</div>
+      <div class="v ${cls}">${v}${m.stale ? ' <small class="err">stale</small>' : ''}</div>
+      <div class="s" title="${esc(m.note || sub)}">${esc(sub)}</div>
+      ${sparkHtml(m)}
+      <div class="rng">${esc(m.window || '')} · <span class="mid">${esc(m.id)}</span></div>
+    </div>`;
+  }).join('');
+  document.querySelectorAll('.spark[data-id]').forEach(el => {
+    const m = metric(el.dataset.id); const pts = (m.series || []).filter(p => p.value !== null && p.value !== undefined);
+    const svg = el.querySelector('svg'), cross = el.querySelector('.cross'), pt = el.querySelector('.pt'), tip = el.querySelector('.tip');
+    const n = pts.length, W = 200, H = 38, pad = 3, v = pts.map(p => Number(p.value));
+    const lo = Math.min(...v), hi = Math.max(...v), span = (hi - lo) || 1;
+    const x = i => pad + i * (W - 2 * pad) / (n - 1), y = k => H - pad - (k - lo) * (H - 2 * pad) / span;
+    el.addEventListener('mousemove', e => {
+      const r = svg.getBoundingClientRect(); const i = Math.max(0, Math.min(n - 1, Math.round((e.clientX - r.left) / r.width * (n - 1))));
+      cross.setAttribute('x1', x(i)); cross.setAttribute('x2', x(i)); pt.setAttribute('cx', x(i)); pt.setAttribute('cy', y(v[i]));
+      const label = String(pts[i].day).startsWith('-') ? `${pts[i].day}` : new Date(pts[i].day + 'T12:00:00').toLocaleDateString('en-US', {month: 'short', day: 'numeric'});
+      tip.textContent = `${label} · ${m.unit === 'USD' ? money(v[i]) : num(v[i])}`; tip.style.left = (x(i) / W * 100) + '%';
+    });
+  });
 }
 
-function renderNumber() {
-  const d = STATE.number;
-  if (!d || !d.configured) { $('number').innerHTML = `<div class="sub">No number configured for this fleet.</div>`; return; }
-  if (!d.present || !d.payload || !d.payload.number) { $('number').innerHTML = `<div class="sub">Not measured yet.</div>`; return; }
-  const p = d.payload, n = p.number, t = p.target || {}, g = p.guardrail, c = p.channel;
-  const cp = nextCheckpoint(STATE.plan);
-  const pct = t.value ? (100 * n.value / t.value) : null;
-  // fk: the number is whatever the venture's endpoint says it is. It used to be MRR, so this
-  // page hardcoded "$" and "/mo"; when the objective moved to verified claims (3,000 by
-  // 2026-12-31) the console printed "$98/mo" for 98 claims. Format by the payload's unit.
-  const isMoney = /\$|usd|\/mo/i.test(String(n.unit || ''));
-  const fmt = isMoney ? money : num;
-  const k1 = p.kr1;
-  $('number').innerHTML = `
-    <div class="sub">${esc(n.name)}${d.stale ? ' · <span class="err">stale reading</span>' : ''}</div>
-    <div class="big">${fmt(n.value)}${t.value ? `<span class="sub"> of ${fmt(t.value)}</span>` : ''}</div>
-    <div class="sub">${signed(n.delta_7d, fmt)} 7d · ${esc(n.unit || '')} · target ${fmt(t.value)} by ${esc(t.by || '?')}${pct !== null ? ` · ${pct.toFixed(1)}% there` : ''}</div>
-    ${cp ? `<div class="sub">Next checkpoint: ${esc(cp.amount)} by ${esc(cp.by)}</div>` : ''}
-    <table>
-      <tr><th>Key result</th><th class="num">Now</th><th class="num">7 days</th></tr>
-      ${k1 ? `<tr><td>${esc(k1.name)}</td><td class="num">${num(k1.value)}</td><td class="num">${signed(k1.delta_7d, num)}</td></tr>` : ''}
-      ${g ? `<tr><td>Orgs and people with at least one real interaction</td><td class="num">${num(g.value)}</td><td class="num">${signed(g.delta_7d, num)}</td></tr>` : ''}
-      ${c ? `<tr><td>Visits, last full week</td><td class="num">${num(c.value)}</td><td class="num">${signed(c.delta_7d, num)}</td></tr>` : ''}
-    </table>`;
-}
-
-// gh#553 fix 1: newest 'ok' run (any agent) and PRs merged in the trailing 24h -- same
-// definitions /classic's renderHomePage() uses, ported here so the two pages can't disagree.
-function newestOkRunAge() {
-  let newest = null;
-  for (const r of STATE.runs) {
-    if (r.status !== 'ok') continue;
-    const t = typeof r.ts === 'number' ? r.ts : Date.parse(r.ts) / 1000;
-    if (Number.isFinite(t) && (newest === null || t > newest)) newest = t;
-  }
-  return newest;
-}
-function mergedLast24hCount() {
-  const cutoff = Date.now() - 24 * 3600 * 1000;
-  return (STATE.gh.merged || []).filter(pr => pr.mergedAt && Date.parse(pr.mergedAt) >= cutoff).length;
-}
-function renderHealth() {
-  const pct = STATE.budget && STATE.budget.week_bank_pct;
-  // null/undefined (meter unreadable or not configured) is its own visible state, never
-  // shown as "0% of week" -- a real zero-headroom stall must not look identical to a quiet
-  // meter (fleet_view.html's own renderGlobalSpend() comment, gh#561).
-  const pctHtml = (pct === null || pct === undefined)
-    ? `<span title="maxx meter unreadable or not configured for this instance">headroom unavailable</span>`
-    : `${Number(pct).toFixed(1)}% of week`;
-  const newest = newestOkRunAge();
-  const aliveHtml = poolPause()
-    ? `<span class="down">PAUSED</span> (cron ticks still run; nothing that thinks does)`
-    : newest === null ? 'no ok run yet' : esc(ago(newest));
-  $('health').innerHTML = `
-    <div class="sub">${pctHtml} · alive ${aliveHtml}</div>
-    <div class="sub">merged 24h ${num(mergedLast24hCount())} · <a href="${withBase('/classic#stats')}">Stats</a></div>`;
-}
-
-// Reif, 2026-09-15: "the waiting on you thing, I dont like it, kill it -- somehow it can get me
-// a message some other way if it needs me." A filed ask pages him (ask.py _notify through
-// fleet_alert.sh, email leg forced for asks); the console shows no inbox. /api/asks stays for
-// /classic and for answering.
-function lastRuns(name) {
-  return STATE.runs.filter(r => r.member === name).sort((a, b) => (b.ts || 0) - (a.ts || 0));
+// ---- agents: per member, last run + 6h outcome counts, click for the drawer.
+function lastRuns(name) { return STATE.runs.filter(r => r.member === name).sort((a, b) => (b.ts || 0) - (a.ts || 0)); }
+function counts6h(name) {
+  const cut = Date.now() / 1000 - 6 * 3600, c = {ok: 0, declined: 0, bad: 0};
+  for (const r of STATE.runs) { if (r.member !== name || (r.ts || 0) < cut) continue;
+    if (r.status === 'ok') c.ok++; else if (r.status === 'budget_declined') c.declined++;
+    else if (['killed', 'timed_out', 'failed', 'error', 'reported_nothing', 'incomplete_fanout', 'report_lost'].includes(r.status)) c.bad++; }
+  return c;
 }
 function dotClass(run, enabled) {
   if (!enabled && !(run && Date.now()/1000 - (run.ts || 0) < 6 * 3600)) return '';
@@ -310,149 +351,128 @@ function dotClass(run, enabled) {
   if (['killed', 'timed_out', 'failed', 'error', 'reported_nothing', 'incomplete_fanout', 'report_lost'].includes(s) || (run.exit_code && run.exit_code !== 0)) return 'bad';
   return 'warn';
 }
+function pillFor(c, enabled) {
+  if (!enabled) return `<span class="pill">paused</span>`;
+  if (c.declined + c.bad >= 5 && c.declined + c.bad >= c.ok / 2) return `<span class="pill bad">churning</span>`;
+  if (c.declined + c.bad > 0) return `<span class="pill warn">${c.declined ? `declined ${c.declined}` : `failed ${c.bad}`}</span>`;
+  if (c.ok > 0) return `<span class="pill ok">steady</span>`;
+  return `<span class="pill">quiet</span>`;
+}
 function renderAgents() {
-  const ms = STATE.members;
-  if (!ms.length) { $('agents').innerHTML = `<div class="empty">No agents found.</div>`; return; }
+  const ms = STATE.members, tb = $('agents').querySelector('tbody');
+  if (!ms.length) { tb.innerHTML = `<tr><td class="empty">No agents found.</td></tr>`; return; }
   const ranked = ms.map(m => ({m, last: lastRuns(m.spec.name)[0] || null})).sort((a, b) => ((b.last && b.last.ts) || 0) - ((a.last && a.last.ts) || 0));
-  $('agents').innerHTML = ranked.map(({m, last}) => {
-    const name = m.spec.name, enabled = !!m.effective.enabled, k = STATE.kpi[name];
-    const count = (k && k.total !== null && k.total !== undefined && k.unit) ? `${k.total} ${k.unit} today` : '';
-    const open = OPEN === name;
-    const runs = open ? lastRuns(name).slice(0, 5) : [];
-    return `
-      <div class="row" data-agent="${esc(name)}" data-last-ts="${last && last.ts ? esc(String(last.ts)) : ''}">
-        <span class="dot ${dotClass(last, enabled)}"></span>
-        <span class="name">${esc(m.spec.emoji || '')} ${esc(name)}${enabled ? '' : ' <span class="sub">(paused)</span>'}</span>
-        <span class="meta">${last ? esc(ago(last.ts)) : 'never run'}${count ? `<br>${esc(count)}` : ''}</span>
-      </div>
-      ${last && last.outcome ? `<div class="outcome">${esc(String(last.outcome).slice(0, 140))}</div>` : ''}
-      ${open ? `<div class="drawer">
-          <div class="role"><span class="role-label">Purpose</span>${esc((m.spec.mandate || {}).target || '')}</div>
-          ${runs.map(r => `<div class="run" data-run="${esc(r.run_id || '')}"><span class="dot ${dotClass(r, true)}" style="display:inline-block;vertical-align:middle;margin-right:6px"></span>${esc(ago(r.ts))} · ${esc(r.status || '')}${r.pr ? ` · <a href="${esc(String(r.pr).startsWith('http') ? r.pr : '#')}" target="_blank">PR</a>` : ''}<br><span class="sub">${esc(String(r.outcome || '').slice(0, 200))}</span></div>`).join('') || '<div class="sub">no runs yet</div>'}
+  tb.innerHTML = `<tr><th>Member</th><th>Last run</th><th class="num">ok</th><th class="num">declined</th><th class="num">failed</th><th></th></tr>` + ranked.map(({m, last}) => {
+    const name = m.spec.name, enabled = !!m.effective.enabled, c = counts6h(name), open = OPEN === name;
+    const runs = open ? lastRuns(name).slice(0, 6) : [];
+    return `<tr class="agent" data-agent="${esc(name)}">
+        <td><span class="dot ${dotClass(last, enabled)}"></span><span class="name">${esc(m.spec.emoji || '')} ${esc(name)}</span><div class="role">${esc(m.spec.plain || (m.spec.mandate || {}).target || '')}</div></td>
+        <td class="when">${last ? `${esc(ago(last.ts))} · ${esc(last.status || '')}` : 'never run'}</td>
+        <td class="num">${c.ok}</td><td class="num">${c.declined}</td><td class="num">${c.bad}</td>
+        <td>${pillFor(c, enabled)}</td></tr>` +
+      (open ? `<tr class="drawer"><td colspan="6">
+          <div class="purpose"><span class="role-label">Purpose</span>${esc(m.spec.plain || '')}</div>
+          ${runs.map(r => `<div class="run" data-run="${esc(r.run_id || '')}"><span class="dot ${dotClass(r, true)}"></span>${esc(ago(r.ts))} · ${esc(r.status || '')}${r.pr ? ` · PR ${esc(r.pr)}` : ''}<br><span class="role">${esc(String(r.outcome || '').slice(0, 200))}</span></div>`).join('') || '<div class="role">no runs yet</div>'}
           <div class="btns">
             <button class="primary" data-act="rerun" data-member="${esc(name)}">Rerun now</button>
             <button class="${enabled ? 'danger' : ''}" data-act="toggle" data-member="${esc(name)}" data-on="${enabled}">${enabled ? 'Pause' : 'Resume'}</button>
-          </div>
-          <div class="err" data-act="err"></div>
-        </div>` : ''}`;
+          </div><div class="err" data-act="err"></div></td></tr>` : '');
   }).join('');
 }
 
 function renderLanded() {
-  const merged = (STATE.gh.merged || []);
-  const today = centralDay(new Date());
-  const rows = merged.filter(pr => pr.mergedAt && centralDay(new Date(pr.mergedAt)) === today)
-    .sort((a, b) => new Date(b.mergedAt) - new Date(a.mergedAt));
-  if (!rows.length) { $('landed').innerHTML = `<div class="empty">Nothing merged yet today (Central time).</div>`; return; }
-  $('landed').innerHTML = rows.map(pr => `<a class="pr" href="${esc(pr.url)}" target="_blank">
-      <div class="t">${esc(pr.title)}</div>
-      <div class="m">#${esc(pr.number)} · ${esc((pr.author && pr.author.login) || '')} · ${esc(ago(new Date(pr.mergedAt).getTime()/1000))}</div>
-    </a>`).join('');
+  const merged = (STATE.gh.merged || []), today = centralDay(new Date());
+  const rows = merged.filter(pr => pr.mergedAt && centralDay(new Date(pr.mergedAt)) === today).sort((a, b) => new Date(b.mergedAt) - new Date(a.mergedAt));
+  $('landedSub').textContent = rows.length ? `${rows.length} today (Central)` : '';
+  if (!rows.length) { $('landed').innerHTML = `<li class="empty">Nothing merged yet today (Central time).</li>`; return; }
+  $('landed').innerHTML = rows.map(pr => `<li><a href="${esc(pr.url)}" target="_blank"><span>${esc(pr.title)}</span><span class="who">#${esc(pr.number)} · ${esc(ago(new Date(pr.mergedAt).getTime()/1000))}</span></a></li>`).join('');
 }
 
-function renderFoot() {
-  const s = STATE.spend, b = STATE.build;
-  const total = s && s.spend ? s.spend.reduce((a, r) => a + (r.total_cost || 0), 0) : null;
-  $('foot').innerHTML = `
-    ${total !== null ? `Spent ${money(total)} in the last 24 hours.<br>` : ''}
-    ${b && b.sha ? `Live build ${esc(String(b.sha).slice(0, 7))}${b.started_at ? `, up since ${esc(ago(b.started_at))}` : ''}.<br>` : ''}
-    <a href="${withBase('/classic')}">Classic console</a> · <a href="${withBase('/classic#settings')}">Settings and sign in</a> · <a href="${withBase('/status')}">Status</a> · updated ${esc(new Date().toLocaleTimeString('en-US', {timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit'}))} CT`;
+// ---- roster: every member in unison, plain English, grouped by the value stage it serves.
+// Reif, 2026-09-15: "holes show up in value not created or not captured" -- a stage with
+// nobody in it is the hole, so every stage renders even when empty.
+const STAGES = [
+  ['find',    'Find the work',        'What is broken, missing, or unmeasured?'],
+  ['rank',    'Rank it',              'Which of it matters most for the objective?'],
+  ['build',   'Build it',             'Who turns an item into a PR?'],
+  ['review',  'Review it',            'Who says a PR is right before it lands?'],
+  ['ship',    'Ship and keep it up',  'Who lands it, and who fixes red?'],
+  ['capture', 'Capture the value',    'Who checks that shipped work moved the number, and retires levers that did not?'],
+  ['learn',   'Learn and prune',      'Who fixes the fleet itself, and keeps it small?'],
+  ['tell',    'Tell Reif',            'Who reports, and only when it matters?'],
+];
+function renderRoster() {
+  const ms = STATE.members;
+  if (!ms.length) { $('roster').innerHTML = `<div class="empty">No members found.</div>`; return; }
+  $('roster').innerHTML = STAGES.map(([key, title, q]) => {
+    const here = ms.filter(m => (m.spec.stage || 'find') === key).sort((a, b) => a.spec.name.localeCompare(b.spec.name));
+    return `<div class="stage">
+      <div class="stage-head"><h3>${esc(title)}</h3><span class="q">${esc(q)}</span>${here.length ? '' : `<span class="pill bad hole">hole: nobody</span>`}</div>
+      ${here.map(m => { const last = lastRuns(m.spec.name)[0], en = !!m.effective.enabled; return `<div class="member">
+        <div><span class="dot ${dotClass(last, en)}"></span><span class="name">${esc(m.spec.emoji || '')} ${esc(m.spec.name)}</span>${en ? '' : ' <span class="pill">dispatch only</span>'}</div>
+        <div class="plain">${esc(m.spec.plain || (m.spec.mandate || {}).target || '')}</div>
+        <div class="when">${last ? `${esc(ago(last.ts))} · ${esc(last.status || '')}` : 'never run'}</div></div>`; }).join('') || `<div class="empty">No member serves this stage.</div>`}
+    </div>`;
+  }).join('');
 }
 
-// ---- fk#748: the run panel. Click a run, everything about that one run slides in from the right.
-function repoBase() {
-  const pr = (STATE.gh.merged || []).find(p => p.url);
-  return pr ? String(pr.url).replace(/\/pull\/\d+.*$/, '') : null;
-}
-function linkify(text) {
-  const base = repoBase(), h = esc(text);
-  return base ? h.replace(/(^|[^\w/&])#(\d{2,6})\b/g, (m, pre, n) => `${pre}<a href="${base}/issues/${n}" target="_blank">#${n}</a>`) : h;
-}
-function statusClass(rec) {
-  const st = rec && rec.status;
-  if (!st || st === 'started') return '';
-  if (st === 'ok') return 'ok';
-  if (st === 'quiet' || st === 'budget_declined' || st === 'reported_nothing') return 'warn';
-  return 'bad';
-}
-function findRun(id) {
-  const all = STATE.runs.filter(r => r.run_id === id);
-  return all.find(r => r.status !== 'started') || all[0] || null;
-}
-function section(title, text, cls) {
-  return `<h2>${esc(title)}</h2>${text ? `<div class="txt ${cls || ''}">${linkify(text)}</div>` : `<div class="none">none</div>`}`;
-}
+// ---- fk#748: the run panel.
+function linkify(text) { const base = repoBase(), h = esc(text); return base ? h.replace(/(^|[^\w/&])#(\d{2,6})\b/g, (m, pre, n) => `${pre}<a href="${base}/issues/${n}" target="_blank">#${n}</a>`) : h; }
+function statusClass(rec) { const st = rec && rec.status; if (!st || st === 'started') return ''; if (st === 'ok') return 'ok'; if (st === 'quiet' || st === 'budget_declined' || st === 'reported_nothing') return 'warn'; return 'bad'; }
+function findRun(id) { const all = STATE.runs.filter(r => r.run_id === id); return all.find(r => r.status !== 'started') || all[0] || null; }
+function section(title, text, cls) { return `<h2>${esc(title)}</h2>${text ? `<div class="txt ${cls || ''}">${linkify(text)}</div>` : `<div class="none">none</div>`}`; }
 function renderRun() {
   const side = $('side'), back = $('sideBack');
   const rec = OPEN_RUN && findRun(OPEN_RUN);
   if (!rec) { side.hidden = true; back.hidden = true; side.classList.remove('in'); if (LIVE_TIMER) { clearInterval(LIVE_TIMER); LIVE_TIMER = null; } return; }
-  const m = STATE.members.find(x => x.spec.name === rec.member);
-  const t = rec.tokens || {};
+  const m = STATE.members.find(x => x.spec.name === rec.member), t = rec.tokens || {};
   const dur = t.duration_ms ? `${Math.round(t.duration_ms / 60000)} min` : (rec.status === 'started' ? 'running' : '--');
-  const live = rec.status === 'started';
-  const base = repoBase();
-  const links = [rec.pr && base ? `<a href="${base}/pull/${esc(rec.pr)}" target="_blank">PR #${esc(rec.pr)}</a>` : '',
-                 rec.item_id && base ? `<a href="${base}/issues/${esc(rec.item_id)}" target="_blank">issue #${esc(rec.item_id)}</a>` : ''].filter(Boolean).join(' · ');
+  const live = rec.status === 'started', base = repoBase();
+  const links = [rec.pr && base ? `<a href="${base}/pull/${esc(rec.pr)}" target="_blank">PR #${esc(rec.pr)}</a>` : '', rec.item_id && base ? `<a href="${base}/issues/${esc(rec.item_id)}" target="_blank">issue #${esc(rec.item_id)}</a>` : ''].filter(Boolean).join(' · ');
   side.innerHTML = `
-    <div class="top"><span class="name">${esc((m && m.spec.emoji) || '')} ${esc(rec.member)}</span>
-      <button class="close" data-act="closeRun" aria-label="close">×</button></div>
-    <div class="when">${esc(ago(rec.ts))} · ${esc(new Date(rec.ts * 1000).toLocaleString('en-US', {timeZone: 'America/Chicago', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'}))} CT
-      · <span class="badge ${statusClass(rec)}">${esc(live ? 'running' : rec.status || '')}</span></div>
-    <dl class="facts">
-      <dt>Took</dt><dd>${esc(dur)}</dd>
-      <dt>Cost</dt><dd>${t.cost_usd !== undefined ? esc(money(t.cost_usd)) : '--'}${t.num_turns ? ` · ${esc(t.num_turns)} turns` : ''}</dd>
-      ${links ? `<dt>Links</dt><dd>${links}</dd>` : ''}
-      <dt>Run</dt><dd style="overflow-wrap:anywhere;color:var(--muted);font-size:12px">${esc(rec.run_id || '')}</dd>
-    </dl>
-    ${live ? `<h2>Report</h2><div class="none">still running; the outcome and report land here when the pass ends</div>
-    <h2>Live transcript</h2><pre class="live" id="liveLog">loading…</pre>` : `
-    ${section('Outcome', rec.outcome)}
-    ${section('Evidence', rec.evidence)}
-    ${rec.report ? section('Report', rec.report, 'report') : `<h2>Report</h2><div class="none">no written report for this run</div>`}
-    ${section('Self-critique', rec.self_critique)}`}`;
+    <div class="top"><span class="name">${esc((m && m.spec.emoji) || '')} ${esc(rec.member)}</span><button class="close" data-act="closeRun" aria-label="close">×</button></div>
+    <div class="when">${esc(ago(rec.ts))} · ${esc(new Date(rec.ts * 1000).toLocaleString('en-US', {timeZone: 'America/Chicago', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'}))} CT · <span class="badge ${statusClass(rec)}">${esc(live ? 'running' : rec.status || '')}</span></div>
+    <dl class="facts"><dt>Took</dt><dd>${esc(dur)}</dd><dt>Cost</dt><dd>${t.cost_usd !== undefined ? esc(money(t.cost_usd)) : '--'}${t.num_turns ? ` · ${esc(t.num_turns)} turns` : ''}</dd>${links ? `<dt>Links</dt><dd>${links}</dd>` : ''}<dt>Run</dt><dd style="overflow-wrap:anywhere;color:var(--muted);font-size:12px">${esc(rec.run_id || '')}</dd></dl>
+    ${live ? `<h2>Report</h2><div class="none">still running; the outcome and report land here when the pass ends</div><h2>Live transcript</h2><pre class="live" id="liveLog">loading…</pre>` : `${section('Outcome', rec.outcome)}${section('Evidence', rec.evidence)}${rec.report ? section('Report', rec.report, 'report') : `<h2>Report</h2><div class="none">no written report for this run</div>`}${section('Self-critique', rec.self_critique)}`}`;
   side.hidden = false; back.hidden = false;
   requestAnimationFrame(() => side.classList.add('in'));
   if (LIVE_TIMER) { clearInterval(LIVE_TIMER); LIVE_TIMER = null; }
   if (live) { loadLive(rec); LIVE_TIMER = setInterval(() => loadLive(rec), 10000); }
 }
 async function loadLive(rec) {
-  try {
-    const d = await getJSON(`/api/pass_log?member=${encodeURIComponent(rec.member)}&n=0`);
-    const el = $('liveLog'); if (!el) return;
+  try { const d = await getJSON(`/api/pass_log?member=${encodeURIComponent(rec.member)}&n=0`); const el = $('liveLog'); if (!el) return;
     const lines = (d.lines || []).slice(-60).map(l => typeof l === 'string' ? l : (l.text || JSON.stringify(l)));
-    el.textContent = lines.length ? lines.join('\n') : 'no transcript yet';
-    el.scrollTop = el.scrollHeight;
+    el.textContent = lines.length ? lines.join('\n') : 'no transcript yet'; el.scrollTop = el.scrollHeight;
   } catch (ex) { const el = $('liveLog'); if (el) el.textContent = ex.message; }
 }
 function openRun(id) { OPEN_RUN = id; renderRun(); }
 function closeRun() { OPEN_RUN = null; renderRun(); }
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && OPEN_RUN) closeRun(); });
 $('sideBack').addEventListener('click', closeRun);
+window.addEventListener('hashchange', () => { PAGE = location.hash.replace('#', '') === 'roster' ? 'roster' : 'home'; renderChrome(); });
 
 document.addEventListener('click', async e => {
-  const row = e.target.closest('.row[data-agent]');
+  const row = e.target.closest('tr.agent[data-agent]');
   if (row) { OPEN = OPEN === row.dataset.agent ? null : row.dataset.agent; renderAgents(); return; }
   const runEl = e.target.closest('.run[data-run]');
   if (runEl && runEl.dataset.run) { openRun(runEl.dataset.run); return; }
   if (e.target.closest('[data-act="closeRun"]')) { closeRun(); return; }
   const btn = e.target.closest('button[data-act]');
   if (!btn) return;
-  const box = btn.closest('.drawer');
-  const err = box && box.querySelector('[data-act="err"]');
+  const box = btn.closest('.drawer'), err = box && box.querySelector('[data-act="err"]');
   btn.disabled = true;
   try {
     if (btn.dataset.act === 'rerun') { await postJSON('/api/run_now', {member: btn.dataset.member}); btn.textContent = 'Started'; }
     else if (btn.dataset.act === 'toggle') { await postJSON('/api/fleet_toggle', {target: btn.dataset.member, value: btn.dataset.on !== 'true'}); await load(); }
+    else if (btn.dataset.act === 'fleet') { await postJSON('/api/fleet_toggle', {target: 'fleet', value: btn.dataset.on !== 'true'}); await load(); btn.disabled = false; }
   } catch (ex) {
-    if (err) err.textContent = ex.message;
+    if (err) err.textContent = ex.message; else $("build").textContent = ex.message;
     btn.disabled = false;
   }
 });
 
-load().catch(ex => { $('number').innerHTML = `<div class="err">${esc(ex.message)}</div>`; });
-refreshHealth();
+load().catch(ex => { $('stats').innerHTML = `<div class="err">${esc(ex.message)}</div>`; });
 setInterval(() => load().catch(() => {}), 30000);
-setInterval(refreshHealth, 30000);
 </script>
 </body>
 </html>

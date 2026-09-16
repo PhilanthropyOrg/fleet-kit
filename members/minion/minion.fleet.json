@@ -1,6 +1,6 @@
 {
   "name": "minion",
-  "emoji": "\ud83d\udc65",
+  "emoji": "👥",
   "kind": "llm",
   "lane": "build",
   "mandate": {
@@ -48,5 +48,7 @@
   },
   "report": {
     "vision_link": "optional"
-  }
+  },
+  "plain": "Builds a batch of items into one mergeable PR with auto-merge armed.",
+  "stage": "build"
 }

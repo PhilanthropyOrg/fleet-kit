@@ -42,5 +42,7 @@
   },
   "report": {
     "vision_link": "optional"
-  }
+  },
+  "plain": "Reads every lane's number off the board each hour and sends a nerd to dig into any lane that is stale, breached, or ignored.",
+  "stage": "find"
 }

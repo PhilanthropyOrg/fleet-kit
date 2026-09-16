@@ -48,5 +48,7 @@
     "vision_link": "optional"
   },
   "pacing": "exempt",
-  "pacing_why": "the merge gate is one cheap text-only call (fleet-kit#781)"
+  "pacing_why": "the merge gate is one cheap text-only call (fleet-kit#781)",
+  "plain": "Reviews every open PR within 15 minutes and posts one verdict: approve or block with the reason.",
+  "stage": "review"
 }

@@ -5196,17 +5196,20 @@ def _console_v2_is_one_phone_first_page_with_five_blocks():
     (/api/asks/answer) behind the same sign-in gate as run_now.
     """
     page = (ROOT / "scripts" / "fleet_home.html").read_text()
-    assert len(page.encode()) < 40_000, "v2 must stay small"
-    for block in ('id="number"', 'id="agents"', 'id="landed"', 'id="foot"'):
+    assert len(page.encode()) < 48_000, "the console must stay small"
+    # fk#1058 (Reif, 2026-09-15): the superadmin sidebar shell -- tiles from the metric
+    # registry, agents, landed today, a roster page; sidebar collapses under 760px.
+    for block in ('class="sidebar"', 'id="stats"', 'id="agents"', 'id="landed"', 'id="roster"', 'id="pageRoster"'):
         assert block in page, f"missing block {block}"
+    assert "@media (max-width:760px)" in page and "grid-template-columns:1fr" in page, "no phone layout"
     # Reif, 2026-09-15: "the waiting on you thing, I dont like it, kill it." No inbox on Home;
     # an ask pages him instead (ask.py _notify forces fleet_alert.sh's email leg).
     assert 'id="asks"' not in page and "Waiting on human" not in page and "Needs you" not in page
     ask_src = (ROOT / "scripts" / "ask.py").read_text()
     assert 'FLEET_ALERT_EMAIL_LEG="1"' in ask_src and "env=env" in ask_src, "an ask no longer reaches a human by email"
-    assert 'name="viewport"' in page and "min-height: 44px" in page
-    assert "<script src=" not in page and "cdn" not in page.lower(), "no framework, no CDN"
-    for api in ("/api/number", "/api/members", "/api/snapshot", "/api/kpi", "/api/build", "/api/plan", "/api/run_now", "/api/fleet_toggle"):
+    assert 'name="viewport"' in page and "min-height:44px" in page
+    assert "<script src=" not in page and "cdn" not in page.lower(), "no framework, no CDN (fonts.googleapis is a stylesheet)"
+    for api in ("/api/metrics", "/api/members", "/api/snapshot", "/api/kpi", "/api/build", "/api/run_now", "/api/fleet_toggle"):
         assert api in page, f"page does not use {api}"
     # gh#553 fix 1 (round 2): the link no longer hardcodes a root-absolute "/classic" -- it is
     # built from withBase('/classic') so it still resolves under this console's own path
@@ -5214,7 +5217,7 @@ def _console_v2_is_one_phone_first_page_with_five_blocks():
     assert "withBase('/classic')" in page
     sv = (ROOT / "scripts" / "fleet_view_server.py").read_text()
     assert 'if path in ("/", "/classic"):' in sv and "PAGE_V2" in sv, "root must serve v2 and /classic the old page"
-    for route in ('if path == "/api/asks":', 'if path == "/api/build":', 'if path == "/api/plan":', 'if path == "/api/asks/answer":'):
+    for route in ('if path == "/api/asks":', 'if path == "/api/build":', 'if path == "/api/plan":', 'if path == "/api/asks/answer":', 'if path == "/api/metrics":'):
         assert route in sv, f"server lacks {route}"
     gate = sv.index("if not self._authorized():")
     assert sv.index('if path == "/api/asks/answer":') > gate, "answering an ask must sit behind the sign-in gate"
@@ -5230,12 +5233,14 @@ def _console_run_panel_shows_everything_about_one_run_fk748():
     carry a report on every run.
     """
     page = (ROOT / "scripts" / "fleet_home.html").read_text()
-    for needle in ('id="side"', 'id="sideBack"', 'width: 33.333vw', '@media (max-width: 700px) { .side { width: 100vw',
+    # fk#1058 reformatted the CSS (no spaces after colons, 760px phone breakpoint); the needles
+    # are the behaviours, not the old whitespace.
+    for needle in ('id="side"', 'id="sideBack"', 'width:33.333vw', '.side{width:100vw',
                    'data-run=', 'no written report for this run', '/api/pass_log', "e.key === 'Escape'",
                    "section('Outcome', rec.outcome)", "section('Evidence', rec.evidence)", "section('Self-critique'",
                    '<span class="role-label">Purpose</span>'):  # Reif 2026-09-09: "not clear that this is marie's purpose line"
         assert needle in page, f"fleet_home.html lacks {needle!r}"
-    assert len(page.encode()) < 40_000, "v2 must stay small"
+    assert len(page.encode()) < 48_000, "the console must stay small"
     import run_report
     sh = run_report.build_record(member="roomba", run_id="r", kind="shell", exit_code=0,
                                  pass_text="Outcome: pruned 3 worktrees\nEvidence: ls\nremoved /tmp/a\nremoved /tmp/b\n",
@@ -5313,13 +5318,76 @@ def _console_says_paused_when_the_whole_pool_is_gated_fk1041():
                 else:
                     _os.environ[k] = v
     html_src = (ROOT / "scripts" / "fleet_home.html").read_text()
-    assert html_src.index('<div id="banner">') < html_src.index('<h1>The number</h1>'), "the banner slot is not the first thing on the page"
-    banner = html_src[html_src.index("function renderBanner()"):html_src.index("function nextCheckpoint(")]
+    assert html_src.index('<div id="banner">') < html_src.index('id="stats"'), "the banner slot is not the first thing on the page"
+    banner = html_src[html_src.index("function renderBanner()"):html_src.index("function sparkHtml(")]
     assert "poolPause()" in banner and "PAUSED: Claude account exhausted, resumes" in banner and 'class="banner paused"' in banner
     assert "America/Chicago" in html_src, "resume time is not rendered in Central"
-    health = html_src[html_src.index("function renderHealth()"):html_src.index("function renderAgents(")]
-    assert "PAUSED" in health and "poolPause()" in health, "the alive line does not say PAUSED"
+    stats = html_src[html_src.index("function renderStats()"):html_src.index("function lastRuns(")]
+    assert "PAUSED" in stats and "poolPause()" in stats, "the alive tile does not say PAUSED"
     assert "Add an account to FLEET_ACCOUNTS" in banner, "the banner carries no ask"
+
+
+def _console_tiles_are_registered_metrics_with_history_fk1058():
+    """fk#1058, Reif: "each one needs to have a real id, because we are going to update the
+    okrs soon" and "show the number and also the sparkline". Every tile is a row in
+    scripts/metrics.json; /api/metrics returns value + sub + series per id; daily-history ids
+    persist one row per Central day in fleet_db.metric_points, so a second call the same day
+    upserts rather than duplicates."""
+    import importlib, os as _os
+    reg = json.loads((ROOT / "scripts" / "metrics.json").read_text())["metrics"]
+    ids = [m["id"] for m in reg]
+    assert len(ids) == len(set(ids)) and all("." in i for i in ids), "metric ids must be unique and namespaced"
+    for want in ("okr.verified_claims", "fleet.backlog_open", "fleet.merged_per_day", "gh.actions_spend_mtd", "fleet.accounts_live"):
+        assert want in ids, f"{want} missing from the registry"
+    page = (ROOT / "scripts" / "fleet_home.html").read_text()
+    assert 'data-metric-id="${esc(m.id)}"' in page and "sparkHtml(m)" in page and "mousemove" in page, "tiles do not carry the id or a hoverable sparkline"
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        old = {k: _os.environ.get(k) for k in ("FLEET_DB_PATH", "FLEET_LOG_DIR", "FLEET_ENV_FILE", "ACCOUNT_POOL_STATE_FILE")}
+        _os.environ["FLEET_LOG_DIR"] = str(tmp); _os.environ["FLEET_DB_PATH"] = str(tmp / "fleet.db")
+        (tmp / "fleet.env").write_text("FLEET_ACCOUNTS=a b\n"); _os.environ["FLEET_ENV_FILE"] = str(tmp / "fleet.env")
+        _os.environ["ACCOUNT_POOL_STATE_FILE"] = str(tmp / "nope.state")
+        try:
+            sys.path.insert(0, str(ROOT / "scripts"))
+            fvs = importlib.import_module("fleet_view_server")
+            fvs.ENV_FILE = tmp / "fleet.env"
+            import fleet_db as _fdb
+            _fdb.DB_FILE = tmp / "fleet.db"
+            fvs.STATE.gh = {"prs": [{"isDraft": False}, {"isDraft": True}], "issues": [{"_claimed": True}, {"_claimed": False}, {"_claimed": False}], "merged": []}
+            fvs.STATE.runs = []
+            fvs._TTL_CACHE.clear()
+            fvs._gh = lambda *a, **k: ""  # no network
+            snap = fvs.metrics_snapshot()
+            by = {m["id"]: m for m in snap["metrics"]}
+            assert by["fleet.backlog_open"]["value"] == 3 and "1 claimed" in by["fleet.backlog_open"]["sub"], by["fleet.backlog_open"]
+            assert by["fleet.prs_open"]["value"] == 2 and by["fleet.accounts_live"]["value"] == 2 and by["fleet.accounts_live"]["of"] == 2
+            assert by["gh.actions_spend_mtd"]["value"] is None, "no network must read as unavailable, not 0"
+            fvs.metrics_snapshot()
+            db = _fdb.connect(tmp / "fleet.db")
+            n = db.execute("SELECT COUNT(*) FROM metric_points WHERE id='fleet.backlog_open'").fetchone()[0]
+            db.close()
+            assert n == 1, f"two calls the same day must upsert one row, got {n}"
+        finally:
+            for k, v in old.items():
+                if v is None: _os.environ.pop(k, None)
+                else: _os.environ[k] = v
+
+
+def _console_roster_shows_every_member_in_plain_english_by_stage():
+    """Reif, 2026-09-15: "we need to see all the fleet members in unison - write their purpose
+    in plain english... holes show up in value not created or not captured." Every member spec
+    carries `plain` (one sentence, no identifiers) and `stage`; the Roster page renders every
+    stage, and an empty stage renders as a hole rather than disappearing."""
+    import member_spec
+    page = (ROOT / "scripts" / "fleet_home.html").read_text()
+    stages = re.findall(r"\['(\w+)',\s*'", page[page.index("const STAGES"):page.index("function renderRoster")])
+    assert "capture" in stages and "find" in stages and "tell" in stages, stages
+    assert "hole: nobody" in page, "an empty stage must render as a hole"
+    for spec in member_spec.load_all():
+        plain = spec.get("plain", "")
+        assert 20 < len(plain) < 220 and plain[0].isupper(), f"{spec['name']}: plain purpose missing or not a sentence"
+        assert not re.search(r"\.(py|sh|json)\b|\$FLEET|_[A-Z]{2,}", plain), f"{spec['name']}: plain purpose carries an identifier: {plain}"
+        assert spec.get("stage") in stages, f"{spec['name']}: stage {spec.get('stage')!r} not in the roster"
 
 
 def _console_shows_role_and_steps_per_member():
@@ -15141,6 +15209,8 @@ if __name__ == "__main__":
     check("deploy.sh kicks one sentry pass right after cutover (gh#663)", _deploy_sh_kicks_a_sentry_pass_right_after_cutover)
     check("deploy.sh rolls over via caddy without a cordon (gh#625)", _deploy_sh_rolls_over_via_caddy_without_a_cordon)
     check("console says PAUSED, first and red, when every pool account is gated (fk#1041)", _console_says_paused_when_the_whole_pool_is_gated_fk1041)
+    check("console tiles are registered metrics with a real id and daily history (fk#1058)", _console_tiles_are_registered_metrics_with_history_fk1058)
+    check("console roster shows every member in plain English by value stage (fk#1058)", _console_roster_shows_every_member_in_plain_english_by_stage)
     check("console shows each member's emoji, role and the steps a pass takes", _console_shows_role_and_steps_per_member)
     check("sidebar shows spawned/scheduled/disabled as distinct badges, not strikethrough (gh#565)", _sidebar_shows_spawned_scheduled_disabled_not_strikethrough_gh565)
     check("status dot carries a non-color channel at both render sites, colors untouched (gh#430)", _status_dot_carries_a_non_color_channel_at_both_render_sites_gh430)

@@ -25,11 +25,23 @@
     "prompt_file": "librarian-scrub.md",
     "runner": "members/librarian-scrub/librarian-scrub.sh",
     "tools": {
-      "allow": ["none"],
-      "deny": ["Read", "Edit", "Write", "Bash", "Grep", "Glob", "WebFetch"]
+      "allow": [
+        "none"
+      ],
+      "deny": [
+        "Read",
+        "Edit",
+        "Write",
+        "Bash",
+        "Grep",
+        "Glob",
+        "WebFetch"
+      ]
     }
   },
   "report": {
     "vision_link": "optional"
-  }
+  },
+  "plain": "Every hour redacts anything credential-shaped from stored transcripts and compresses old ones.",
+  "stage": "learn"
 }

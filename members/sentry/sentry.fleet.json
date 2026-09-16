@@ -41,5 +41,7 @@
   },
   "report": {
     "vision_link": "optional"
-  }
+  },
+  "plain": "Uses the product like a person every 3 hours and files an issue when something a user does stops working.",
+  "stage": "find"
 }

@@ -45,5 +45,7 @@
     "vision_link": "optional"
   },
   "pacing": "exempt",
-  "pacing_why": "the brief Reif reads must go out (fleet-kit#781)"
+  "pacing_why": "the brief Reif reads must go out (fleet-kit#781)",
+  "plain": "Sends Reif the morning brief, the afternoon block, and the evening wrap, Central time.",
+  "stage": "tell"
 }

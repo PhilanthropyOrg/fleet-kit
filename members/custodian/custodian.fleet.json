@@ -43,5 +43,7 @@
   "report": {
     "vision_link": "optional"
   },
-  "kind": "shell"
+  "kind": "shell",
+  "plain": "Once a day finds the product job doing more than one thing and files a retirement for the worst one.",
+  "stage": "find"
 }

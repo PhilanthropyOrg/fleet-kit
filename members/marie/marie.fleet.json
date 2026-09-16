@@ -1,6 +1,6 @@
 {
   "name": "marie",
-  "emoji": "\ud83e\uddf9",
+  "emoji": "🧹",
   "kind": "llm",
   "lane": "hygiene",
   "mandate": {
@@ -55,5 +55,7 @@
   },
   "report": {
     "vision_link": "optional"
-  }
+  },
+  "plain": "Keeps the backlog honest every hour: every item real, ranked against the vision, claimed items matched to live PRs, and writes the spec for what is about to be built.",
+  "stage": "rank"
 }
