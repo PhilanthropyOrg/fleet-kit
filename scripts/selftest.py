@@ -6736,6 +6736,21 @@ def _a_dispatch_lock_collision_is_not_an_executed_run():
     assert "--dispatch-skipped" in guard[:guard.index("exit 0")], \
         "run_member.sh's dispatch-race guard no longer asks for the status -- rows regress to ok"
 
+    # gh#150/gh#254's class, 4th instance: `declined` is total - executed, so a status added to
+    # _NOT_EXECUTED_STATUSES silently becomes a BUDGET decline on the Stats page unless it is
+    # also excluded from the budget-wall arithmetic. Assert on the payload, not the sets.
+    now = datetime.datetime.now(datetime.timezone.utc).timestamp()
+    rows = ([{"member": "the-fixer", "status": "ok", "ts": now}] * 2
+            + [{"member": "the-fixer", "status": "dispatch_skipped", "ts": now}] * 8
+            + [{"member": "judge-judy", "status": "heartbeat", "ts": now}] * 10)
+    summary = fleet_stats.runs_summary(rows, hours=24.0)
+    assert summary["budget_declined_count"] == 0 and summary["declined"] == 0, \
+        f"lock collisions and liveness pings are not budget declines, got {summary}"
+    assert summary["budget_wall"] == 0, \
+        f"18 no-attempt rows must not read as a budget wall, got {summary['budget_wall']}"
+    assert summary["signal_rate"] == 100, \
+        f"the two real passes were both ok, so signal rate is 100, got {summary['signal_rate']}"
+
 
 def _judge_judy_writes_a_heartbeat_row_on_a_no_pr_tick():
     """gh#267: a tick that finds no PR to review used to exit without ever touching

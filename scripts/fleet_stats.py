@@ -74,6 +74,17 @@ _INTERRUPTED_STATUSES = {"timed_out", "killed"}
 # as a budget decline.
 _PROVISIONAL_STATUSES = {"started"}
 
+# fk#1049: not executed AND not walled off -- nothing was attempted and nothing was refused.
+# `declined` is computed as total - executed, so every status added to _NOT_EXECUTED_STATUSES
+# lands in it by default, and `budget_declined_count = declined - interrupted_count` then
+# renders it on the Stats page as "the fleet is being throttled by cost limits". That was
+# already wrong for `heartbeat` (52 judge-judy liveness pings in a day), and a dispatch-flock
+# collision would have made it wrong 1,246 times a week. This is the 4th instance of
+# gh#150/gh#254's "a new run_report.py status doesn't reach this file" class, so it is fixed as
+# a named set rather than a subtraction nobody can find later: these rows leave the budget-wall
+# numerator AND its denominator, because they were never an attempt to spend.
+_NO_ATTEMPT_STATUSES = {"heartbeat", "dispatch_skipped"}
+
 
 def runs_summary(runs: list[dict], hours: float = 24.0, roster: list[dict] | None = None) -> dict:
     """One payload for the whole Recent Runs card: headline KPIs (signal rate, budget-wall rate,
@@ -101,7 +112,12 @@ def runs_summary(runs: list[dict], hours: float = 24.0, roster: list[dict] | Non
 
     total = len(non_provisional)
     executed = [r for r in non_provisional if (r.get("status") or "") not in _NOT_EXECUTED_STATUSES]
-    declined = total - len(executed)
+    # fk#1049: an attempt is a run that either executed or was refused. A liveness ping and a
+    # dispatch-flock collision are neither, so they leave both sides of the budget-wall ratio.
+    no_attempt_count = sum(1 for r in non_provisional
+                           if (r.get("status") or "") in _NO_ATTEMPT_STATUSES)
+    attempts = total - no_attempt_count
+    declined = attempts - len(executed)
     interrupted_count = sum(1 for r in non_provisional
                              if (r.get("status") or "") in _INTERRUPTED_STATUSES)
     budget_declined_count = declined - interrupted_count
@@ -111,7 +127,7 @@ def runs_summary(runs: list[dict], hours: float = 24.0, roster: list[dict] | Non
     # run failed, or every run got budget-declined) is a different diagnosis from "nothing ran
     # in this window at all," and the two must not render as the same number downstream.
     signal_rate = round(100 * ok / len(executed)) if executed else None
-    budget_wall = round(100 * declined / total) if total else None
+    budget_wall = round(100 * declined / attempts) if attempts else None
 
     # dormant: members with runs in the window whose most recent run was budget_declined AND
     # who logged nothing else -- i.e. every attempt in-window got walled off, not just the last one
