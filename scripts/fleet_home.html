@@ -34,6 +34,7 @@
   .delta { font-weight: 600; }
   .up { color: var(--ok); } .down { color: var(--bad); }
   .banner.paused { background: var(--bad); color: #fff; font-weight: 700; font-size: 18px; }
+  .banner-sub { font-weight: 500; font-size: 14px; margin-top: 6px; opacity: .95; }
   table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 14px; }
   td, th { text-align: left; padding: 6px 0; border-top: 1px solid var(--line); vertical-align: top; }
   th { color: var(--muted); font-weight: 500; }
@@ -56,14 +57,6 @@
   button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
   button.danger { color: var(--bad); border-color: var(--bad); }
   button:disabled { opacity: .5; }
-  .ask { padding: 10px 0; border-top: 1px solid var(--line); }
-  .ask:first-child { border-top: 0; }
-  .ask .why { font-weight: 600; }
-  .ask .why-detail { margin: 4px 0; }
-  .ask .why-detail summary { cursor: pointer; color: var(--accent); font-size: 13px; }
-  .ask .why-full { color: var(--muted); font-size: 13px; margin-top: 6px; white-space: pre-wrap; }
-  .ask .prop { color: var(--muted); font-size: 14px; margin: 4px 0 8px; }
-  .ask input { font: inherit; font-size: 15px; min-height: 44px; padding: 0 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--text); width: 100%; }
   .empty { color: var(--muted); padding: 6px 4px; }
   .pr { display: block; padding: 8px 4px; border-top: 1px solid var(--line); color: var(--text); text-decoration: none; min-height: 44px; }
   .pr:first-child { border-top: 0; }
@@ -113,10 +106,6 @@
   <h1>Fleet</h1>
   <div class="card" id="health"><div class="sub">loading…</div></div>
 
-  <h1>Needs you</h1>
-  <div class="sub" id="asksSub"></div>
-  <div class="card" id="asks"><div class="empty">loading…</div></div>
-
   <h1>Agents</h1>
   <div class="card" id="agents"><div class="empty">loading…</div></div>
 
@@ -142,7 +131,7 @@ const centralDay = d => new Intl.DateTimeFormat('en-CA', {timeZone: 'America/Chi
 let OPEN = null;        // which agent drawer is open, survives re-renders
 let OPEN_RUN = null;    // run_id shown in the side panel (fk#748), survives re-renders
 let LIVE_TIMER = null;
-let STATE = { number: null, plan: null, asks: [], members: [], runs: [], gh: {}, kpi: {}, spend: null, build: null, fleet: null, budget: null };
+let STATE = { number: null, plan: null, members: [], runs: [], gh: {}, kpi: {}, spend: null, build: null, fleet: null, budget: null };
 
 // gh#553 fix 1 (round 2): this console is served behind a path prefix (Caddy routes
 // /fleet/<instance>/* to this backend, e.g. /fleet/fleet-kit/), but this page's own root-
@@ -171,7 +160,7 @@ async function postJSON(path, body) {
 
 // gh#553 VP review round 2, fix 5: FLEET card measured 2.20s to fill against a 1s budget
 // because render() used to wait on all 9 boot fetches before drawing anything -- including
-// kpi/spend/plan/asks/members/build, none of which renderBanner()/renderHealth() read. Both
+// kpi/spend/plan/members/build, none of which renderBanner()/renderHealth() read. Both
 // waves still start at the same instant (fired together below, same total network load), but
 // the card's own two dependencies -- snapshot and fleet_state -- are no longer stuck behind
 // whichever of the other seven happens to answer slowest.
@@ -183,7 +172,6 @@ async function load() {
   const restP = Promise.all([
     getJSON('/api/number').catch(() => null),
     getJSON('/api/plan').catch(() => null),
-    getJSON('/api/asks').catch(() => ({asks: []})),
     getJSON('/api/members').catch(() => ({members: []})),
     getJSON('/api/kpi').catch(() => ({kpi: []})),
     getJSON('/api/spend?hours=24').catch(() => null),
@@ -193,12 +181,12 @@ async function load() {
   STATE = { ...STATE, runs: snap.runs || [], gh: snap.gh || {}, fleet };
   renderBanner(); renderHealth();
 
-  const [number, plan, asks, members, kpi, spend, build] = await restP;
-  STATE = { ...STATE, number, plan, asks: asks.asks || [], members: members.members || [],
+  const [number, plan, members, kpi, spend, build] = await restP;
+  STATE = { ...STATE, number, plan, members: members.members || [],
             kpi: Object.fromEntries((kpi.kpi || []).map(k => [k.member, k])), spend, build };
   // renderBanner()/renderHealth() already ran above off the critical wave and don't depend on
   // anything this second wave adds -- rerunning them here would just rewrite the same DOM twice.
-  renderNumber(); renderAsks(); renderAgents(); renderLanded(); renderFoot();
+  renderNumber(); renderAgents(); renderLanded(); renderFoot();
 }
 
 // gh#553 fix 1: /api/budget_preview shells out to a real remote meter (maxx_reader.py) and can
@@ -217,7 +205,7 @@ async function refreshHealth() {
 }
 
 function render() {
-  renderBanner(); renderNumber(); renderHealth(); renderAsks(); renderAgents(); renderLanded(); renderFoot();
+  renderBanner(); renderNumber(); renderHealth(); renderAgents(); renderLanded(); renderFoot();
 }
 
 // fk#1041: every Claude account gated = the fleet is PAUSED, whatever the cron ticks say.
@@ -234,7 +222,7 @@ function renderBanner() {
   const f = STATE.fleet;
   const p = poolPause();
   $('banner').innerHTML = p
-    ? `<div class="banner paused" role="alert">PAUSED: Claude account exhausted, resumes ${esc(pausedResumesCT(p))}</div>`
+    ? `<div class="banner paused" role="alert">PAUSED: Claude account exhausted, resumes ${esc(pausedResumesCT(p))}<div class="banner-sub">Every account in the pool is gated (${esc((p.pool || []).map(a => `${a}: ${(p.gated[a] || {}).reason || 'exhausted'}`).join(', '))}). Add an account to FLEET_ACCOUNTS in fleet.env and redeploy, or wait.</div></div>`
     : (f && f.FLEET_ENABLED === false) ? `<div class="banner">The fleet is paused. Nothing new starts until it is turned back on.</div>` : '';
   // gh#553 fix 5: the tab title comes from this instance's own config (FLEET_BRAND, or a name
   // derived from its repo), never a hardcoded product name.
@@ -290,10 +278,6 @@ function mergedLast24hCount() {
   const cutoff = Date.now() - 24 * 3600 * 1000;
   return (STATE.gh.merged || []).filter(pr => pr.mergedAt && Date.parse(pr.mergedAt) >= cutoff).length;
 }
-function needsHumanOp() {
-  return STATE.gh.needs_human_op || { count: 0, oldest_age_hours: 0 };
-}
-
 function renderHealth() {
   const pct = STATE.budget && STATE.budget.week_bank_pct;
   // null/undefined (meter unreadable or not configured) is its own visible state, never
@@ -306,60 +290,15 @@ function renderHealth() {
   const aliveHtml = poolPause()
     ? `<span class="down">PAUSED</span> (cron ticks still run; nothing that thinks does)`
     : newest === null ? 'no ok run yet' : esc(ago(newest));
-  const nho = needsHumanOp();
   $('health').innerHTML = `
     <div class="sub">${pctHtml} · alive ${aliveHtml}</div>
-    <div class="sub">Waiting on human ${num(nho.count)}${nho.count ? ` · oldest ${Math.round(nho.oldest_age_hours)}h` : ''} · merged 24h ${num(mergedLast24hCount())} · <a href="${withBase('/classic#stats')}">Stats</a></div>`;
+    <div class="sub">merged 24h ${num(mergedLast24hCount())} · <a href="${withBase('/classic#stats')}">Stats</a></div>`;
 }
 
-// gh#553 VP review round 2, fix 4: the fleet's own asks are filed in raw engineering prose by
-// whichever script hit trouble (gru_allowance.py, pacing_gate.py, ...) -- rewriting that text
-// at the source would mean touching every ask-filing call site across the fleet, well past
-// what this page can safely do. What this page CAN fix: it was showing that whole paragraph
-// unconditionally, which is why Home ran ~8 screens of ask prose before Reif ever reached the
-// AGENTS list (measured 8,497px). A short headline now stands in front, and the full text is
-// one tap away instead of always on screen.
-function askHeadline(why) {
-  // Array.from() splits on code points, not UTF-16 code units, so a 110-char cut never
-  // lands in the middle of a surrogate pair (e.g. an emoji) the way String.slice() can.
-  const chars = Array.from(String(why || ''));
-  if (chars.length <= 110) return chars.join('');
-  const cut = chars.slice(0, 110);
-  const sp = cut.lastIndexOf(' ');
-  return (sp > 40 ? cut.slice(0, sp) : cut).join('') + '…';
-}
-
-function renderAsks() {
-  const nho = needsHumanOp();
-  $('asksSub').textContent = nho.count ? `${nho.count} waiting on human, oldest ${Math.round(nho.oldest_age_hours)}h` : '';
-  const asks = STATE.asks;
-  const p = poolPause();
-  const pausedAsk = p ? `<div class="ask"><div class="why">Add capacity or wait: every account in the pool is gated (${esc((p.pool || []).map(a => `${a}: ${(p.gated[a] || {}).reason || 'exhausted'}`).join(', '))}). Add an account to FLEET_ACCOUNTS in fleet.env and redeploy, or the fleet resumes ${esc(pausedResumesCT(p))}.</div></div>` : '';
-  if (!asks.length) { $('asks').innerHTML = pausedAsk || `<div class="empty">Nothing waiting on you.</div>`; return; }
-  $('asks').innerHTML = pausedAsk + asks.map(a => {
-    const why = String(a.why || '');
-    // gh#877: a filer-authored plain-language summary, when present, IS the headline and the
-    // full `why` trace moves behind the tap -- even if `why` alone would have fit on one line,
-    // per AC4. No summary (every ask filed before this column existed, or a filer that still
-    // omits it) falls back to askHeadline()'s truncation exactly as before, per AC5.
-    const summary = String(a.summary || '').trim();
-    const headline = summary || askHeadline(why);
-    const detail = summary ? why : (headline !== why ? why : null);
-    return `
-    <div class="ask" data-id="${esc(a.id)}">
-      <div class="why">${esc(headline)}</div>
-      ${detail !== null ? `<details class="why-detail"><summary>full detail</summary><div class="why-full">${esc(detail)}</div></details>` : ''}
-      <div class="prop">${a.member ? `from ${esc(a.member)} · ` : ''}${a.unblocks ? `unblocks ${esc(a.unblocks)} · ` : ''}${a.proposed ? `fleet proposes: ${esc(a.proposed)}` : 'no proposed answer'}</div>
-      <div class="btns">
-        ${a.proposed ? `<button class="primary" data-act="answer" data-answer="${esc(a.proposed)}">Yes, do that</button>` : ''}
-        <input placeholder="or answer in a sentence" data-act="text">
-        <button data-act="send">Send</button>
-      </div>
-      <div class="err" data-act="err"></div>
-    </div>`;
-  }).join('');
-}
-
+// Reif, 2026-09-15: "the waiting on you thing, I dont like it, kill it -- somehow it can get me
+// a message some other way if it needs me." A filed ask pages him (ask.py _notify through
+// fleet_alert.sh, email leg forced for asks); the console shows no inbox. /api/asks stays for
+// /classic and for answering.
 function lastRuns(name) {
   return STATE.runs.filter(r => r.member === name).sort((a, b) => (b.ts || 0) - (a.ts || 0));
 }
@@ -498,18 +437,12 @@ document.addEventListener('click', async e => {
   if (e.target.closest('[data-act="closeRun"]')) { closeRun(); return; }
   const btn = e.target.closest('button[data-act]');
   if (!btn) return;
-  const box = btn.closest('.drawer, .ask');
+  const box = btn.closest('.drawer');
   const err = box && box.querySelector('[data-act="err"]');
   btn.disabled = true;
   try {
     if (btn.dataset.act === 'rerun') { await postJSON('/api/run_now', {member: btn.dataset.member}); btn.textContent = 'Started'; }
     else if (btn.dataset.act === 'toggle') { await postJSON('/api/fleet_toggle', {target: btn.dataset.member, value: btn.dataset.on !== 'true'}); await load(); }
-    else if (btn.dataset.act === 'answer' || btn.dataset.act === 'send') {
-      const answer = btn.dataset.act === 'answer' ? btn.dataset.answer : (box.querySelector('[data-act="text"]').value || '').trim();
-      if (!answer) throw new Error('write an answer first');
-      await postJSON('/api/asks/answer', {id: Number(box.dataset.id), answer});
-      await load();
-    }
   } catch (ex) {
     if (err) err.textContent = ex.message;
     btn.disabled = false;
