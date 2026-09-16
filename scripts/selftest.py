@@ -1339,9 +1339,9 @@ def _vision_link_gate_eligibility_rule():
 
     # gate_candidates: a linked candidate is always eligible; order is a filtered subsequence.
     out = vlg.gate_candidates([
-        {"number": 3, "body": "Vision-link: A"},
+        {"number": 3, "body": "Vision-link: okr.traffic -- A"},
         {"number": 4, "body": "no link at all"},
-        {"number": 5, "body": "Vision-link: B"},
+        {"number": 5, "body": "Vision-link: okr.clicks -- B"},
     ])
     assert out == {"eligible": [3, 5], "dropped": [
         {"number": 4, "reason": "no Vision-link line (neither a real link nor explicit "
@@ -1373,7 +1373,7 @@ def _vision_link_gate_eligibility_rule():
     # Vision-link'd candidate is available at the same tier.
     out_ac2 = vlg.gate_candidates([
         {"number": 1, "body": "no vision line"},
-        {"number": 2, "body": "Vision-link: KR1 supply"},
+        {"number": 2, "body": "Vision-link: okr.traffic -- supply"},
     ])
     assert out_ac2["eligible"] == [2]
     assert [d["number"] for d in out_ac2["dropped"]] == [1]
