@@ -119,8 +119,38 @@ def check_tile_dark(metrics: dict, registry: list[dict], now: float) -> list[dic
     return out
 
 
-def check_no_plain(runs: list[dict], now: float, hours: float = 24.0) -> list[dict]:
-    if os.environ.get("FLEET_RUN_PLAIN") != "1":
+def gated_accounts(state_text: str, accounts: list[str], now: float) -> list[tuple[str, float]]:
+    """(account, reset_epoch) for every configured account the pool state file still gates."""
+    until: dict[str, float] = {}
+    for line in state_text.splitlines():
+        parts = line.split()
+        if len(parts) >= 2:
+            try:
+                until[parts[0]] = float(parts[1])
+            except ValueError:
+                continue
+    return [(a, until[a]) for a in accounts if a in until and until[a] > now]
+
+
+def check_pool_exhausted(state_text: str, accounts: list[str], now: float) -> list[dict]:
+    """Every account in FLEET_ACCOUNTS is gated: the fleet is dark and every other symptom
+    (budget_declined runs, no plain words, quiet members) is this one fact. One finding, not six."""
+    gated = gated_accounts(state_text, accounts, now)
+    if not accounts or len(gated) < len(accounts):
+        return []
+    fmt = lambda t: time.strftime("%Y-%m-%d %H:%MZ", time.gmtime(t))
+    soonest = min(t for _, t in gated)
+    return [{"key": "pool-exhausted",
+             "title": f"the fleet is dark: every account is at its weekly limit until {fmt(soonest)}",
+             "body": ("Every account in the pool is gated by `account-pool-exhausted.state`: "
+                      + "; ".join(f"`{a}` until {fmt(t)}" for a, t in gated)
+                      + ". Until the first reset no member can spend a call, so every run reads `budget_declined` "
+                        "and no report gets plain words. Either add an account to FLEET_ACCOUNTS or wait; "
+                        "nothing on the board moves before then.")}]
+
+
+def check_no_plain(runs: list[dict], now: float, hours: float = 24.0, pool_dark: bool = False) -> list[dict]:
+    if os.environ.get("FLEET_RUN_PLAIN") != "1" or pool_dark:
         return []
     since = now - hours * 3600
     per: dict[str, list[int]] = {}
@@ -251,8 +281,14 @@ def main(argv=None) -> int:
     slug = repo_slug()
     titles = open_issue_titles(slug) if slug and not a.dry_run else []
     metrics, registry = load_metrics()
-    findings = (check_churn(runs, now, a.hours) + check_ask_stale(load_asks(), titles, now)
-                + check_tile_dark(metrics, registry, now) + check_no_plain(runs, now))
+    accounts = (os.environ.get("FLEET_ACCOUNTS") or "").split()
+    try:
+        pool_state = (LOG_DIR / "account-pool-exhausted.state").read_text()
+    except OSError:
+        pool_state = ""
+    dark = check_pool_exhausted(pool_state, accounts, now)
+    findings = (dark + check_churn(runs, now, a.hours) + check_ask_stale(load_asks(), titles, now)
+                + check_tile_dark(metrics, registry, now) + check_no_plain(runs, now, pool_dark=bool(dark)))
     log(f"{len(findings)} finding(s): " + ", ".join(f["key"] for f in findings))
     if a.dry_run:
         json.dump(findings, sys.stdout, indent=1); print()

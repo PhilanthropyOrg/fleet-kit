@@ -4989,6 +4989,14 @@ def _reif_eyes_files_what_reif_would_have_pointed_out():
         assert [f["key"] for f in re_.check_no_plain(runs, now)] == ["no-plain:gru"]
         runs2 = [dict(r, plain="ok words") for r in runs]
         assert re_.check_no_plain(runs2, now) == []
+        # 2026-09-16, live: both accounts weekly-limited, reif_eyes filed six no-plain issues
+        # (philanthropy#6290-#6295) for one cause. The cause is the finding; the symptoms are not.
+        state = f"philanthropy {now + 3 * 86400:.0f}\ntgp {now + 86400:.0f}\n"
+        dark = re_.check_pool_exhausted(state, ["philanthropy", "tgp"], now)
+        assert [f["key"] for f in dark] == ["pool-exhausted"] and "`tgp` until" in dark[0]["body"], dark
+        assert re_.check_pool_exhausted(state, ["philanthropy", "tgp", "spare"], now) == [], "one free account is not dark"
+        assert re_.check_pool_exhausted(f"tgp {now - 10:.0f}\n", ["tgp"], now) == [], "a past reset is not a gate"
+        assert re_.check_no_plain(runs, now, pool_dark=True) == [], "no plain words while dark is not a finding"
     finally:
         os.environ.pop("FLEET_RUN_PLAIN", None)
     assert re_.check_no_plain(runs, now) == [], "off unless FLEET_RUN_PLAIN=1"
