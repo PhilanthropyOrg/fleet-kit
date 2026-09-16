@@ -5269,6 +5269,53 @@ def _console_home_is_usable_on_a_phone_and_the_number_tile_reads_fleet_env():
     assert "@media (max-width: 700px){.home-agents,.home-nav-grid{grid-template-columns:1fr}}" in html_src
 
 
+def _console_says_paused_when_the_whole_pool_is_gated_fk1041():
+    """fk#1041, 2026-09-15: every LLM member exited rc=3 for 8h (the only account gated until
+    Sunday) while Home read "alive 33m ago" off cron ticks. With the state file gating every
+    account in FLEET_ACCOUNTS, /api/fleet_state must carry POOL_PAUSE.paused=true with the
+    resume epoch, and Home must put a red PAUSED banner first. One account still free = not
+    paused. An expired gate = not paused."""
+    import importlib, os as _os
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        (tmp / "fleet.env").write_text('FLEET_ACCOUNTS="philanthropy tgp"\n')
+        state = tmp / "account-pool-exhausted.state"
+        old = {k: _os.environ.get(k) for k in ("FLEET_ENV_FILE", "ACCOUNT_POOL_STATE_FILE", "FLEET_LOG_DIR")}
+        _os.environ["FLEET_ENV_FILE"] = str(tmp / "fleet.env")
+        _os.environ["ACCOUNT_POOL_STATE_FILE"] = str(state)
+        try:
+            sys.path.insert(0, str(ROOT / "scripts"))
+            fvs = importlib.import_module("fleet_view_server")
+            if hasattr(fvs, "ENV_FILE"):
+                fvs.ENV_FILE = Path(_os.environ["FLEET_ENV_FILE"])
+            now = 1_800_000_000.0
+            assert fvs.pool_pause(now)["paused"] is False, "no state file must read as not paused"
+            state.write_text(f"philanthropy {now + 3600:.0f}\n")
+            assert fvs.pool_pause(now)["paused"] is False, "one free account is not a pause"
+            state.write_text(f"philanthropy {now + 3600:.0f}\ntgp {now + 7200:.0f} unauthenticated\n")
+            p = fvs.pool_pause(now)
+            assert p["paused"] is True and p["resumes_at"] == now + 3600, p
+            assert p["gated"]["tgp"]["reason"] == "unauthenticated"
+            state.write_text(f"philanthropy {now - 1:.0f}\ntgp {now + 7200:.0f}\n")
+            assert fvs.pool_pause(now)["paused"] is False, "an expired gate must not count"
+            assert "POOL_PAUSE" in fvs.read_env_flags(), "/api/fleet_state does not carry POOL_PAUSE"
+        finally:
+            for k, v in old.items():
+                if v is None:
+                    _os.environ.pop(k, None)
+                else:
+                    _os.environ[k] = v
+    html_src = (ROOT / "scripts" / "fleet_home.html").read_text()
+    assert html_src.index('<div id="banner">') < html_src.index('<h1>The number</h1>'), "the banner slot is not the first thing on the page"
+    banner = html_src[html_src.index("function renderBanner()"):html_src.index("function nextCheckpoint(")]
+    assert "poolPause()" in banner and "PAUSED: Claude account exhausted, resumes" in banner and 'class="banner paused"' in banner
+    assert "America/Chicago" in html_src, "resume time is not rendered in Central"
+    health = html_src[html_src.index("function renderHealth()"):html_src.index("function askHeadline(")]
+    assert "PAUSED" in health and "poolPause()" in health, "the alive line does not say PAUSED"
+    asks = html_src[html_src.index("function renderAsks()"):html_src.index("function renderAgents(")] if "function renderAgents(" in html_src else html_src[html_src.index("function renderAsks()"):]
+    assert "Add capacity or wait" in asks, "the needs-you block carries no ask"
+
+
 def _console_shows_role_and_steps_per_member():
     """Reif, 2026-09-07: "emojis and role overview with the actual steps it takes, so someone
     can prune it from actual knowledge." The agent page shows the member's emoji, its mandate
@@ -15087,6 +15134,7 @@ if __name__ == "__main__":
     check("deploy.sh kicks one gru pass right after cutover (gh#622)", _deploy_sh_kicks_a_gru_pass_right_after_cutover)
     check("deploy.sh kicks one sentry pass right after cutover (gh#663)", _deploy_sh_kicks_a_sentry_pass_right_after_cutover)
     check("deploy.sh rolls over via caddy without a cordon (gh#625)", _deploy_sh_rolls_over_via_caddy_without_a_cordon)
+    check("console says PAUSED, first and red, when every pool account is gated (fk#1041)", _console_says_paused_when_the_whole_pool_is_gated_fk1041)
     check("console shows each member's emoji, role and the steps a pass takes", _console_shows_role_and_steps_per_member)
     check("sidebar shows spawned/scheduled/disabled as distinct badges, not strikethrough (gh#565)", _sidebar_shows_spawned_scheduled_disabled_not_strikethrough_gh565)
     check("status dot carries a non-color channel at both render sites, colors untouched (gh#430)", _status_dot_carries_a_non_color_channel_at_both_render_sites_gh430)
