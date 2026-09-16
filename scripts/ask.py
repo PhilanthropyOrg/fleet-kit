@@ -136,8 +136,12 @@ def _notify(member: str, ask_id: int, why: str) -> None:
     # ask reaches nobody. Reif, 2026-09-15: the console inbox is gone; "somehow it can get me a
     # message some other way if it needs me." An ask is that message: force the email leg.
     env = dict(os.environ, FLEET_ALERT_EMAIL_LEG="1")
-    title = f"fleet ask filed by {member}"
-    body = f"ask #{ask_id}: {why}"
+    title = f"fleet ask #{ask_id} from {member}"
+    # fk#1056: the mail says how to answer it, and a reply to it reaches the fleet (Reply-To
+    # is set by fleet_alert.sh; webhook_receiver.py applies the answer with no model in the way).
+    body = (f"ask #{ask_id}: {why}\n\n"
+            f"Reply to this email with one line: `yes {ask_id}`, `no {ask_id}: why`, "
+            f"or `{ask_id}: your answer`. Anything else you write goes to the messenger.")
     try:
         subprocess.run(
             ["bash", str(script), "--check", "ask", "--problem", problem,

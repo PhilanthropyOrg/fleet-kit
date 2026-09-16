@@ -182,8 +182,17 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as exc:  # noqa: BLE001
             log(f"inbox: fetch of {data.get('email_id')} failed: {exc} -- storing metadata only")
             email = {"id": data.get("email_id"), "from": sender, "subject": data.get("subject"), "text": ""}
-        inbox_mod.store(email, data)
-        _launch_member("dont-shoot-the-messenger", ["--task", "inbox"])
+        row = inbox_mod.store(email, data)
+        # fk#1056: ask answers and `backlog:` mails need no model; do them here, reply, and
+        # only hand leftover free text to the messenger. A failure inside apply() must not
+        # lose the mail: it stays pending and the messenger pass reads it as before.
+        try:
+            applied = inbox_mod.apply(row)
+        except Exception as exc:  # noqa: BLE001
+            log(f"inbox: apply of {row.get('id')} failed: {exc} -- messenger takes it")
+            applied = {"done": False}
+        if not applied.get("done"):
+            _launch_member("dont-shoot-the-messenger", ["--task", "inbox"])
         self.send_response(200); self.end_headers(); self.wfile.write(b"stored")
 
     def _handle_pull_request(self, payload: dict) -> None:
