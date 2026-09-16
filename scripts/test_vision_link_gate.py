@@ -24,7 +24,7 @@ import vision_link_gate as vlg  # noqa: E402
 
 class ClassifyValueTests(unittest.TestCase):
     def test_real_link_is_linked(self):
-        status, raw = vlg._classify_value("Stripe MRR -- the number, gh#519")
+        status, raw = vlg._classify_value("okr.verified_claims -- the number, gh#519")
         self.assertEqual(status, vlg.STATUS_LINKED)
 
     def test_maintenance_dash_form(self):
@@ -45,9 +45,18 @@ class ClassifyValueTests(unittest.TestCase):
         # A real link that happens to use the word "maintenance" must not be mis-read as the
         # maintenance token just because the substring appears somewhere in the value.
         status, _ = vlg._classify_value(
-            "Reduces support/maintenance load on the on-call rotation -- gh#601"
+            "okr.conversion -- reduces support/maintenance load on the on-call rotation -- gh#601"
         )
         self.assertEqual(status, vlg.STATUS_LINKED)
+
+    def test_prose_without_a_registered_id_is_missing(self):
+        # Reif 2026-09-16: OKRs were set and nothing bound the pick to them, because any prose
+        # counted. Live example that passed: "KR2 -- sixteen members opened a thread".
+        status, _ = vlg._classify_value("KR2 -- sixteen members opened a thread with us in 24h")
+        self.assertEqual(status, vlg.STATUS_MISSING)
+        status, _ = vlg._classify_value("Stripe MRR -- the number")
+        self.assertEqual(status, vlg.STATUS_MISSING)
+        self.assertEqual(set(vlg.kr_ids()), {"okr.verified_claims", "okr.traffic", "okr.clicks", "okr.conversion"})
 
 
 class ClassifyCandidateTests(unittest.TestCase):
@@ -75,11 +84,11 @@ class ClassifyCandidateTests(unittest.TestCase):
         body = "Vision-link: none (maintenance) -- old value."
         comments = [
             {"body": "irrelevant earlier comment"},
-            {"body": "Vision-link: Signal rate (KR2) -- rescored PRD."},
+            {"body": "Vision-link: okr.clicks -- rescored PRD."},
         ]
         status, raw = vlg.classify_candidate(body, comments)
         self.assertEqual(status, vlg.STATUS_LINKED)
-        self.assertIn("Signal rate", raw)
+        self.assertIn("okr.clicks", raw)
 
     def test_lightweight_non_prd_comment_is_linked_gh4597(self):
         # gh#4597: marie's PRD template (Part C4) only stamps this line on capped,
@@ -89,10 +98,10 @@ class ClassifyCandidateTests(unittest.TestCase):
         # carry no `labels` field), so a bare one-line comment must classify identically to a
         # full PRD comment saying the same thing.
         body = "A plain issue body with no Vision-link line of its own."
-        comments = [{"body": "Vision-link: Stripe MRR -- the number, gh#4597 lightweight backfill."}]
+        comments = [{"body": "Vision-link: okr.verified_claims -- the number, gh#4597 lightweight backfill."}]
         status, raw = vlg.classify_candidate(body, comments)
         self.assertEqual(status, vlg.STATUS_LINKED)
-        self.assertIn("Stripe MRR", raw)
+        self.assertIn("okr.verified_claims", raw)
 
     def test_lightweight_non_prd_maintenance_comment_gh4597(self):
         body = "A plain issue body with no Vision-link line of its own."
@@ -119,7 +128,7 @@ class GateCandidatesOrderingTests(unittest.TestCase):
     def test_real_link_crowds_out_maintenance(self):
         candidates = [
             {"number": 1, "body": "Vision-link: none (maintenance) -- a.", "comments": []},
-            {"number": 2, "body": "Vision-link: Signal rate -- b.", "comments": []},
+            {"number": 2, "body": "Vision-link: okr.traffic -- b.", "comments": []},
         ]
         result = vlg.gate_candidates(candidates)
         self.assertEqual(result["eligible"], [2])

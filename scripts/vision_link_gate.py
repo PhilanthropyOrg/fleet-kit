@@ -97,14 +97,33 @@ def classify_candidate(body: str | None, comments: list[dict] | None) -> tuple[s
     return STATUS_MISSING, None
 
 
+def kr_ids(path: Path | None = None) -> list[str]:
+    """The registered OKR ids (scripts/okr.json, or FLEET_OKR_FILE): the objective plus every
+    key result. Empty when the file is unreadable -- and then nothing can be linked, which is
+    loud on purpose."""
+    import os
+    p = path or Path(os.environ.get("FLEET_OKR_FILE") or (HERE / "okr.json"))
+    try:
+        d = json.loads(p.read_text())
+        return [d["objective"]["id"]] + [k["id"] for k in d.get("key_results", [])]
+    except Exception:  # noqa: BLE001
+        return []
+
+
 def _classify_value(raw: str) -> tuple[str, str]:
-    # A real link is often written "Stripe MRR -- it puts the number in front of every member"
-    # (#513's own example); a maintenance value is only ever "none (...maintenance...)", so a
-    # prefix match on the normalized value distinguishes them without depending on a dash
-    # separator being present at all (gh#584).
+    # A maintenance value is only ever "none (...maintenance...)" -- a prefix match on the
+    # normalized value, so a reason clause never defeats it (gh#584).
     if _MAINTENANCE_RE.match(_normalize(raw)):
         return STATUS_MAINTENANCE, raw
-    return STATUS_LINKED, raw
+    # Reif, 2026-09-16, on six merged PRs none of which moved a KR: "shouldnt that be the case
+    # with setting up the okrs, we did this". It was not, because any prose counted as a link
+    # -- live: "KR2 -- sixteen members opened a thread" passed while VISION.md has no messaging
+    # KR. A link now names a registered id (scripts/okr.json); prose without one is MISSING,
+    # which marie's restamp sweep repairs and gru cannot build past.
+    low = raw.lower()
+    if any(k in low for k in kr_ids()):
+        return STATUS_LINKED, raw
+    return STATUS_MISSING, raw
 
 
 def _label_names(labels) -> list[str]:

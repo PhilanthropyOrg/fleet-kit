@@ -556,10 +556,17 @@ the section minion actually builds against, so it is the one to get exactly righ
 Anything you could not resolve from the repo, named as a question for a human. Never guess and
 never quietly drop it.
 
-Vision-link: <the number, guardrail, or channel this PRD moves (persona_law.md §10d) -- or
-`none (maintenance)` if this is fleet-internal tooling with nothing number-moving behind it>
+Vision-link: <one registered id from /fleet-kit/scripts/okr.json -- `okr.verified_claims`,
+`okr.traffic`, `okr.clicks` or `okr.conversion` -- then ` -- ` and one sentence on HOW this
+item moves it; or `none (maintenance)` if nothing number-moving is behind it>
 ```
-Free text is fine (gh#525) until #513's number.json ships. **This must be a literal inline
+**The id is the link; the sentence is the argument.** Free text used to count (gh#525) and it
+let everything through: on 2026-09-16 six PRs merged in a day and none moved a KR, one of them
+linked to "KR2 -- messages", a KR that does not exist. `vision_link_gate.py` now reads a line
+with no registered id as MISSING, so it is not eligible for gru. **Restamp, do not skip:** in
+both backfill sweeps below, a `Vision-link:` line that names no registered id counts as absent
+-- post a new comment with a proper one (or an honest `none (maintenance)`). If you cannot name
+which KR an item moves, that is the finding: it is maintenance, rank it as such. **This must be a literal inline
 line reading `Vision-link: <value>`, never a `## Vision-link` heading with the value on the
 next line** -- gh#595, live 2026-09-06: `vision_link_gate.py`'s regex requires the colon on the
 same line as the label, so a heading-styled Vision-link is silently invisible to the gate no
@@ -592,12 +599,12 @@ gh issue list --state open --label fleet:backlog --json number,labels,body,comme
 ```
 For each result: skip it if it already carries `fleet:prd` (that issue's Vision-link is the
 backfill step above's job -- **check the label before posting, gh#4597 AC3** -- never duplicate
-it here) or if its body/any comment already has a `Vision-link:` line (nothing to add). For
+it here) or if its body/any comment already has a `Vision-link:` line naming a registered id (a prose line with no id counts as absent -- restamp it). For
 everything left, post one comment with just the single line -- no Problem/Goal/AC sections,
 this is a determination, not a spec:
 
 ```
-Vision-link: <the number, guardrail, or channel this moves -- or `none (maintenance)`>
+Vision-link: <okr.verified_claims | okr.traffic | okr.clicks | okr.conversion> -- <how> | `none (maintenance)`
 ```
 
 **Run this sweep every pass, not once (gh#4597).** New candidates land continuously — every

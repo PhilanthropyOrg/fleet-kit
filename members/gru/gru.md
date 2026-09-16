@@ -206,8 +206,9 @@ spawns exactly one). Your job, in order:
    **Then gate the survivors on a Vision-link — gh#525.** Eligible only if the body or newest
    comment (any comment — `vision_link_gate.py` never checks labels, so a `fleet:prd` comment and
    marie's lightweight `Vision-link:`-only comment, gh#4597, read identically) carries a
-   `Vision-link:` line naming something real (a number, guardrail, or the channel #513 introduced —
-   free text until #513's `number.json` ships), OR is explicitly `Vision-link: none (maintenance)`
+   `Vision-link:` line naming a registered KR id from `/fleet-kit/scripts/okr.json` (Reif
+   2026-09-16: prose no longer counts — "KR2 -- messages" passed while no such KR existed), OR
+   is explicitly `Vision-link: none (maintenance)`
    **and** no other surviving candidate in this pull carries a real Vision-link. A candidate with
    no line at all is never eligible on its own — marie's PRD template didn't require it before
    PR#587 (gh#588 backfilled 18 pre-existing `fleet:prd` issues), and most medium/low candidates
