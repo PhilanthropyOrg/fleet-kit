@@ -414,15 +414,10 @@ spawns exactly one). Your job, in order:
    before either exists.
 
 5. **Batch `chosen` into minion PASSES sized by real turn cost, not a fixed item count, and
-   spawn ONE minion per batch, not one per item.** (2026-09-14, Reif: bring down Blacksmith CI
-   cost by shipping more units per PR — each PR triggers one full CI run regardless of how many
-   items it closes, so N items in N PRs pays for CI N times, fewer PRs pays for it fewer times.
-   Reif then corrected a first cut of this that used a flat `MINION_BATCH_SIZE=3`: "can't we
-   just give it budget and a goal and have it innovate to maximum units per run" — a fixed
-   count is the exact mistake step 3's own `pack()` already exists to prevent for item
-   selection, just reintroduced one layer down for batch size. `fanout.py`'s `pack_batches`
-   fixes it the same way `pack` fixes item selection: batch size is an OUTPUT of packing real
-   turn cost, never an input.)
+   spawn ONE minion per batch, not one per item.** (Each PR triggers one full CI run whatever it
+   closes, so fewer, fuller PRs pay for CI fewer times — 2026-09-14, Reif. Batch size is an
+   OUTPUT of `fanout.py`'s `pack_batches`, never an input: a fixed `MINION_BATCH_SIZE` is the
+   same mistake step 3's `pack()` exists to prevent, reintroduced one layer down.)
 
    **Calibrate against what a real batch pass actually costs in turns**, same pattern as step
    3's cost calibration — never hand it a guessed turn cost:
@@ -448,12 +443,19 @@ spawns exactly one). Your job, in order:
    should be able to see why a big item got its own batch and small ones got grouped, not just
    the resulting PR count.
 
-   For each batch in the result, use the `Bash` tool with `run_in_background: true` — **not** a
-   shell `&` — spawn one minion told its EXACT comma-separated issue numbers in the prompt
-   (minions never pick or claim their own items):
+   For each batch, spawn one minion with the `Bash` tool and `run_in_background: true`. This is
+   the WHOLE `command` — copy it, substitute the batch's EXACT comma-separated issue numbers,
+   add nothing (minions never pick or claim their own items):
    ```
    FLEET_RUN_NOW=1 bash /fleet-kit/scripts/run_member.sh minion --items <n1,n2,n3>
    ```
+   **The `command` string must not contain `&`, `disown`, `nohup`, `setsid` or a subshell.**
+   Choosing the right tool is not the rule; the rule is what you put in `command`.
+   `run_in_background: true` already detaches, so a `&` *inside* it backgrounds a second time
+   and the `task_id` you get back tracks the launcher, which exits at once — a false-early
+   completion, with the real minion now untracked. Measured 2026-09-16: four gru passes in two
+   days self-critiqued this, three of them the nested form (`&`/`disown` on top of a correct
+   `run_in_background: true`) — the tool was right every time and the string was wrong.
    (`FLEET_RUN_NOW=1` is required — minion ships with `enabled:false` since it never self-fires
    on cron; same escape hatch the dashboard's "run now" button uses.) Record each call's
    returned `task_id`, and which issue numbers went into that `task_id`'s batch — step 7 needs
@@ -461,14 +463,12 @@ spawns exactly one). Your job, in order:
 
 6. **Wait for every minion to finish** before you report: call `TaskOutput(task_id, block:
    true, timeout: 600000)` for each `task_id` from step 5 — a minion can legitimately take many
-   minutes. **Never use a raw shell `&` + `wait $PID`**: gh#152 recorded 7+ passes on datta's
-   identical pattern (~$6-8, ~300 turns) where `wait` on a manually-backgrounded PID silently
-   lost the child, landing `reported_nothing` with every field null. `Bash(run_in_background)` +
-   `TaskOutput(block: true)` is the confirmed-working replacement (two clean passes, 2026-08-29),
-   not reliant on this turn's shell PID surviving. **Do not end your turn to "wait for the
-   notification" instead** — you're a one-shot `claude -p` pass (persona_law.md §12); nothing
-   resumes you once your turn ends, background or not. `TaskOutput(block: true)` blocks inside
-   THIS turn; a notification you hope arrives later never will.
+   minutes. Never `wait $PID` instead (gh#152: 7+ datta passes, ~$6-8 and ~300 turns each, where
+   `wait` on a manually-backgrounded PID lost the child and landed `reported_nothing` with every
+   field null). **Do not end your turn to "wait for the notification" either** — you're a
+   one-shot `claude -p` pass (persona_law.md §12); nothing resumes you once your turn ends.
+   `TaskOutput(block: true)` blocks inside THIS turn; a notification you hope arrives later
+   never will.
 
    `timeout: 600000` is `TaskOutput`'s hard ceiling, not a tunable margin — its schema caps
    `timeout` at that value, and a minion is allowed to run past it. If a call returns with the
