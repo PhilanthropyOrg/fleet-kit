@@ -33,6 +33,7 @@
   .sub { color: var(--muted); font-size: 14px; }
   .delta { font-weight: 600; }
   .up { color: var(--ok); } .down { color: var(--bad); }
+  .banner.paused { background: var(--bad); color: #fff; font-weight: 700; font-size: 18px; }
   table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 14px; }
   td, th { text-align: left; padding: 6px 0; border-top: 1px solid var(--line); vertical-align: top; }
   th { color: var(--muted); font-weight: 500; }
@@ -219,9 +220,22 @@ function render() {
   renderBanner(); renderNumber(); renderHealth(); renderAsks(); renderAgents(); renderLanded(); renderFoot();
 }
 
+// fk#1041: every Claude account gated = the fleet is PAUSED, whatever the cron ticks say.
+// 2026-09-15 it ran 8h like that reading "alive 33m ago". First line of the page, red.
+function poolPause() {
+  const p = STATE.fleet && STATE.fleet.POOL_PAUSE;
+  return (p && p.paused) ? p : null;
+}
+function pausedResumesCT(p) {
+  if (!p.resumes_at) return 'unknown';
+  return new Intl.DateTimeFormat('en-US', { timeZone: 'America/Chicago', weekday: 'short', hour: 'numeric', minute: '2-digit' }).format(new Date(p.resumes_at * 1000)) + ' CT';
+}
 function renderBanner() {
   const f = STATE.fleet;
-  $('banner').innerHTML = (f && f.FLEET_ENABLED === false) ? `<div class="banner">The fleet is paused. Nothing new starts until it is turned back on.</div>` : '';
+  const p = poolPause();
+  $('banner').innerHTML = p
+    ? `<div class="banner paused" role="alert">PAUSED: Claude account exhausted, resumes ${esc(pausedResumesCT(p))}</div>`
+    : (f && f.FLEET_ENABLED === false) ? `<div class="banner">The fleet is paused. Nothing new starts until it is turned back on.</div>` : '';
   // gh#553 fix 5: the tab title comes from this instance's own config (FLEET_BRAND, or a name
   // derived from its repo), never a hardcoded product name.
   if (f && f.BRAND) document.title = f.BRAND;
@@ -289,7 +303,9 @@ function renderHealth() {
     ? `<span title="maxx meter unreadable or not configured for this instance">headroom unavailable</span>`
     : `${Number(pct).toFixed(1)}% of week`;
   const newest = newestOkRunAge();
-  const aliveHtml = newest === null ? 'no ok run yet' : esc(ago(newest));
+  const aliveHtml = poolPause()
+    ? `<span class="down">PAUSED</span> (cron ticks still run; nothing that thinks does)`
+    : newest === null ? 'no ok run yet' : esc(ago(newest));
   const nho = needsHumanOp();
   $('health').innerHTML = `
     <div class="sub">${pctHtml} · alive ${aliveHtml}</div>
@@ -317,8 +333,10 @@ function renderAsks() {
   const nho = needsHumanOp();
   $('asksSub').textContent = nho.count ? `${nho.count} waiting on human, oldest ${Math.round(nho.oldest_age_hours)}h` : '';
   const asks = STATE.asks;
-  if (!asks.length) { $('asks').innerHTML = `<div class="empty">Nothing waiting on you.</div>`; return; }
-  $('asks').innerHTML = asks.map(a => {
+  const p = poolPause();
+  const pausedAsk = p ? `<div class="ask"><div class="why">Add capacity or wait: every account in the pool is gated (${esc((p.pool || []).map(a => `${a}: ${(p.gated[a] || {}).reason || 'exhausted'}`).join(', '))}). Add an account to FLEET_ACCOUNTS in fleet.env and redeploy, or the fleet resumes ${esc(pausedResumesCT(p))}.</div></div>` : '';
+  if (!asks.length) { $('asks').innerHTML = pausedAsk || `<div class="empty">Nothing waiting on you.</div>`; return; }
+  $('asks').innerHTML = pausedAsk + asks.map(a => {
     const why = String(a.why || '');
     // gh#877: a filer-authored plain-language summary, when present, IS the headline and the
     // full `why` trace moves behind the tap -- even if `why` alone would have fit on one line,

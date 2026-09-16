@@ -430,6 +430,39 @@ def _validate_dial_value(key: str, value: str) -> str | None:
     return None
 
 
+def pool_pause(now: float | None = None) -> dict:
+    """fk#1041: is the WHOLE account pool gated right now? account_pool.sh writes one line per
+    gated account to account-pool-exhausted.state ("<account> <epoch> [unauthenticated]"); the
+    fleet is paused when every account in FLEET_ACCOUNTS has a line whose epoch is still ahead
+    of now. 2026-09-15: every LLM member had exited rc=3 for 8h while the console said "alive",
+    because shell members and cron ticks kept producing ok runs. Read from the file on every
+    call (an operator adding an account must change the banner on the next poll)."""
+    import time as _t
+    now = _t.time() if now is None else now
+    pool = [a for a in (read_env_values().get("FLEET_ACCOUNTS") or "").strip().strip('"\'').split()
+            if a] or ["primary"]
+    state_path = Path(os.environ.get("ACCOUNT_POOL_STATE_FILE") or (LOG_DIR / "account-pool-exhausted.state"))
+    gated: dict[str, dict] = {}
+    try:
+        for line in state_path.read_text().splitlines():
+            parts = line.split()
+            if len(parts) < 2:
+                continue
+            try:
+                until = float(parts[1])
+            except ValueError:
+                continue
+            if until > now:
+                gated[parts[0]] = {"until": until, "reason": parts[2] if len(parts) > 2 else "exhausted"}
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        return {"paused": False, "pool": pool, "gated": {}, "error": f"{type(exc).__name__}: {exc}"}
+    paused = all(a in gated for a in pool)
+    resumes = min((g["until"] for a, g in gated.items() if a in pool), default=None) if paused else None
+    return {"paused": paused, "pool": pool, "gated": gated, "resumes_at": resumes}
+
+
 def read_env_flags() -> dict:
     """FLEET_ENABLED from fleet.env text (not this process's environment, which was only a
     snapshot taken at start -- a toggle must be visible on the very next page load, not after
@@ -444,6 +477,7 @@ def read_env_flags() -> dict:
            "BRAND": brand, "SIBLINGS": SIBLINGS}
     for key in DIAL_FIELDS:
         out[key] = values.get(key, "")
+    out["POOL_PAUSE"] = pool_pause()
     try:
         for spec in member_spec.load_all():
             eff, _ = ov.apply(spec)
