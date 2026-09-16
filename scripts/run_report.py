@@ -163,6 +163,22 @@ STATUS_STARTED = "started"
 # open UNKNOWN about that colour stays exactly as open as it was.
 STATUS_HEARTBEAT = "heartbeat"
 
+# fk#1049: a DISPATCH-LOCK COLLISION, not a run. run_member.sh takes a per-(member,item,lane)
+# flock before it resolves a spec or launches anything (gh#3220's dispatch-race guard); a
+# loser exits immediately, having spent nothing -- no LLM, no turns, no cost. It still wrote
+# its row through this parser with a real Outcome:/Evidence: pair, so classify() returned
+# STATUS_OK and the collision was indistinguishable from a pass that did work. Measured
+# 2026-09-16 over the trailing 24h: 57 of the-fixer's 161 "executed" runs (35.4%) and 14 of
+# judge-judy's 46 (30.4%) were these, 1,246 rows across the fleet in 7 days -- so
+# runs_per_day:the-fixer read 161 where the real figure was 104, and
+# self_critique_rate:the-fixer read 0.559 where the real figure over actual passes was 0.865.
+# Same failure fk#819 fixed for `heartbeat`, same fix: a distinct status with no edit to
+# fleet_metrics.py, which whitelists EXECUTED/SIGNAL_DENOM by set membership. It also repairs
+# member_liveness_check.sh's "newest ok across all members" -- a fleet doing nothing but
+# colliding on its own locks currently reads as alive. Set ONLY when the runner passes
+# --dispatch-skipped; never inferred from pass text, because only the runner knows.
+STATUS_DISPATCH_SKIPPED = "dispatch_skipped"
+
 # gh#252: a fan-out parent (the-fixer, or any member that spawns one `--item` sub-pass per
 # unit of work, per docs/gru-minions.md's own reasoning) that dispatches background sub-passes
 # and then ends its turn without ever writing Outcome:/Evidence: reads identically to a pass
@@ -235,13 +251,18 @@ def parse_report(text: str) -> dict:
 
 
 def classify(report: dict, *, vision_required: bool, exit_code: int | None = None,
-            trailing_loss: bool = False, heartbeat: bool = False) -> str:
+            trailing_loss: bool = False, heartbeat: bool = False,
+            dispatch_skipped: bool = False) -> str:
     """The status that goes on the run record."""
     # fk#819: checked first and unconditionally -- the runner, not this parser, is the only
     # thing that knows a tick never launched an LLM, and no amount of Outcome:/Evidence: text
     # can make a liveness ping into a unit of work.
     if heartbeat:
         return STATUS_HEARTBEAT
+    # fk#1049: same reasoning, one line later -- the flock loser writes a real
+    # Outcome:/Evidence: pair, so this must win over that text just as --heartbeat does.
+    if dispatch_skipped:
+        return STATUS_DISPATCH_SKIPPED
     outcome = (report.get("outcome") or "").strip()
     if not outcome:
         # A budget decline or a timeout never gets the chance to write a FLEET-REPORT block --
@@ -309,7 +330,7 @@ def build_record(*, member: str, run_id: str, kind: str, exit_code: int,
                  pass_text: str, usage: dict | None, vision_required: bool,
                  item_id: str | None = None, pr: str | None = None,
                  lane: str | None = None, trailing_loss: bool = False,
-                 heartbeat: bool = False) -> dict:
+                 heartbeat: bool = False, dispatch_skipped: bool = False) -> dict:
     """One run = one record. `usage` is pass_accounting's parsed JSON, or None (mechanical)."""
     report = parse_report(pass_text)
     if not report.get("report") and kind != "llm" and (pass_text or "").strip():
@@ -319,7 +340,8 @@ def build_record(*, member: str, run_id: str, kind: str, exit_code: int,
         tail = (pass_text or "").strip()[-8000:]
         report["report"] = "(script output)\n" + tail
     status = classify(report, vision_required=vision_required, exit_code=exit_code,
-                      trailing_loss=trailing_loss, heartbeat=heartbeat)
+                      trailing_loss=trailing_loss, heartbeat=heartbeat,
+                      dispatch_skipped=dispatch_skipped)
     rec = {
         "member": member,
         "run_id": run_id,
@@ -402,6 +424,12 @@ def main(argv=None) -> int:
                          "it is a liveness ping (gh#267's no-PR judge-judy tick). Records "
                          "status 'heartbeat', which fleet_metrics.py excludes from EXECUTED "
                          "and SIGNAL_DENOM, so polling never dilutes a quality rate.")
+    ap.add_argument("--dispatch-skipped", action="store_true",
+                    help="fk#1049: this tick lost run_member.sh's per-member dispatch flock "
+                         "(gh#3220) and exited without launching an LLM or spending anything. "
+                         "Records status 'dispatch_skipped', which fleet_metrics.py excludes "
+                         "from EXECUTED and SIGNAL_DENOM, so a lock collision never counts as "
+                         "a run.")
     ap.add_argument("--started", action="store_true",
                     help="write a provisional 'started' row (gh#145), before claude -p runs -- "
                          "ignores --exit-code/--pass-file/--usage-file/--vision-required/--pr")
@@ -429,7 +457,7 @@ def main(argv=None) -> int:
     rec = build_record(member=a.member, run_id=a.run_id, kind=a.kind, exit_code=a.exit_code,
                        pass_text=text, usage=usage, vision_required=a.vision_required,
                        item_id=a.item_id, pr=a.pr, lane=a.lane, trailing_loss=a.trailing_loss,
-                       heartbeat=a.heartbeat)
+                       heartbeat=a.heartbeat, dispatch_skipped=a.dispatch_skipped)
     print(json.dumps(rec))
     # Reif, 2026-09-12: "have those reports sent to me each time something runs." One mail per
     # finished run, plain English on top -- see scripts/run_mail.py. Off unless FLEET_RUN_MAIL=1;
