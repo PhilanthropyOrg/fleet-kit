@@ -6685,6 +6685,58 @@ def _heartbeat_is_not_an_executed_run():
         "judge-judy's report_heartbeat no longer asks for the heartbeat status -- rows regress to quiet"
 
 
+def _a_dispatch_lock_collision_is_not_an_executed_run():
+    """fk#1049: run_member.sh takes a per-(member,item,lane) flock before it resolves a spec or
+    launches anything (gh#3220's dispatch-race guard). The loser exits having spent nothing --
+    no LLM, no turns, no cost -- but it wrote its row through run_report.py with a real
+    Outcome:/Evidence: pair, so classify() returned STATUS_OK. Measured 2026-09-16 over the
+    trailing 24h: 57 of the-fixer's 161 "executed" runs (35.4%) and 14 of judge-judy's 46
+    (30.4%) were collisions, 1,246 rows fleet-wide in 7 days -- runs_per_day:the-fixer read 161
+    against a real 104, and self_critique_rate:the-fixer read 0.559 against a real 0.865.
+
+    Same shape as _heartbeat_is_not_an_executed_run above, and asserted the same way on both
+    ends: the runner asks for the status, and every consumer excludes it. fleet_metrics.py is
+    deliberately NOT edited -- EXECUTED/SIGNAL_DENOM are whitelists, so a new status drops out
+    by set membership -- so that exclusion is asserted here rather than assumed.
+    """
+    import run_report
+    import fleet_metrics
+    import fleet_stats
+
+    skip_text = {"outcome": "dispatch skipped -- another the-fixer pass already running "
+                            "(gh#3220 dispatch-race guard)",
+                 "evidence": "scripts/run_member.sh's per-member flock was already held"}
+    assert run_report.classify(skip_text, vision_required=False, exit_code=0,
+                               dispatch_skipped=True) == run_report.STATUS_DISPATCH_SKIPPED, \
+        "--dispatch-skipped must win over the row's own Outcome:/Evidence: text"
+    assert run_report.classify(skip_text, vision_required=False, exit_code=0) \
+        != run_report.STATUS_DISPATCH_SKIPPED, \
+        "dispatch_skipped must never be inferred from pass text -- only the runner knows"
+    assert run_report.build_record(
+        member="the-fixer", run_id="the-fixer-skiplock-1-2", kind="llm", exit_code=0,
+        pass_text="Outcome: dispatch skipped -- another the-fixer pass already running\n"
+                  "Evidence: scripts/run_member.sh's per-member flock was already held\n",
+        usage=None, vision_required=False,
+        dispatch_skipped=True)["status"] == run_report.STATUS_DISPATCH_SKIPPED, \
+        "build_record must carry --dispatch-skipped through to the written row"
+
+    assert run_report.STATUS_DISPATCH_SKIPPED not in fleet_metrics.EXECUTED, \
+        "a lock collision is not an executed run -- it inflates runs_per_day and dilutes every rate"
+    assert run_report.STATUS_DISPATCH_SKIPPED not in fleet_metrics.SIGNAL_DENOM, \
+        "a lock collision in SIGNAL_DENOM makes signal_rate track how often cron overlapped itself"
+    assert run_report.STATUS_DISPATCH_SKIPPED in fleet_stats._NOT_EXECUTED_STATUSES, \
+        "fleet_stats must agree with fleet_metrics about what executed"
+
+    import run_mail
+    assert run_report.STATUS_DISPATCH_SKIPPED in run_mail.SKIP_STATUSES, \
+        "mailing a lock collision is not a report -- 1,246 of them a week is spam"
+
+    rm = (Path(__file__).parent / "run_member.sh").read_text()
+    guard = rm[rm.index("SKIP_RUN_ID="):]
+    assert "--dispatch-skipped" in guard[:guard.index("exit 0")], \
+        "run_member.sh's dispatch-race guard no longer asks for the status -- rows regress to ok"
+
+
 def _judge_judy_writes_a_heartbeat_row_on_a_no_pr_tick():
     """gh#267: a tick that finds no PR to review used to exit without ever touching
     runs.jsonl/fleet.db -- fleet_view.html's sidebar dot and lane_kpi.py's
@@ -14981,6 +15033,8 @@ if __name__ == "__main__":
     check("a leak is auto-stashed so gitpull can proceed on its next tick (gh#4542)", _postflight_dirty_check_auto_stashes_a_leak_so_gitpull_can_proceed)
     check("the stash pile escalates once it crosses the review threshold (gh#4542)", _postflight_dirty_check_escalates_once_the_stash_pile_crosses_the_threshold)
     check("auto-deploy race check detects an unrecognized git failure outside auto_deploy.sh's own path", _auto_deploy_race_check_detects_the_unrecognized_git_failure)
+    check("a dispatch-lock collision is not an executed run",
+          _a_dispatch_lock_collision_is_not_an_executed_run)
     check("the-fixer dedup does not let one stuck PR mute the batch", _fixer_dedup_does_not_let_one_stuck_pr_mute_the_batch)
     check("the-fixer dedup still suppresses an unchanged batch", _fixer_dedup_still_suppresses_an_unchanged_batch)
     check("the-fixer dedup expires so a wedge cannot last forever", _fixer_dedup_expires_so_a_wedge_cannot_last_forever)

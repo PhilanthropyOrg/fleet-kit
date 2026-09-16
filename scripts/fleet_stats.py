@@ -48,7 +48,12 @@ def _now_epoch() -> float:
 # fk#819: `heartbeat` joins them for a different reason -- a liveness ping (gh#267) did not
 # attempt a unit of work at all, so counting it alongside real attempts made signal rate
 # track how empty the PR queue was (measured 2026-09-11: 94 of 106 "executed" runs).
-_NOT_EXECUTED_STATUSES = {"budget_declined", "paced", "timed_out", "killed", "heartbeat"}
+# fk#1049: `dispatch_skipped` joins them for the same reason as `heartbeat` -- a run that lost
+# run_member.sh's per-member dispatch flock exited before launching an LLM, so it attempted no
+# unit of work (measured 2026-09-16: 57 of the-fixer's 161 "executed" runs in 24h, 1,246 rows
+# fleet-wide in 7 days).
+_NOT_EXECUTED_STATUSES = {"budget_declined", "paced", "timed_out", "killed", "heartbeat",
+                          "dispatch_skipped"}
 _OK_STATUSES = {"ok"}
 
 # gh#186: split of _NOT_EXECUTED_STATUSES by whether the run spent anything before it stopped.

@@ -35,7 +35,10 @@ KIT = pathlib.Path(__file__).resolve().parent.parent
 # that ran to completion and said nothing is still tracked in runs.jsonl/fleet_metrics.py for
 # signal_rate, it just no longer pages a human. See run_report.py's classify() docstring for
 # why the STATUS stays distinct from budget_declined/timed_out -- only the mail is silenced.
-SKIP_STATUSES = frozenset({"started", "heartbeat", "quiet", "paced", "reported_nothing"})
+SKIP_STATUSES = frozenset({"started", "heartbeat", "quiet", "paced", "reported_nothing",
+                           # fk#1049: a dispatch-flock collision spent nothing and did nothing
+                           # -- mailing 1,246 of them a week is not a report.
+                           "dispatch_skipped"})
 PLAIN_MODEL = os.environ.get("FLEET_RUN_MAIL_MODEL", "haiku")
 PLAIN_BUDGET_USD = os.environ.get("FLEET_RUN_MAIL_BUDGET_USD", "0.05")
 PLAIN_TIMEOUT_S = int(os.environ.get("FLEET_RUN_MAIL_TIMEOUT_S", "120"))

@@ -267,6 +267,7 @@ RUN_STATE = {
     "quiet": OK,               # ran, correctly found nothing to do
     "reported_nothing": OK,    # ran, produced no report -- weak, not down
     "heartbeat": OK,           # liveness ping, no unit of work attempted (fk#819)
+    "dispatch_skipped": OK,    # lost the dispatch flock, spent nothing (fk#1049)
     "budget_declined": "spare",
     "paced": "spare",          # held before spending: the hour had no headroom (fk#781)
     "killed": "spare",

@@ -232,7 +232,7 @@ if ! flock -n 9; then
   printf "Outcome: dispatch skipped -- another %s pass already running (gh#3220 dispatch-race guard)\nEvidence: scripts/run_member.sh's per-member flock on %s was already held\n" \
       "$DISPATCH_LOCK_KEY" "$DISPATCH_LOCK_DIR/${DISPATCH_LOCK_KEY}.lock" \
     | python3 "$KIT_DIR/scripts/run_report.py" \
-        --member "$MEMBER" --run-id "$SKIP_RUN_ID" --kind llm --exit-code 0 \
+        --member "$MEMBER" --run-id "$SKIP_RUN_ID" --kind llm --exit-code 0 --dispatch-skipped \
         --pass-file - ${ITEM:+--item-id "$ITEM"} $LANE_FLAG >> "$LOG_DIR/runs.jsonl" 2>>"$LOG"
   exit 0
 fi
