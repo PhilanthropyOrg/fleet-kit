@@ -480,16 +480,29 @@ def metric_registry() -> list[dict]:
         return []
 
 
+def _central_tz():
+    """America/Chicago, or a fixed CDT/CST guess when the box has no tzdata (the container
+    lacked it on 2026-09-16 and every tile read ZoneInfoNotFoundError). The Dockerfile now
+    installs tzdata; this keeps the console alive on a box that has not been rebuilt."""
+    import datetime as _dt
+    try:
+        from zoneinfo import ZoneInfo
+        return ZoneInfo("America/Chicago")
+    except Exception:  # noqa: BLE001 - ZoneInfoNotFoundError or a missing zoneinfo module
+        now = _dt.datetime.utcnow()
+        # US DST: second Sunday of March to first Sunday of November. Good enough for a day key.
+        dst = (3, 8) <= (now.month, now.day) and (now.month, now.day) < (11, 7)
+        return _dt.timezone(_dt.timedelta(hours=-5 if dst else -6), "CDT" if dst else "CST")
+
+
 def _central_day(ts: float | None = None) -> str:
     import datetime as _dt
-    from zoneinfo import ZoneInfo
-    return _dt.datetime.fromtimestamp(ts if ts is not None else time.time(), ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
+    return _dt.datetime.fromtimestamp(ts if ts is not None else time.time(), _central_tz()).strftime("%Y-%m-%d")
 
 
 def _last_days(n: int) -> list[str]:
     import datetime as _dt
-    from zoneinfo import ZoneInfo
-    today = _dt.datetime.now(ZoneInfo("America/Chicago")).date()
+    today = _dt.datetime.now(_central_tz()).date()
     return [(today - _dt.timedelta(days=n - 1 - i)).isoformat() for i in range(n)]
 
 
@@ -641,8 +654,7 @@ def metrics_snapshot() -> dict:
 
 def _central_fmt(epoch: float) -> str:
     import datetime as _dt
-    from zoneinfo import ZoneInfo
-    return _dt.datetime.fromtimestamp(epoch, ZoneInfo("America/Chicago")).strftime("%a %-I:%M %p CT")
+    return _dt.datetime.fromtimestamp(epoch, _central_tz()).strftime("%a %-I:%M %p CT")
 
 
 def read_env_flags() -> dict:

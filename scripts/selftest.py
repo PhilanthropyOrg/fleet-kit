@@ -5373,6 +5373,27 @@ def _console_tiles_are_registered_metrics_with_history_fk1058():
                 else: _os.environ[k] = v
 
 
+def _console_metrics_survive_a_box_without_tzdata():
+    """2026-09-16, first deploy of fk#1059: /api/metrics returned
+    {"metrics": [], "error": "ZoneInfoNotFoundError: 'No time zone found with key
+    America/Chicago'"} because the container had no tzdata. The Dockerfile installs it, and
+    the server falls back to a fixed Central offset so the tiles never go blank again."""
+    import importlib, zoneinfo
+    assert " tzdata " in (ROOT / "Dockerfile").read_text().replace("\\\n", " "), "Dockerfile does not install tzdata"
+    sys.path.insert(0, str(ROOT / "scripts"))
+    fvs = importlib.import_module("fleet_view_server")
+    real = zoneinfo.ZoneInfo
+    def boom(key):
+        raise zoneinfo.ZoneInfoNotFoundError(key)
+    zoneinfo.ZoneInfo = boom
+    try:
+        tz = fvs._central_tz()
+        assert tz.tzname(None) in ("CDT", "CST"), tz
+        assert len(fvs._last_days(3)) == 3 and len(fvs._central_day()) == 10
+    finally:
+        zoneinfo.ZoneInfo = real
+
+
 def _console_roster_shows_every_member_in_plain_english_by_stage():
     """Reif, 2026-09-15: "we need to see all the fleet members in unison - write their purpose
     in plain english... holes show up in value not created or not captured." Every member spec
@@ -15210,6 +15231,7 @@ if __name__ == "__main__":
     check("deploy.sh rolls over via caddy without a cordon (gh#625)", _deploy_sh_rolls_over_via_caddy_without_a_cordon)
     check("console says PAUSED, first and red, when every pool account is gated (fk#1041)", _console_says_paused_when_the_whole_pool_is_gated_fk1041)
     check("console tiles are registered metrics with a real id and daily history (fk#1058)", _console_tiles_are_registered_metrics_with_history_fk1058)
+    check("console metrics survive a box without tzdata (fk#1059 first deploy)", _console_metrics_survive_a_box_without_tzdata)
     check("console roster shows every member in plain English by value stage (fk#1058)", _console_roster_shows_every_member_in_plain_english_by_stage)
     check("console shows each member's emoji, role and the steps a pass takes", _console_shows_role_and_steps_per_member)
     check("sidebar shows spawned/scheduled/disabled as distinct badges, not strikethrough (gh#565)", _sidebar_shows_spawned_scheduled_disabled_not_strikethrough_gh565)
