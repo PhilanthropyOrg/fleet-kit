@@ -1,6 +1,6 @@
 {
   "name": "gru",
-  "emoji": "\ud83e\ude96",
+  "emoji": "🪖",
   "kind": "llm",
   "lane": "build",
   "mandate": {
@@ -45,5 +45,7 @@
   },
   "report": {
     "vision_link": "optional"
-  }
+  },
+  "plain": "Every hour picks the top-ranked items the budget can afford and hands them to builders in batches.",
+  "stage": "build"
 }

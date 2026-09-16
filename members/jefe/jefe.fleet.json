@@ -1,6 +1,6 @@
 {
   "name": "jefe",
-  "emoji": "\ud83d\udc51",
+  "emoji": "👑",
   "kind": "llm",
   "lane": "orchestrate",
   "mandate": {
@@ -49,5 +49,7 @@
   },
   "report": {
     "vision_link": "required"
-  }
+  },
+  "plain": "Runs the company hourly: keeps the loop healthy, advances the top backlog item, merges a green PR that got stuck.",
+  "stage": "ship"
 }

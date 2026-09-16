@@ -1,6 +1,6 @@
 {
   "name": "roomba",
-  "emoji": "\ud83e\uddf9",
+  "emoji": "🧹",
   "lane": "hygiene",
   "mandate": {
     "target": "every stale/orphaned worktree that passes roomba.py's own checks (merged or provably abandoned, clean tree, not protected, past min-age, or a dead builder PID) is removed, with zero false-positive removals of in-flight work -- as a script, not a model pass",
@@ -41,5 +41,7 @@
   "report": {
     "vision_link": "optional"
   },
-  "kind": "shell"
+  "kind": "shell",
+  "plain": "Every hour removes worktrees whose work merged or was abandoned.",
+  "stage": "learn"
 }

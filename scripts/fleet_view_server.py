@@ -463,6 +463,188 @@ def pool_pause(now: float | None = None) -> dict:
     return {"paused": paused, "pool": pool, "gated": gated, "resumes_at": resumes}
 
 
+# ---------------------------------------------------------------------------------------------
+# fk#1058: the metric registry behind the console's stat tiles. Each tile = one id in
+# scripts/metrics.json; /api/metrics returns, per id, the current value, a one-line sub, and a
+# short series for the sparkline. History for snapshot-type metrics (backlog, PRs, accounts,
+# the number) is one row per Central day in fleet_db.metric_points, upserted here on every
+# call; merged/ok-runs/spend have native history and are computed from their source.
+# ---------------------------------------------------------------------------------------------
+METRICS_FILE = Path(__file__).resolve().parent / "metrics.json"
+
+
+def metric_registry() -> list[dict]:
+    try:
+        return json.loads(METRICS_FILE.read_text())["metrics"]
+    except Exception:  # noqa: BLE001 - a broken registry must not take the console down
+        return []
+
+
+def _central_day(ts: float | None = None) -> str:
+    import datetime as _dt
+    from zoneinfo import ZoneInfo
+    return _dt.datetime.fromtimestamp(ts if ts is not None else time.time(), ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
+
+
+def _last_days(n: int) -> list[str]:
+    import datetime as _dt
+    from zoneinfo import ZoneInfo
+    today = _dt.datetime.now(ZoneInfo("America/Chicago")).date()
+    return [(today - _dt.timedelta(days=n - 1 - i)).isoformat() for i in range(n)]
+
+
+def _gh_actions_spend_series() -> tuple[float | None, list[dict], str]:
+    """Month-to-date Actions net USD per day (cumulative) from the org billing usage API.
+    Cached one hour; None when the org cannot be derived or the call fails."""
+    m = re.search(r"github\.com/([^/]+)/", REPO_URL or "")
+    if not m:
+        return None, [], "no org"
+    org = m.group(1)
+    import datetime as _dt
+    now = _dt.datetime.utcnow()
+    key = f"gh_billing:{org}:{now.year}-{now.month}"
+    hit = _TTL_CACHE.get(key)
+    if hit and time.time() - hit[0] < 3600:
+        return hit[1]  # type: ignore[return-value]
+    raw = _gh("api", f"/orgs/{org}/settings/billing/usage?year={now.year}&month={now.month}", timeout=30)
+    try:
+        items = json.loads(raw).get("usageItems", []) if raw else []
+    except Exception:  # noqa: BLE001
+        items = []
+    per_day: dict[str, float] = {}
+    minutes = 0.0
+    for u in items:
+        if u.get("product") != "actions":
+            continue
+        d = str(u.get("date", ""))[:10]
+        per_day[d] = per_day.get(d, 0.0) + float(u.get("netAmount") or 0)
+        if u.get("unitType") == "Minutes":
+            minutes += float(u.get("quantity") or 0)
+    series, run = [], 0.0
+    for d in sorted(per_day):
+        run += per_day[d]
+        series.append({"day": d, "value": round(run, 2)})
+    out = (round(run, 2) if series else None, series, f"{minutes:,.0f} min this month")
+    _TTL_CACHE[key] = (time.time(), out)
+    return out
+
+
+def metrics_snapshot() -> dict:
+    """Current value + sub + series for every registered metric. Never raises."""
+    days = _last_days(14)
+    out: dict[str, dict] = {}
+    snap = STATE.snapshot()
+    runs, gh = snap["runs"], snap["gh"]
+    db = fleet_db.connect()
+    try:
+        def upsert(mid: str, value: float | None) -> None:
+            if value is None:
+                return
+            db.execute("INSERT INTO metric_points (id, day, value) VALUES (?, ?, ?) "
+                       "ON CONFLICT(id, day) DO UPDATE SET value = excluded.value", (mid, days[-1], float(value)))
+
+        def daily_series(mid: str) -> list[dict]:
+            have = dict(db.execute("SELECT day, value FROM metric_points WHERE id=? AND day>=? ORDER BY day",
+                                   (mid, days[0])).fetchall())
+            return [{"day": d, "value": have.get(d)} for d in days if d in have]
+
+        # okr.verified_claims
+        try:
+            import number_read
+            for key, value in read_env_values().items():
+                if key.startswith("FLEET_NUMBER_") and value and not os.environ.get(key):
+                    os.environ[key] = value
+            nr = number_read.read_current()
+            n = ((nr.get("payload") or {}).get("number") or {}) if nr.get("present") else {}
+            tgt = ((nr.get("payload") or {}).get("target") or {}) if nr.get("present") else {}
+            val = n.get("value")
+            upsert("okr.verified_claims", val)
+            out["okr.verified_claims"] = {"value": val, "unit": n.get("unit") or "", "target": tgt.get("value"),
+                                          "sub": (f"{n.get('name', '')}" + (f" · {'+' if (n.get('delta_7d') or 0) >= 0 else ''}{n.get('delta_7d')} 7d" if n.get("delta_7d") is not None else "")).strip(" ·"),
+                                          "series": daily_series("okr.verified_claims"), "stale": bool(nr.get("stale"))}
+        except Exception as exc:  # noqa: BLE001
+            out["okr.verified_claims"] = {"value": None, "sub": f"unreadable: {type(exc).__name__}", "series": []}
+
+        # fleet.backlog_open
+        issues = gh.get("issues") or []
+        claimed = sum(1 for i in issues if i.get("_claimed"))
+        upsert("fleet.backlog_open", len(issues))
+        out["fleet.backlog_open"] = {"value": len(issues), "sub": f"{claimed} claimed · {len(issues) - claimed} free",
+                                     "series": daily_series("fleet.backlog_open")}
+
+        # fleet.prs_open
+        prs = gh.get("prs") or []
+        drafts = sum(1 for p in prs if p.get("isDraft"))
+        upsert("fleet.prs_open", len(prs))
+        out["fleet.prs_open"] = {"value": len(prs), "sub": f"{drafts} draft · {len(prs) - drafts} ready for review",
+                                 "series": daily_series("fleet.prs_open")}
+
+        # fleet.merged_per_day (native: the merged feed, per Central day)
+        merged = gh.get("merged") or []
+        per: dict[str, int] = {d: 0 for d in days}
+        for pr in merged:
+            ma = pr.get("mergedAt")
+            if not ma:
+                continue
+            try:
+                import datetime as _dt
+                ts = _dt.datetime.fromisoformat(str(ma).replace("Z", "+00:00")).timestamp()
+            except ValueError:
+                continue
+            d = _central_day(ts)
+            if d in per:
+                per[d] += 1
+        last24 = sum(1 for pr in merged if pr.get("mergedAt") and
+                     (time.time() - __import__("datetime").datetime.fromisoformat(str(pr["mergedAt"]).replace("Z", "+00:00")).timestamp()) < 86400)
+        out["fleet.merged_per_day"] = {"value": last24, "sub": f"last 24h · {sum(per.values())} in the window shown",
+                                       "series": [{"day": d, "value": per[d]} for d in days],
+                                       "note": "the merged feed is the newest 30 PRs, so older days can read low"}
+
+        # gh.actions_spend_mtd
+        spend, sseries, smin = _gh_actions_spend_series()
+        out["gh.actions_spend_mtd"] = {"value": spend, "unit": "USD", "sub": smin if spend is not None else f"unavailable ({smin})", "series": sseries}
+
+        # fleet.accounts_live
+        pp = pool_pause()
+        pool = pp.get("pool") or []
+        gated = {a: g for a, g in (pp.get("gated") or {}).items() if a in pool}
+        live = len(pool) - len(gated)
+        upsert("fleet.accounts_live", live)
+        gsub = ", ".join(f"{a} gated to {_central_fmt(g['until'])}" for a, g in gated.items()) or "all live"
+        out["fleet.accounts_live"] = {"value": live, "of": len(pool), "sub": gsub, "paused": bool(pp.get("paused")),
+                                      "series": daily_series("fleet.accounts_live")}
+
+        # fleet.ok_runs_per_hour (native: runs, last 24 hours)
+        now = time.time()
+        hours = [0] * 24
+        newest = None
+        for r in runs:
+            if r.get("status") != "ok":
+                continue
+            ts = r.get("ts")
+            ts = ts if isinstance(ts, (int, float)) else None
+            if ts is None:
+                continue
+            if newest is None or ts > newest:
+                newest = ts
+            age_h = int((now - ts) // 3600)
+            if 0 <= age_h < 24:
+                hours[23 - age_h] += 1
+        out["fleet.ok_runs_per_hour"] = {"value": hours[-1], "newest_ok_ts": newest, "sub": "this hour",
+                                         "series": [{"day": f"-{23 - i}h", "value": v} for i, v in enumerate(hours)]}
+        db.commit()
+    finally:
+        db.close()
+    return {"metrics": [dict(m, **out.get(m["id"], {"value": None, "sub": "not computed", "series": []}))
+                        for m in metric_registry()], "as_of": time.time()}
+
+
+def _central_fmt(epoch: float) -> str:
+    import datetime as _dt
+    from zoneinfo import ZoneInfo
+    return _dt.datetime.fromtimestamp(epoch, ZoneInfo("America/Chicago")).strftime("%a %-I:%M %p CT")
+
+
 def read_env_flags() -> dict:
     """FLEET_ENABLED from fleet.env text (not this process's environment, which was only a
     snapshot taken at start -- a toggle must be visible on the very next page load, not after
@@ -1451,6 +1633,12 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/fleet_state":
             self._json(read_env_flags())
+            return
+        if path == "/api/metrics":
+            try:
+                self._json(metrics_snapshot())
+            except Exception as exc:  # noqa: BLE001 - a tile that says why beats a 500
+                self._json({"metrics": [], "error": f"{type(exc).__name__}: {exc}"}, 200)
             return
         if path == "/api/budget_preview":
             # Show the operator the ACTUAL arithmetic behind the two dials, with live numbers.

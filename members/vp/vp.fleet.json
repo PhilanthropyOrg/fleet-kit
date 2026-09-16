@@ -46,5 +46,7 @@
   },
   "report": {
     "vision_link": "optional"
-  }
+  },
+  "plain": "Judges a world-class item's design before it is built: approved, accepted, or not yet with numbered fixes.",
+  "stage": "build"
 }

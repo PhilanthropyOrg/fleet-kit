@@ -53,5 +53,7 @@
   },
   "report": {
     "vision_link": "optional"
-  }
+  },
+  "plain": "Once a day keeps every agent's memory under its size cap, merges duplicates, and keeps the one-page intent file current.",
+  "stage": "learn"
 }

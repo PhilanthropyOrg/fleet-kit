@@ -47,5 +47,7 @@
     "vision_link": "optional"
   },
   "pacing": "exempt",
-  "pacing_why": "incidents cannot wait for headroom (fleet-kit#781)"
+  "pacing_why": "incidents cannot wait for headroom (fleet-kit#781)",
+  "plain": "When CI, a deploy, or production goes red, opens exactly one fix-or-revert PR within the hour.",
+  "stage": "ship"
 }

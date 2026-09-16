@@ -44,5 +44,7 @@
   },
   "report": {
     "vision_link": "optional"
-  }
+  },
+  "plain": "Attacks the live site every 6 hours like a bad actor would and files each way in that worked.",
+  "stage": "find"
 }
