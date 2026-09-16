@@ -154,6 +154,10 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         sha = wr.get("head_sha", "?")[:12]
+        fire, why = should_fire(payload)
+        if not fire:
+            log(f"ignored: {wf_name} failed at {sha} -- {why}")
+            return
         log(f"FIRE: {wf_name} failed at {sha} -- launching the-fixer")
         _launch_member("the-fixer")
 
@@ -211,6 +215,20 @@ class Handler(BaseHTTPRequestHandler):
         num = pr.get("number", "?")
         log(f"FIRE: pull_request {action} on PR #{num} -- launching judge-judy")
         _launch_member("judge-judy")
+
+
+def should_fire(payload: dict) -> tuple[bool, str]:
+    """fk#1055: a red run is an incident only on the default branch. Every PR branch and
+    merge-queue batch that fails CI used to launch the-fixer too -- measured 2026-09-16 on
+    dino: ~20 FIRE lines an hour, 283 the-fixer runs in 6h, 114 of them dispatch_skipped and
+    61 quiet, each a paid LLM pass that ran check.sh and found nothing to fight. A PR's red
+    CI is the PR's problem (judge-judy, its author); main's red CI is the fleet's."""
+    wr = payload.get("workflow_run") or {}
+    branch = wr.get("head_branch") or ""
+    default = (payload.get("repository") or {}).get("default_branch") or "main"
+    if branch == default:
+        return True, "default branch"
+    return False, f"head_branch {branch!r} is not the default branch {default!r}"
 
 
 def env_value(key: str) -> str:
