@@ -392,6 +392,10 @@ case "${1:-cron-foreground}" in
       # for FLEET_REPO_URL / FLEET_RUN_PLAIN FIRST, then exports this container's own view port
       # (gh#716: a port exported before the source gets clobbered by fleet.env's default).
       echo "38 * * * * root [ -f \"\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}\" ] && { set -a; . \"\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}\"; set +a; }; export GH_TOKEN=\$(cat $TOKEN_FILE) FLEET_LOG_DIR=$LOG_DIR FLEET_VIEW_PORT=${FLEET_VIEW_PORT:-8420}; python3 /fleet-kit/scripts/reif_eyes.py >> $LOG_DIR/reif_eyes.log 2>&1"
+      # inbox.py resolve (fk#1105, Reif: "no response back to the thread so that I can't know if
+      # there was some resolution"): every filed mail/alert gets a 'Resolved' reply on its thread
+      # once its issue closes. Deterministic, idempotent, hourly at :44.
+      echo "44 * * * * root [ -f \"\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}\" ] && { set -a; . \"\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}\"; set +a; }; export GH_TOKEN=\$(cat $TOKEN_FILE) FLEET_LOG_DIR=$LOG_DIR; python3 /fleet-kit/scripts/inbox.py resolve >> $LOG_DIR/inbox.log 2>&1"
       # vp_due.sh: spawn a VP review for each due item whose newest merged PR is newer than
       # its newest VP verdict (members/vp/vp.md). Deterministic on purpose -- gru is a
       # prompt and did not spawn vp for 2.5h after a redo merged (2026-09-08).
