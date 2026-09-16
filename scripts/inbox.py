@@ -46,7 +46,7 @@ import urllib.request
 LOG_DIR = pathlib.Path(os.environ.get("FLEET_LOG_DIR") or os.path.expanduser("~/Library/Logs/fleet-kit"))
 INBOX = LOG_DIR / "inbox.jsonl"
 DONE = LOG_DIR / "inbox.done"
-THREADS = LOG_DIR / "threads.jsonl"   # one row per filed issue: where to say "resolved" (fk#1105)
+THREADS = LOG_DIR / "threads.jsonl"   # one row per filed issue: where to say "resolved" (fk#1106)
 ALERT_ENV = pathlib.Path(os.environ.get("FLEET_ALERT_ENV") or "/home/ubuntu/.config/maxx/alert.env")
 ALERT_ENV = pathlib.Path(os.environ.get("FLEET_ALERT_ENV") or "/home/ubuntu/.config/maxx/alert.env")
 RESEND_API = os.environ.get("RESEND_API_URL_BASE", "https://api.resend.com")
@@ -443,7 +443,7 @@ def main(argv=None) -> int:
     d = sub.add_parser("done"); d.add_argument("id")
     p = sub.add_parser("parse"); p.add_argument("file")
     ap_ = sub.add_parser("apply"); ap_.add_argument("id")
-    sub.add_parser("resolve", help="reply 'Resolved' on every filed thread whose issue has closed (fk#1105)")
+    sub.add_parser("resolve", help="reply 'Resolved' on every filed thread whose issue has closed (fk#1106)")
     a = ap.parse_args(argv)
     if a.cmd == "resolve":
         for line in resolve():
