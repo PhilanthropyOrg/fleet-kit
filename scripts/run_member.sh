@@ -610,6 +610,18 @@ if [ "${FLEET_HANDOFF:-1}" = "1" ] && FLEET_LOG_DIR="$LOG_DIR" python3 "$KIT_DIR
 
 $PROMPT"
 fi
+# NORTH (Reif 2026-09-16, fk#1097: "add weight on the things that I am shipping personally...
+# then the okrs, then whats burning"): what Reif merged himself, the funnel's leak, where the
+# tokens went, one weight per KR. Written by the 6-hourly cron with gh; at prompt time only the
+# last write is reused (--no-gh), so a pass never blocks on the network.
+NORTH_FILE="$LOG_DIR/NORTH.md"
+if [ "${FLEET_NORTH:-1}" = "1" ] && FLEET_LOG_DIR="$LOG_DIR" python3 "$KIT_DIR/scripts/north.py" write --no-gh >/dev/null 2>>"$LOG" && [ -s "$NORTH_FILE" ]; then
+  PROMPT="$(head -c 4000 "$NORTH_FILE")
+
+---
+
+$PROMPT"
+fi
 
 REPORT_CONTRACT=$(awk '/^## 10b\./{f=1} f{print} /^## 11\./{exit}' "$KIT_DIR/agents/persona_law.md" | sed '$d')
 if [ -n "$REPORT_CONTRACT" ]; then

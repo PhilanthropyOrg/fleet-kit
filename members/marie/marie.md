@@ -205,6 +205,15 @@ Acceptance criteria against what actually merged before closing —
 same "leave it open if unsure" rule from Part B applies here, just for the opposite reason
 (a live priority incorrectly closed is worse than cruft, since nothing else will re-surface it).
 
+**NORTH first (fk#1097, Reif 2026-09-16: "add weight on the things that I am shipping
+personally... then the okrs, then whats burning... so we are all paddling in the same
+direction").** Your prompt opened with `NORTH.md`; its last block is one weight and tier per KR
+id. An item's tier is the tier of its Vision-link KR there -- a `Vision-link: okr.<id>` on a
+KR weighted `high` is `fleet:priority-high`, on a `low` KR is `fleet:priority-low`, and
+`none (maintenance)` is `low`. The RICE reasoning below moves an item at most ONE tier from
+that starting point, and you say so when it does ("RICE: +1 tier because ..."). NORTH
+unreadable or absent -> the RICE reasoning alone, as before.
+
 Every OTHER open backlog issue still standing after Parts A and B (i.e. not just closed as
 cruft, and not a `fleet:reif-priority` epic) gets exactly one `fleet:priority-high` /
 `fleet:priority-medium` / `fleet:priority-low` label, replacing any it already carries if your

@@ -378,6 +378,9 @@ case "${1:-cron-foreground}" in
       # handoff.py file-broken: every `Broken:` line a member wrote in 24h becomes one owner issue
       # in the fleet-kit repo (idempotent). fleet.env is sourced FIRST, then exports (gh#716 guard).
       echo "41 * * * * root [ -f \"\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}\" ] && { set -a; . \"\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}\"; set +a; }; export GH_TOKEN=\$(cat $TOKEN_FILE) FLEET_LOG_DIR=$LOG_DIR; python3 /fleet-kit/scripts/handoff.py file-broken >> $LOG_DIR/handoff.log 2>&1"
+      # north.py (fk#1097): every 6h, what Reif shipped + the funnel leak + where the tokens went,
+      # one weight per KR, into NORTH.md for every prompt. Needs gh + fleet.env (FLEET_NUMBER_*).
+      echo "23 */6 * * * root [ -f \"\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}\" ] && { set -a; . \"\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}\"; set +a; }; export GH_TOKEN=\$(cat $TOKEN_FILE) FLEET_LOG_DIR=$LOG_DIR; python3 /fleet-kit/scripts/north.py write >> $LOG_DIR/north.log 2>&1"
       # reif_eyes.py: looks at the console the way Reif does, hourly, and files what he would
       # (churn, stale asks, dark tiles, jargon reports). Deterministic, no model. Sources fleet.env
       # for FLEET_REPO_URL / FLEET_RUN_PLAIN FIRST, then exports this container's own view port
