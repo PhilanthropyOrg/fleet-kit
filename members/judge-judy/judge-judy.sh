@@ -502,7 +502,7 @@ This reflects a parse/format issue in the reviewer's own output, not a finding a
       # filed a fix item gru could never pick. Use a real, named guardrail link instead so the
       # filed item classifies as `linked`, not `maintenance`.
       ERR_VISION_LINK=$(grep -iE '^[[:space:]]*#{0,6}[[:space:]]*[*_]{0,2}Vision-link' "$BODY_FILE" 2>/dev/null | head -1)
-      [ -z "$ERR_VISION_LINK" ] && ERR_VISION_LINK="Vision-link: guardrail -- an errored review hands the PR to the fleet with a ticket gru can actually pick"
+      [ -z "$ERR_VISION_LINK" ] && ERR_VISION_LINK="Vision-link: okr.verified_claims -- guardrail: an errored review hands the PR to the fleet with a ticket gru can actually pick (inherits the blocked PR's link)"
       ERR_FIX_TITLE="fix: code review could not run on PR #$PR -- reviewer output failed schema validation"
       ERR_FIX_BODY="judge-judy dequeued PR #$PR at head ${HEAD_SHA:0:12} and disarmed auto-merge, but could NOT post a verdict: its own output failed schema validation ${N}x in a row ($PARSE_REASON).
 

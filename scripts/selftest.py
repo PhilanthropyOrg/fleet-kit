@@ -1313,7 +1313,7 @@ def _vision_link_gate_eligibility_rule():
 
     # Pure classification: real link, explicit maintenance (tolerating a model's punctuation
     # drift), and "nothing at all" are three distinct states.
-    assert vlg.classify_candidate("Vision-link: Stripe MRR -- top line metric", [])[0] == \
+    assert vlg.classify_candidate("Vision-link: okr.verified_claims -- top line metric", [])[0] == \
         vlg.STATUS_LINKED
     assert vlg.classify_candidate("Vision-link: none (maintenance)", [])[0] == \
         vlg.STATUS_MAINTENANCE
@@ -1332,16 +1332,16 @@ def _vision_link_gate_eligibility_rule():
         "Vision-link: none (maintenance)",
         [
             {"body": "Vision-link: none (maintenance)", "createdAt": "2026-09-01T00:00:00Z"},
-            {"body": "marie re-scored this.\nVision-link: KR2 guardrail",
+            {"body": "marie re-scored this.\nVision-link: okr.clicks guardrail",
              "createdAt": "2026-09-05T00:00:00Z"},
         ])
-    assert status == vlg.STATUS_LINKED and "KR2 guardrail" in raw
+    assert status == vlg.STATUS_LINKED and "okr.clicks guardrail" in raw
 
     # gate_candidates: a linked candidate is always eligible; order is a filtered subsequence.
     out = vlg.gate_candidates([
-        {"number": 3, "body": "Vision-link: A"},
+        {"number": 3, "body": "Vision-link: okr.traffic -- A"},
         {"number": 4, "body": "no link at all"},
-        {"number": 5, "body": "Vision-link: B"},
+        {"number": 5, "body": "Vision-link: okr.clicks -- B"},
     ])
     assert out == {"eligible": [3, 5], "dropped": [
         {"number": 4, "reason": "no Vision-link line (neither a real link nor explicit "
@@ -1350,7 +1350,7 @@ def _vision_link_gate_eligibility_rule():
     # AC4: maintenance is eligible only when nothing number-moving is waiting -- present, it's
     # dropped and the drop names the linked candidate (AC3); absent, it's picked.
     out_blocked = vlg.gate_candidates([
-        {"number": 513, "body": "Vision-link: Stripe MRR"},
+        {"number": 513, "body": "Vision-link: okr.verified_claims"},
         {"number": 100, "body": "Vision-link: none (maintenance)"},
     ])
     assert out_blocked["eligible"] == [513]
@@ -1373,14 +1373,14 @@ def _vision_link_gate_eligibility_rule():
     # Vision-link'd candidate is available at the same tier.
     out_ac2 = vlg.gate_candidates([
         {"number": 1, "body": "no vision line"},
-        {"number": 2, "body": "Vision-link: KR1 supply"},
+        {"number": 2, "body": "Vision-link: okr.traffic -- supply"},
     ])
     assert out_ac2["eligible"] == [2]
     assert [d["number"] for d in out_ac2["dropped"]] == [1]
 
     # The CLI surfaces the same verdict -- what gru.md's new gate step actually runs.
     import subprocess
-    items = json.dumps([{"number": 513, "body": "Vision-link: Stripe MRR"},
+    items = json.dumps([{"number": 513, "body": "Vision-link: okr.verified_claims"},
                          {"number": 100, "body": "Vision-link: none (maintenance)"}])
     out = subprocess.run(
         [sys.executable, str(HERE / "vision_link_gate.py"), "--items", items],
@@ -1404,7 +1404,7 @@ def _vision_link_gate_severity_escape_hatch_gh726():
 
     # AC1: none (maintenance) + fleet:severity-live + a linked candidate open -> eligible.
     out = vlg.gate_candidates([
-        {"number": 513, "body": "Vision-link: Stripe MRR"},
+        {"number": 513, "body": "Vision-link: okr.verified_claims"},
         {"number": 100, "body": "Vision-link: none (maintenance)",
          "labels": [{"name": "fleet:severity-live"}]},
     ])
@@ -1412,7 +1412,7 @@ def _vision_link_gate_severity_escape_hatch_gh726():
 
     # AC2: same pack, no fleet:severity-live -> still dropped, reason string unchanged.
     out_no_hatch = vlg.gate_candidates([
-        {"number": 513, "body": "Vision-link: Stripe MRR"},
+        {"number": 513, "body": "Vision-link: okr.verified_claims"},
         {"number": 100, "body": "Vision-link: none (maintenance)", "labels": []},
     ])
     assert out_no_hatch == {"eligible": [513], "dropped": [
@@ -1422,7 +1422,7 @@ def _vision_link_gate_severity_escape_hatch_gh726():
     # AC3: no `labels` key at all (the shape every current caller passes today) -> byte-identical
     # to the pre-hatch output -- no KeyError, and absence never becomes an accidental rescue.
     out_legacy = vlg.gate_candidates([
-        {"number": 513, "body": "Vision-link: Stripe MRR"},
+        {"number": 513, "body": "Vision-link: okr.verified_claims"},
         {"number": 100, "body": "Vision-link: none (maintenance)"},
     ])
     assert out_legacy == out_no_hatch, out_legacy
@@ -1430,7 +1430,7 @@ def _vision_link_gate_severity_escape_hatch_gh726():
     # AC4: fleet:severity-live present but no Vision-link line at all (missing, not maintenance)
     # -- the hatch rescues an honest maintenance line, never an unlinked one.
     out_missing = vlg.gate_candidates([
-        {"number": 513, "body": "Vision-link: Stripe MRR"},
+        {"number": 513, "body": "Vision-link: okr.verified_claims"},
         {"number": 100, "body": "no vision line here",
          "labels": [{"name": "fleet:severity-live"}]},
     ])
@@ -1445,7 +1445,7 @@ def _vision_link_gate_severity_escape_hatch_gh726():
     # candidate in the same pack, and #716's real labels plus fleet:severity-live -- the exact
     # fix this PRD names.
     out_716 = vlg.gate_candidates([
-        {"number": 660, "body": "Vision-link: KR2 journey coverage"},
+        {"number": 660, "body": "Vision-link: okr.conversion journey coverage"},
         {"number": 716, "body": _GH716_BODY, "comments": [{"body": _GH716_COMMENT}],
          "labels": [{"name": "fleet:priority-high"}, {"name": "fleet:severity-live"}]},
     ])
@@ -1454,7 +1454,7 @@ def _vision_link_gate_severity_escape_hatch_gh726():
     # AC7: the CLI is a thin wrapper -- same rule, same verdict, over the same items.
     import subprocess
     items = json.dumps([
-        {"number": 513, "body": "Vision-link: Stripe MRR"},
+        {"number": 513, "body": "Vision-link: okr.verified_claims"},
         {"number": 100, "body": "Vision-link: none (maintenance)",
          "labels": [{"name": "fleet:severity-live"}]},
     ])
