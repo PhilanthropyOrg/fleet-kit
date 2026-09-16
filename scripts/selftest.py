@@ -5197,11 +5197,16 @@ def _console_v2_is_one_phone_first_page_with_five_blocks():
     """
     page = (ROOT / "scripts" / "fleet_home.html").read_text()
     assert len(page.encode()) < 40_000, "v2 must stay small"
-    for block in ('id="number"', 'id="asks"', 'id="agents"', 'id="landed"', 'id="foot"'):
+    for block in ('id="number"', 'id="agents"', 'id="landed"', 'id="foot"'):
         assert block in page, f"missing block {block}"
+    # Reif, 2026-09-15: "the waiting on you thing, I dont like it, kill it." No inbox on Home;
+    # an ask pages him instead (ask.py _notify forces fleet_alert.sh's email leg).
+    assert 'id="asks"' not in page and "Waiting on human" not in page and "Needs you" not in page
+    ask_src = (ROOT / "scripts" / "ask.py").read_text()
+    assert 'FLEET_ALERT_EMAIL_LEG="1"' in ask_src and "env=env" in ask_src, "an ask no longer reaches a human by email"
     assert 'name="viewport"' in page and "min-height: 44px" in page
     assert "<script src=" not in page and "cdn" not in page.lower(), "no framework, no CDN"
-    for api in ("/api/number", "/api/asks", "/api/members", "/api/snapshot", "/api/kpi", "/api/build", "/api/plan", "/api/run_now", "/api/fleet_toggle", "/api/asks/answer"):
+    for api in ("/api/number", "/api/members", "/api/snapshot", "/api/kpi", "/api/build", "/api/plan", "/api/run_now", "/api/fleet_toggle"):
         assert api in page, f"page does not use {api}"
     # gh#553 fix 1 (round 2): the link no longer hardcodes a root-absolute "/classic" -- it is
     # built from withBase('/classic') so it still resolves under this console's own path
@@ -5312,10 +5317,9 @@ def _console_says_paused_when_the_whole_pool_is_gated_fk1041():
     banner = html_src[html_src.index("function renderBanner()"):html_src.index("function nextCheckpoint(")]
     assert "poolPause()" in banner and "PAUSED: Claude account exhausted, resumes" in banner and 'class="banner paused"' in banner
     assert "America/Chicago" in html_src, "resume time is not rendered in Central"
-    health = html_src[html_src.index("function renderHealth()"):html_src.index("function askHeadline(")]
+    health = html_src[html_src.index("function renderHealth()"):html_src.index("function renderAgents(")]
     assert "PAUSED" in health and "poolPause()" in health, "the alive line does not say PAUSED"
-    asks = html_src[html_src.index("function renderAsks()"):html_src.index("function renderAgents(")] if "function renderAgents(" in html_src else html_src[html_src.index("function renderAsks()"):]
-    assert "Add capacity or wait" in asks, "the needs-you block carries no ask"
+    assert "Add an account to FLEET_ACCOUNTS" in banner, "the banner carries no ask"
 
 
 def _console_shows_role_and_steps_per_member():
@@ -15141,7 +15145,7 @@ if __name__ == "__main__":
     check("sidebar shows spawned/scheduled/disabled as distinct badges, not strikethrough (gh#565)", _sidebar_shows_spawned_scheduled_disabled_not_strikethrough_gh565)
     check("status dot carries a non-color channel at both render sites, colors untouched (gh#430)", _status_dot_carries_a_non_color_channel_at_both_render_sites_gh430)
     check("console Home is usable on a phone and the number tile reads fleet.env", _console_home_is_usable_on_a_phone_and_the_number_tile_reads_fleet_env)
-    check("console v2 is one phone-first page with five blocks (fk#645)", _console_v2_is_one_phone_first_page_with_five_blocks)
+    check("console v2 is one phone-first page with four blocks (fk#645; Needs you killed 2026-09-15)", _console_v2_is_one_phone_first_page_with_five_blocks)
     check("share dials offer every 5% labelled as a percent", _share_dials_offer_every_five_percent_labelled_as_percent)
     check("messenger_brief.py sends the brief through Resend once per kind per day (fk#558)", _messenger_brief_sends_through_resend_once_per_day)
     check("messenger is scheduled 3x/day with creds mounted and a send-only charter (fk#558)", _messenger_is_scheduled_three_times_a_day_with_creds_mounted)

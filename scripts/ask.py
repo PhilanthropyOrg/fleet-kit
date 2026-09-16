@@ -129,15 +129,20 @@ def _notify(member: str, ask_id: int, why: str) -> None:
     committed to fleet.db by the time this runs, so a failed/undeliverable page must never make
     `ask.py file` itself fail.
     """
+    import os
     script = HERE / "fleet_alert.sh"
     problem = f"{member}:{int(time.time() // 3600)}"
+    # #1049 made fleet_alert.sh's email leg opt-in and Reif has no ntfy app, so without this an
+    # ask reaches nobody. Reif, 2026-09-15: the console inbox is gone; "somehow it can get me a
+    # message some other way if it needs me." An ask is that message: force the email leg.
+    env = dict(os.environ, FLEET_ALERT_EMAIL_LEG="1")
     title = f"fleet ask filed by {member}"
     body = f"ask #{ask_id}: {why}"
     try:
         subprocess.run(
             ["bash", str(script), "--check", "ask", "--problem", problem,
              "--severity", "critical", "--handle", member, title, body],
-            capture_output=True, timeout=30, check=False,
+            capture_output=True, timeout=30, check=False, env=env,
         )
     except Exception:
         pass
