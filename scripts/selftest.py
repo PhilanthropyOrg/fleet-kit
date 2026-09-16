@@ -4909,6 +4909,35 @@ def _email_reply_answers_asks_and_files_backlog_without_a_model():
     assert 'f"fleet ask #{ask_id} from {member}"' in ask and "Reply to this email with one line" in ask, "ask mail does not say how to reply"
 
 
+def _run_record_carries_plain_words_when_opted_in():
+    """Reif, 2026-09-16: "this needs to be in plain english and run on haiku". run_report's
+    record carries `plain` (run_mail.plain_words, haiku, $0.05 cap) when FLEET_RUN_PLAIN=1 and
+    the run said something; off by default, never for a quiet/skipped run; the drawer shows
+    it first."""
+    import importlib.util, os
+    spec = importlib.util.spec_from_file_location("run_report", ROOT / "scripts" / "run_report.py")
+    rr = importlib.util.module_from_spec(spec); spec.loader.exec_module(rr)
+    import run_mail
+    calls = []
+    orig = run_mail.plain_words
+    run_mail.plain_words = lambda rec: (calls.append(rec) or "Shipped the fix. Nothing to do.")
+    try:
+        rec = {"member": "gru", "status": "ok", "report": "BOTTOM LINE: shipped", "outcome": "PR #1"}
+        os.environ.pop("FLEET_RUN_PLAIN", None)
+        assert rr.plain_words_for(rec) == "" and not calls, "must be off by default"
+        os.environ["FLEET_RUN_PLAIN"] = "1"
+        assert rr.plain_words_for(rec) == "Shipped the fix. Nothing to do." and len(calls) == 1
+        assert rr.plain_words_for({"member": "gru", "status": "quiet", "report": "x"}) == "" and len(calls) == 1, "quiet runs never pay for a rewrite"
+        assert rr.plain_words_for({"member": "gru", "status": "ok"}) == "" and len(calls) == 1, "nothing said, nothing to rewrite"
+    finally:
+        run_mail.plain_words = orig
+        os.environ.pop("FLEET_RUN_PLAIN", None)
+    src = (ROOT / "scripts" / "run_report.py").read_text()
+    assert src.index("plain = plain_words_for(rec)") < src.rindex("print(json.dumps(rec))"), "plain must land on the record before it is printed"
+    html = (ROOT / "scripts" / "fleet_home.html").read_text()
+    assert html.index("section('In plain words', rec.plain") < html.index("section('Outcome', rec.outcome)"), "drawer shows plain words first"
+
+
 def _messenger_brief_restates_the_strategy_and_points_at_pages():
     """Reif, 2026-09-07, on the first brief: "we don't show the objective and the results",
     "show me the url where I can see it, make it concrete". collect() now carries the
@@ -15291,6 +15320,7 @@ if __name__ == "__main__":
     check("messenger brief restates the strategy and points every project step at a page (fk#558)", _messenger_brief_restates_the_strategy_and_points_at_pages)
     check("replying to the brief steers the fleet: svix, allowlist, parser, ledger, route, Reply-To (fk#669)", _reply_to_the_brief_steers_the_fleet)
     check("a reply answers asks and a backlog: mail files an issue, no model in the way (fk#1056)", _email_reply_answers_asks_and_files_backlog_without_a_model)
+    check("a finished run carries its plain-English words for the console, haiku, opt-in", _run_record_carries_plain_words_when_opted_in)
     check("closes gate blocks a partial or docs-only PR from closing an issue (fk#629)", _closes_gate_blocks_a_partial_or_docs_only_pr_from_closing_an_issue)
     check("judge runs the closes gate and reads the issue; law has 13 and 14 (fk#629)", _judge_runs_the_closes_gate_and_reads_the_issue)
     check("git_pull_guard.sh self-heals a stray branch and leaves a normal pull unchanged", _git_pull_guard_self_heals_a_stray_branch_and_leaves_a_normal_pull_unchanged)
