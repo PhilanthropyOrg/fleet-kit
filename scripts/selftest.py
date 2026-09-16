@@ -5015,6 +5015,56 @@ def _reif_eyes_files_what_reif_would_have_pointed_out():
     assert re_.file_findings(churn, "o/r", state, [], run=run, now=now + 8 * 86400) == ["https://github.com/o/r/issues/5"], "after 7 days it may be filed again"
     ep = (ROOT / "entrypoint.sh").read_text()
     assert "python3 /fleet-kit/scripts/reif_eyes.py >> $LOG_DIR/reif_eyes.log" in ep, "no cron line for reif_eyes.py"
+def _north_weights_every_kr_by_what_reif_shipped_and_where_the_funnel_leaks():
+    """fk#1097, Reif 2026-09-16: "add weight on the things that I am shipping personally... then
+    the okrs, then whats burning... so we are all paddling in the same direction." The
+    attribution table is fixed and auditable; weights sum to 1 and `none` is 0; PR-less spend
+    is named; every prompt carries NORTH.md; marie's tier starts from it; a cron writes it."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("north", ROOT / "scripts" / "north.py")
+    n = importlib.util.module_from_spec(spec); spec.loader.exec_module(n)
+    # the table, on real titles from 2026-09-13..16
+    assert n.attribute("CI runs on GitHub-hosted runners, not our boxes") == "none", "GitHub is not hub"
+    assert n.attribute("Ranked review can see the fleet's PRs again") == "none", "runners/review is not ranking"
+    assert n.attribute("The objective is 3,000 claimed orgs, and the KRs stop restating it") == "none", "OKR prose is not a claim fix"
+    assert n.attribute("Claim page points her at the upload form, not her inbox") == "okr.conversion"
+    assert n.attribute("HQ Home renders on the shared shell, with a day-one checklist") == "okr.conversion"
+    assert n.attribute("Long org names no longer hide behind Follow on phones") == "okr.clicks"
+    assert n.attribute("A misspelled top-10 charity finds the real charity") == "okr.traffic"
+    assert n.attribute("Superadmin renders on the shared shell") == "none"
+    assert n.attribute("Tidy things", ["src/philanthropy/api/routes_claim.py"]) == "okr.conversion", "paths break a tie"
+    assert n.attribute("Tidy things", [".github/workflows/ci.yml"]) == "none"
+    # weights: Reif's PRs carry 60%, the funnel leak 40%; sum to 1; none is 0
+    reif = [{"kr": "okr.conversion"}] * 3 + [{"kr": "okr.clicks"}] + [{"kr": "none"}] * 10
+    w = n.weights(reif, "okr.conversion")
+    assert abs(sum(w[k] for k in n.KR_IDS) - 1.0) < 0.02 and w["none"] == 0.0, w
+    assert w["okr.conversion"] > w["okr.clicks"] > w["okr.traffic"] == 0.0, w
+    assert n.tier_for(w["okr.conversion"]) == "high" and n.tier_for(w["okr.traffic"]) == "low"
+    eq = n.weights([], None)
+    assert all(abs(eq[k] - 0.33) < 0.01 for k in n.KR_IDS), "nothing readable -> the equal split"
+    assert n.worst_step_kr({"funnel": {"worst_step": "cta_clicked->page_viewed"}}) == "okr.conversion"
+    assert n.worst_step_kr({}) is None
+    # burn: a run with a pr inherits the PR's KR; a PR-less run is named by member
+    now = 1_800_000_000.0
+    runs = [{"member": "minion", "pr": 42, "ts": now - 10, "tokens": {"cost_usd": 3.0}},
+            {"member": "marie", "ts": now - 10, "tokens": {"cost_usd": 5.5}},
+            {"member": "old", "pr": 42, "ts": now - 9 * 86400, "tokens": {"cost_usd": 99.0}}]
+    burn, total = n.burn_by_kr(runs, {42: "okr.clicks"}, now)
+    assert burn == {"okr.clicks": 3.0, "no PR: marie": 5.5} and total == 8.5, (burn, total)
+    text = n.render(reif, None, {"objective": {"id": "okr.verified_claims", "label": "3,000"}, "key_results": [{"id": k, "label": k} for k in n.KR_IDS]},
+                    {"funnel": {"worst_step": "cta_clicked->page_viewed", "cta_clicked": 239}}, None, burn, total, now)
+    assert "## Weights" in text and "`okr.conversion` 0.85" in text and "no PR at all: $6 (65%) -- marie $6" in text, text
+    assert "funnel worst step: **cta_clicked->page_viewed** -> `okr.conversion`" in text
+    # wiring
+    rm = (ROOT / "scripts" / "run_member.sh").read_text()
+    assert 'python3 "$KIT_DIR/scripts/north.py" write --no-gh' in rm and 'NORTH_FILE="$LOG_DIR/NORTH.md"' in rm, "every prompt carries NORTH.md"
+    assert rm.index('HANDOFF_FILE="$LOG_DIR/HANDOFF.md"') < rm.index('NORTH_FILE="$LOG_DIR/NORTH.md"'), "NORTH follows HANDOFF"
+    ep = (ROOT / "entrypoint.sh").read_text()
+    assert "python3 /fleet-kit/scripts/north.py write >> $LOG_DIR/north.log" in ep, "no cron line for north.py"
+    marie = (ROOT / "members" / "marie" / "marie.md").read_text()
+    assert "NORTH.md" in marie and "at most ONE tier" in marie, "marie's tier must start from NORTH"
+
+
 def _an_open_ask_also_lands_on_the_board_for_an_agent():
     """Reif, 2026-09-16: "if something is broken like this - I want to make darn sure that
     another agent picks it up." ask.py files one fleet:backlog issue per open ask (opt-in,
@@ -15568,6 +15618,7 @@ if __name__ == "__main__":
     check("every pass reads the handoff; a Broken: instrument gets one owner issue (Reif 2026-09-16)", _every_pass_reads_the_handoff_and_a_broken_instrument_gets_an_owner)
     check("tiles backfill their history from the source dates, once, observed rows win (fk#1084)", _tiles_backfill_their_history_from_the_source_dates)
     check("reif_eyes files what Reif would have pointed out: churn, stale asks, dark tiles, jargon; idempotent; cron", _reif_eyes_files_what_reif_would_have_pointed_out)
+    check("north weights every KR by what Reif shipped and where the funnel leaks; NORTH.md in every prompt (fk#1097)", _north_weights_every_kr_by_what_reif_shipped_and_where_the_funnel_leaks)
     check("a finished run carries its plain-English words for the console, haiku, opt-in", _run_record_carries_plain_words_when_opted_in)
     check("an open ask also lands on the board so an agent picks it up (opt-in, idempotent)", _an_open_ask_also_lands_on_the_board_for_an_agent)
     check("the-fixer fires only for a red run on the default branch (fk#1055)", _the_fixer_fires_only_for_the_default_branch)
