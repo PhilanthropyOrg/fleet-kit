@@ -1,9 +1,25 @@
 {
   "_doc": "The objective and key results the fleet is ranked against (docs/VISION.md in the product repo, set by Reif 2026-09-14). A Vision-link on an issue must name one of these ids or say `none (maintenance)`; prose that names no id is not a link (Reif 2026-09-16: OKRs were set and still nothing bound the pick to them). `metric` is the console tile (scripts/metrics.json) that reads the KR, or null while the baseline is not yet pulled. Override per instance with FLEET_OKR_FILE.",
-  "objective": {"id": "okr.verified_claims", "label": "3,000 verified org claims by 2026-12-31", "metric": "okr.verified_claims"},
+  "objective": {
+    "id": "okr.verified_claims",
+    "label": "3,000 verified org claims by 2026-12-31",
+    "metric": "okr.verified_claims"
+  },
   "key_results": [
-    {"id": "okr.traffic",    "label": "Traffic: weekly search-driven visits to org pages",          "metric": null},
-    {"id": "okr.clicks",     "label": "Clicks: distinct orgs clicking the claim CTA, per 30 days",  "metric": null},
-    {"id": "okr.conversion", "label": "Conversion: claim CTA click to claim filed",                 "metric": null}
+    {
+      "id": "okr.traffic",
+      "label": "Traffic: weekly search-driven visits to org pages",
+      "metric": null
+    },
+    {
+      "id": "okr.clicks",
+      "label": "Clicks: distinct orgs clicking the claim CTA, per 30 days",
+      "metric": "okr.clicks"
+    },
+    {
+      "id": "okr.conversion",
+      "label": "Conversion: claim CTA click to claim filed",
+      "metric": "okr.conversion"
+    }
   ]
 }

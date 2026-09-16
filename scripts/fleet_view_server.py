@@ -638,6 +638,13 @@ def metrics_snapshot() -> dict:
             out["okr.verified_claims"] = {"value": val, "unit": n.get("unit") or "", "target": tgt.get("value"),
                                           "sub": (f"{n.get('name', '')}" + (f" · {'+' if (n.get('delta_7d') or 0) >= 0 else ''}{n.get('delta_7d')} 7d" if n.get("delta_7d") is not None else "")).strip(" ·"),
                                           "series": daily_series("okr.verified_claims"), "stale": bool(nr.get("stale"))}
+            k1 = ((nr.get("payload") or {}).get("kr1") or {}) if nr.get("present") else {}
+            upsert("okr.clicks", k1.get("value"))
+            out["okr.clicks"] = {"value": k1.get("value"), "unit": k1.get("unit") or "", "sub": (k1.get("name") or "") + (f" · {'+' if (k1.get('delta_7d') or 0) >= 0 else ''}{k1.get('delta_7d')} 7d" if k1.get("delta_7d") is not None else ""),
+                                 "series": daily_series("okr.clicks"), "stale": bool(nr.get("stale"))}
+            upsert("okr.conversion", k1.get("completion_rate_pct"))
+            out["okr.conversion"] = {"value": k1.get("completion_rate_pct"), "unit": "%", "sub": f"{k1.get('pending')} pending · median {k1.get('median_pending_age_days')}d" if k1.get("pending") is not None else "claims started that reached verified",
+                                     "series": daily_series("okr.conversion"), "stale": bool(nr.get("stale"))}
         except Exception as exc:  # noqa: BLE001
             out["okr.verified_claims"] = {"value": None, "sub": f"unreadable: {type(exc).__name__}", "series": []}
 

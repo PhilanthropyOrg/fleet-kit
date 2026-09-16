@@ -152,7 +152,7 @@ case "${1:-cron-foreground}" in
     # `FLEET_CRON_MEMBERS=judge-judy`) to schedule only those. dont-shoot-the-messenger is
     # excluded from ALL_CRON_MEMBERS because its own cron line is already commented out
     # (archived 2026-09-04, see below) -- re-enabling it is a separate step from this mechanism.
-    ALL_CRON_MEMBERS=(the-fixer judge-judy gru jefe roomba marie datta dumbledore sentry librarian librarian-scrub red custodian dont-shoot-the-messenger)
+    ALL_CRON_MEMBERS=(the-fixer judge-judy gru jefe roomba marie datta dumbledore sentry librarian librarian-scrub red custodian dont-shoot-the-messenger signals)
     if [ -n "${FLEET_CRON_MEMBERS:-}" ]; then
       IFS=', ' read -ra RESOLVED_CRON_MEMBERS <<< "$FLEET_CRON_MEMBERS"
       for m in "${RESOLVED_CRON_MEMBERS[@]}"; do
@@ -295,6 +295,12 @@ case "${1:-cron-foreground}" in
       # 13:17 is off the hourly grids above and well clear of gru's :03 fanout.
       if cron_member_enabled custodian; then
         echo "17 13 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh custodian >> $LOG_DIR/custodian.log 2>&1"
+      fi
+      # signals (fk#1042): the daily analyst. 06:05 Central = 11:05 UTC (12:05 in winter --
+      # same drift custodian and the brief accept). Runs after the product's overnight crons
+      # so the funnel it reads is yesterday's complete day.
+      if cron_member_enabled signals; then
+        echo "5 11 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh signals >> $LOG_DIR/signals.log 2>&1"
       fi
       # librarian (philanthropy#4439, nonprofit-atlas#4410 seq:1): scrubs credential-shaped
       # strings out of session transcripts and enforces the compress/drop retention window.

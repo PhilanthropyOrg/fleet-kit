@@ -5122,6 +5122,48 @@ def _tiles_backfill_their_history_from_the_source_dates():
     assert '_backfill_daily(db, "fleet.backlog_open"' in src and '_backfill_daily(db, "fleet.prs_open"' in src and 'delta_7d' in src.split("def metrics_snapshot")[1]
 
 
+def _signals_member_reads_the_datafeed_daily_and_names_a_kr():
+    """fk#1042; Reif 2026-09-16: "who is consuming the data with which to build insights from?
+    ... not weekly, at least daily." signals_pull renders today + the change since the last
+    snapshot and names a failed read as a broken instrument; the member runs daily with a
+    required Vision-link; run_member fetches before the pass; the handoff carries SIGNALS.md;
+    every KR in okr.json that names a metric names one that exists in metrics.json."""
+    import importlib.util, os
+    spec = importlib.util.spec_from_file_location("signals_pull", ROOT / "scripts" / "signals_pull.py")
+    sp = importlib.util.module_from_spec(spec); spec.loader.exec_module(sp)
+    os.environ["FLEET_NUMBER_URL"] = "https://example.org/990/api/number"; os.environ["FLEET_NUMBER_TOKEN"] = "t"
+    assert sp.base_url() == "https://example.org/990"
+    def fake(path):
+        if path.endswith("/funnel"): raise RuntimeError("HTTP Error 404")
+        if path.endswith("/number"): return {"number": {"value": 110, "unit": "verified claims", "delta_7d": 35}, "kr1": {"value": 52, "completion_rate_pct": 85.9, "pending": 10, "median_pending_age_days": 1.2}}
+        if path.endswith("/ga4"): return {"sessions_today": 28761, "top_landing_pages": [{"page": "/990/login", "sessions": 12318}]}
+        return {"top_events": [{"event": "$pageview", "count": 9}]}
+    snap = sp.fetch_all(fetch=fake)
+    assert set(snap["reads"]) == {"number", "posthog", "ga4"} and "funnel" in snap["errors"], snap
+    prev = {"fetched_at": snap["fetched_at"] - 86400, "reads": {"number": {"number": {"value": 100}, "kr1": {"value": 40}}, "ga4": {"sessions_today": 20000}}}
+    text = sp.render(snap, prev)
+    assert "Objective: 110 verified claims (+35 in 7d) (+10 since last snapshot)" in text, text
+    assert "Claims started, last 7d: 52" in text and "(+12 since last snapshot)" in text
+    assert "GA4 sessions today: 28761 (+8761 since last snapshot)" in text and "/990/login 12318" in text
+    assert "READS THAT FAILED" in text and "funnel" in text
+    with tempfile.TemporaryDirectory() as tmp:
+        sp.SIG_DIR = Path(tmp)
+        p = sp.save(snap); assert p.exists() and sp.previous("9999-12-31")["reads"]["ga4"]["sessions_today"] == 28761
+    spec_j = json.loads((ROOT / "members" / "signals" / "signals.fleet.json").read_text())
+    assert spec_j["schedule"] == {"daily_at": "06:05"} and spec_j["report"]["vision_link"] == "required" and spec_j["enabled"]
+    md = (ROOT / "members" / "signals" / "signals.md").read_text()
+    assert "signals_pull.py --render" in md and "Vision-link: okr.<id>" in md and "SIGNALS.md" in md
+    rm = (ROOT / "scripts" / "run_member.sh").read_text()
+    assert 'signals_pull.py" --fetch' in rm and rm.index('signals_pull.py" --fetch') < rm.index('handoff.py" write')
+    ho = (ROOT / "scripts" / "handoff.py").read_text()
+    assert 'LOG_DIR / "SIGNALS.md"' in ho
+    metrics = {m["id"] for m in json.loads((ROOT / "scripts" / "metrics.json").read_text())["metrics"]}
+    okr = json.loads((ROOT / "scripts" / "okr.json").read_text())
+    for kr in [okr["objective"]] + okr["key_results"]:
+        assert kr["metric"] is None or kr["metric"] in metrics, f"{kr['id']} names metric {kr['metric']!r} that is not a tile"
+    assert {"okr.clicks", "okr.conversion"} <= metrics
+
+
 def _messenger_brief_restates_the_strategy_and_points_at_pages():
     """Reif, 2026-09-07, on the first brief: "we don't show the objective and the results",
     "show me the url where I can see it, make it concrete". collect() now carries the
@@ -15508,6 +15550,7 @@ if __name__ == "__main__":
     check("messenger brief restates the strategy and points every project step at a page (fk#558)", _messenger_brief_restates_the_strategy_and_points_at_pages)
     check("replying to the brief steers the fleet: svix, allowlist, parser, ledger, route, Reply-To (fk#669)", _reply_to_the_brief_steers_the_fleet)
     check("a reply answers asks and a backlog: mail files an issue, no model in the way (fk#1056)", _email_reply_answers_asks_and_files_backlog_without_a_model)
+    check("signals reads the datafeed daily and every finding names a KR (fk#1042)", _signals_member_reads_the_datafeed_daily_and_names_a_kr)
     check("every pass reads the handoff; a Broken: instrument gets one owner issue (Reif 2026-09-16)", _every_pass_reads_the_handoff_and_a_broken_instrument_gets_an_owner)
     check("tiles backfill their history from the source dates, once, observed rows win (fk#1084)", _tiles_backfill_their_history_from_the_source_dates)
     check("reif_eyes files what Reif would have pointed out: churn, stale asks, dark tiles, jargon; idempotent; cron", _reif_eyes_files_what_reif_would_have_pointed_out)
