@@ -585,18 +585,16 @@ a PRD missing the inline form is invisible to gru no matter how high you ranked 
 live 2026-09-06: 62 of 64 open backlog candidates fleet-kit-wide were gate-ineligible for lack
 of this line, including `fleet:priority-high`/`fleet:prd` items with nothing else wrong.
 
-**Backfill existing PRDs too, not just new ones.** Before writing this pass's capped 5, check
-every issue already carrying `fleet:prd` for whether its PRD comment (or a later comment)
-already has a `Vision-link:` line. If not, post a short new comment adding one (same
-supersedes-the-earlier-comment convention as a re-scored PRD) -- this one-time debt-payoff has
-no cap, unlike the 5-per-pass limit on writing PRDs from scratch, because every day it's
-undone is another day gru can build almost nothing. Count it in your report (C4).
+**Backfill existing PRDs too, not just new ones, and do it first.** Check every issue already
+carrying `fleet:prd` for a `Vision-link:` line (its comment or a later one); if missing, post a
+short new comment adding one (same supersedes convention as a re-scored PRD) before writing any
+new PRDs this pass (no per-pass cap on either, per the note above) -- every day it's undone is
+another day gru can build almost nothing. Count it in your report (C4).
 
 **Lightweight Vision-link backfill for everything else (gh#4597).** The backfill above only
-reaches issues that already carry `fleet:prd` -- but the 5-per-pass PRD cap means most of the
-backlog never gets there. Every open `fleet:backlog` candidate that is NOT `fleet:prd` --
-every medium/low-tier item, and any high-tier item still waiting its turn under the cap -- also
-never gets a `Vision-link:` line, and `vision_link_gate.py` (gh#525) drops every one of them as
+reaches `fleet:prd` issues -- Part C4's scope (`fleet:priority-high`, unclaimed, un-PRD'd) means
+most of the backlog never gets a PRD at all. Every open `fleet:backlog` candidate that is NOT
+`fleet:prd` also never gets a `Vision-link:` line, and `vision_link_gate.py` (gh#525) drops it as
 MISSING regardless of whether the work behind it is real. The gate does not require the line to
 come from a `fleet:prd` comment -- it reads the newest comment (or the body) carrying a
 `Vision-link:` line, full stop, from ANY comment (`test_vision_link_gate.py`'s
@@ -608,7 +606,8 @@ gh issue list --state open --label fleet:backlog --json number,labels,body,comme
 ```
 For each result: skip it if it already carries `fleet:prd` (that issue's Vision-link is the
 backfill step above's job -- **check the label before posting, gh#4597 AC3** -- never duplicate
-it here) or if its body/any comment already has a `Vision-link:` line naming a registered id (a prose line with no id counts as absent -- restamp it). For
+it here) or if its body/any comment already has a valid `Vision-link:` line naming a registered
+id (the restamp rule above governs what counts as valid). For
 everything left, post one comment with just the single line -- no Problem/Goal/AC sections,
 this is a determination, not a spec:
 
