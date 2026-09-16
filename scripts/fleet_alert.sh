@@ -110,6 +110,9 @@ if [ -z "${NTFY_TOPIC:-}" ] && [ -f /home/ubuntu/.config/maxx/anchor.env ]; then
 fi
 
 _send_email() {  # <title> <body> -> 0 on delivered
+  # Reif, 2026-09-15: "prune all the emails". ntfy is the pager; the email leg is opt-in
+  # (FLEET_ALERT_EMAIL_LEG=1) so the same alarm no longer lands in two inboxes.
+  [ "${FLEET_ALERT_EMAIL_LEG:-}" = "1" ] || { log "email leg off (FLEET_ALERT_EMAIL_LEG unset)"; return 1; }
   [ -n "${RESEND_API_KEY:-}" ] && [ -n "${FLEET_ALERT_EMAIL:-}" ] || { log "email skipped: no RESEND_API_KEY/FLEET_ALERT_EMAIL in alert.env"; return 1; }
   local payload code
   payload=$(TITLE="$1" BODY="$2" FROM="${MAIL_FROM:-990 Scout <hello@philanthropy.org>}" \

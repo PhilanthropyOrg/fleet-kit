@@ -145,3 +145,29 @@ class PlanBlockingNoteTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BriefIsWrittenNotMailedTest(unittest.TestCase):
+    """Reif, 2026-09-15: prune all outgoing email. deliver() writes the brief and returns
+    without touching Resend unless FLEET_BRIEF_EMAIL=1. Mutation: drop the gate and the
+    first test reaches read_alert_env()/urlopen."""
+
+    def test_default_writes_the_brief_and_does_not_mail(self):
+        with tempfile.TemporaryDirectory() as d, \
+             unittest.mock.patch.object(mb, "LOG_DIR", Path(d)), \
+             unittest.mock.patch.dict("os.environ", {"FLEET_BRIEF_EMAIL": ""}), \
+             unittest.mock.patch.object(mb, "read_alert_env", side_effect=AssertionError("mail path reached")), \
+             unittest.mock.patch("urllib.request.urlopen", side_effect=AssertionError("network reached")):
+            rc, word = mb.deliver("morning", "# hello\n", want_pdf=False, force=True)
+            self.assertEqual((rc, word), (0, "written-not-mailed"))
+            written = list(Path(d).glob("brief-morning-*.md"))
+            self.assertEqual(len(written), 1)
+            self.assertEqual(written[0].read_text(), "# hello\n")
+
+    def test_opt_in_reaches_the_mail_path(self):
+        with tempfile.TemporaryDirectory() as d, \
+             unittest.mock.patch.object(mb, "LOG_DIR", Path(d)), \
+             unittest.mock.patch.dict("os.environ", {"FLEET_BRIEF_EMAIL": "1"}), \
+             unittest.mock.patch.object(mb, "read_alert_env", return_value={}):
+            rc, word = mb.deliver("morning", "# hello\n", want_pdf=False, force=True)
+            self.assertEqual((rc, word), (1, "no-credentials"))
