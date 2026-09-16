@@ -585,47 +585,46 @@ a PRD missing the inline form is invisible to gru no matter how high you ranked 
 live 2026-09-06: 62 of 64 open backlog candidates fleet-kit-wide were gate-ineligible for lack
 of this line, including `fleet:priority-high`/`fleet:prd` items with nothing else wrong.
 
-**Backfill existing PRDs too, not just new ones.** Before writing this pass's capped 5, check
-every issue already carrying `fleet:prd` for whether its PRD comment (or a later comment)
-already has a `Vision-link:` line. If not, post a short new comment adding one (same
-supersedes-the-earlier-comment convention as a re-scored PRD) -- this one-time debt-payoff has
-no cap, unlike the 5-per-pass limit on writing PRDs from scratch, because every day it's
-undone is another day gru can build almost nothing. Count it in your report (C4).
+**Both backfills below recur by construction, not by oversight (gh#4597).** New candidates land
+continuously — every freshly filed or re-labeled `fleet:backlog` issue is gate-blocked as
+MISSING until one of these two sweeps next reaches it, so "debt payoff" is never a one-time
+state. (Confirmed live 2026-09-07: a debt-payoff pass at 10:50Z that closed 99 backlog + 35 PRD
+issues was followed within hours by fresh gate-MISSING candidates that didn't exist at payoff
+time.) Run both every pass; count each separately in your report (C4).
 
-**Lightweight Vision-link backfill for everything else (gh#4597).** The backfill above only
-reaches issues that already carry `fleet:prd` -- but the 5-per-pass PRD cap means most of the
-backlog never gets there. Every open `fleet:backlog` candidate that is NOT `fleet:prd` --
-every medium/low-tier item, and any high-tier item still waiting its turn under the cap -- also
-never gets a `Vision-link:` line, and `vision_link_gate.py` (gh#525) drops every one of them as
-MISSING regardless of whether the work behind it is real. The gate does not require the line to
-come from a `fleet:prd` comment -- it reads the newest comment (or the body) carrying a
-`Vision-link:` line, full stop, from ANY comment (`test_vision_link_gate.py`'s
-`test_newest_comment_wins_over_body` already locks this in). So the fix is a lighter-weight
-comment, not a gate change and not a full PRD:
+**Backfill existing PRDs first.** Before writing any new PRD this pass, check every issue
+already carrying `fleet:prd` for whether its PRD comment (or a later comment) already has a
+`Vision-link:` line naming a registered id (a prose line with no id counts as absent —
+restamp it). If not, post a short new comment adding one (same supersedes-the-earlier-comment
+convention as a re-scored PRD). This debt-payoff has no turn budget of its own beyond what C4
+allots overall — every day it's undone is another day gru can build almost nothing.
+
+**Lightweight Vision-link backfill for everything else.** The backfill above only reaches
+issues that already carry `fleet:prd` — most of the backlog never gets there. Every open
+`fleet:backlog` candidate that is NOT `fleet:prd` also never gets a `Vision-link:` line, and
+`vision_link_gate.py` (gh#525) drops every one of them as MISSING regardless of whether the
+work behind it is real. The gate does not require the line to come from a `fleet:prd` comment
+— it reads the newest comment (or the body) carrying a `Vision-link:` line, full stop, from ANY
+comment (`test_vision_link_gate.py`'s `test_newest_comment_wins_over_body` already locks this
+in). So the fix is a lighter-weight comment, not a gate change and not a full PRD:
 
 ```
 gh issue list --state open --label fleet:backlog --json number,labels,body,comments --limit 200
 ```
 For each result: skip it if it already carries `fleet:prd` (that issue's Vision-link is the
-backfill step above's job -- **check the label before posting, gh#4597 AC3** -- never duplicate
-it here) or if its body/any comment already has a `Vision-link:` line naming a registered id (a prose line with no id counts as absent -- restamp it). For
-everything left, post one comment with just the single line -- no Problem/Goal/AC sections,
+backfill step above's job — **check the label before posting, gh#4597 AC3** — never duplicate
+it here) or if its body/any comment already has a `Vision-link:` line naming a registered id.
+For everything left, post one comment with just the single line — no Problem/Goal/AC sections,
 this is a determination, not a spec:
 
 ```
 Vision-link: <okr.verified_claims | okr.traffic | okr.clicks | okr.conversion> -- <how> | `none (maintenance)`
 ```
 
-**Run this sweep every pass, not once (gh#4597).** New candidates land continuously — every
-freshly filed or re-labeled `fleet:backlog` issue is gate-blocked as MISSING until this sweep
-next reaches it — so "debt payoff" is never a one-time state; it recurs by construction, not
-by any pass's oversight. (Confirmed live 2026-09-07: a debt-payoff pass at 10:50Z that closed
-99 backlog + 35 PRD issues was followed within hours by fresh gate-MISSING candidates that
-didn't exist at payoff time.) The `--limit 200` pull is a cheap read every pass regardless of
-label; the write cost only applies to the delta since your last pass, which stays small once
-the initial debt is paid. Count it in your report (C4): how many lightweight comments posted
-(issue numbers) and how many candidates still lack the line after this sweep (fleet:prd or
-not).
+The `--limit 200` pull is a cheap read every pass regardless of label; the write cost only
+applies to the delta since your last pass, which stays small once the initial debt is paid.
+Count it in your report (C4): how many lightweight comments posted (issue numbers) and how many
+candidates still lack the line after this sweep (fleet:prd or not).
 
 **Judge EFFORT, not importance, and never re-rank here.** The PRD may make an item look
 bigger or smaller than its label — if your own spec changes your complexity estimate, update
