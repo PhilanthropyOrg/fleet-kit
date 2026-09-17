@@ -15624,6 +15624,90 @@ def _pacing_hold_check_sparse_single_row_hours_never_page_gh812():
         assert not ntfy_calls.exists(), "a sparse single-row hold reached the alert helper at all"
 
 
+def _fold_candidates_matches_four_reasons_in_order_and_excludes_bad_prs_fk1127():
+    """fk#1127: fold_candidates.candidates() returns (item, PR) pairs by strongest-matching
+    rule -- review finding > declared follow-up > shared file > same-lane title overlap --
+    and excludes a draft, a >24h-stale, and a DIRTY PR outright, even when their content would
+    otherwise match rule (a). Delete candidates() (or gut any one of its four rules) and this
+    goes red; keep it and it's green."""
+    import fold_candidates
+    now = 2_000_000_000.0
+    fresh = "2033-05-18T09:00:00Z"  # within 24h of `now` above
+    issues = [
+        {"number": 1, "title": "fix: PR #101 failed code review", "body": "", "labels": []},
+        {"number": 2, "title": "add missing test", "body": "follow-up to work in #102",
+         "labels": []},
+        {"number": 3, "title": "typo in src/api/routes_claim.py", "body": "src/api/routes_claim.py has a typo",
+         "labels": []},
+        {"number": 4, "title": "revenue pricing gate copy tweak", "body": "",
+         "labels": [{"name": "lane:revenue"}]},
+        {"number": 5, "title": "unrelated item, matches nothing", "body": "", "labels": []},
+    ]
+    prs = [
+        {"number": 101, "title": "x", "body": "", "headRefName": "b1", "files": [],
+         "createdAt": fresh, "updatedAt": fresh, "isDraft": False, "mergeStateStatus": "CLEAN"},
+        {"number": 102, "title": "x", "body": "Closes #2", "headRefName": "b2", "files": [],
+         "createdAt": fresh, "updatedAt": fresh, "isDraft": False, "mergeStateStatus": "CLEAN"},
+        {"number": 103, "title": "x", "body": "", "headRefName": "b3",
+         "files": [{"path": "src/api/routes_claim.py"}],
+         "createdAt": fresh, "updatedAt": fresh, "isDraft": False, "mergeStateStatus": "CLEAN"},
+        {"number": 104, "title": "revenue pricing gate fix", "body": "",
+         "headRefName": "build/revenue-x", "files": [],
+         "createdAt": fresh, "updatedAt": fresh, "isDraft": False, "mergeStateStatus": "CLEAN"},
+        # excluded PRs: each would otherwise match issue 1's review-finding rule
+        {"number": 201, "title": "fix: PR #101 failed code review", "body": "", "headRefName": "d1",
+         "files": [], "createdAt": fresh, "updatedAt": fresh, "isDraft": True, "mergeStateStatus": "CLEAN"},
+        {"number": 202, "title": "x", "body": "", "headRefName": "d2", "files": [],
+         "createdAt": fresh, "updatedAt": "2020-01-01T00:00:00Z",  # >24h stale
+         "isDraft": False, "mergeStateStatus": "CLEAN"},
+        {"number": 203, "title": "x", "body": "", "headRefName": "d3", "files": [],
+         "createdAt": fresh, "updatedAt": fresh, "isDraft": False, "mergeStateStatus": "DIRTY"},
+    ]
+    out = fold_candidates.candidates(issues, prs, now)
+    by_item = {c["item"]: c for c in out}
+    assert by_item[1] == {"item": 1, "pr": 101, "reason": "review finding on PR 101",
+                           "confidence": "high"}, by_item.get(1)
+    assert by_item[2]["pr"] == 102 and by_item[2]["confidence"] == "high" \
+        and "follow-up" in by_item[2]["reason"], by_item.get(2)
+    assert by_item[3]["pr"] == 103 and by_item[3]["confidence"] == "medium" \
+        and "routes_claim.py" in by_item[3]["reason"], by_item.get(3)
+    assert by_item[4]["pr"] == 104 and by_item[4]["confidence"] == "low", by_item.get(4)
+    assert 5 not in by_item, "an item matching no rule must not appear"
+    assert not any(c["pr"] in (201, 202, 203) for c in out), \
+        "draft / stale / DIRTY PRs must never produce a candidate: " + str(out)
+
+
+def _worktree_builder_parses_onto_pr_flag_and_has_the_queue_fallback_fk1127():
+    """fk#1127: worktree_builder.sh accepts `--onto-pr N` (checks out N's own branch, rebases
+    and pushes once instead of opening a new PR) and falls back to a fresh branch + `gh pr
+    create` when the push is rejected because N is already in the merge queue ("protected
+    branch hook declined"). A dry grep of the script, not a live run -- there's no repo/gh here
+    to actually build against. Delete the flag or the fallback string and this goes red."""
+    src = (ROOT / "scripts" / "worktree_builder.sh").read_text()
+    assert re.search(r'--onto-pr\)\s*ONTO_PR=', src), \
+        "the --onto-pr case arm must actually set ONTO_PR (flag not really parsed)"
+    assert "ONTO_PR" in src, "no ONTO_PR variable driving the fold path"
+    assert "protected branch hook declined" in src, \
+        "no handling for a push rejected by the merge queue"
+    assert "gh pr create" in src, "no fallback that opens a normal PR when the fold push fails"
+    assert re.search(r"git rebase origin/main", src), "fold path must rebase before pushing"
+
+
+def _marie_charter_wires_fold_candidates_and_the_fold_label_fk1127():
+    """fk#1127: marie's checklist (marie.fleet.json) and prompt (marie.md) both name
+    fold_candidates.py and the fleet:fold-into-pr label -- the mechanical helper is useless if
+    nothing in marie's own instructions tells her to run it. Delete either reference and this
+    goes red."""
+    fleet_json = json.loads((ROOT / "members" / "marie" / "marie.fleet.json").read_text())
+    checklist_text = " ".join(fleet_json["mandate"]["checklist"])
+    assert "fold_candidates.py" in checklist_text, "marie.fleet.json checklist never runs the helper"
+    assert "fleet:fold-into-pr" in checklist_text, "marie.fleet.json checklist never mentions the label"
+    md = (ROOT / "members" / "marie" / "marie.md").read_text()
+    assert "fold_candidates.py" in md, "marie.md never runs the helper"
+    assert "fleet:fold-into-pr" in md, "marie.md never mentions the label"
+    assert "PART C5" in md.upper(), "no PART C5 section in marie.md"
+
+
 if __name__ == "__main__":
     check("PR tile rollup reflects mergeability, not just CI (#179)", _pr_tile_rollup_reflects_mergeability_not_just_ci)
     check("member specs load and validate", _member_specs_validate)
@@ -16052,6 +16136,10 @@ if __name__ == "__main__":
     check("pacing_hold_check pages once on a sustained fleet-wide hold, suppresses the repeat, resolves on recovery (gh#812 AC1/AC2/AC3/AC4)", _pacing_hold_check_pages_on_sustained_hold_gh812)
     check("pacing_hold_check never pages a single held tick that clears on its own (gh#812 AC6)", _pacing_hold_check_single_tick_does_not_page_gh812)
     check("pacing_hold_check never pages on two sparse single-row hours (one early ticker each, not a real fleet-wide hold)", _pacing_hold_check_sparse_single_row_hours_never_page_gh812)
+
+    check("fold_candidates matches the four reasons in strongest-rule-first order, excludes draft/stale/DIRTY PRs (fk#1127)", _fold_candidates_matches_four_reasons_in_order_and_excludes_bad_prs_fk1127)
+    check("worktree_builder.sh parses --onto-pr and falls back to a new PR on a queue-rejected push (fk#1127)", _worktree_builder_parses_onto_pr_flag_and_has_the_queue_fallback_fk1127)
+    check("marie's charter wires fold_candidates.py and the fleet:fold-into-pr label (fk#1127)", _marie_charter_wires_fold_candidates_and_the_fold_label_fk1127)
     for n in ok:
         print(f"  ok    {n}")
     for n, why in skipped:

@@ -637,6 +637,21 @@ to re-litigate the ranking you just made.
 HOW. If you find yourself writing an implementation, you have crossed into minion's lane —
 the design belongs in the PR, not the PRD.
 
+## Part C5 — fold-in (fk#1127)
+
+Two PRs for a one-line follow-up is a waste. Run `python3 /fleet-kit/scripts/fold_candidates.py`
+(reads live issues/PRs for `FLEET_REPO`). For each `high`/`medium` candidate that is a small
+delta (`fleet:complexity-<=3>` or a plain review finding), `gh issue edit <item> --add-label
+fleet:fold-into-pr` (create it once, idempotent: `gh label create fleet:fold-into-pr --color
+5319e7 --description "small delta -- build onto the named open PR, not a new one" || true`) and
+post ONE comment `marie: fold into PR #<pr> -- <reason>`; skip an item that already carries the
+label. Never fold into a draft, a PR unchanged >24h (Reif's stale-PR rule — stale gets closed,
+not extended), or a `DIRTY` `mergeStateStatus` — `fold_candidates.py` already excludes these,
+so any candidate it returns is fold-eligible on that front. When two or more un-PR'd open items
+touch the same page/route/module, write one shared PRD (C4) instead and say in it "build as ONE
+PR" rather than labelling either for fold-in. Report: how many labelled + PR numbers, how many
+candidates seen but skipped and why.
+
 ## Part D — label-consistency sweep (safety net for #3167)
 
 Part C's `--add-label fleet:priority-<tier>,fleet:backlog` habit only guards issues YOU touch
@@ -678,7 +693,8 @@ waiting for one, how many existing `fleet:prd` issues you backfilled with a miss
 issues got a lightweight `Vision-link:`-only comment this pass (issue numbers, gh#4597) and how
 many still lack the line, and every `UNKNOWN` you left
 open — an accumulating UNKNOWN list is a human's 30-second fix and the single most useful thing
-this section surfaces. (D) how many issues were
+this section surfaces. (C5) how many items labelled `fleet:fold-into-pr` this pass (item + PR
+numbers), how many candidates fold_candidates.py returned but you skipped and why. (D) how many issues were
 missing `fleet:backlog` despite holding a priority label, and their
 numbers.
 

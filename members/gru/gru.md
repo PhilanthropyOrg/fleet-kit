@@ -305,6 +305,22 @@ spawns exactly one). Your job, in order:
    still can't crowd out the rest of the hour's budget the way an unbounded sort would. No
    complexity-1/2 candidates in the remainder degrades silently to `ranked`'s order unchanged.
 
+2d. **Fold-labeled items (fk#1127) never enter step 3's batch pack — dispatch them directly.**
+   A survivor carrying `fleet:fold-into-pr` is a small delta marie already matched to an open
+   PR; batching it into a minion's multi-item PR would open a SECOND PR for the same delta,
+   the exact waste #1127 exists to remove. For each such item, read the PR number from marie's
+   own comment (`gh issue view <n> --json comments --jq '.comments[] | select(.body | startswith("marie: fold into PR #")) | .body' | tail -1`
+   — take the newest matching comment, same supersedes-the-earlier-one convention as PRDs), then
+   dispatch it OUTSIDE the batch loop, still one claim per item first (step 4's claim, done here
+   instead):
+   ```
+   gh issue edit <n> --add-label fleet:claimed
+   FLEET_RUN_NOW=1 bash /fleet-kit/scripts/worktree_builder.sh --onto-pr <N>
+   ```
+   Remove fold-labeled items from the candidate set before step 3 sees it — they are handled,
+   not skipped. Report each one: item, target PR, and whether the push landed on N or fell back
+   to a new PR (worktree_builder.sh logs "protected branch hook declined" on a queued target).
+
 3. **Pack the hour with `fanout.py`. N is an OUTPUT, not a decision.**
 
    Your job is choosing the set of work that fills this hour's allowance, not picking how many
