@@ -93,7 +93,7 @@ log "claimed item #$ITEM_ID: $ITEM_TEXT"
 WT_PATH="${TMPDIR:-/tmp}/fleet-build-${ITEM_ID}-$$"
 WT_BRANCH="build/${ITEM_ID}-${WORKER_NAME}"
 ONTO_PR_BRANCH=""
-if [ -n "$ONTO_PR" ]; then
+if [ -n "${ONTO_PR:-}" ]; then
   ONTO_PR_BRANCH=$(gh pr view "$ONTO_PR" --json headRefName -q '.headRefName' 2>>"$LOG")
   if [ -z "$ONTO_PR_BRANCH" ]; then
     log "item #$ITEM_ID: --onto-pr $ONTO_PR given but could not read its headRefName -- falling back to a new branch"
@@ -120,7 +120,7 @@ create_build_worktree() {
       sleep $((attempt * 3)); continue
     fi
     worktree_prune_own_container "$REPO" 2>>"$LOG"
-    if [ -n "$ONTO_PR" ]; then
+    if [ -n "${ONTO_PR:-}" ]; then
       # Fold path: check out the PR's OWN branch, tracking origin -- never delete it (it's
       # not ours to recreate) and never seed it from origin/main (that would drop the PR's
       # existing commits).
@@ -197,7 +197,7 @@ Title: $ITEM_TEXT
 Context: $ITEM_CONTEXT
 
 You are in a fresh worktree at $WT_PATH on branch $WT_BRANCH. Commit from here.
-$([ -n "$ONTO_PR" ] && echo "This is a FOLD-IN onto PR #$ONTO_PR's own branch -- do NOT push and do NOT open a new PR yourself; worktree_builder.sh rebases and pushes once after you finish." || echo "Push from here.")
+$([ -n "${ONTO_PR:-}" ] && echo "This is a FOLD-IN onto PR #$ONTO_PR's own branch -- do NOT push and do NOT open a new PR yourself; worktree_builder.sh rebases and pushes once after you finish." || echo "Push from here.")
 
 ## Report (injected — end your final message with exactly these two lines)
 Outcome: <one line — what you did, naming the PR # if you opened one, or why you stopped>
@@ -257,7 +257,7 @@ fi
 # compliance rate well under 100%. Stamp it deterministically here rather than hoping.
 PR_NUM=""
 FOLD_FELL_BACK=0
-if [ -n "$ONTO_PR" ]; then
+if [ -n "${ONTO_PR:-}" ]; then
   # Fold path: rebase the builder's commits onto current origin/main, then push ONCE to the
   # PR's own branch -- never a new PR. If N is already enqueued in the merge queue, GitHub
   # rejects a plain push with "protected branch hook declined" (a queued PR's branch is
