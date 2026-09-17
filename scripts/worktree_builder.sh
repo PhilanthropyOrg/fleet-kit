@@ -12,6 +12,20 @@
 #
 # Env (fleet.env): FLEET_REPO, FLEET_LOG_DIR, FLEET_BUILDER_MODEL (default sonnet),
 # FLEET_BUILDER_MAX_TURNS (default 60), FLEET_BUILDER_TIMEOUT seconds (default 2400).
+#
+# --onto-pr N (fk#1127): fold the claimed item's delta onto PR N's own branch instead of
+# opening a new PR -- for an item marie labelled fleet:fold-into-pr (her comment names N).
+# Builds in the SAME worktree lock/collision path as the normal flow, just checked out on
+# N's headRefName. After the build: rebase onto origin/main, push ONCE. A PR already in the
+# merge queue rejects that push with "protected branch hook declined" -- caught and logged,
+# then falls back to the normal new-branch-and-PR path below so the work is never lost.
+ONTO_PR=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --onto-pr) ONTO_PR="${2:?--onto-pr needs a PR number}"; shift 2 ;;
+    *) shift ;;
+  esac
+done
 set -uo pipefail
 
 # set -a/+a: a plain . only sets local shell vars, invisible to claude -p (a separate
@@ -78,6 +92,17 @@ log "claimed item #$ITEM_ID: $ITEM_TEXT"
 # --- STEP 2: fresh worktree, with the collision + stale-branch lock ----------------------------
 WT_PATH="${TMPDIR:-/tmp}/fleet-build-${ITEM_ID}-$$"
 WT_BRANCH="build/${ITEM_ID}-${WORKER_NAME}"
+ONTO_PR_BRANCH=""
+if [ -n "$ONTO_PR" ]; then
+  ONTO_PR_BRANCH=$(gh pr view "$ONTO_PR" --json headRefName -q '.headRefName' 2>>"$LOG")
+  if [ -z "$ONTO_PR_BRANCH" ]; then
+    log "item #$ITEM_ID: --onto-pr $ONTO_PR given but could not read its headRefName -- falling back to a new branch"
+    ONTO_PR=""
+  else
+    git fetch origin "$ONTO_PR_BRANCH" >>"$LOG" 2>&1
+    WT_BRANCH="$ONTO_PR_BRANCH"
+  fi
+fi
 . "$KIT_DIR/scripts/worktree_lock.sh"
 # gh#684 (Part C4): same fix PR #697 shipped for run_member.sh -- a blanket `git worktree
 # prune` deletes a SIBLING container's still-live worktree entry during a rolling cutover
@@ -95,13 +120,24 @@ create_build_worktree() {
       sleep $((attempt * 3)); continue
     fi
     worktree_prune_own_container "$REPO" 2>>"$LOG"
-    # Delete-and-recreate, never reuse: a stale branch from a prior dead attempt would
-    # otherwise silently build on top of possibly-broken prior commits.
-    if git rev-parse --verify --quiet "refs/heads/$WT_BRANCH" >/dev/null 2>&1; then
-      git branch -D "$WT_BRANCH" >/dev/null 2>&1
+    if [ -n "$ONTO_PR" ]; then
+      # Fold path: check out the PR's OWN branch, tracking origin -- never delete it (it's
+      # not ours to recreate) and never seed it from origin/main (that would drop the PR's
+      # existing commits).
+      if git rev-parse --verify --quiet "refs/heads/$WT_BRANCH" >/dev/null 2>&1; then
+        git branch -D "$WT_BRANCH" >/dev/null 2>&1
+      fi
+      git worktree add "$WT_PATH" -b "$WT_BRANCH" "origin/$WT_BRANCH"
+      rc=$?
+    else
+      # Delete-and-recreate, never reuse: a stale branch from a prior dead attempt would
+      # otherwise silently build on top of possibly-broken prior commits.
+      if git rev-parse --verify --quiet "refs/heads/$WT_BRANCH" >/dev/null 2>&1; then
+        git branch -D "$WT_BRANCH" >/dev/null 2>&1
+      fi
+      git worktree add "$WT_PATH" -b "$WT_BRANCH" origin/main
+      rc=$?
     fi
-    git worktree add "$WT_PATH" -b "$WT_BRANCH" origin/main
-    rc=$?
     # Stamp BEFORE releasing the lock: a concurrent prune (this container or another) must
     # never observe a registered-but-unstamped entry.
     [ "$rc" -eq 0 ] && worktree_stamp_container_id "$REPO" "$WT_PATH" 2>>"$LOG"
@@ -160,7 +196,8 @@ ID: $ITEM_ID
 Title: $ITEM_TEXT
 Context: $ITEM_CONTEXT
 
-You are in a fresh worktree at $WT_PATH on branch $WT_BRANCH. Commit + push from here.
+You are in a fresh worktree at $WT_PATH on branch $WT_BRANCH. Commit from here.
+$([ -n "$ONTO_PR" ] && echo "This is a FOLD-IN onto PR #$ONTO_PR's own branch -- do NOT push and do NOT open a new PR yourself; worktree_builder.sh rebases and pushes once after you finish." || echo "Push from here.")
 
 ## Report (injected — end your final message with exactly these two lines)
 Outcome: <one line — what you did, naming the PR # if you opened one, or why you stopped>
@@ -218,7 +255,38 @@ fi
 # --- STEP 4: stamp the backlog id onto the PR (idempotent) --------------------------------------
 # Same lesson as the source fleet: a prose "mention the item ID" instruction has a real-world
 # compliance rate well under 100%. Stamp it deterministically here rather than hoping.
-PR_NUM=$(grep -oE 'github\.com/[^ ]+/pull/[0-9]+' <<<"$OUT" | tail -1 | grep -oE '[0-9]+$')
+PR_NUM=""
+FOLD_FELL_BACK=0
+if [ -n "$ONTO_PR" ]; then
+  # Fold path: rebase the builder's commits onto current origin/main, then push ONCE to the
+  # PR's own branch -- never a new PR. If N is already enqueued in the merge queue, GitHub
+  # rejects a plain push with "protected branch hook declined" (a queued PR's branch is
+  # locked); catch exactly that and fall back to a NEW branch + normal `gh pr create` below
+  # (the builder's commits already exist locally in $WT_PATH -- push those, not lose them).
+  (cd "$WT_PATH" && git fetch origin main >>"$LOG" 2>&1 && git rebase origin/main >>"$LOG" 2>&1)
+  PUSH_ERR=$(cd "$WT_PATH" && git push origin "HEAD:$WT_BRANCH" 2>&1 1>>"$LOG"); PUSH_RC=$?
+  if [ "$PUSH_RC" -eq 0 ]; then
+    PR_NUM="$ONTO_PR"
+    log "item #$ITEM_ID: folded onto PR #$ONTO_PR ($WT_BRANCH), pushed"
+  elif [[ "$PUSH_ERR" == *"protected branch hook declined"* ]]; then
+    log "item #$ITEM_ID: PR #$ONTO_PR is queued to merge (protected branch hook declined) -- falling back to a normal new PR: $PUSH_ERR"
+    FALLBACK_BRANCH="build/${ITEM_ID}-${WORKER_NAME}-foldfallback"
+    if (cd "$WT_PATH" && git push origin "HEAD:refs/heads/$FALLBACK_BRANCH" >>"$LOG" 2>&1); then
+      FOLD_FELL_BACK=1
+      PR_NUM=$(cd "$WT_PATH" && gh pr create --head "$FALLBACK_BRANCH" \
+        --title "item #$ITEM_ID (fold onto PR #$ONTO_PR was queued -- opened new)" \
+        --body "Was meant to fold into #$ONTO_PR (fleet:fold-into-pr), but that PR was already in the merge queue and rejected the push. Opened fresh so item #$ITEM_ID isn't lost." \
+        2>>"$LOG" | grep -oE '[0-9]+$')
+      [ -n "$PR_NUM" ] && log "item #$ITEM_ID: fold fallback opened new PR #$PR_NUM on $FALLBACK_BRANCH"
+    else
+      log "item #$ITEM_ID: fold fallback push of $FALLBACK_BRANCH FAILED -- work stays local to $WT_PATH, claim will be released"
+    fi
+  else
+    log "item #$ITEM_ID: fold push onto PR #$ONTO_PR FAILED (not a queue rejection) -- $PUSH_ERR"
+  fi
+elif [ -z "$PR_NUM" ]; then
+  PR_NUM=$(grep -oE 'github\.com/[^ ]+/pull/[0-9]+' <<<"$OUT" | tail -1 | grep -oE '[0-9]+$')
+fi
 
 # --- report: one line in runs.jsonl per pass ------------------------------------------------
 # This is the leg the fleet-view server tails. Written here (by the wrapper, around the agent)
