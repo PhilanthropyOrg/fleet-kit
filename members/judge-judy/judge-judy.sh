@@ -97,19 +97,6 @@ REPO_SLUG=$(gh repo view --json nameWithOwner -q '.nameWithOwner' 2>/dev/null ||
 [ -z "$REPO_SLUG" ] && { log "FATAL: cannot resolve repo slug (gh auth?)"; exit 1; }
 
 unqueue_pr() { # <pr>
-  # 2026-09-17 (Reif, watching the philanthropy merge queue): fleet-code-review is ADVISORY
-  # there (its CLAUDE.md: "a review miss must not strand merges"), yet this function pulled a
-  # PR out of the queue and disarmed auto-merge on every BLOCK -- and the repo's own arm
-  # sweep re-armed it on the next CI completion. Measured from the org audit log: one
-  # merge_queue.pull_request_dequeued by this reviewer every 5-10 minutes for the whole day
-  # (13:26Z-17:00Z), so no entry ever survived at the front and nothing merged for hours.
-  # A BLOCK now posts the status, the findings and the fix item, and leaves the queue
-  # alone. Set FLEET_REVIEW_BLOCK_HOLDS=1 on a fleet whose target repo has made this
-  # status a required check and WANTS a block to hold the merge.
-  if [ "${FLEET_REVIEW_BLOCK_HOLDS:-0}" != "1" ]; then
-    log "PR #$1: BLOCK is advisory here (FLEET_REVIEW_BLOCK_HOLDS!=1) -- left in the queue"
-    return 0
-  fi
   # fleet-kit#523: main is merge-queue-controlled, and fleet-code-review is not a required
   # check (it cannot be -- the queue only waits for checks on its own temporary branch, and
   # this status lands on the PR head). So a BLOCK has to pull the PR out of the queue and

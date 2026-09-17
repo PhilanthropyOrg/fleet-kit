@@ -4394,6 +4394,8 @@ _ENTRYPOINT_SCHEDULED_SCRIPTS = (
     ("librarian-scrub (hourly shell scrub)", "run_member.sh librarian-scrub >>", "fleet-kit#784"),
     ("librarian (daily reader, 05:15 UTC)", "15 5 * * * root export GH_TOKEN=\\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh librarian >>", "fleet-kit#784"),
     ("pacing_hold_check.py", "python3 /fleet-kit/scripts/pacing_hold_check.py", "gh#812"),
+    ("rsi_stall_check.py", "python3 /fleet-kit/scripts/rsi_stall_check.py", "fk#1122"),
+    ("charter_bloat_check.py (weekly)", "python3 /fleet-kit/scripts/charter_bloat_check.py", "fk#1122"),
 )
 
 
@@ -5851,6 +5853,53 @@ def _console_minion_runs_join_pr_fate_from_gh_state():
     html = (ROOT / "scripts" / "fleet_view.html").read_text()
     assert 'data-page="minion"' in html and "/api/minion_runs" in html, "page not wired"
     assert "no minion runs yet" in html, "empty state must say so, not render a blank box"
+
+
+def _rsi_loop_every_step_has_a_live_owner():
+    """fk#1122: after fk#1116 deactivated jefe, dumbledore and vp, the grade-reading step and the
+    world-class acceptance step had no live owner; the grader ran for 12h on dino with the score
+    pinned and nothing filed. scripts/rsi_loop.py names an owner per step; this fails the moment
+    a named member is enabled:false or a named script has no cron line. Set vp enabled:false
+    and this goes red."""
+    import member_spec, rsi_loop
+    members = {m["name"]: bool(m["enabled"]) for m in member_spec.load_all()}
+    entry = (ROOT / "entrypoint.sh").read_text()
+    gaps = rsi_loop.unowned(members, entry)
+    assert not gaps, "RSI loop steps with no live owner:\n" + "\n".join(gaps)
+    assert rsi_loop.unowned({**members, "vp": False}, entry), "the check cannot see a disabled member"
+
+
+def _rsi_stall_check_files_once_on_a_flat_score_and_never_on_a_rising_one():
+    """fk#1122: seeded ledgers, stubbed gh. Flat/falling files exactly one issue; a second call
+    with that title already open files nothing; a rise inside the window files nothing; two
+    rows is no_data."""
+    import json, tempfile
+    import rsi_stall_check as rsc
+    calls = []
+    open_titles = []
+    def run(cmd):
+        calls.append(cmd)
+        class R: returncode = 0; stderr = ""
+        r = R()
+        if cmd[:3] == ["gh", "issue", "list"]:
+            r.stdout = "\n".join(open_titles)
+        else:
+            r.stdout = "https://github.com/x/fleet-kit/issues/9\n"
+        return r
+    with tempfile.TemporaryDirectory() as d:
+        led = Path(d) / "self_improve_score.jsonl"
+        def seed(scores):
+            led.write_text("".join(json.dumps({"date": "2026-09-17", "score": s, "reasoning": f"r{s}"}) + "\n" for s in scores))
+        seed([52, 52]); assert rsc.check(Path(d), run=run, slug="x/fleet-kit") == "no_data"
+        seed([50, 52, 55]); assert rsc.check(Path(d), run=run, slug="x/fleet-kit") == "rising"
+        seed([52, 50, 52]); assert rsc.check(Path(d), run=run, slug="x/fleet-kit") == "rising", "a rise inside the window is not a stall"
+        seed([55, 52, 52]); assert rsc.check(Path(d), run=run, slug="x/fleet-kit") == "filed"
+        create = [c for c in calls if c[:3] == ["gh", "issue", "create"]]
+        assert len(create) == 1 and create[0][create[0].index("--title") + 1].startswith(rsc.TITLE_PREFIX), create
+        assert "falling" in create[0][create[0].index("--title") + 1]
+        open_titles.append(create[0][create[0].index("--title") + 1])
+        assert rsc.check(Path(d), run=run, slug="x/fleet-kit") == "already_open"
+        assert len([c for c in calls if c[:3] == ["gh", "issue", "create"]]) == 1, "filed twice"
 
 
 def _console_roster_shows_every_member_in_plain_english_by_stage():
@@ -8578,7 +8627,8 @@ def _every_scheduled_member_is_actually_on_cron():
     import json, glob
     root = Path(__file__).parent.parent
     entry = (root / "entrypoint.sh").read_text()
-    spawned_by_a_member = {"minion", "nerd"}
+    # vp joins them (fk#1122): spawned by vp_due.sh with --item, never by its own schedule.
+    spawned_by_a_member = {"minion", "nerd", "vp"}
     missing = []
     for f in sorted(glob.glob(str(root / "members" / "*" / "*.fleet.json"))):
         spec = json.loads(Path(f).read_text())
@@ -13954,7 +14004,11 @@ def _run_member_pregate_short_circuits_in_shell_fk1093():
     assert specs["the-fixer"]["llm"].get("pregate") == "members/the-fixer/check.sh", specs["the-fixer"]["llm"]
     charter = (ROOT / "members/the-fixer/the-fixer.md").read_text()
     assert "do not run check.sh again" in charter and "FLEET_PREGATE_OUTPUT" in charter
-    for name in ("jefe", "dumbledore", "vp"):
+    # fk#1122 (2026-09-17): vp is back on, on sonnet, because with it off every
+    # quality:world-class item stalled at its stale "Not yet" verdict with no path to review
+    # (vp_due.log 12:03Z: "vp enabled=false in spec -- not spawning for: 5349"). Its spawns are
+    # gated by vp_due.sh to genuinely-due items, so its cost tracks the backlog, not the clock.
+    for name in ("jefe", "dumbledore"):
         assert specs[name].get("enabled") is False, f"{name} is deactivated (governance overhead, 2026-09-16), not deleted"
     vp_due = (HERE / "vp_due.sh").read_text()
     assert 'VP_ENABLED' in vp_due and vp_due.find("VP_ENABLED") < vp_due.find("run_member.sh\" vp"), "vp_due must check enabled before spawning vp"
@@ -15727,6 +15781,8 @@ if __name__ == "__main__":
     check("console tiles are registered metrics with a real id and daily history (fk#1058)", _console_tiles_are_registered_metrics_with_history_fk1058)
     check("console metrics survive a box without tzdata (fk#1059 first deploy)", _console_metrics_survive_a_box_without_tzdata)
     check("console: minion runs join PR fate from gh state (fk#1121)", _console_minion_runs_join_pr_fate_from_gh_state)
+    check("RSI loop: every step has a live owner (fk#1122)", _rsi_loop_every_step_has_a_live_owner)
+    check("rsi_stall_check files once on a flat score, never on a rising one (fk#1122)", _rsi_stall_check_files_once_on_a_flat_score_and_never_on_a_rising_one)
     check("console roster shows every member in plain English by value stage (fk#1058)", _console_roster_shows_every_member_in_plain_english_by_stage)
     check("console shows each member's emoji, role and the steps a pass takes", _console_shows_role_and_steps_per_member)
     check("sidebar shows spawned/scheduled/disabled as distinct badges, not strikethrough (gh#565)", _sidebar_shows_spawned_scheduled_disabled_not_strikethrough_gh565)

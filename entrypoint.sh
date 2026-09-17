@@ -368,6 +368,17 @@ case "${1:-cron-foreground}" in
       # (00/03/06...) within an hour of it opening; the script's own SLOT idempotency guard
       # makes every other tick inside the same window a fast, cheap no-op.
       echo "7 * * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/self_improve_score.sh >> $LOG_DIR/self_improve_score_cron.log 2>&1"
+      # rsi_stall_check.py (fk#1122): reads the grade self_improve_score.sh just wrote and files
+      # ONE fleet-kit issue when the score has not risen for 3 ticks. dumbledore used to be the
+      # member that read the grade and acted; it is enabled:false since fk#1116, and without this
+      # the grader ran for 12h on dino with the score pinned at 52-55 and nothing filed. :12 is
+      # unclaimed on the minute map and five minutes after the grader's own slot.
+      echo "12 * * * * root [ -f \"\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}\" ] && { set -a; . \"\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}\"; set +a; }; export GH_TOKEN=\$(cat $TOKEN_FILE) FLEET_LOG_DIR=$LOG_DIR; python3 /fleet-kit/scripts/rsi_stall_check.py >> $LOG_DIR/rsi_stall_check.log 2>&1"
+      # charter_bloat_check.py (fk#753, fk#1122): the consolidation duty jefe held by prose and
+      # dumbledore did by initiative -- both off since fk#1116. Weekly, Sunday 05:40 UTC; prints
+      # the reconstruction so the next librarian pass and any human can see which charters are
+      # accumulating patches with no consolidation pass.
+      echo "40 5 * * 0 root [ -f \"\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}\" ] && { set -a; . \"\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}\"; set +a; }; export GH_TOKEN=\$(cat $TOKEN_FILE); cd /fleet-kit && python3 /fleet-kit/scripts/charter_bloat_check.py --root /fleet-kit >> $LOG_DIR/charter_bloat_check.log 2>&1"
       # number_read.py --fetch (fleet-kit#513): pulls the venture's number from FLEET_NUMBER_URL
       # into $LOG_DIR/number.json so run_member.sh can put it above every charter. Every 6h at
       # :29 (unclaimed on the minute map above); the endpoint caches 6h itself. Sources
