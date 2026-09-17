@@ -4910,8 +4910,9 @@ def _email_reply_answers_asks_and_files_backlog_without_a_model():
     def run(cmd):
         calls.append(cmd)
         if cmd[:3] == ["gh", "issue", "list"]:
-            # one open twin exists only for the prod-alert title, so the repeat becomes a comment
-            return R('[{"number": 7, "title": "prod alert [app_error]: 20 timeouts", "url": "https://github.com/o/r/issues/7"}]'
+            # one open twin exists only for the prod-alert title (fk#1129: keyed by `check`,
+            # "prod alert [app_error]" with no trailing text), so the repeat becomes a comment
+            return R('[{"number": 7, "title": "prod alert [app_error]", "url": "https://github.com/o/r/issues/7"}]'
                      if "prod alert" in cmd[cmd.index("--search") + 1] else "[]\n")
         return R("https://github.com/o/r/issues/99\n" if cmd[0] == "gh" else "ask 17 answered\n")
     def reply(to, subject, text, in_reply_to=None): replies.append((to, subject, text, in_reply_to))
@@ -4935,12 +4936,17 @@ def _email_reply_answers_asks_and_files_backlog_without_a_model():
         threads = [json.loads(l) for l in ib.THREADS.read_text().splitlines()]
         assert threads[-1]["issue"] == 99 and threads[-1]["message_id"] == "<m2>" and threads[-1]["to"] == "reif@philanthropy.org", threads
         os.environ["FLEET_INBOX_FROM"] = "reif@philanthropy.org"; os.environ["FLEET_ALERT_EMAIL"] = "reif@thegoodproject.net"
+        # fk#1129 slice 1: an alert mail is classified + triaged by `check`, not by subject
+        # verbatim -- it never reaches backlog_title()/file_backlog() any more, and it is
+        # untrusted (hello@philanthropy.org is not in FLEET_INBOX_FROM) so the old
+        # trusted-gate would have dropped it silently before this existed.
         row = ib.store({"id": "e2b", "from": "990 Scout <hello@philanthropy.org>", "subject": "990 Scout prod alert [app_error]: 20 timeouts",
-                        "text": "20 Postgres statement timeouts", "message_id": "<m2b>"}, {})
+                        "text": "20 Postgres statement timeouts", "message_id": "<m2b>"}, {}, trusted=False)
+        assert row["kind"] == "alert" and row["check"] == "app_error" and row["trusted"] is False, row
+        n_replies = len(replies)
         res = ib.apply(row, run=run, reply=reply)
         assert calls[-1][:3] == ["gh", "issue", "comment"] and calls[-1][5] == "7" and "Fired again" in calls[-1][-1], calls[-1]
-        assert res["done"] and "issues/7" in replies[-1][2], (res, replies)
-        assert replies[-1][0] == "reif@thegoodproject.net" and replies[-1][3] == "<m2b>", "a pager mail's receipt goes to Reif on the same thread, not back to the box"
+        assert res["done"] and len(replies) == n_replies, "an alert triages silently -- no Resend reply"
         # resolve: a closed issue gets one 'Resolved' reply on its thread, with the closing PR; never twice; open ones wait
         def run3(cmd):
             calls.append(cmd)
@@ -4955,7 +4961,9 @@ def _email_reply_answers_asks_and_files_backlog_without_a_model():
         assert replies[-1][0] == "reif@philanthropy.org" and replies[-1][3] == "<m2>" and replies[-1][2].startswith("Resolved: claim button dead on phone"), replies[-1]
         assert "Fixed by PR #120: Claim button taps again on iOS" in replies[-1][2], replies[-1][2]
         assert ib.resolve(run=run3, reply=reply) == [], "a resolved thread is not replied to twice"
-        assert [t["issue"] for t in ib.open_threads()] == [7], "the still-open issue keeps waiting"
+        # fk#1129: an alert never becomes a THREADS row (no Resend reply to resolve later),
+        # so issue #7 is not in open_threads() -- only backlog: mails thread that way.
+        assert ib.open_threads() == [], "an alert issue is not threaded for a resolve-reply"
         ep = (ROOT / "entrypoint.sh").read_text()
         assert "python3 /fleet-kit/scripts/inbox.py resolve >> $LOG_DIR/inbox.log" in ep, "no cron line for inbox.py resolve"
         os.environ.pop("FLEET_ALERT_EMAIL", None)
@@ -4971,6 +4979,72 @@ def _email_reply_answers_asks_and_files_backlog_without_a_model():
     assert 'p["reply_to"] = [os.environ["REPLY_TO"]]' in fa and 'REPLY_TO="${FLEET_REPLY_TO:-}"' in fa, "alert email has no Reply-To"
     ask = (ROOT / "scripts" / "ask.py").read_text()
     assert 'f"fleet ask #{ask_id} from {member}"' in ask and "Reply to this email with one line" in ask, "ask mail does not say how to reply"
+
+
+def _intake_classifies_and_dedupes_alerts_by_check():
+    """fk#1129 slice 1: the central input dump. FLEET_INTAKE_FROM widens who is ACCEPTED
+    (hello@philanthropy.org, DigitalOcean, GitHub) without widening who can STEER -- only
+    FLEET_INBOX_FROM answers an ask or writes free text into steering. classify() is the pure
+    front door: seven kinds from sender+subject+body alone, no model. A second alert firing
+    for a `check` that already has an open board item appends ONE comment, never a twin issue
+    (the exact hourly-repage-as-duplicate-issue bug this epic exists to stop)."""
+    import importlib.util, os
+    spec = importlib.util.spec_from_file_location("inbox", ROOT / "scripts" / "inbox.py")
+    ib = importlib.util.module_from_spec(spec); spec.loader.exec_module(ib)
+    os.environ["FLEET_INBOX_FROM"] = "reif@philanthropy.org"
+    os.environ.pop("FLEET_INTAKE_FROM", None)  # exercise the documented default
+
+    seeded = [
+        ("ask_answer", {"from": "reif@philanthropy.org", "subject": "Re: fleet ask #17 from nerd", "text": "yes 17"}),
+        ("steering", {"from": "reif@philanthropy.org", "subject": "Re: brief", "text": "stop the person page"}),
+        ("question", {"from": "990 Scout <hello@philanthropy.org>", "subject": "New question from a donor about Red Cross", "text": "x"}),
+        ("alert", {"from": "990 Scout <hello@philanthropy.org>", "subject": "990 Scout prod alert [app_error]: 20 timeouts", "text": "20 timeouts"}),
+        ("forward", {"from": "reif@philanthropy.org", "subject": "Fwd: claim page blank on iPad", "text": "x"}),
+        ("github", {"from": "notifications@github.com", "subject": "[o/r] CI failed on main", "text": "x"}),
+        ("monitoring", {"from": "noreply@digitalocean.com", "subject": "Droplet CPU alert", "text": "x"}),
+    ]
+    for want, mail in seeded:
+        got = ib.classify(mail)
+        assert got == want, f"{mail['subject']!r} classified {got!r}, want {want!r}"
+    assert ib.alert_check(seeded[3][1]["subject"]) == "app_error"
+
+    # a hello@philanthropy.org mail is accepted (FLEET_INTAKE_FROM default) but never parsed
+    # as an ask answer, even when its body is shaped exactly like one
+    assert ib.intake_allowed("990 Scout <hello@philanthropy.org>")
+    assert ib.classify({"from": "990 Scout <hello@philanthropy.org>", "subject": "Re: brief", "text": "yes 12"}) == "unknown"
+    # an address in neither FLEET_INBOX_FROM nor FLEET_INTAKE_FROM is still rejected (untrusted)
+    assert not ib.intake_allowed("stranger@example.org")
+    assert not ib.allowed_sender("stranger@example.org", os.environ["FLEET_INBOX_FROM"])
+
+    calls = []
+    class R:
+        def __init__(self, out): self.returncode, self.stdout, self.stderr = 0, out, ""
+    open_issue = {"present": False}
+    def run(cmd):
+        calls.append(cmd)
+        if cmd[:3] == ["gh", "issue", "list"]:
+            return R('[{"number": 42, "title": "prod alert [app_error]", "url": "https://github.com/o/r/issues/42"}]'
+                     if open_issue["present"] else "[]\n")
+        if cmd[:3] == ["gh", "issue", "create"]:
+            open_issue["present"] = True
+            return R("https://github.com/o/r/issues/42\n")
+        return R("")
+    with tempfile.TemporaryDirectory() as tmp:
+        ib.LOG_DIR = Path(tmp); ib.INBOX = Path(tmp) / "inbox.jsonl"; ib.DONE = Path(tmp) / "inbox.done"
+        os.environ["FLEET_REPO_URL"] = "https://github.com/o/r.git"
+        row1 = ib.store({"id": "a1", "from": "990 Scout <hello@philanthropy.org>", "subject": "990 Scout prod alert [app_error]: 20 timeouts",
+                         "text": "20 timeouts", "message_id": "<a1>"}, {}, trusted=False)
+        res1 = ib.apply(row1, run=run, reply=lambda *a: (_ for _ in ()).throw(AssertionError("alert must not reply")))
+        assert res1["done"] and ib.pending() == [], res1
+        row2 = ib.store({"id": "a2", "from": "990 Scout <hello@philanthropy.org>", "subject": "990 Scout prod alert [app_error]: 41 timeouts",
+                         "text": "41 timeouts", "message_id": "<a2>"}, {}, trusted=False)
+        res2 = ib.apply(row2, run=run, reply=lambda *a: (_ for _ in ()).throw(AssertionError("alert must not reply")))
+        assert res2["done"], res2
+    creates = [c for c in calls if c[:3] == ["gh", "issue", "create"]]
+    comments = [c for c in calls if c[:3] == ["gh", "issue", "comment"]]
+    assert len(creates) == 1 and creates[0][creates[0].index("--title") + 1] == "prod alert [app_error]", creates
+    assert "fleet:priority-high" in creates[0][creates[0].index("--label") + 1] and "lane:devops" in creates[0][creates[0].index("--label") + 1], creates[0]
+    assert len(comments) == 1 and comments[0][5] == "42" and "Fired again" in comments[0][-1], comments
 
 
 def _run_record_carries_plain_words_when_opted_in():
@@ -15879,6 +15953,7 @@ if __name__ == "__main__":
     check("messenger brief restates the strategy and points every project step at a page (fk#558)", _messenger_brief_restates_the_strategy_and_points_at_pages)
     check("replying to the brief steers the fleet: svix, allowlist, parser, ledger, route, Reply-To (fk#669)", _reply_to_the_brief_steers_the_fleet)
     check("a reply answers asks and a backlog: mail files an issue, no model in the way (fk#1056)", _email_reply_answers_asks_and_files_backlog_without_a_model)
+    check("intake classifies seven kinds and dedupes a repeat alert by check, one issue not two (fk#1129)", _intake_classifies_and_dedupes_alerts_by_check)
     check("signals reads the datafeed daily and every finding names a KR (fk#1042)", _signals_member_reads_the_datafeed_daily_and_names_a_kr)
     check("every pass reads the handoff; a Broken: instrument gets one owner issue (Reif 2026-09-16)", _every_pass_reads_the_handoff_and_a_broken_instrument_gets_an_owner)
     check("tiles backfill their history from the source dates, once, observed rows win (fk#1084)", _tiles_backfill_their_history_from_the_source_dates)
