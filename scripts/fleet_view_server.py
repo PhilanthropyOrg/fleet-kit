@@ -872,6 +872,41 @@ def read_pass_block(member: str, n: int) -> list[str]:
 # show this panel empty even when real self-evolution happened.
 
 
+def minion_runs_payload(rows: list[dict], gh: dict, limit: int = 50) -> list[dict]:
+    """fk#1121 (Reif 2026-09-17: "add to the fleet dashboard - minion runs"). One row per
+    builder run, newest first, with the PR's CURRENT fate joined from the polled GitHub state
+    rather than from the run row: a run records the PR it opened, never what became of it.
+    pr_state is one of merged / open (with the open PR's _rollup: green, failing, blocked,
+    pending, none) / closed (a PR number the run wrote that is in neither feed -- closed
+    unmerged, or merged longer ago than the 30-PR merged feed reaches) / none (no PR)."""
+    merged_by_no = {int(pr["number"]): pr for pr in (gh.get("merged") or []) if pr.get("number")}
+    open_by_no = {int(pr["number"]): pr for pr in (gh.get("prs") or []) if pr.get("number")}
+    out = []
+    for r in rows[:limit]:
+        pr_no = None
+        try:
+            pr_no = int(str(r.get("pr") or "").lstrip("#")) or None
+        except ValueError:
+            pr_no = None
+        if pr_no is None:
+            pr_state, pr_detail = "none", ""
+        elif pr_no in merged_by_no:
+            pr_state, pr_detail = "merged", merged_by_no[pr_no].get("mergedAt") or ""
+        elif pr_no in open_by_no:
+            pr_state, pr_detail = "open", open_by_no[pr_no].get("_rollup") or ""
+        else:
+            pr_state, pr_detail = "closed", ""
+        out.append({
+            "run_id": r.get("run_id"), "recorded_at": r.get("recorded_at"),
+            "item_id": r.get("item_id"), "pr": pr_no, "pr_state": pr_state, "pr_detail": pr_detail,
+            "status": r.get("status"), "exit_code": r.get("exit_code"),
+            "outcome": r.get("outcome"), "cost_usd": r.get("cost_usd"),
+            "duration_ms": r.get("duration_ms"), "lane": r.get("lane"),
+        })
+    return out
+
+
+
 def poll_gh_state() -> dict:
     prs_raw = _gh("pr", "list", "--state", "open", "--json",
                    "number,title,isDraft,headRefName,url,statusCheckRollup,mergeStateStatus,updatedAt")
@@ -1671,6 +1706,14 @@ class Handler(BaseHTTPRequestHandler):
             # tell those two apart; the trend chart still only plots the windowed rows.
             latest = all_history[-1] if all_history else None
             self._json({"latest": latest, "history": history})
+            return
+        if path == "/api/minion_runs":
+            qs = parse_qs(urlparse(self.path).query)
+            limit = int(qs.get("limit", ["50"])[0])
+            db = fleet_db.connect()
+            fleet_db.sync(db)
+            rows = fleet_db.query_runs(db, member="minion", limit=limit)
+            self._json({"runs": minion_runs_payload(rows, STATE.snapshot()["gh"], limit)})
             return
         if path == "/api/query":
             qs = parse_qs(urlparse(self.path).query)
