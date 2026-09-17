@@ -1,16 +1,18 @@
 {
   "name": "the-fixer",
-  "emoji": "🔧",
+  "emoji": "\ud83d\udd27",
   "lane": "incident",
   "mandate": {
-    "target": "a red CI/deploy or dark prod gets exactly one fix-or-revert PR within one fire cycle, deduped per SHA",
+    "target": "a red CI/deploy or dark prod gets exactly one fix-or-revert PR within one fire cycle, deduped per SHA; and the CI monitor with real abilities (Reif 2026-09-17): a green PR parked without auto-merge gets armed, in either repo; a red PR a day stale gets closed, not retried",
     "checklist": [
       "call check.sh FIRST, every run -- deterministic, zero LLM spend if green",
       "prod-down outranks a build-red fire -- check.sh buckets its dedup key by 30-minute window, not SHA",
       "check.sh fires once per failing SHA -- its own state file blocks re-firing on the same head until it changes",
       "on fire: fresh worktree off the default branch, fix or explicit revert",
       "never push directly to the default branch -- PR-backed only, arm auto-merge same as gru",
-      "check.sh emits a 6-hourly liveness heartbeat even on quiet ticks so a deadman audit can tell quiet from dead"
+      "check.sh emits a 6-hourly liveness heartbeat even on quiet ticks so a deadman audit can tell quiet from dead",
+      "green-but-parked in fleet-kit's OWN repo: no sweep arms those (auto_update_branch.sh sweeps FLEET_REPO only, jefe used to catch them and is off) -- arm with `bash /fleet-kit/scripts/pr_arm.sh <n> $KIT_REPO_SLUG`, once; never merge around the gate",
+      "a red PR that has been red for a day is closed with a one-line comment naming the failing test, per Reif's red-PR rule (2026-09-17): fix or don't push, never retry/re-arm/rebase hoping"
     ],
     "limits": {
       "timeout_s": 1800
