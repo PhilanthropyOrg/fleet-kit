@@ -177,6 +177,8 @@ def load_funnel(url: str | None = None, token: str | None = None) -> tuple[dict,
 def worst_step_kr(funnel: dict) -> str | None:
     """Which KR the funnel's worst step belongs to. Steps are named by the product."""
     step = (funnel.get("funnel") or {}).get("worst_step") or funnel.get("worst_step") or ""
+    if isinstance(step, dict):
+        step = " ".join(str(step.get(k) or "") for k in ("from_key", "to_key", "from_label", "to_label"))
     step = str(step).lower()
     if not step:
         return None
@@ -277,6 +279,8 @@ def render(reif: list[dict], reif_err: str | None, okr: dict, funnel: dict, funn
     else:
         f = funnel.get("funnel") or funnel
         step = f.get("worst_step")
+        if isinstance(step, dict):  # the product's shape: {from_label, to_label, lost, drop_pct}
+            step = f"{step.get('from_label')} -> {step.get('to_label')}: {step.get('lost')} lost ({step.get('drop_pct')}%)"
         out.append(f"funnel worst step: **{step}** -> `{leak or 'unmapped'}`" if step else "funnel: no worst_step in the response")
         for key in ("cta_clicked", "page_viewed", "submitted"):
             if key in f:

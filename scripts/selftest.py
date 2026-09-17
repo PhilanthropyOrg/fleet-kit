@@ -5106,6 +5106,9 @@ def _north_weights_every_kr_by_what_reif_shipped_and_where_the_funnel_leaks():
     assert all(abs(eq[k] - 0.33) < 0.01 for k in n.KR_IDS), "nothing readable -> the equal split"
     assert n.worst_step_kr({"funnel": {"worst_step": "cta_clicked->page_viewed"}}) == "okr.conversion"
     assert n.worst_step_kr({}) is None
+    live = {"funnel": {"worst_step": {"from_label": "Clicked claim", "to_label": "Reached claim page", "lost": 203, "drop_pct": 65.5}}}
+    assert n.worst_step_kr(live) == "okr.conversion", "the product's dict-shaped worst_step must map"
+    assert "Clicked claim -> Reached claim page: 203 lost (65.5%)" in n.render([], None, {}, live, None, {}, 0, 1_800_000_000.0), "and read as words, not a dict"
     # burn: a run with a pr inherits the PR's KR; a PR-less run is named by member
     now = 1_800_000_000.0
     runs = [{"member": "minion", "pr": 42, "ts": now - 10, "tokens": {"cost_usd": 3.0}},
