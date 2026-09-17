@@ -25,6 +25,17 @@ push to one; this fires it immediately instead. Safe to fire repeatedly on rapid
 judge-judy's own checklist only reviews a head with no fresh fleet-code-review status, so a
 redundant trigger is a fast no-op pass, never a double review.
 
+Also serves two per-caller-token routes (fk#1124/fk#1129), auth'd by webhook_auth.caller_for
+against FLEET_WEBHOOK_TOKENS -- neither the GitHub HMAC secret above nor the inbox route's
+Svix secret, its own scheme, so a canary or a CI job never needs a GitHub-shaped credential:
+  POST /webhook/intake  -- one central input dump (fk#1129 slice 2): any non-email input
+                           (alert/monitoring/github/forward/steering) lands in the SAME
+                           inbox.jsonl store as /webhook/inbox, source=<caller>, then the
+                           same inbox.py apply() triage runs.
+  POST /webhook/run     -- fire one fleet member now, off-cron, with the caller's own
+                           credential (fk#1124) -- same Popen path /api/run_now uses, factored
+                           into one function so there is ONE spawn path, not two.
+
 Usage: FLEET_WEBHOOK_SECRET=<shared secret> FLEET_REPO=/path/to/target/repo \
          python3 webhook_receiver.py [--port 8562]
 Wire GitHub -> Settings -> Webhooks -> Add webhook, Payload URL = this server's public path
@@ -41,6 +52,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -86,8 +98,15 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(length) if length else b""
-        if self.path.rstrip("/").endswith("/inbox"):
+        path = self.path.rstrip("/")
+        if path.endswith("/inbox"):
             self._handle_inbox(body)
+            return
+        if path.endswith("/webhook/intake"):
+            self._handle_intake(body)
+            return
+        if path.endswith("/webhook/run"):
+            self._handle_run(body)
             return
         sig = self.headers.get("X-Hub-Signature-256", "")
 
@@ -221,6 +240,114 @@ class Handler(BaseHTTPRequestHandler):
         log(f"FIRE: pull_request {action} on PR #{num} -- launching judge-judy")
         _launch_member("judge-judy")
 
+    def _handle_intake(self, body: bytes) -> None:
+        """fk#1129 slice 2: POST /webhook/intake -- the central input dump's non-email side.
+        Same store as /webhook/inbox (inbox.py's LOG_DIR/inbox.jsonl), same triage
+        (inbox.py apply()), but for a caller that isn't an email at all: a canary, a CI red-
+        on-main detector, DigitalOcean monitoring hitting this directly rather than through
+        Resend. Body: {"kind": "alert|monitoring|github|forward|steering", "source": "<free
+        text>", "subject": "...", "body": "...", "check": "<optional>"}. kind is trusted from
+        the caller (already authenticated by its own token) rather than re-classified from a
+        from/subject shape that doesn't exist here; missing kind falls back to classify()."""
+        import inbox as inbox_mod
+        caller = self._caller()
+        if not caller:
+            log(f"intake REJECTED: bad or missing token from {self.client_address[0]}")
+            self.send_response(401); self.end_headers(); return
+        try:
+            payload = json.loads(body)
+        except json.JSONDecodeError:
+            self.send_response(400); self.end_headers(); return
+        if not isinstance(payload, dict):
+            self.send_response(400); self.end_headers(); return
+        subject = payload.get("subject") or ""
+        text = payload.get("body") or ""
+        mail = {"from": caller, "subject": subject, "text": text}
+        kind = payload.get("kind") or inbox_mod.classify(mail)
+        row = {
+            "id": f"intake-{caller}-{int(time.time() * 1000)}-{os.urandom(3).hex()}",
+            "received_at": time.time(),
+            "trusted": False,  # fk#1129: a webhook caller is never in FLEET_INBOX_FROM's
+                               # steering set -- it can land an alert/backlog item through the
+                               # fixed machine kinds below, never answer an ask or free-text steer.
+            "from": caller,
+            "subject": subject,
+            "text": text,
+            "full_text": text[:20000],
+            "kind": kind,
+            "source": payload.get("source") or caller,
+        }
+        check = payload.get("check") or inbox_mod.alert_check(subject)
+        if check:
+            row["check"] = check
+        inbox_mod.LOG_DIR.mkdir(parents=True, exist_ok=True)
+        with open(inbox_mod.INBOX, "a") as fh:
+            fh.write(json.dumps(row) + "\n")
+        log(f"intake stored {row['id']} from caller={caller} kind={kind} source={row['source']!r}")
+        try:
+            applied = inbox_mod.apply(row)
+        except Exception as exc:  # noqa: BLE001
+            log(f"intake: apply of {row['id']} failed: {exc} -- messenger takes it")
+            applied = {"done": False}
+        if not applied.get("done"):
+            _launch_member("dont-shoot-the-messenger", ["--task", "inbox"])
+        self.send_response(200); self.end_headers(); self.wfile.write(b"stored")
+
+    def _caller(self) -> str | None:
+        import webhook_auth
+        return webhook_auth.caller_for(self.headers.get("Authorization"),
+                                       env_value("FLEET_WEBHOOK_TOKENS") or None)
+
+    def _handle_run(self, body: bytes) -> None:
+        """fk#1124: POST /webhook/run -- fire one fleet member now, with the caller's own
+        token (never the dashboard's FLEET_API_KEY). {"member": "<name>", "item": <n
+        optional>, "reason": "<one line>"}. Same Popen path /api/run_now uses
+        (_run_member_bg, factored so there is one spawn path); the run record carries
+        fired_by=<caller> and reason. One in-flight run per member: a second call while the
+        first is still running gets 409 with the running run_id. Disabled members still fire
+        -- an explicit webhook call is a human/agent decision, same as FLEET_RUN_NOW=1 today."""
+        caller = self._caller()
+        if not caller:
+            log(f"run REJECTED: bad or missing token from {self.client_address[0]}")
+            self.send_response(401); self.end_headers(); return
+        try:
+            payload = json.loads(body)
+        except json.JSONDecodeError:
+            self.send_response(400); self.end_headers(); return
+        if not isinstance(payload, dict):
+            self.send_response(400); self.end_headers(); return
+        member = str(payload.get("member") or "").strip()
+        if not member:
+            self._json(400, {"ok": False, "error": "member is required"}); return
+        try:
+            import member_spec
+            if member != "judge-judy":  # judge-judy runs its own script, not run_member.sh
+                member_spec.by_name(member)
+        except Exception as exc:  # noqa: BLE001
+            self._json(400, {"ok": False, "error": f"unknown member {member!r}: {exc}"}); return
+        item = payload.get("item")
+        if item is not None and (not isinstance(item, int) or isinstance(item, bool)):
+            self._json(400, {"ok": False, "error": "item must be an integer issue number"}); return
+        reason = str(payload.get("reason") or "").strip()
+
+        running = _running_run_id(member)
+        if running:
+            log(f"run REJECTED: {member} already running ({running}), caller={caller}")
+            self._json(409, {"ok": False, "error": "already running", "run_id": running}); return
+
+        log(f"FIRE: /webhook/run member={member} item={item} caller={caller} reason={reason!r}")
+        import member_launch
+        member_launch.spawn(member, item=item, fired_by=caller, reason=reason)
+        self._json(200, {"ok": True, "started": member})
+
+    def _json(self, code: int, obj: dict) -> None:
+        b = json.dumps(obj).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(b)))
+        self.end_headers()
+        self.wfile.write(b)
+
 
 def should_fire(payload: dict) -> tuple[bool, str]:
     """fk#1055: a red run is an incident only on the default branch. Every PR branch and
@@ -250,6 +377,32 @@ def env_value(key: str) -> str:
     except OSError:
         pass
     return ""
+
+
+def _running_run_id(member: str) -> str | None:
+    """fk#1124: the run_id of `member`'s in-flight run, or None. A run is in-flight when its
+    most recent runs.jsonl row is a `started` row (run_report.py's build_started_record,
+    written by run_member.sh before `claude -p` even runs -- see that module's header) with no
+    completion row (any other status, sharing the same run_id) after it -- same pairing
+    fleet_stats.lost_passes() uses to detect a run that vanished, reused here with zero grace
+    instead of that function's 90-minute default, because this call needs 'is it running right
+    now', not 'has it been gone long enough to call a gap'."""
+    import fleet_stats
+    rows = []
+    try:
+        with open(LOG_DIR / "runs.jsonl", errors="ignore") as fh:
+            for line in fh:
+                try:
+                    rows.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+    except OSError:
+        return None
+    lost = fleet_stats.lost_passes(rows, grace_minutes=0.0)
+    for r in lost:
+        if r.get("member") == member:
+            return r.get("run_id")
+    return None
 
 
 def _launch_member(name: str, args: list[str] | None = None) -> None:

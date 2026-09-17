@@ -303,7 +303,8 @@ def classify(report: dict, *, vision_required: bool, exit_code: int | None = Non
 
 
 def build_started_record(*, member: str, run_id: str, kind: str = "llm",
-                         item_id: str | None = None, lane: str | None = None) -> dict:
+                         item_id: str | None = None, lane: str | None = None,
+                         fired_by: str | None = None, reason: str | None = None) -> dict:
     """gh#145: the FIRST leg of a run record, written before `claude -p` is ever invoked.
 
     build_record's two callers (run_member.sh's normal-exit path and its SIGTERM trap,
@@ -317,6 +318,9 @@ def build_started_record(*, member: str, run_id: str, kind: str = "llm",
     Deliberately minimal: no exit_code, no tokens, no outcome/evidence -- none of that exists
     yet. Adding fields here later must not change what classify()/build_record() do with an
     ordinary completion record (that's a separate, unrelated status space -- see STATUS_STARTED).
+
+    fired_by/reason (fk#1124): who explicitly fired this run and why, when it was a webhook
+    call rather than cron/a dashboard click -- null for everything else, same as `lane`.
     """
     return {
         "member": member,
@@ -326,6 +330,8 @@ def build_started_record(*, member: str, run_id: str, kind: str = "llm",
         "status": STATUS_STARTED,
         "item_id": item_id,
         "lane": lane,
+        "fired_by": fired_by,
+        "reason": reason,
     }
 
 
@@ -333,7 +339,8 @@ def build_record(*, member: str, run_id: str, kind: str, exit_code: int,
                  pass_text: str, usage: dict | None, vision_required: bool,
                  item_id: str | None = None, pr: str | None = None,
                  lane: str | None = None, trailing_loss: bool = False,
-                 heartbeat: bool = False, dispatch_skipped: bool = False) -> dict:
+                 heartbeat: bool = False, dispatch_skipped: bool = False,
+                 fired_by: str | None = None, reason: str | None = None) -> dict:
     """One run = one record. `usage` is pass_accounting's parsed JSON, or None (mechanical)."""
     report = parse_report(pass_text)
     if not report.get("report") and kind != "llm" and (pass_text or "").strip():
@@ -385,6 +392,11 @@ def build_record(*, member: str, run_id: str, kind: str, exit_code: int,
         # normal ok/quiet run (which may also mention a dispatch line in its prose) doesn't
         # carry a misleading orphaned_items list.
         "orphaned_items": report["dispatched_items"] if status == STATUS_INCOMPLETE_FANOUT else None,
+        # fk#1124: set only for a webhook-fired run (run_member.sh forwards FLEET_FIRED_BY/
+        # FLEET_FIRED_REASON when set); null for cron/dashboard/ad-hoc runs, same convention
+        # as `lane` above.
+        "fired_by": fired_by,
+        "reason": reason,
     }
     u = usage or {}
     # Field names here match pass_accounting.py's split() output verbatim -- that module is the
@@ -432,6 +444,8 @@ def main(argv=None) -> int:
     ap.add_argument("--item-id", help="board item id this pass worked, if any")
     ap.add_argument("--pr", help="PR number this pass produced, if any")
     ap.add_argument("--lane", help="lane this pass was dispatched for, if any (e.g. nerd's lane=<name> --task prefix)")
+    ap.add_argument("--fired-by", help="fk#1124: the webhook caller that fired this run, if any (webhook_auth.caller_for's name)")
+    ap.add_argument("--reason", help="fk#1124: the one-line reason a webhook caller gave for firing this run")
     ap.add_argument("--trailing-loss", action="store_true",
                     help="gh#257: stream_log.py's _detect_trailing_loss fired for this run -- "
                          "a real report existed one turn earlier and was overwritten by a "
@@ -455,7 +469,8 @@ def main(argv=None) -> int:
 
     if a.started:
         rec = build_started_record(member=a.member, run_id=a.run_id, kind=a.kind,
-                                   item_id=a.item_id, lane=a.lane)
+                                   item_id=a.item_id, lane=a.lane,
+                                   fired_by=a.fired_by, reason=a.reason)
         print(json.dumps(rec))
         return 0
 
@@ -475,7 +490,8 @@ def main(argv=None) -> int:
     rec = build_record(member=a.member, run_id=a.run_id, kind=a.kind, exit_code=a.exit_code,
                        pass_text=text, usage=usage, vision_required=a.vision_required,
                        item_id=a.item_id, pr=a.pr, lane=a.lane, trailing_loss=a.trailing_loss,
-                       heartbeat=a.heartbeat, dispatch_skipped=a.dispatch_skipped)
+                       heartbeat=a.heartbeat, dispatch_skipped=a.dispatch_skipped,
+                       fired_by=a.fired_by, reason=a.reason)
     # Reif, 2026-09-16, on a gru report in the console: "this needs to be in plain english and
     # run on haiku - dont burn tokens for this." The same 160-word haiku rewrite run_mail.py
     # already does for the email lands ON the record, so the console drawer opens with it.

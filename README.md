@@ -529,6 +529,45 @@ Two properties worth preserving if you touch this:
   thing the key protects must not be reachable by the things it protects against. `selftest.py`
   fails if a new spawner is added without the unset.
 
+### Per-caller webhook tokens: firing a member or landing an intake row (fk#1124, fk#1129)
+
+`webhook_receiver.py` (the same process that serves `/webhook/inbox` and the GitHub HMAC
+routes — see its own header) also serves two routes gated by `FLEET_WEBHOOK_TOKENS`, a
+**different** credential from `FLEET_API_KEY` above: a comma list of `name:token` pairs in
+`fleet.env` (`FLEET_WEBHOOK_TOKENS=canary:<tok>,ci:<tok>`), so a canary script, a CI job, or
+another box each get their own token — one can be rotated without touching another's, and
+every run or intake row a token fires records that caller's name, never the token itself.
+
+```bash
+# fire one member now, from outside the box, with this caller's own token
+curl -X POST https://<your-host>/webhook/run \
+  -H "Authorization: Bearer $FLEET_WEBHOOK_TOKEN_CANARY" \
+  -H "Content-Type: application/json" \
+  -d '{"member":"the-fixer","reason":"prod health check failing, no CI signal"}'
+# -> {"ok": true, "started": "the-fixer"}; a second call for the same member while the first
+#    is still running gets 409 {"ok": false, "error": "already running", "run_id": "..."}
+
+# land one non-email input in the fleet's intake store (same store/triage as /webhook/inbox)
+curl -X POST https://<your-host>/webhook/intake \
+  -H "Authorization: Bearer $FLEET_WEBHOOK_TOKEN_CI" \
+  -H "Content-Type: application/json" \
+  -d '{"kind":"github","source":"ci","subject":"CI red on main","body":"pytest failed: ..."}'
+```
+
+`scripts/box/app_error_canary.py`-style callers (the product repo's own prod-down canary) and a
+CI red-on-main detector are the intended first wiring — see fk#1124's own acceptance criteria.
+The product-repo side of actually calling this from `scripts/box/page.py` is tracked as a
+separate product issue (PhilanthropyOrg/philanthropy#6532), since it's a change to that repo,
+not this one.
+
+Disabled members (`enabled:false` in their `.fleet.json`) still fire on an explicit
+`/webhook/run` call — same as a dashboard `/api/run_now` click with `FLEET_RUN_NOW=1` today; an
+explicit call is a human/agent decision, not the thing the enabled flag exists to gate.
+
+Never a substitute for `FLEET_API_KEY`: the dashboard's write routes (`fleet_toggle`, `steer`,
+`prune`, ...) still require that key. This is narrower on purpose — a webhook token can only
+fire one member or land one intake row, nothing else the dashboard can do.
+
 ## What's NOT in this kit (extension points)
 
 The source fleet had product-specific machinery this kit deliberately does not port:

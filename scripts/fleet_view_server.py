@@ -2078,15 +2078,12 @@ class Handler(BaseHTTPRequestHandler):
             if name not in MEMBERS:
                 self._json({"ok": False, "error": f"unknown member {name!r}"}, 400)
                 return
-            script = KIT_DIR / "scripts" / MEMBERS[name]["script"]
-            env = dict(os.environ)
-            env.setdefault("FLEET_ENV_FILE", str(ENV_FILE))
-            env["FLEET_RUN_NOW"] = "1"
+            # fk#1124: same spawn path POST /webhook/run uses (member_launch.spawn) -- one
+            # place resolves member -> script and sets FLEET_RUN_NOW, not two independent
+            # Popen call sites that could silently drift.
+            import member_launch
             try:
-                subprocess.Popen(["bash", str(script), *MEMBERS[name].get("args", [])],
-                                 cwd=REPO or None, env=env,
-                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                 start_new_session=True)
+                member_launch.spawn(name, env_file=ENV_FILE, cwd=REPO or None)
             except OSError as exc:
                 self._json({"ok": False, "error": str(exc)}, 500)
                 return
