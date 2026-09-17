@@ -13900,7 +13900,36 @@ def _run_member_wires_pacing_gate_and_exempt_specs_gh781():
     assert 0 < ceiling_at < gate_at < launch_at, "gate must sit after the ceiling and before claude -p"
     assert "--exit-code 75" in text, "a held pass must be recorded as paced (exit 75)"
     exempt = {s["name"] for s in member_spec.load_all(ROOT / "members") if s.get("pacing") == "exempt"}
-    assert exempt == {"the-fixer", "dont-shoot-the-messenger", "judge-judy"}, exempt
+    assert exempt == {"the-fixer", "dont-shoot-the-messenger"}, exempt  # judge-judy paced since 2026-09-16 (fk#1094: $436/7d is not "one cheap call")
+
+
+def _run_member_pregate_short_circuits_in_shell_fk1093():
+    """fk#1093: a member with `llm.pregate` decides "anything to do?" in shell, before pacing,
+    before any model. the-fixer spent $279/7d on 2,682 runs having a model read check.sh's
+    `green`. Text pins, same shape as gh781's: the block sits after the enabled check and before
+    both the pacing gate and `claude -p`; a `green*` result records a quiet run and exits; the
+    charter is told not to re-run the check (check.sh dedups per SHA -- a second call mutes the
+    fire). vp_due.sh honors vp's own enabled flag, the one spawn path FLEET_RUN_NOW=1 bypassed."""
+    import member_spec
+    text = (HERE / "run_member.sh").read_text()
+    enabled_at = text.find("enabled=false in spec -- exiting")
+    gate_at = text.find("PREGATE=$(jget \"['llm'].get('pregate', '')\")")
+    pacing_at = text.find("pacing_gate.py")
+    launch_at = text.find("claude -p \"$PROMPT\"")
+    assert 0 < enabled_at < gate_at < pacing_at < launch_at, (enabled_at, gate_at, pacing_at, launch_at)
+    block = text[gate_at:pacing_at]
+    assert "green*)" in block and "--kind shell" in block and "exit 0" in block, "green must record a quiet shell run and exit"
+    assert 'export FLEET_PREGATE_OUTPUT' in block, "the charter reads the result from the environment"
+    specs = {s["name"]: s for s in member_spec.load_all(ROOT / "members")}
+    assert specs["the-fixer"]["llm"].get("pregate") == "members/the-fixer/check.sh", specs["the-fixer"]["llm"]
+    charter = (ROOT / "members/the-fixer/the-fixer.md").read_text()
+    assert "do not run check.sh again" in charter and "FLEET_PREGATE_OUTPUT" in charter
+    for name in ("jefe", "dumbledore", "vp"):
+        assert specs[name].get("enabled") is False, f"{name} is deactivated (governance overhead, 2026-09-16), not deleted"
+    vp_due = (HERE / "vp_due.sh").read_text()
+    assert 'VP_ENABLED' in vp_due and vp_due.find("VP_ENABLED") < vp_due.find("run_member.sh\" vp"), "vp_due must check enabled before spawning vp"
+    marie = (ROOT / "members/marie/marie.md").read_text()
+    assert "The leak rule" in marie and marie.find("The leak rule") < marie.find("## Part C2"), "marie ranks the leaking KR first"
 
 
 def _gh782_runs(now):
@@ -15941,7 +15970,8 @@ if __name__ == "__main__":
     check("predict.py ledger excludes a hit's unattributed cost from cost_per_hit_usd instead of booking it as $0 (gh#789 AC1-3)", _predict_ledger_excludes_unattributed_cost_from_hit_average_gh789)
     check("self_improve_score.sh resolves the ledger, feeds it to the prompt first, and stamps hits/misses on the row (gh#782 AC4)", _self_improve_score_reads_the_ledger_gh782)
     check("dumbledore: <=140 lines, opus, ledger-first, one predict.py add per pass, reads INTENT.md, grader off-limits (gh#783)", _dumbledore_charter_is_short_on_opus_and_ledger_first_gh783)
-    check("run_member.sh calls pacing_gate after the ceiling and the exempt specs are the three named (gh#781)", _run_member_wires_pacing_gate_and_exempt_specs_gh781)
+    check("run_member.sh calls pacing_gate after the ceiling and the exempt specs are the two named (gh#781; judge-judy paced since fk#1094)", _run_member_wires_pacing_gate_and_exempt_specs_gh781)
+    check("run_member.sh llm.pregate quiets a green tick in shell before pacing or a model; jefe/dumbledore/vp deactivated; vp_due honors enabled; marie ranks the leak first (fk#1093)", _run_member_pregate_short_circuits_in_shell_fk1093)
 
     check("plan_rank prefers a plan-named bet regardless of tier/age order (gh#572 AC1)", _plan_rank_ac1_bet_named_candidate_outranks_regardless_of_order_gh572)
     check("plan_rank with no plan file at all returns byte-identical order (gh#572 AC2)", _plan_rank_ac2_no_plan_file_is_byte_identical_order_gh572)

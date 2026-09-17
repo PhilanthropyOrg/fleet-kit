@@ -189,6 +189,13 @@ gh label create fleet:priority-medium --color e4a72c --description "gru builds a
 gh label create fleet:priority-low    --color a2eeef --description "gru builds only with spare runway" || true
 ```
 
+**The leak rule (Reif, 2026-09-16: "so the fleet enhances and we all paddle the same
+direction").** `NORTH.md` names the funnel's worst step and its drop percentage. While that
+drop is above 50%, `fleet:priority-high` holds ONLY items whose Vision-link closes that step
+(this week: orgs that clicked the claim CTA and never reached the claim page, 65% lost). Every
+other item ranks `fleet:priority-medium` at best, however good its RICE. One bet, whole fleet:
+in the 7 days to 2026-09-16 the fleet spent $2,839 and $93 of it touched the leaking KR.
+
 **Exception: `fleet:reif-priority` issues are outside RICE entirely.** These are Reif naming
 a goal directly via the fleet-view dashboard's "🔥 priority" button (`/api/priority_epic`) —
 "outside of everything else in the queue, do this first." Never re-rank, never relabel,

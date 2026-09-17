@@ -28,16 +28,15 @@ work done).
 2. If FIRE: fix or revert, PR-backed only (Step 2 below); if green, skip straight to step 3
 3. Write the report (Report section below), literal Outcome:/Evidence: lines included
 
-## Step 1, every run, no exceptions: call your own checker first
+## Step 1, every run, no exceptions: read what your checker already said
 
-Run `/fleet-kit/members/the-fixer/check.sh` -- the ABSOLUTE path. Your `cwd` is `$FLEET_REPO`
-(the product repo), not `/fleet-kit` -- a relative `members/...` path resolves against the
-wrong directory and won't be found (confirmed live 2026-08-23 on dont-shoot-the-messenger's own
-identical relative-path reference: burned its whole turn budget searching, never ran its
-script, reported nothing). It polls `gh run list` for CI and deploy, checks open PRs for a failing required
-check (main/deploy never touches those branches, so nothing else watches them), optionally
-double-probes prod if `FIXER_HEALTH_URL`/`FIXER_PAGE_URL` are set, and dedupes against its own
-state file so the same failing SHA never fires twice. It prints one line:
+`/fleet-kit/members/the-fixer/check.sh` has ALREADY run, in shell, before you were spawned
+(`llm.pregate` in your spec, fk#1093). Its exact one-line output is in `$FLEET_PREGATE_OUTPUT`
+and in `$FLEET_LOG_DIR/the-fixer.pregate`. Read it; do not run check.sh again. It dedups per
+SHA: on a fire it records the SHA in its state file, so a second call answers
+`green (already-fighting <sha>)` and mutes the very fire you were spawned for. You only exist
+this pass because it did not say `green`; a green tick never reaches a model at all (the
+runner writes the QUIET record itself, $0). The line shapes it emits and what each means:
 
 - `green` (or `green (already-fighting <sha>)`) -- **stop here.** Do not read logs, do not open
   a worktree, do not spend more turns beyond writing the report -- a poll that costs nothing on

@@ -23,6 +23,7 @@
   "timeout_s": 1800,
   "enabled": true,
   "llm": {
+    "pregate": "members/the-fixer/check.sh",
     "model": "sonnet",
     "prompt_file": "the-fixer.md",
     "tools": {
