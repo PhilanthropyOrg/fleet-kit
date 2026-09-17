@@ -5090,6 +5090,152 @@ def _the_fixer_fires_only_for_the_default_branch():
     assert src.index("fire, why = should_fire(payload)") < src.index('_launch_member("the-fixer")'), "receiver must consult should_fire before launching"
 
 
+def _webhook_auth_matches_the_right_caller_constant_time():
+    """fk#1124: webhook_auth.caller_for() -- the shared bearer-token gate for POST
+    /webhook/intake and POST /webhook/run. FLEET_WEBHOOK_TOKENS="name:token,name:token",
+    constant-time-compared against every configured token (never short-circuits on the first
+    match, so a timing side channel can't narrow a guess)."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("webhook_auth", ROOT / "scripts" / "webhook_auth.py")
+    wa = importlib.util.module_from_spec(spec); spec.loader.exec_module(wa)
+    tokens = "canary:abc123,ci:def456"
+    assert wa.caller_for("Bearer abc123", tokens) == "canary"
+    assert wa.caller_for("Bearer def456", tokens) == "ci"
+    assert wa.caller_for("bearer abc123", tokens) == "canary", "scheme match must be case-insensitive"
+    assert wa.caller_for("Bearer wrongtoken", tokens) is None
+    assert wa.caller_for("Bearer ", tokens) is None, "empty token must not match"
+    assert wa.caller_for(None, tokens) is None
+    assert wa.caller_for("abc123", tokens) is None, "missing Bearer scheme must not match"
+    assert wa.caller_for("Bearer abc123", "") is None, "no configured tokens means nobody is a valid caller"
+
+
+def _webhook_run_and_intake_are_gated_and_land_on_the_right_store():
+    """fk#1124 + fk#1129 slice 2, Reif 2026-09-17: "any member of a fleet callable via webhook
+    (given credentials)" + "there should be a central input dump where all the data inputs can
+    go via email, webhooks, etc." Pins, end to end through the real HTTP server:
+      - a bad/missing token 401s on both routes, before any spawn or store happens
+      - a good token on /webhook/intake writes a row to the SAME inbox.jsonl store
+        /webhook/inbox uses, source=<caller>, and inbox.py apply() runs triage on it (alert ->
+        one board item, gh stubbed)
+      - a good token on /webhook/run spawns the member (member_launch.spawn stubbed) and the
+        call carries fired_by=<caller> and the given reason
+      - a second /webhook/run for the same member while a `started` row has no completion row
+        yet returns 409 with the in-flight run_id, never a second spawn
+      - an unknown member is 400, no spawn
+    """
+    import importlib.util, os, tempfile, threading, json as _json, urllib.request, urllib.error
+    from http.server import ThreadingHTTPServer
+
+    spec = importlib.util.spec_from_file_location("inbox", ROOT / "scripts" / "inbox.py")
+    ib = importlib.util.module_from_spec(spec)
+    sys.modules["inbox"] = ib  # webhook_receiver.py does a plain `import inbox` per request --
+                               # it must resolve to THIS patched instance, not reload a fresh
+                               # one with the real LOG_DIR (module_from_spec alone does not
+                               # register in sys.modules, so a bare `import inbox` elsewhere
+                               # would otherwise load a second, unpatched copy).
+    spec.loader.exec_module(ib)
+    tmp = tempfile.mkdtemp()
+    ib.LOG_DIR = Path(tmp); ib.INBOX = Path(tmp) / "inbox.jsonl"; ib.DONE = Path(tmp) / "inbox.done"
+    os.environ["FLEET_REPO_URL"] = "https://github.com/o/r.git"
+
+    gh_calls = []
+    class R:
+        def __init__(self, out): self.returncode, self.stdout, self.stderr = 0, out, ""
+    def fake_run(cmd):
+        gh_calls.append(cmd)
+        if cmd[:3] == ["gh", "issue", "list"]:
+            return R("[]\n")
+        if cmd[:3] == ["gh", "issue", "create"]:
+            return R("https://github.com/o/r/issues/9\n")
+        return R("")
+    orig_apply = ib.apply
+    ib.apply = lambda row, run=None, reply=None: orig_apply(row, run=fake_run, reply=reply or (lambda *a: True))
+
+    os.environ["FLEET_WEBHOOK_SECRET"] = "x"
+    os.environ["FLEET_WEBHOOK_TOKENS"] = "canary:tok123"
+    spec2 = importlib.util.spec_from_file_location("webhook_receiver", ROOT / "scripts" / "webhook_receiver.py")
+    wr = importlib.util.module_from_spec(spec2); spec2.loader.exec_module(wr)
+    wr.LOG_DIR = Path(tmp)
+
+    import member_launch
+    spawn_calls = []
+    orig_spawn = member_launch.spawn
+    class FakeProc:
+        pid = 999999
+    def fake_spawn(name, **kw):
+        spawn_calls.append((name, kw))
+        return FakeProc()
+    member_launch.spawn = fake_spawn
+
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), wr.Handler)
+    port = srv.server_address[1]
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+
+    def post(path, body, token=None):
+        req = urllib.request.Request(f"http://127.0.0.1:{port}{path}",
+                                     data=_json.dumps(body).encode(), method="POST")
+        if token:
+            req.add_header("Authorization", f"Bearer {token}")
+        try:
+            with urllib.request.urlopen(req, timeout=5) as r:
+                b = r.read()
+        except urllib.error.HTTPError as e:
+            return e.code, e.read()
+        return r.status, b
+
+    def post_json(path, body, token=None):
+        status, b = post(path, body, token=token)
+        return status, (_json.loads(b) if b else None)
+
+    try:
+        # bad token 401s both routes, before any store or spawn
+        assert post("/webhook/intake", {"kind": "alert", "check": "app_error", "subject": "x"}, token="wrong")[0] == 401
+        assert post("/webhook/run", {"member": "gru"}, token="wrong")[0] == 401
+        assert post("/webhook/run", {"member": "gru"})[0] == 401, "missing token must 401 too"
+        assert ib.pending() == [] and spawn_calls == [], "a rejected call must not store or spawn"
+
+        # good token, alert intake -> stored in the SAME store /webhook/inbox writes, triaged
+        status, _ = post("/webhook/intake",
+                         {"kind": "alert", "check": "app_error",
+                          "subject": "990 Scout prod alert [app_error]: 5 timeouts",
+                          "body": "5 timeouts"}, token="tok123")
+        assert status == 200
+        rows = [r for r in ib.INBOX.read_text().splitlines() if r]
+        assert len(rows) == 1, rows
+        row = _json.loads(rows[0])
+        assert row["source"] == "canary" and row["kind"] == "alert" and row["check"] == "app_error", row
+        assert any(c[:3] == ["gh", "issue", "create"] for c in gh_calls), "alert intake must run triage, not just store"
+
+        # good token, run -- spawns via the one shared spawn path, carries fired_by + reason
+        status, out = post_json("/webhook/run", {"member": "gru", "reason": "canary fired it"}, token="tok123")
+        assert status == 200 and out == {"ok": True, "started": "gru"}, out
+        assert len(spawn_calls) == 1, spawn_calls
+        name, kw = spawn_calls[0]
+        assert name == "gru" and kw["fired_by"] == "canary" and kw["reason"] == "canary fired it", spawn_calls
+
+        # a started row with no completion for gru -> second call is 409, no second spawn
+        with open(Path(tmp) / "runs.jsonl", "a") as fh:
+            fh.write(_json.dumps({"member": "gru", "run_id": "gru-999", "ts": time.time(), "status": "started"}) + "\n")
+        status, out = post_json("/webhook/run", {"member": "gru"}, token="tok123")
+        assert status == 409 and out == {"ok": False, "error": "already running", "run_id": "gru-999"}, out
+        assert len(spawn_calls) == 1, "a run in flight must not spawn a second one"
+
+        # a completion row for that run_id clears the in-flight state -- a third call spawns again
+        with open(Path(tmp) / "runs.jsonl", "a") as fh:
+            fh.write(_json.dumps({"member": "gru", "run_id": "gru-999", "ts": time.time(), "status": "ok"}) + "\n")
+        status, out = post_json("/webhook/run", {"member": "gru"}, token="tok123")
+        assert status == 200 and len(spawn_calls) == 2, (status, out, spawn_calls)
+
+        # unknown member -> 400, no spawn
+        status, out = post_json("/webhook/run", {"member": "not-a-real-member"}, token="tok123")
+        assert status == 400 and not out.get("ok"), out
+        assert len(spawn_calls) == 2, "an unknown member must never reach spawn"
+    finally:
+        srv.shutdown()
+        member_launch.spawn = orig_spawn
+        ib.apply = orig_apply
+
+
 def _reif_eyes_files_what_reif_would_have_pointed_out():
     """Reif, 2026-09-16: "I shouldnt be asking for it, something should be thinking about these
     things itself." Each check reproduces one complaint from that day on synthetic data; the
@@ -15962,6 +16108,8 @@ if __name__ == "__main__":
     check("a finished run carries its plain-English words for the console, haiku, opt-in", _run_record_carries_plain_words_when_opted_in)
     check("an open ask also lands on the board so an agent picks it up (opt-in, idempotent)", _an_open_ask_also_lands_on_the_board_for_an_agent)
     check("the-fixer fires only for a red run on the default branch (fk#1055)", _the_fixer_fires_only_for_the_default_branch)
+    check("webhook_auth.caller_for matches the right caller, constant-time (fk#1124)", _webhook_auth_matches_the_right_caller_constant_time)
+    check("webhook /run and /intake: bad token 401s, good token spawns/stores with caller identity, in-flight is 409 (fk#1124, fk#1129)", _webhook_run_and_intake_are_gated_and_land_on_the_right_store)
     check("closes gate blocks a partial or docs-only PR from closing an issue (fk#629)", _closes_gate_blocks_a_partial_or_docs_only_pr_from_closing_an_issue)
     check("judge runs the closes gate and reads the issue; law has 13 and 14 (fk#629)", _judge_runs_the_closes_gate_and_reads_the_issue)
     check("git_pull_guard.sh self-heals a stray branch and leaves a normal pull unchanged", _git_pull_guard_self_heals_a_stray_branch_and_leaves_a_normal_pull_unchanged)

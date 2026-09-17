@@ -112,6 +112,17 @@ case "$TASK" in
 esac
 LANE_FLAG=""; [ -n "$LANE" ] && LANE_FLAG="--lane $LANE"
 
+# fk#1124: webhook_receiver.py's /webhook/run sets these two env vars before Popen'ing this
+# script, so a run fired by webhook carries who fired it and why on every record it writes
+# (started, killed-by-signal, and normal completion below) -- same passthrough shape as
+# FLEET_RUN_NOW. Empty for every other caller (cron, /api/run_now, an ad-hoc manual run).
+# Every other *_FLAG in this file is interpolated unquoted (word-split) at each call site, so
+# FLEET_FIRED_REASON must already be one shell word by the time it lands here -- the receiver
+# collapses whitespace to underscores before setting it, same reasoning as --items joining
+# issue numbers with underscore a few lines up.
+FIRED_FLAG=""; [ -n "${FLEET_FIRED_BY:-}" ] && FIRED_FLAG="--fired-by $FLEET_FIRED_BY"
+REASON_FLAG=""; [ -n "${FLEET_FIRED_REASON:-}" ] && REASON_FLAG="--reason $FLEET_FIRED_REASON"
+
 LOG="$LOG_DIR/${MEMBER}.log"
 ts() { date '+%Y-%m-%d %H:%M:%S %Z'; }
 log() { echo "[$(ts)] $*" >> "$LOG"; }
@@ -686,7 +697,7 @@ log "pass start (kind=llm charter=$BEHAVIOR model=$MODEL max_turns=${MAX_TURNS:-
 # a failure here must not block the pass itself, only lose the extra visibility this adds.
 python3 "$KIT_DIR/scripts/run_report.py" --started \
   --member "$MEMBER" --run-id "$RUN_ID" --kind llm \
-  ${ITEM:+--item-id "$ITEM"} $LANE_FLAG >> "$LOG_DIR/runs.jsonl" 2>>"$LOG" \
+  ${ITEM:+--item-id "$ITEM"} $LANE_FLAG $FIRED_FLAG $REASON_FLAG >> "$LOG_DIR/runs.jsonl" 2>>"$LOG" \
   || log "WARNING: failed to write started row for run_id=$RUN_ID"
 
 # A pass killed from OUTSIDE (deploy cutover stopping the container, operator `podman stop`,
@@ -731,7 +742,7 @@ record_killed_pass() {
   # lives in the CLI's unread stream, and inventing a number here would be worse than null.
   printf '' | python3 "$KIT_DIR/scripts/run_report.py" \
     --member "$MEMBER" --run-id "$RUN_ID" --kind llm --exit-code 143 \
-    --pass-file - ${ITEM:+--item-id "$ITEM"} $VISION_FLAG $LANE_FLAG >> "$LOG_DIR/runs.jsonl" 2>>"$LOG" || true
+    --pass-file - ${ITEM:+--item-id "$ITEM"} $VISION_FLAG $LANE_FLAG $FIRED_FLAG $REASON_FLAG >> "$LOG_DIR/runs.jsonl" 2>>"$LOG" || true
   exit 143
 }
 trap record_killed_pass TERM INT
@@ -845,7 +856,7 @@ rm -f "$TRAILING_LOSS_FILE"
 
 echo "$OUT" | python3 "$KIT_DIR/scripts/run_report.py" \
   --member "$MEMBER" --run-id "$RUN_ID" --kind llm --exit-code "$RC" \
-  --pass-file - --usage-file "$USAGE_FILE" ${ITEM:+--item-id "$ITEM"} $VISION_FLAG $LANE_FLAG $TRAILING_LOSS_FLAG >> "$LOG_DIR/runs.jsonl" 2>>"$LOG"
+  --pass-file - --usage-file "$USAGE_FILE" ${ITEM:+--item-id "$ITEM"} $VISION_FLAG $LANE_FLAG $TRAILING_LOSS_FLAG $FIRED_FLAG $REASON_FLAG >> "$LOG_DIR/runs.jsonl" 2>>"$LOG"
 rm -f "$USAGE_FILE"
 
 SUMMARY=$(tail -c 400 <<<"$OUT" | tr '\n' ' ' | tail -c 300)

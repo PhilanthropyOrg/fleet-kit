@@ -59,6 +59,8 @@ CREATE TABLE IF NOT EXISTS runs (
   duration_ms                          INTEGER,
   stop_reason                           TEXT,
   lane                                   TEXT,
+  fired_by                               TEXT,
+  reason                                 TEXT,
   recorded_at                            REAL NOT NULL,
   -- Composite, not bare run_id (fleet-kit#212): judge-judy's run_id is `review-<pr>-<sha>`,
   -- not per-invocation, so two genuinely different concurrent reviews of the same PR head
@@ -157,6 +159,11 @@ _ADD_COLUMNS = (
     # Replaces datta's prior keyword-match of outcome/evidence prose for lane attribution --
     # only set on lane-dispatched passes (nerd today), NULL everywhere else.
     ("lane", "TEXT"),
+    # fk#1124: who fired this run and why, set only when POST /webhook/run named a caller --
+    # NULL for cron/dashboard/ad-hoc runs, same nullable-not-zero convention as every other
+    # column here (see the "Absent fields stay NULL" note on _row_from_record below).
+    ("fired_by", "TEXT"),
+    ("reason", "TEXT"),
 )
 
 # Same expand-contract mechanism as _ADD_COLUMNS above, scoped to `asks` instead of `runs`
@@ -265,6 +272,7 @@ RUN_COLUMNS = (
     "vision_link", "self_critique", "report", "prediction", "score_now", "last_verdict",
     "cost_usd", "num_turns", "input_tokens", "output_tokens",
     "cache_read_tokens", "cache_creation_tokens", "duration_ms", "stop_reason", "lane",
+    "fired_by", "reason",
     "recorded_at",
 )
 
@@ -287,6 +295,7 @@ def _row_from_record(rec: dict) -> tuple:
         tokens.get("cache_read_input_tokens"), tokens.get("cache_creation_input_tokens"),
         tokens.get("duration_ms"), tokens.get("stop_reason"),
         rec.get("lane"),
+        rec.get("fired_by"), rec.get("reason"),
         rec.get("_recorded_at") or 0.0,
     )
 
