@@ -5823,6 +5823,36 @@ def _console_metrics_survive_a_box_without_tzdata():
         zoneinfo.ZoneInfo = real
 
 
+def _console_minion_runs_join_pr_fate_from_gh_state():
+    """fk#1121 (Reif 2026-09-17: "add to the fleet dashboard - minion runs"). A run row only
+    knows the PR it opened; the page must show what BECAME of it. Four fixtures, one call:
+    merged, open-with-failing-checks, a PR in neither feed (closed), and no PR at all. Delete
+    minion_runs_payload and this goes red; wire the page to /api/query instead and pr_state
+    disappears, so the assertion on it goes red too."""
+    import importlib
+    sys.path.insert(0, str(ROOT / "scripts"))
+    fvs = importlib.import_module("fleet_view_server")
+    rows = [
+        {"run_id": "m1", "recorded_at": 4.0, "item_id": "10", "pr": "501", "status": "ok",
+         "cost_usd": 1.5, "duration_ms": 61000, "outcome": "opened PR #501"},
+        {"run_id": "m2", "recorded_at": 3.0, "item_id": "11", "pr": "#502", "status": "ok",
+         "cost_usd": 0.5, "duration_ms": 5000},
+        {"run_id": "m3", "recorded_at": 2.0, "item_id": "12", "pr": "503", "status": "error"},
+        {"run_id": "m4", "recorded_at": 1.0, "item_id": None, "pr": None, "status": "ok"},
+    ]
+    gh = {"merged": [{"number": 501, "mergedAt": "2026-09-17T12:00:00Z"}],
+          "prs": [{"number": 502, "_rollup": "failing"}]}
+    out = fvs.minion_runs_payload(rows, gh, limit=10)
+    assert [r["pr_state"] for r in out] == ["merged", "open", "closed", "none"], out
+    assert out[0]["pr_detail"] == "2026-09-17T12:00:00Z" and out[1]["pr_detail"] == "failing", out
+    assert out[1]["pr"] == 502, "a '#502' pr field must parse to the number"
+    assert out[0]["cost_usd"] == 1.5 and out[0]["duration_ms"] == 61000
+    assert len(fvs.minion_runs_payload(rows, gh, limit=2)) == 2
+    html = (ROOT / "scripts" / "fleet_view.html").read_text()
+    assert 'data-page="minion"' in html and "/api/minion_runs" in html, "page not wired"
+    assert "no minion runs yet" in html, "empty state must say so, not render a blank box"
+
+
 def _console_roster_shows_every_member_in_plain_english_by_stage():
     """Reif, 2026-09-15: "we need to see all the fleet members in unison - write their purpose
     in plain english... holes show up in value not created or not captured." Every member spec
@@ -15696,6 +15726,7 @@ if __name__ == "__main__":
     check("console says PAUSED, first and red, when every pool account is gated (fk#1041)", _console_says_paused_when_the_whole_pool_is_gated_fk1041)
     check("console tiles are registered metrics with a real id and daily history (fk#1058)", _console_tiles_are_registered_metrics_with_history_fk1058)
     check("console metrics survive a box without tzdata (fk#1059 first deploy)", _console_metrics_survive_a_box_without_tzdata)
+    check("console: minion runs join PR fate from gh state (fk#1121)", _console_minion_runs_join_pr_fate_from_gh_state)
     check("console roster shows every member in plain English by value stage (fk#1058)", _console_roster_shows_every_member_in_plain_english_by_stage)
     check("console shows each member's emoji, role and the steps a pass takes", _console_shows_role_and_steps_per_member)
     check("sidebar shows spawned/scheduled/disabled as distinct badges, not strikethrough (gh#565)", _sidebar_shows_spawned_scheduled_disabled_not_strikethrough_gh565)

@@ -191,6 +191,10 @@
             <ul class="landed" id="landed"><li class="empty">loading…</li></ul>
           </div>
         </div>
+        <div class="card" style="margin-top:24px">
+          <div class="card-head"><h2>Minion runs</h2><span class="sub" id="minionSub"></span><a class="right" href="/classic#minion">all runs</a></div>
+          <ul class="landed" id="minionRuns"><li class="empty">loading…</li></ul>
+        </div>
       </section>
       <section id="pageRoster" hidden>
         <div class="card" id="roster"><div class="empty">loading…</div></div>
@@ -243,7 +247,7 @@ async function load() {
     getJSON('/api/build').catch(() => null),
   ]);
   STATE = { ...STATE, members: members.members || [], kpi: Object.fromEntries((kpi.kpi || []).map(k => [k.member, k])), build };
-  renderChrome(); renderAgents(); renderLanded(); renderRoster();
+  renderChrome(); renderAgents(); renderLanded(); renderMinionRuns(); renderRoster();
 }
 
 function metric(id) { return STATE.metrics.find(m => m.id === id) || null; }
@@ -388,6 +392,32 @@ function renderLanded() {
   $('landedSub').textContent = rows.length ? `${rows.length} today (Central)` : '';
   if (!rows.length) { $('landed').innerHTML = `<li class="empty">Nothing merged yet today (Central time).</li>`; return; }
   $('landed').innerHTML = rows.map(pr => `<li><a href="${esc(pr.url)}" target="_blank"><span>${esc(pr.title)}</span><span class="who">#${esc(pr.number)} · ${esc(ago(new Date(pr.mergedAt).getTime()/1000))}</span></a></li>`).join('');
+}
+
+// ---- minion runs (fk#1121, Reif 2026-09-17): what the builder did, run by run -- the item
+// it took, the PR it opened and what became of it (joined server-side from the polled GitHub
+// state), cost and duration. A builder opening PRs nobody merges is visible in one glance.
+let MINION_RUNS_INFLIGHT = false;
+async function renderMinionRuns() {
+  if (MINION_RUNS_INFLIGHT) return;
+  MINION_RUNS_INFLIGHT = true;
+  let runs = [];
+  try { runs = (await (await fetch('/api/minion_runs?limit=12')).json()).runs || []; }
+  catch (e) { $('minionRuns').innerHTML = `<li class="empty">could not load minion runs: ${esc(e.message)}</li>`; MINION_RUNS_INFLIGHT = false; return; }
+  MINION_RUNS_INFLIGHT = false;
+  const base = repoBase();
+  const usd = v => (v === null || v === undefined) ? '—' : '$' + Number(v).toFixed(2);
+  const dur = ms => (ms === null || ms === undefined) ? '—' : (ms < 60000 ? Math.round(ms / 1000) + 's' : Math.floor(ms / 60000) + 'm');
+  const fate = r => !r.pr ? 'no PR' : r.pr_state === 'open' ? `open · ${r.pr_detail || 'checks unknown'}` : r.pr_state;
+  const merged = runs.filter(r => r.pr_state === 'merged').length, withPr = runs.filter(r => r.pr).length;
+  $('minionSub').textContent = runs.length ? `last ${runs.length} · ${withPr} opened a PR · ${merged} merged · ${usd(runs.reduce((a, r) => a + (Number(r.cost_usd) || 0), 0))}` : '';
+  if (!runs.length) { $('minionRuns').innerHTML = `<li class="empty">no minion runs yet</li>`; return; }
+  $('minionRuns').innerHTML = runs.map(r => {
+    const href = r.pr && base ? `${base}/pull/${r.pr}` : (r.item_id && base ? `${base}/issues/${r.item_id}` : '#');
+    const item = r.item_id ? `#${esc(r.item_id)}` : 'no item';
+    const pr = r.pr ? ` · PR #${esc(r.pr)} ${esc(fate(r))}` : ' · no PR';
+    return `<li><a href="${esc(href)}" target="_blank"><span><span class="dot ${r.status === 'ok' ? 'ok' : r.status === 'error' ? 'bad' : ''}"></span>${item}${pr}<br><span class="role">${esc(String(r.outcome || '').slice(0, 140))}</span></span><span class="who">${esc(ago(r.recorded_at))} · ${dur(r.duration_ms)} · ${usd(r.cost_usd)}</span></a></li>`;
+  }).join('');
 }
 
 // ---- roster: every member in unison, plain English, grouped by the value stage it serves.

@@ -367,6 +367,7 @@
       <div class="side-nav-item" data-page="merged">
         Recently Merged <span class="count-badge" id="navMergedCount">0</span>
       </div>
+      <div class="side-nav-item" data-page="minion">Minion runs</div>
       <div class="side-nav-item" data-page="evolution">
         Self-Evolution <span class="count-badge" id="navEvolutionCount">0</span>
       </div>
@@ -1015,6 +1016,7 @@ function selectPage(page) {
   if (page === 'home') renderHomePage();
   else if (page === 'queue') renderQueuePage();
   else if (page === 'merged') renderMergedPage();
+  else if (page === 'minion') renderMinionPage();
   else if (page === 'evolution') renderEvolutionPage();
   else if (page === 'stats') renderStatsPage();
   else if (page === 'settings') renderSettingsPage();
@@ -1128,6 +1130,7 @@ function homeNavHtml() {
   const items = [
     ['queue', 'PRs & Backlog', badge('navQueueCount')],
     ['merged', 'Recently Merged', badge('navMergedCount')],
+    ['minion', 'Minion runs', ''],
     ['evolution', 'Self-Evolution', badge('navEvolutionCount')],
     ['stats', 'Stats', ''],
     ['settings', 'Settings', ''],
@@ -1141,6 +1144,49 @@ function homeNavHtml() {
 // any author. Own sidebar item (moved off the PRs & Backlog page, Reif 2026-08-25: buried at
 // the bottom of a 68-item backlog, "where is that" -- needed a click of its own, not a scroll).
 // ---------------------------------------------------------------------------------------------
+// ---------------------------------------------------------------------------------------------
+// Minion runs page (fk#1121, Reif 2026-09-17): what the builder actually did, run by run --
+// the item it took, the PR it opened, what became of that PR, what the run cost and how long
+// it took. The PR's fate is joined server-side from the polled GitHub state (a run row only
+// knows the PR it opened), so a builder that opens PRs nobody merges is visible in one glance.
+// ---------------------------------------------------------------------------------------------
+function minionPrBadge(r) {
+  if (!r.pr) return '<span class="badge pending">no PR</span>';
+  const link = REPO_URL ? `<a href="${REPO_URL}/pull/${esc(r.pr)}" target="_blank">#${esc(r.pr)}</a>` : `#${esc(r.pr)}`;
+  const cls = r.pr_state === 'merged' ? 'ok' : r.pr_state === 'closed' ? 'error'
+            : r.pr_detail === 'failing' || r.pr_detail === 'blocked' ? 'error'
+            : r.pr_detail === 'green' ? 'ok' : 'pending';
+  const label = r.pr_state === 'open' ? `open · ${r.pr_detail || 'checks unknown'}` : r.pr_state;
+  return `${link} <span class="badge ${cls}">${esc(label)}</span>`;
+}
+function fmtUsd(v) { return (v === null || v === undefined) ? '—' : '$' + Number(v).toFixed(2); }
+function fmtDurMs(ms) {
+  if (ms === null || ms === undefined) return '—';
+  const s = Math.round(ms / 1000);
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
+}
+async function renderMinionPage() {
+  if (PAGE !== 'minion') return;
+  detailHeadEl.innerHTML = `<div class="title-row"><h2>Minion runs</h2></div>`;
+  runListEl.innerHTML = '<div class="rail-section"><div class="run-empty">loading…</div></div>';
+  let runs = [];
+  try { runs = (await (await fetch('/api/minion_runs?limit=50')).json()).runs || []; }
+  catch (e) { runListEl.innerHTML = `<div class="rail-section"><div class="run-empty">could not load minion runs: ${esc(e.message)}</div></div>`; return; }
+  if (PAGE !== 'minion') return;
+  const merged = runs.filter(r => r.pr_state === 'merged').length;
+  const withPr = runs.filter(r => r.pr).length;
+  const spent = runs.reduce((a, r) => a + (Number(r.cost_usd) || 0), 0);
+  const head = `<div class="rail-row"><div class="rmeta">last ${runs.length} runs · ${withPr} opened a PR · ${merged} merged · ${fmtUsd(spent)} spent</div></div>`;
+  const rowsHtml = runs.map(r => `<div class="rail-row">
+      <div><span class="badge ${esc(r.status || 'pending')}">${esc(r.status || 'pending')}</span>
+        item ${r.item_id ? (REPO_URL ? `<a href="${REPO_URL}/issues/${esc(r.item_id)}" target="_blank">#${esc(r.item_id)}</a>` : '#' + esc(r.item_id)) : '—'}
+        · ${minionPrBadge(r)}</div>
+      <div class="rmeta">${r.recorded_at ? clockTime(r.recorded_at) + ' · ' + ago(r.recorded_at) : ''} · ${fmtDurMs(r.duration_ms)} · ${fmtUsd(r.cost_usd)}${r.exit_code ? ' · exit ' + esc(r.exit_code) : ''}</div>
+      ${r.outcome ? `<div class="routcome">${formatOutcome(r.outcome)}</div>` : ''}
+    </div>`).join('') || '<div class="run-empty">no minion runs yet</div>';
+  runListEl.innerHTML = `<div class="rail-section">${head}${rowsHtml}</div>`;
+}
+
 function renderMergedPage() {
   if (PAGE !== 'merged') return;
   const merged = GH.merged || [];
@@ -2456,7 +2502,7 @@ let BOOTING = false;
 // already did, unwired) so the Stats page is a real destination, not one extra click past a
 // page that just lands on Home again. Read once at boot -- this page never changes the hash
 // itself, so there's nothing to keep in sync after the initial load.
-const HASH_PAGES = ['queue', 'merged', 'evolution', 'stats', 'settings'];
+const HASH_PAGES = ['queue', 'merged', 'minion', 'evolution', 'stats', 'settings'];
 
 async function boot() {
   if (BOOTING) return;
@@ -2527,7 +2573,7 @@ async function boot() {
     es.onopen = () => dot.classList.add('live');
     es.onerror = () => dot.classList.remove('live');
     es.addEventListener('run', e => { onRunEvent(JSON.parse(e.data)); renderQueue(); });
-    es.addEventListener('gh', e => { GH = JSON.parse(e.data); GH_LOADED = true; renderSidebar(); renderQueuePage(); renderMergedPage(); renderEvolutionPage(); renderHomePage(); });
+    es.addEventListener('gh', e => { GH = JSON.parse(e.data); GH_LOADED = true; renderSidebar(); renderQueuePage(); renderMergedPage(); renderMinionPage(); renderEvolutionPage(); renderHomePage(); });
     es.addEventListener('logline', e => appendLiveLine(JSON.parse(e.data)));
   } finally {
     BOOTING = false;
