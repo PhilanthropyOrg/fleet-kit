@@ -47,6 +47,11 @@ LOG_DIR = pathlib.Path(os.environ.get("FLEET_LOG_DIR") or os.path.expanduser("~/
 INBOX = LOG_DIR / "inbox.jsonl"
 DONE = LOG_DIR / "inbox.done"
 THREADS = LOG_DIR / "threads.jsonl"   # one row per filed issue: where to say "resolved" (fk#1106)
+# fk#1129 slice 3: one line per completed mail naming what happened to it -- "board item #N
+# created", "comment on #N", "answered ask #N", "steering issue #N", "dropped: <why>". Separate
+# file from DONE (a bare id-per-line list `pending()` dedupes against) so this addition cannot
+# change DONE's format or `pending()`'s `.split()` parsing of it.
+RESULTS = LOG_DIR / "inbox.results.jsonl"
 ALERT_ENV = pathlib.Path(os.environ.get("FLEET_ALERT_ENV") or "/home/ubuntu/.config/maxx/alert.env")
 ALERT_ENV = pathlib.Path(os.environ.get("FLEET_ALERT_ENV") or "/home/ubuntu/.config/maxx/alert.env")
 RESEND_API = os.environ.get("RESEND_API_URL_BASE", "https://api.resend.com")
@@ -460,13 +465,17 @@ def alert_title(check: str) -> str:
     return f"prod alert [{check}]"
 
 
-def file_or_comment_alert(row: dict, run=None) -> str:
+def file_or_comment_alert(row: dict, run=None) -> tuple[str, bool]:
     """fk#1129 slice 1: one open board item per `check`, ever -- a firing that finds it open
     appends ONE comment with the new firing's first line and stops; only a `check` with no
     open item yet creates one, priority-high on devops. Same search-by-title shape as
     file_backlog() (dedupe by exact open title), split out because an alert is keyed by
     `check`, not by the mail's subject verbatim (two firings of the same check rarely share
-    an identical subject line -- differing counts, timestamps)."""
+    an identical subject line -- differing counts, timestamps).
+
+    Returns (url, created) -- fk#1129 slice 3: `created` lets apply() say "board item #N
+    created" the first time and "comment on #N" every firing after, instead of one word for
+    both."""
     run = run or (lambda cmd: subprocess.run(cmd, capture_output=True, text=True, timeout=60))
     slug = repo_slug()
     if not slug:
@@ -482,14 +491,14 @@ def file_or_comment_alert(row: dict, run=None) -> str:
                 if (it.get("title") or "").strip().lower() == title.strip().lower():
                     run(["gh", "issue", "comment", "--repo", slug, str(it["number"]),
                          "--body", f"Fired again: {first_line}"[:1500]])
-                    return it.get("url") or f"https://github.com/{slug}/issues/{it['number']}"
+                    return it.get("url") or f"https://github.com/{slug}/issues/{it['number']}", False
         except (json.JSONDecodeError, KeyError, TypeError):
             pass
     r = run(["gh", "issue", "create", "--repo", slug, "--label", "fleet:backlog,lane:devops,fleet:priority-high",
              "--title", title, "--body", f"{first_line}\n\nFiled by intake from {row.get('from') or row.get('source')} (fk#1129)."])
     if r.returncode != 0:
         raise RuntimeError((r.stderr or r.stdout).strip()[:300])
-    return r.stdout.strip().splitlines()[-1]
+    return r.stdout.strip().splitlines()[-1], True
 
 
 def apply(row: dict, run=None, reply=None) -> dict:
@@ -506,19 +515,24 @@ def apply(row: dict, run=None, reply=None) -> dict:
     reply = reply or send_reply
     kind = row.get("kind") or classify(row)
     if kind == "alert" and row.get("check"):
+        result = f"dropped: {row['check']} NOT filed"
         try:
-            url = file_or_comment_alert(row, run=run)
+            url, created = file_or_comment_alert(row, run=run)
+            m = re.search(r"/issues/(\d+)", url or "")
+            num = m.group(1) if m else "?"
+            result = f"board item #{num} created" if created else f"comment on #{num}"
             log(f"applied {row.get('id')}: alert[{row['check']}] -> {url}")
         except Exception as exc:  # noqa: BLE001
             log(f"applied {row.get('id')}: alert[{row.get('check')}] NOT filed: {exc}")
         if row.get("id"):
-            mark_done(row["id"])
+            mark_done(row["id"], result=result)
         return {"lines": [], "free_text": "", "done": True}
     if kind in ("question", "github", "monitoring"):
         # Logged only: question is already notified by the product; github/monitoring are
         # kept for the morning-brief digest a later PR reads, not filed as board items here.
+        result = "dropped: already handled by the product" if kind == "question" else "dropped: no action needed"
         if row.get("id"):
-            mark_done(row["id"])
+            mark_done(row["id"], result=result)
         return {"lines": [], "free_text": "", "done": True}
     if row.get("trusted") is False:
         # Not Reif, and not one of the machine kinds above: no ask gets answered and nothing
@@ -528,6 +542,7 @@ def apply(row: dict, run=None, reply=None) -> dict:
         return {"lines": [], "free_text": row.get("text") or "", "done": False}
     parsed = parse_reply(row.get("text") or "")
     lines = answer_asks(parsed["answers"], run=run)
+    results = [f"answered ask #{a['ask_id']}" for a in parsed["answers"]]
     free = parsed["free_text"]
     title = backlog_title(row.get("subject") or "")
     to = notify_address(row.get("from") or "")
@@ -536,8 +551,12 @@ def apply(row: dict, run=None, reply=None) -> dict:
             url = file_backlog(title, free, row.get("from") or "", run=run)
             lines.append(f"backlog item filed: {url}")
             record_thread(url, row, to)
+            m = re.search(r"/issues/(\d+)", url or "")
+            num = m.group(1) if m else "?"
+            results.append(f"steering issue #{num}" if kind == "forward" else f"board item #{num} created")
         except Exception as exc:  # noqa: BLE001
             lines.append(f"backlog item NOT filed: {exc}")
+            results.append(f"dropped: filing failed ({exc})")
         free = ""
     done = not free
     if lines:
@@ -546,7 +565,7 @@ def apply(row: dict, run=None, reply=None) -> dict:
               row.get("message_id"))
         log(f"applied {row.get('id')}: " + "; ".join(lines))
     if done and row.get("id"):
-        mark_done(row["id"])
+        mark_done(row["id"], result="; ".join(results) if results else "")
     return {"lines": lines, "free_text": free, "done": done}
 
 
@@ -565,10 +584,85 @@ def pending() -> list[dict]:
     return rows
 
 
-def mark_done(email_id: str) -> None:
+def mark_done(email_id: str, result: str = "") -> None:
+    """Mark one mail processed, and -- fk#1129 slice 3 -- record what happened to it, so a
+    later reader (the morning brief's "Came in yesterday" section) can say more than a count.
+    `result` is a short plain-language line: "board item #N created", "comment on #N",
+    "answered ask #N", "steering issue #N", "dropped: <why>", or "" when nothing happened
+    (kept, no action -- read as "pending" by came_in()). DONE keeps its old bare-id-per-line
+    shape untouched; the result goes in a separate file so pending()'s `.split()` dedupe never
+    sees it."""
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     with open(DONE, "a") as fh:
         fh.write(email_id + "\n")
+    if result:
+        with open(RESULTS, "a") as fh:
+            fh.write(json.dumps({"id": email_id, "result": result, "at": time.time()}) + "\n")
+
+
+def _result_bucket(result: str) -> str:
+    """One result line -> the phrase it rolls up under: "board item #12 created" and "board
+    item #12 created" both roll up as "board item"; "comment on #12" as "comment"; "answered
+    ask #3" as "answered ask"; "steering issue #9" as "steering issue"; "dropped: ..." as
+    "dropped"; anything else (including "pending") passes through as itself."""
+    if result.startswith("board item"):
+        return "board item"
+    if result.startswith("comment on"):
+        return "comment"
+    if result.startswith("answered ask"):
+        return "answered ask"
+    if result.startswith("steering issue"):
+        return "steering issue"
+    if result.startswith("dropped"):
+        return "dropped"
+    return result
+
+
+def _plural(n: int, word: str) -> str:
+    return f"{n} {word}" if n == 1 else f"{n} {word}s"
+
+
+def came_in(since_ts: float) -> dict:
+    """fk#1129 slice 3: every intake row received since `since_ts`, grouped by `kind`, for the
+    morning brief's "Came in yesterday" section. Returns:
+      counts   -- {kind: n}, total rows per kind
+      summary  -- {kind: "1 board item, 2 comments"}, the bucketed-result rollup per kind
+      lines    -- {kind: [line, ...]}, one raw result line per row (mark_done()'s `result`,
+                  or "pending" for a row not yet applied / applied with nothing to report)
+    Rows missing `kind` (pre-fk#1129 rows written before classification existed) are read as
+    "unknown" rather than dropped, so an old row does not silently vanish from the count."""
+    results: dict[str, str] = {}
+    if RESULTS.exists():
+        for line in RESULTS.read_text(errors="ignore").splitlines():
+            try:
+                r = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if r.get("id"):
+                results[r["id"]] = r.get("result") or "pending"
+    counts: dict[str, int] = {}
+    lines: dict[str, list[str]] = {}
+    if INBOX.exists():
+        for line in INBOX.read_text(errors="ignore").splitlines():
+            try:
+                r = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if float(r.get("received_at") or 0) < since_ts:
+                continue
+            kind = r.get("kind") or "unknown"
+            counts[kind] = counts.get(kind, 0) + 1
+            lines.setdefault(kind, []).append(results.get(r.get("id"), "pending"))
+    summary: dict[str, str] = {}
+    for kind, kind_lines in lines.items():
+        buckets: dict[str, int] = {}
+        for result in kind_lines:
+            b = _result_bucket(result)
+            buckets[b] = buckets.get(b, 0) + 1
+        summary[kind] = ", ".join(_plural(n, b) for b, n in buckets.items())
+    dropped_total = sum(1 for kind_lines in lines.values() for result in kind_lines
+                        if _result_bucket(result) == "dropped")
+    return {"counts": counts, "summary": summary, "lines": lines, "dropped_total": dropped_total}
 
 
 def main(argv=None) -> int:
@@ -579,11 +673,15 @@ def main(argv=None) -> int:
     p = sub.add_parser("parse"); p.add_argument("file")
     ap_ = sub.add_parser("apply"); ap_.add_argument("id")
     sub.add_parser("resolve", help="reply 'Resolved' on every filed thread whose issue has closed (fk#1106)")
+    ci = sub.add_parser("came-in", help="counts + what happened, by kind, since N hours ago (fk#1129 slice 3)")
+    ci.add_argument("--since-hours", type=float, default=24)
     a = ap.parse_args(argv)
     if a.cmd == "resolve":
         for line in resolve():
             print(line)
         return 0
+    if a.cmd == "came-in":
+        json.dump(came_in(time.time() - a.since_hours * 3600), sys.stdout, indent=1); print(); return 0
     if a.cmd == "apply":
         rows = [r for r in pending() if r["id"] == a.id]
         if not rows:

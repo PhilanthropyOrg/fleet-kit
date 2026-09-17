@@ -41,6 +41,7 @@ import urllib.request
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import plan_rank  # noqa: E402 -- one shared plan-path resolver, fk#559 VP review fix 1
+import inbox  # noqa: E402 -- fk#1129 slice 3: came_in() reads the same intake store inbox.py owns
 
 KIT = pathlib.Path(__file__).resolve().parent.parent
 LOG_DIR = pathlib.Path(os.environ.get("FLEET_LOG_DIR") or os.path.expanduser("~/Library/Logs/fleet-kit"))
@@ -262,6 +263,15 @@ def pages(repo: str | None = None) -> list[str]:
     return sorted(found)
 
 
+def came_in_since(now: dt.datetime) -> dict:
+    """fk#1129 slice 3: what landed in the intake store in the last 24h Central-day window
+    (the same window the morning brief already reasons in, per messenger_brief.py's CENTRAL
+    constant), regardless of the brief's own `since_hours` -- "Came in yesterday" always means
+    a day, not whatever the calling slot's lookback happens to be."""
+    since_ts = (now - dt.timedelta(hours=24)).timestamp()
+    return inbox.came_in(since_ts)
+
+
 def collect(since_hours: float) -> dict:
     now = dt.datetime.now(dt.timezone.utc)
     since = now - dt.timedelta(hours=since_hours)
@@ -284,6 +294,7 @@ def collect(since_hours: float) -> dict:
         "plan_bets": plan_bets(),
         "vision": vision(),
         "pages": pages(),
+        "came_in": came_in_since(now),
         "app_url": os.environ.get("FLEET_PUBLIC_APP_URL", "https://philanthropy.org"),
         "console_url": os.environ.get("FLEET_CONSOLE_URL", "https://dino.luckymachines.co/fleet/philanthropy/"),
     }

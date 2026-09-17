@@ -43,7 +43,10 @@ counts plus the notable ones: killed, timed out, budget-declined, and every
 gru/jefe/dumbledore/datta outcome line), `deploys`, `plan_bets` (the learner's plan, bets in
 order), `vision` (the objective, key results, where we are, and the checkpoints on the number,
 straight from the product's docs/VISION.md and plan), `pages` (every fixed admin page the
-product serves, as URLs), `app_url` and `console_url` (the fleet console, where he answers
+product serves, as URLs), `came_in` (fk#1129 slice 3: everything that landed in the intake
+store in the last 24h -- `counts` per kind, `summary` per kind ("1 board item, 2 comments"),
+`lines` per kind (the raw per-row result, or "pending"), `dropped_total`), `app_url` and
+`console_url` (the fleet console, where he answers
 asks).
 
 ## Step 2: write the brief -- the strategy first, then what moved it, then his one job
@@ -74,6 +77,18 @@ older KR1/KR2/KR3 numbering, and the 100,000-entities goal it belonged to, were 
   one sentence, then one table with a row for THE NUMBER and one for each key result:
   what it measures (plain), where it is now, the target, the next checkpoint date from
   `vision.checkpoints`, and the 7-day change. Then one sentence: did last night move any row.
+- `## Came in yesterday` -- fk#1129: everything that landed in the intake store (email,
+  webhooks, pages) in the last 24h, so nothing needs his own inbox. One line per kind in
+  `came_in.counts`, plain words not the raw kind name (say "alerts" not "alert", "questions"
+  not "question", "forwards" not "forward", "GitHub notifications" not "github"): the count,
+  then `came_in.summary[kind]` in parens -- `Alerts: 3 (1 board item, 2 comments)`. Then up to
+  8 lines total across all kinds of what became what, pulled from `came_in.lines`, in plain
+  words with the issue number linked (`board item #412 created`, `comment added to #412`,
+  `answered ask #7`, `steering issue #55 filed`) -- skip any line that just says "pending",
+  those aren't done yet. End with one line: `Dropped N (duplicates/questions the product
+  already handled)` using `came_in.dropped_total` -- 0 is fine, still say it. If every count in
+  `came_in.counts` is zero (or the key itself is empty), the whole section is one line:
+  "Nothing came in." -- never a blank heading with nothing under it.
 - `## What landed, and what it moved` -- merged PRs, each one line: what a person can now do,
   **See it: <live URL>**, the PR link, then an arrow to the row it moves (`-> the number`,
   `-> interactions`, `-> sign-ups`, `-> time to first interaction`, or `-> keeps the fleet

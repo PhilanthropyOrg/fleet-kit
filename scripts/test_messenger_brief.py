@@ -7,6 +7,7 @@ Run: python3 scripts/test_messenger_brief.py
 """
 from __future__ import annotations
 
+import datetime as dt
 import json
 import sys
 import tempfile
@@ -74,6 +75,42 @@ class CollectIncludesWorldClassOpenTests(unittest.TestCase):
              unittest.mock.patch.object(mb, "pages", return_value=[]):
             out = mb.collect(14)
         self.assertEqual(out["world_class_open"], sentinel)
+
+
+class CollectIncludesCameInTests(unittest.TestCase):
+    """fk#1129 slice 3: collect() wires came_in_since() through into the JSON the charter
+    reads for the "Came in yesterday" section."""
+
+    def test_collect_carries_the_came_in_key(self):
+        sentinel = {"counts": {"alert": 3}, "summary": {"alert": "1 board item, 2 comments"},
+                    "lines": {"alert": ["board item #412 created"]}, "dropped_total": 0}
+        with unittest.mock.patch.object(mb, "came_in_since", return_value=sentinel), \
+             unittest.mock.patch.object(mb, "world_class_open", return_value=[]), \
+             unittest.mock.patch.object(mb, "number_header", return_value=""), \
+             unittest.mock.patch.object(mb, "gh_prs", return_value=[]), \
+             unittest.mock.patch.object(mb, "asks_open", return_value=[]), \
+             unittest.mock.patch.object(mb, "runs_since", return_value={"by_member": {}, "notable": []}), \
+             unittest.mock.patch.object(mb, "deploys_since", return_value=[]), \
+             unittest.mock.patch.object(mb, "plan_bets", return_value=""), \
+             unittest.mock.patch.object(mb, "vision", return_value={}), \
+             unittest.mock.patch.object(mb, "pages", return_value=[]):
+            out = mb.collect(14)
+        self.assertEqual(out["came_in"], sentinel)
+
+    def test_came_in_since_always_uses_a_24h_window_regardless_of_since_hours(self):
+        """The brief's own since_hours (14 for morning, 6 for afternoon) must not shrink the
+        intake window -- "Came in yesterday" always means a day."""
+        seen = {}
+
+        def fake_came_in(since_ts):
+            seen["since_ts"] = since_ts
+            return {}
+
+        now = dt.datetime(2026, 9, 17, 12, 0, tzinfo=dt.timezone.utc)
+        with unittest.mock.patch.object(mb.inbox, "came_in", side_effect=fake_came_in):
+            mb.came_in_since(now)
+        expected = (now - dt.timedelta(hours=24)).timestamp()
+        self.assertAlmostEqual(seen["since_ts"], expected, delta=1)
 
 
 class PlanBetsTests(unittest.TestCase):
