@@ -90,6 +90,28 @@ def allowed_sender(addr: str, allow: str) -> bool:
     return bare in {a.strip().lower() for a in (allow or "").split(",") if a.strip()}
 
 
+# fk#1129 slice 1: the intake epic ("there should be a central input dump where all the data
+# inputs can go via email, webhooks, etc.") starts here -- widen who is ACCEPTED without
+# widening who can STEER. FLEET_INBOX_FROM (Reif's own addresses) stays the only allowlist
+# that can answer an ask or write free text into steering; FLEET_INTAKE_FROM is everything
+# else the fleet already knows how to triage on its own: the product's own notifier, and the
+# two machine senders that page/notify by mail today. Bare address, same matching as
+# allowed_sender() above.
+INTAKE_FROM_DEFAULT = "hello@philanthropy.org,noreply@digitalocean.com,support@digitalocean.com,notifications@github.com"
+
+
+def bare_address(addr: str) -> str:
+    m = re.search(r"<([^>]+)>", addr or "")
+    return (m.group(1) if m else (addr or "")).strip().lower()
+
+
+def intake_allowed(addr: str, allow: str | None = None) -> bool:
+    """FLEET_INTAKE_FROM (default INTAKE_FROM_DEFAULT): accepted and stored, but never treated
+    as a steering reply -- no ask-answer parsing, no free-text-to-steering path."""
+    allow = os.environ.get("FLEET_INTAKE_FROM", INTAKE_FROM_DEFAULT) if allow is None else allow
+    return bare_address(addr) in {a.strip().lower() for a in (allow or "").split(",") if a.strip()}
+
+
 def resend_key() -> str:
     if os.environ.get("RESEND_API_KEY"):
         return os.environ["RESEND_API_KEY"]
@@ -150,21 +172,29 @@ def untrusted_budget_ok(now: float | None = None) -> bool:
 
 def store(email: dict, event: dict, trusted: bool = True) -> dict:
     text = email.get("text") or html_to_text(email.get("html") or "")
+    sender = email.get("from") or event.get("from")
+    subject = email.get("subject") or event.get("subject")
+    mail = {"from": sender, "subject": subject, "text": strip_quotes(text)}
     row = {
         "id": email.get("id") or event.get("email_id"),
         "received_at": time.time(),
         "trusted": bool(trusted),
-        "from": email.get("from") or event.get("from"),
-        "subject": email.get("subject") or event.get("subject"),
-        "text": strip_quotes(text),
+        "from": sender,
+        "subject": subject,
+        "text": mail["text"],
         "full_text": text[:20000],
         "in_reply_to": (email.get("headers") or {}).get("in-reply-to") or (email.get("headers") or {}).get("In-Reply-To"),
         "message_id": email.get("message_id"),
+        "kind": classify(mail),
+        "source": bare_address(sender),
     }
+    check = alert_check(subject)
+    if check:
+        row["check"] = check
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     with open(INBOX, "a") as fh:
         fh.write(json.dumps(row) + "\n")
-    log(f"stored reply {row['id']} from {row['from']} subject={row['subject']!r} chars={len(row['text'])}")
+    log(f"stored reply {row['id']} from {row['from']} subject={row['subject']!r} chars={len(row['text'])} kind={row['kind']}")
     return row
 
 
@@ -215,6 +245,50 @@ def backlog_title(subject: str) -> str | None:
 
 def backlog_labels(title: str) -> str:
     return "fleet:backlog,fleet:priority-high,lane:devops" if title.startswith("prod alert [") else "fleet:backlog"
+
+
+# fk#1129 slice 1: classification is the deterministic front door every mail passes through
+# before triage decides anything. One kind, from sender + subject + body alone -- no model,
+# so it never blocks the receiver and every kind stays testable with a dict literal.
+QUESTION_SUBJECT_RE = re.compile(r"^\s*(?:(?:re|fwd?|fw)\s*:\s*)*(?:new question from|.+ messaged you on 990 scout)\b", re.I)
+ALERT_CHECK_RE = re.compile(r"990 scout prod alert\s*\[([^\]]+)\]", re.I)
+
+GITHUB_SENDER_RE = re.compile(r"@(?:notifications\.)?github\.com$", re.I)
+DIGITALOCEAN_SENDER_RE = re.compile(r"@(?:noreply\.)?digitalocean\.com$", re.I)
+
+
+def alert_check(subject: str) -> str | None:
+    """'990 Scout prod alert [app_error]: 20 timeouts' -> 'app_error'; else None."""
+    m = ALERT_CHECK_RE.search(subject or "")
+    return m.group(1).strip() if m else None
+
+
+def classify(mail: dict) -> str:
+    """kind for one mail, from its from/subject/text alone: ask_answer | steering | question |
+    alert | forward | github | monitoring | unknown. Reif's own addresses (FLEET_INBOX_FROM)
+    can steer; everyone else lands on the fixed machine kinds or unknown -- never steering,
+    never an ask answer, however the text is shaped (an untrusted sender writing "yes 12" is
+    not Reif answering ask 12)."""
+    sender = mail.get("from") or ""
+    subject = mail.get("subject") or ""
+    bare = bare_address(sender)
+    reif = {a.strip().lower() for a in (os.environ.get("FLEET_INBOX_FROM") or "").split(",") if a.strip()}
+    if alert_check(subject):
+        return "alert"
+    if QUESTION_SUBJECT_RE.match(subject):
+        return "question"
+    if GITHUB_SENDER_RE.search(bare):
+        return "github"
+    if DIGITALOCEAN_SENDER_RE.search(bare):
+        return "monitoring"
+    if bare in reif:
+        if FORWARD_RE.match(subject):
+            return "forward"
+        text = mail.get("text") or ""
+        return "ask_answer" if parse_reply(text)["answers"] else "steering"
+    if intake_allowed(sender):
+        return "unknown"
+    return "unknown"
 
 
 def repo_slug() -> str:
@@ -382,14 +456,75 @@ def resolve(run=None, reply=None, now: float | None = None) -> list[str]:
     return out
 
 
+def alert_title(check: str) -> str:
+    return f"prod alert [{check}]"
+
+
+def file_or_comment_alert(row: dict, run=None) -> str:
+    """fk#1129 slice 1: one open board item per `check`, ever -- a firing that finds it open
+    appends ONE comment with the new firing's first line and stops; only a `check` with no
+    open item yet creates one, priority-high on devops. Same search-by-title shape as
+    file_backlog() (dedupe by exact open title), split out because an alert is keyed by
+    `check`, not by the mail's subject verbatim (two firings of the same check rarely share
+    an identical subject line -- differing counts, timestamps)."""
+    run = run or (lambda cmd: subprocess.run(cmd, capture_output=True, text=True, timeout=60))
+    slug = repo_slug()
+    if not slug:
+        raise RuntimeError("FLEET_REPO_URL does not name a GitHub repo")
+    title = alert_title(row["check"])
+    first_line = (row.get("text") or row.get("subject") or "").strip().splitlines()[0:1]
+    first_line = first_line[0] if first_line else row.get("subject") or ""
+    r = run(["gh", "issue", "list", "--repo", slug, "--state", "open", "--search", f'"{title}" in:title',
+             "--json", "number,title,url", "--limit", "20"])
+    if r.returncode == 0:
+        try:
+            for it in json.loads(r.stdout or "[]"):
+                if (it.get("title") or "").strip().lower() == title.strip().lower():
+                    run(["gh", "issue", "comment", "--repo", slug, str(it["number"]),
+                         "--body", f"Fired again: {first_line}"[:1500]])
+                    return it.get("url") or f"https://github.com/{slug}/issues/{it['number']}"
+        except (json.JSONDecodeError, KeyError, TypeError):
+            pass
+    r = run(["gh", "issue", "create", "--repo", slug, "--label", "fleet:backlog,lane:devops,fleet:priority-high",
+             "--title", title, "--body", f"{first_line}\n\nFiled by intake from {row.get('from') or row.get('source')} (fk#1129)."])
+    if r.returncode != 0:
+        raise RuntimeError((r.stderr or r.stdout).strip()[:300])
+    return r.stdout.strip().splitlines()[-1]
+
+
 def apply(row: dict, run=None, reply=None) -> dict:
-    """The no-model half of one stored reply. Returns {"lines": [...], "free_text": str,
-    "done": bool}: done means nothing is left for the messenger and the row is marked."""
+    """The no-model half of one stored mail. Returns {"lines": [...], "free_text": str,
+    "done": bool}: done means nothing is left for the messenger and the row is marked.
+
+    fk#1129 slice 1: routes by `kind` first, machine kinds regardless of `trusted` --
+    otherwise an alert mailed by the box's own pager (never Reif, so always untrusted under
+    the old gate) sat pending forever waiting for a human to read it by hand. `question` is
+    already surfaced by the product itself, so it's marked done with no action; `github` and
+    `monitoring` are kept (done, no action) for a later digest pass (fk#1129 PR 3) rather than
+    filed sight unseen. Only `ask_answer`/`steering` ever touch an ask or steering -- gated on
+    `trusted` exactly as before, so a stranger can never answer ask #17 by guessing the shape."""
     reply = reply or send_reply
+    kind = row.get("kind") or classify(row)
+    if kind == "alert" and row.get("check"):
+        try:
+            url = file_or_comment_alert(row, run=run)
+            log(f"applied {row.get('id')}: alert[{row['check']}] -> {url}")
+        except Exception as exc:  # noqa: BLE001
+            log(f"applied {row.get('id')}: alert[{row.get('check')}] NOT filed: {exc}")
+        if row.get("id"):
+            mark_done(row["id"])
+        return {"lines": [], "free_text": "", "done": True}
+    if kind in ("question", "github", "monitoring"):
+        # Logged only: question is already notified by the product; github/monitoring are
+        # kept for the morning-brief digest a later PR reads, not filed as board items here.
+        if row.get("id"):
+            mark_done(row["id"])
+        return {"lines": [], "free_text": "", "done": True}
     if row.get("trusted") is False:
-        # Not Reif: no ask gets answered and nothing is filed by rule. The messenger reads it
-        # (garbage -> `inbox.py done`, real -> it files with the sender named) and no receipt
-        # goes back, so a stranger learns nothing about the fleet from mailing it.
+        # Not Reif, and not one of the machine kinds above: no ask gets answered and nothing
+        # is filed by rule. The messenger reads it (garbage -> `inbox.py done`, real -> it
+        # files with the sender named) and no receipt goes back, so a stranger learns nothing
+        # about the fleet from mailing it.
         return {"lines": [], "free_text": row.get("text") or "", "done": False}
     parsed = parse_reply(row.get("text") or "")
     lines = answer_asks(parsed["answers"], run=run)
