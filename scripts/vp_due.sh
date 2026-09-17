@@ -24,6 +24,16 @@ for item in json.load(sys.stdin).get("redo", []):
     for t in item.get("targets", [n]):
         print(f"{t}\t{n}\t{why}")
 ' 2>/dev/null)"
+# vp's own `enabled` flag gates the spawn, too. FLEET_RUN_NOW=1 below bypasses run_member's
+# enabled check on purpose (a human's "run it now" click), which made this loop the one path
+# that kept a disabled vp running: 1,095 runs / $261 in the 7 days to 2026-09-16 with
+# vp.fleet.json already at enabled:false. Redo minions still spawn -- those are verdicts
+# already given.
+VP_ENABLED="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("enabled", True))' "$KIT/members/vp/vp.fleet.json" 2>/dev/null)"
+if [ -n "$due" ] && [ "$VP_ENABLED" != "True" ]; then
+  log "vp enabled=false in spec -- not spawning for: $due"
+  due=""
+fi
 if [ -z "$due" ] && [ -z "$redo_lines" ]; then
   log "nothing due"
   exit 0

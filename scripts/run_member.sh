@@ -280,6 +280,32 @@ if [ "$ENABLED" != "True" ] && [ "${FLEET_RUN_NOW:-0}" != "1" ]; then
   exit 0
 fi
 
+# llm.pregate (fk#1093): a deterministic shell check that decides "is there anything to do"
+# BEFORE a model is spawned. the-fixer's charter said "call check.sh first, spend nothing on
+# green" and the model still cost $279/7d on 2,682 runs deciding that check.sh had said green.
+# A $0 decision belongs in shell. The pregate's full stdout is handed to the charter in
+# FLEET_PREGATE_OUTPUT and $LOG_DIR/<member>.pregate; a first word of `green` writes a quiet
+# record and exits. The charter must NOT re-run the check: check.sh dedups per SHA, so a second
+# call on a fire answers "green (already-fighting)" and mutes the fire the pass was spawned for.
+PREGATE=$(jget "['llm'].get('pregate', '')")
+if [ -n "$PREGATE" ] && [ "$DRY_RUN" -ne 1 ]; then
+  PREGATE_OUT="$(bash "$KIT_DIR/$PREGATE" 2>>"$LOG")"
+  printf '%s\n' "$PREGATE_OUT" > "$LOG_DIR/$MEMBER.pregate"
+  export FLEET_PREGATE_OUTPUT="$PREGATE_OUT"
+  case "$PREGATE_OUT" in
+    green*)
+      log "$MEMBER: pregate reported '$PREGATE_OUT' -- quiet, no model spawned"
+      printf 'Outcome: QUIET -- %s reported %s\nEvidence: %s ran in shell before any model was spawned (llm.pregate, fk#1093)\nSelf-critique: none -- deterministic pregate output, nothing to critique\n' \
+          "$(basename "$PREGATE")" "$PREGATE_OUT" "$PREGATE" \
+        | python3 "$KIT_DIR/scripts/run_report.py" \
+            --member "$MEMBER" --run-id "${MEMBER}-pregate-$$-$(date +%s)" --kind shell --exit-code 0 \
+            --pass-file - ${ITEM:+--item-id "$ITEM"} $LANE_FLAG >> "$LOG_DIR/runs.jsonl" 2>>"$LOG"
+      exit 0
+      ;;
+    *) log "$MEMBER: pregate reported '$PREGATE_OUT' -- proceeding to the model" ;;
+  esac
+fi
+
 # `-adhoc` in the run_id marks an operator-directed pass. It matters for CALIBRATION: gru
 # derives what a normal pass costs from real run records, and a one-off "go rescore everything"
 # is not a normal pass -- averaging it in would skew every future estimate. Filter these out
