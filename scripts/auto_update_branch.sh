@@ -204,6 +204,23 @@ done
 ARMED=0
 for pr in $(gh pr list --state open --json number,isDraft,autoMergeRequest \
               -q '.[] | select(.isDraft|not) | select(.autoMergeRequest==null) | .number' 2>/dev/null); do
+  # fleet-kit#1113: a PR the queue's own watchdog
+  # (scripts/ci/merge_queue_watchdog.py in the product repo) just pulled and labelled
+  # `ci:batch-red` still has a SUCCESS fleet-code-review verdict on its own head -- the batch
+  # failure is a merge-queue-only signal (this PR combined with whatever is queued ahead of
+  # it), invisible to the per-head verdict check below. Without this guard, this loop re-arms
+  # the PR every cadence tick the instant the queue naturally dequeues it, producing an
+  # enqueue/dequeue cycle roughly every 20 minutes indefinitely (measured live: PR #6235 on
+  # philanthropy cycled 21 times over 8.5h, blocking every PR queued behind it). The label
+  # clears itself on the next push (merge_queue_watchdog.py's own contract), which is also
+  # when this PR should become armable again.
+  labels=$(gh pr view "$pr" --json labels -q '[.labels[].name] | join(",")' 2>/dev/null || true)
+  case ",$labels," in
+    *,ci:batch-red,*)
+      log "PR #$pr: not armed -- labelled ci:batch-red by the merge-queue watchdog"
+      continue
+      ;;
+  esac
   # fleet-kit#523: never re-arm a head judge-judy blocked. fleet-code-review is not a required
   # check under the merge queue, so an armed BLOCKed PR simply merges. Newest status first.
   # gh#806: "error" (judge-judy gave up after MAX_PARSE_STRIKES schema-invalid runs) holds the
