@@ -5884,7 +5884,11 @@ def _console_run_panel_shows_everything_about_one_run_fk748():
     # are the behaviours, not the old whitespace.
     for needle in ('id="side"', 'id="sideBack"', 'width:33.333vw', '.side{width:100vw',
                    'data-run=', 'no written report for this run', '/api/pass_log', "e.key === 'Escape'",
-                   "section('Outcome', rec.outcome)", "section('Evidence', rec.evidence)", "section('Self-critique'"):
+                   "section('Outcome', rec.outcome)", "section('Evidence', rec.evidence)",
+                   # The self-critique section became critiqueSection() (Reif, 2026-09-18: a
+                   # critique with nothing to point at "is a soap opera, lots of words said, no
+                   # change"), so the needle is the grader, not the old plain section() call.
+                   "critiqueSection(rec.self_critique)", "What it improved"):
         assert needle in page, f"fleet_home.html lacks {needle!r}"
     # Reif 2026-09-09 "not clear that this is marie's purpose line" put a labelled Purpose block in
     # the drawer; Reif 2026-09-16 "purpose is doubled unnecessarily" -- the row under the name
