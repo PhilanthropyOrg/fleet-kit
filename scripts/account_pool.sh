@@ -255,7 +255,8 @@ _account_pool_budget_verdict() {
   fi
 }
 
-# _account_pool_order — print the accounts to try, soonest-reset FIRST.
+# _account_pool_order — print the accounts to try: most week-bank headroom FIRST (fk#1136),
+# soonest-reset as the tie-break and the fallback when a bank is unreadable.
 #
 # WHY (Reif, 2026-09-05): quota that resets in an hour is worth less than quota that resets in
 # five days, because the near-reset account loses whatever it did not spend. Draining the
@@ -338,16 +339,24 @@ _account_pool_week_reset() {
       -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" \
       -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"maxx_budget","arguments":{}}}' 2>/dev/null)
     local fresh
+    # fk#1136: the same call carries week_bank_pct -- the fleet-wide headroom quantity
+    # (maxx_reader.get_headroom's docstring) -- so cache it as a 4th field and let
+    # _account_pool_order sort on it. One curl, two facts.
+    local fresh bank
     fresh=$(python3 -c 'import json,sys
 d=json.load(sys.stdin); t=json.loads(d["result"]["content"][0]["text"]); v=t.get("week_reset")
 print(int(v)) if v else None' <<<"$out" 2>/dev/null)
+    bank=$(python3 -c 'import json,sys
+d=json.load(sys.stdin); t=json.loads(d["result"]["content"][0]["text"]); v=t.get("week_bank_pct")
+print(float(v)) if v is not None else None' <<<"$out" 2>/dev/null)
+    [[ "$bank" =~ ^-?[0-9]+(\.[0-9]+)?$ ]] || bank=""
     if [[ "$fresh" =~ ^[0-9]+$ ]]; then
       epoch="$fresh"
       mkdir -p "$(dirname "$ACCOUNT_POOL_WEEK_RESET_CACHE")" 2>/dev/null
       { [ -f "$ACCOUNT_POOL_WEEK_RESET_CACHE" ] && grep -v "^${account} " "$ACCOUNT_POOL_WEEK_RESET_CACHE"
-        echo "$account $epoch $now"; } > "${ACCOUNT_POOL_WEEK_RESET_CACHE}.tmp" 2>/dev/null
+        echo "$account $epoch $now${bank:+ $bank}"; } > "${ACCOUNT_POOL_WEEK_RESET_CACHE}.tmp" 2>/dev/null
       mv "${ACCOUNT_POOL_WEEK_RESET_CACHE}.tmp" "$ACCOUNT_POOL_WEEK_RESET_CACHE" 2>/dev/null
-      _account_pool_log "account=$account maxx week_reset=$epoch (in $((epoch - now))s)"
+      _account_pool_log "account=$account maxx week_reset=$epoch (in $((epoch - now))s) week_bank_pct=${bank:-unreadable}"
     else
       _account_pool_log "account=$account maxx week_reset unreadable, using cached=${epoch:-none}"
     fi
@@ -356,8 +365,25 @@ print(int(v)) if v else None' <<<"$out" 2>/dev/null)
   return 0
 }
 
+# _account_pool_week_bank <account> -- the cached week_bank_pct written by
+# _account_pool_week_reset (4th field), or nothing. Call the reset reader first.
+_account_pool_week_bank() {
+  local line bank
+  [ -f "$ACCOUNT_POOL_WEEK_RESET_CACHE" ] || return 0
+  line=$(awk -v a="$1" '$1==a' "$ACCOUNT_POOL_WEEK_RESET_CACHE" 2>/dev/null | tail -1)
+  bank=$(awk '{print $4}' <<<"$line")
+  [[ "$bank" =~ ^-?[0-9]+(\.[0-9]+)?$ ]] && echo "$bank"
+  return 0
+}
+
+# fk#1136 (Reif, 2026-09-17: "check every account that has been authorised, and then try the
+# one with the most headroom"): among HEALTHY accounts, the one with the largest week bank
+# goes first; soonest weekly reset is only the tie-break. Live that night: gmail (handle reif,
+# week_bank -32.9) sorted ahead of a fresh tgp (+1.0) purely because gmail's week reset was
+# 2.5 days sooner, so gru paced the whole evening against the drained meter. An account whose
+# bank is unreadable keeps the old soonest-reset rule, after every account with a reading.
 _account_pool_order() {
-  local account epoch now wr known="" lapsed="" weekly="" unknown=""
+  local account epoch now wr bank known="" lapsed="" weekly="" weekly_nobank="" unknown=""
   now=$(date +%s)
   for account in $ACCOUNT_POOL_ORDER; do
     epoch=""
@@ -371,17 +397,22 @@ _account_pool_order() {
     else
       # gh#616: healthy account -- ask maxx when its WEEK resets and sort on that.
       wr=$(_account_pool_week_reset "$account")
-      if [[ "$wr" =~ ^[0-9]+$ ]]; then
-        weekly="${weekly}${wr} ${account}"$'\n'
+      bank=$(_account_pool_week_bank "$account")
+      if [[ "$wr" =~ ^[0-9]+$ ]] && [ -n "$bank" ]; then
+        weekly="${weekly}${bank} ${wr} ${account}"$'\n'
+      elif [[ "$wr" =~ ^[0-9]+$ ]]; then
+        weekly_nobank="${weekly_nobank}${wr} ${account}"$'\n'
       else
         unknown="${unknown}${account}"$'\n'
       fi
     fi
   done
+  [ -n "$weekly" ] && _account_pool_log "order by week bank: $(printf '%s' "$weekly" | sort -k1,1gr -k2,2n | awk '{printf "%s(bank=%s) ", $3, $1}')"
   {
     [ -n "$known" ] && printf '%s' "$known" | sort -n | awk '{print $2}'
     [ -n "$lapsed" ] && printf '%s' "$lapsed" | sort -n | awk '{print $2}'
-    [ -n "$weekly" ] && printf '%s' "$weekly" | sort -n | awk '{print $2}'
+    [ -n "$weekly" ] && printf '%s' "$weekly" | sort -k1,1gr -k2,2n | awk '{print $3}'
+    [ -n "$weekly_nobank" ] && printf '%s' "$weekly_nobank" | sort -n | awk '{print $2}'
     [ -n "$unknown" ] && printf '%s' "$unknown"
   } | grep -v '^$' || true
 }
