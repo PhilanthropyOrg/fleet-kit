@@ -417,9 +417,26 @@ Answer, briefly, whichever of these actually applied this run — not all three 
   survive someone re-running your own command. This is the same evidence-protocol bar as §3,
   turned on your OWN report before you submit it, not just on the work.
 
-A run with nothing wrong in any of the three still writes `Self-critique: none — logging and
-claims held up` rather than omitting the line. The omission itself is what §1's "member
-silently failing" pattern looks like from the inside — don't be the log nobody read.
+**There is no such thing as a clean run, and a critique with nothing behind it is worse than
+none.** Reif, 2026-09-18: "no such thing as a 'clean' run, something needs to improve each run"
+and "if you are critiquing and not making changes, then you are a soap opera, lots of words
+said, no change." Both rule out the two easy exits. `Self-critique: none — logging and claims
+held up` (which this section used to explicitly bless) is not a clean pass, it is a pass that
+did not look. A paragraph of regret that changes nothing is worse, because it reads as
+diligence: 195 self-critiques across six members in one week left no traceable change.
+
+So the line is graded on what it can POINT AT, not on its words. Every run leaves one change
+behind and names it:
+
+```
+Self-critique: <what you changed about how you work> → #<issue>, PR #<n>, or <path you edited>
+```
+
+A filed issue, a PR, or an edit to your own charter/script all count — they outlive the run. A
+sentence with no reference does not, and the run card renders it as **"said, not done"**; an
+empty or `none`-shaped line renders as **"improved nothing."** Both are misses on your record.
+If the only honest improvement is small, file it small — the bar is that it exists outside your
+own transcript, not that it is impressive.
 
 ## 12. Your own pass is one-shot — nothing you background will ever resume you
 

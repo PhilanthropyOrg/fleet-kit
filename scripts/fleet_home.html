@@ -142,6 +142,17 @@
   .side .txt.report{border-left:3px solid var(--accent);padding-left:10px}
   .side .none{color:var(--muted);font-style:italic;font-size:14px}
   .side .facts{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:14px} .side .facts dt{color:var(--muted)} .side .facts dd{margin:0}
+  /* The run id is the only handle a human has on one pass -- it is what you paste into a
+     grep of the logs, or into a message to another agent. It was plain dim text, so the
+     only way to get it was a hand selection that kept missing the last character. */
+  .side .runid{display:inline-flex;align-items:center;gap:6px;font:12px/1.3 var(--mono);color:var(--muted);background:var(--chip,#f4f5f7);border:1px solid var(--line,#e3e5e9);border-radius:5px;padding:2px 6px;cursor:pointer;overflow-wrap:anywhere;text-align:left}
+  .side .runid:hover{color:var(--ink);border-color:var(--accent)}
+  .side .runid .rc{font:11px var(--mono);color:var(--faint);flex:none}
+  /* "Self-critique: none" is not a clean run, it is a run that did not look. Render it as the
+     miss it is rather than as a tidy green fact (Reif, 2026-09-18: "no such thing as a clean
+     run, something needs to improve each run"). */
+  .side .txt.nocrit{border-left:3px solid var(--warn,#b8860b);padding-left:10px;color:var(--muted)}
+  .side .critflag{margin-top:6px;font-size:12.5px;color:var(--warn,#b8860b)}
   .side pre.live{font:12px/1.5 var(--mono);background:var(--tint);border:1px solid var(--rule);border-radius:8px;padding:8px 10px;max-height:40vh;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere}
   @media (max-width:760px){
     .layout{grid-template-columns:1fr}
@@ -230,6 +241,9 @@ async function postJSON(path, body) {
 
 let OPEN = null, OPEN_RUN = null, LIVE_TIMER = null;
 let PAGE = (location.hash.replace('#', '') === 'roster') ? 'roster' : 'home';
+// A run id in the URL opens that run's panel on load, so a pasted link lands a second human
+// (or a second session) on the exact pass being discussed, not on the home page.
+function runFromHash() { const m = location.hash.match(/(?:^|[#&])run=([^&]+)/); return m ? decodeURIComponent(m[1]) : null; }
 let STATE = { members: [], runs: [], gh: {}, kpi: {}, build: null, fleet: null, metrics: [] };
 
 // Two waves (gh#553 round 2): the tiles and the banner draw off the first, everything else off the second.
@@ -241,6 +255,9 @@ async function load() {
   ]);
   STATE = { ...STATE, runs: snap.runs || [], gh: snap.gh || {}, fleet, metrics: metrics.metrics || [] };
   renderChrome(); renderBanner(); renderStats();
+  // A deep-linked run opens as soon as the runs themselves land (wave one), not after the
+  // roster does -- the whole point of the link is that the reader arrives ON the pass.
+  if (!OPEN_RUN) { const r = runFromHash(); if (r) { OPEN_RUN = r; renderRun(); } }
   const [members, kpi, build] = await Promise.all([
     getJSON('/api/members').catch(() => ({members: []})),
     getJSON('/api/kpi').catch(() => ({kpi: []})),
@@ -453,6 +470,29 @@ function linkify(text) { const base = repoBase(), h = esc(text); return base ? h
 function statusClass(rec) { const st = rec && rec.status; if (!st || st === 'started') return ''; if (st === 'ok') return 'ok'; if (st === 'quiet' || st === 'budget_declined' || st === 'reported_nothing') return 'warn'; return 'bad'; }
 function findRun(id) { const all = STATE.runs.filter(r => r.run_id === id); return all.find(r => r.status !== 'started') || all[0] || null; }
 function section(title, text, cls) { return `<h2>${esc(title)}</h2>${text ? `<div class="txt ${cls || ''}">${linkify(text)}</div>` : `<div class="none">none</div>`}`; }
+// Reif, 2026-09-18: "no such thing as a 'clean' run, something needs to improve each run" and
+// "if you are critiquing and not making changes, then you are a soap opera, lots of words said,
+// no change." Both land on the same field. A pass that writes `Self-critique: none -- clean
+// single-pass verdict` did not look; a pass that writes a paragraph of regret and changes
+// nothing is worse, because it reads as diligence. So this section grades on a REFERENCE --
+// an issue, a PR, or a file the pass actually edited -- not on the presence of words. 195
+// self-critiques across six members in one week produced no traceable change; that is the
+// pattern being killed here.
+const CRIT_NONE = /^(none|n\/a|nothing|no findings?|clean)\b[\s\S]{0,60}$/i;
+// What counts as a change that outlived the run: a filed item (#123), a PR link, or a path it
+// edited. Anything else is a sentence.
+const CRIT_REF = /(^|[^\w/])#\d{2,6}\b|\/(?:pull|issues)\/\d+|[\w.\-\/]+\.(?:py|sh|md|html|js|json|ya?ml)(?::\d+)?/;
+function critiqueState(text) {
+  const t = (text || '').trim();
+  if (!t || CRIT_NONE.test(t)) return 'empty';
+  return CRIT_REF.test(t) ? 'changed' : 'said';
+}
+function critiqueSection(text) {
+  const state = critiqueState(text);
+  if (state === 'changed') return `<h2>What it improved</h2><div class="txt">${linkify(text.trim())}</div>`;
+  if (state === 'said') return `<h2>What it improved</h2><div class="txt nocrit">${linkify(text.trim())}<div class="critflag">Said, not done — no issue, PR or file behind it. A critique with nothing to point at did not change anything.</div></div>`;
+  return `<h2>What it improved</h2><div class="txt nocrit">This pass improved nothing about itself, and named nothing to improve. Every run should leave one concrete change behind — a filed issue, a PR, or an edit to its own charter or script.</div>`;
+}
 function renderRun() {
   const side = $('side'), back = $('sideBack');
   const rec = OPEN_RUN && findRun(OPEN_RUN);
@@ -464,8 +504,8 @@ function renderRun() {
   side.innerHTML = `
     <div class="top"><span class="name">${esc((m && m.spec.emoji) || '')} ${esc(rec.member)}</span><button class="close" data-act="closeRun" aria-label="close">×</button></div>
     <div class="when">${esc(ago(rec.ts))} · ${esc(new Date(rec.ts * 1000).toLocaleString('en-US', {timeZone: 'America/Chicago', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'}))} CT · <span class="badge ${statusClass(rec)}">${esc(live ? 'running' : rec.status || '')}</span></div>
-    <dl class="facts"><dt>Took</dt><dd>${esc(dur)}</dd><dt>Cost</dt><dd>${t.cost_usd !== undefined ? esc(money(t.cost_usd)) : '--'}${t.num_turns ? ` · ${esc(t.num_turns)} turns` : ''}</dd>${links ? `<dt>Links</dt><dd>${links}</dd>` : ''}<dt>Run</dt><dd style="overflow-wrap:anywhere;color:var(--muted);font-size:12px">${esc(rec.run_id || '')}</dd></dl>
-    ${live ? `<h2>Report</h2><div class="none">still running; the outcome and report land here when the pass ends</div><h2>Live transcript</h2><pre class="live" id="liveLog">loading…</pre>` : `${rec.plain ? section('In plain words', rec.plain, 'plain') : ''}${section('Outcome', rec.outcome)}${section('Evidence', rec.evidence)}${rec.report ? section('Report', rec.report, 'report') : `<h2>Report</h2><div class="none">no written report for this run</div>`}${section('Self-critique', rec.self_critique)}`}`;
+    <dl class="facts"><dt>Took</dt><dd>${esc(dur)}</dd><dt>Cost</dt><dd>${t.cost_usd !== undefined ? esc(money(t.cost_usd)) : '--'}${t.num_turns ? ` · ${esc(t.num_turns)} turns` : ''}</dd>${links ? `<dt>Links</dt><dd>${links}</dd>` : ''}<dt>Run</dt><dd>${rec.run_id ? `<button class="runid" data-act="copyRun" data-run-id="${esc(rec.run_id)}" title="click to copy this run id and its link">${esc(rec.run_id)}<span class="rc">copy</span></button>` : '--'}</dd></dl>
+    ${live ? `<h2>Report</h2><div class="none">still running; the outcome and report land here when the pass ends</div><h2>Live transcript</h2><pre class="live" id="liveLog">loading…</pre>` : `${rec.plain ? section('In plain words', rec.plain, 'plain') : ''}${section('Outcome', rec.outcome)}${section('Evidence', rec.evidence)}${rec.report ? section('Report', rec.report, 'report') : `<h2>Report</h2><div class="none">no written report for this run</div>`}${critiqueSection(rec.self_critique)}`}`;
   side.hidden = false; back.hidden = false;
   requestAnimationFrame(() => side.classList.add('in'));
   if (LIVE_TIMER) { clearInterval(LIVE_TIMER); LIVE_TIMER = null; }
@@ -477,17 +517,43 @@ async function loadLive(rec) {
     el.textContent = lines.length ? lines.join('\n') : 'no transcript yet'; el.scrollTop = el.scrollHeight;
   } catch (ex) { const el = $('liveLog'); if (el) el.textContent = ex.message; }
 }
-function openRun(id) { OPEN_RUN = id; renderRun(); }
-function closeRun() { OPEN_RUN = null; renderRun(); }
+function openRun(id) { OPEN_RUN = id; setRunHash(id); renderRun(); }
+function closeRun() { OPEN_RUN = null; setRunHash(null); renderRun(); }
+// Keep the URL in step with the open panel without pushing a history entry per click --
+// replaceState means Back still leaves the page rather than walking back through every run
+// the reader opened.
+function setRunHash(id) {
+  const base = PAGE === 'roster' ? '#roster' : '';
+  const next = id ? `${base}${base ? '&' : '#'}run=${encodeURIComponent(id)}` : (base || location.pathname);
+  if (location.hash !== next && !(next === location.pathname && !location.hash)) history.replaceState(null, '', next);
+}
+// What a copied run id is FOR: pasting it somewhere another person or session can act on it.
+// So copy the deep link alongside the bare id -- the id alone makes the reader hunt for the
+// page it belongs to.
+async function copyRun(id, el) {
+  const link = `${location.origin}${location.pathname}#run=${encodeURIComponent(id)}`;
+  const chip = el && el.querySelector('.rc'), was = chip && chip.textContent;
+  try {
+    await navigator.clipboard.writeText(`${id}\n${link}`);
+    if (chip) { chip.textContent = 'copied'; setTimeout(() => { chip.textContent = was; }, 1400); }
+  } catch { if (chip) { chip.textContent = 'copy failed'; setTimeout(() => { chip.textContent = was; }, 1800); } }
+}
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && OPEN_RUN) closeRun(); });
 $('sideBack').addEventListener('click', closeRun);
-window.addEventListener('hashchange', () => { PAGE = location.hash.replace('#', '') === 'roster' ? 'roster' : 'home'; renderChrome(); });
+window.addEventListener('hashchange', () => {
+  PAGE = /(^|[#&])roster\b/.test(location.hash) ? 'roster' : 'home';
+  const r = runFromHash();
+  if (r !== OPEN_RUN) { OPEN_RUN = r; renderRun(); }
+  renderChrome();
+});
 
 document.addEventListener('click', async e => {
   const row = e.target.closest('tr.agent[data-agent]');
   if (row) { OPEN = OPEN === row.dataset.agent ? null : row.dataset.agent; renderAgents(); return; }
   const runEl = e.target.closest('.run[data-run]');
   if (runEl && runEl.dataset.run) { openRun(runEl.dataset.run); return; }
+  const copyEl = e.target.closest('[data-act="copyRun"]');
+  if (copyEl) { copyRun(copyEl.dataset.runId, copyEl); return; }
   if (e.target.closest('[data-act="closeRun"]')) { closeRun(); return; }
   const btn = e.target.closest('button[data-act]');
   if (!btn) return;

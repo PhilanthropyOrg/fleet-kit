@@ -21,6 +21,7 @@ to run on must already have it, no `pip install` step to silently fail on a fres
 from __future__ import annotations
 
 import contextlib
+import datetime
 import fcntl
 import json
 import os
@@ -504,6 +505,84 @@ def query_runs(conn: sqlite3.Connection, *, member: str | None = None, status: s
     return rows
 
 
+def find_run(conn: sqlite3.Connection, run_id: str) -> list[dict]:
+    """Resolve one pasted run id back to its full record.
+
+    The run id is the handle a human copies off a run card and pastes into a chat. Before this,
+    nothing could turn that string back into the pass: `query` filters by member/status/item,
+    and /api/snapshot only carries a recent window, so an id from last week resolved to nothing
+    and the reader had to go grep runs.jsonl by hand. Exact match first; a prefix match is the
+    fallback, because a hand-selected id loses its tail characters more often than not.
+
+    Newest first, so a started+completion pair for the same id reads with the real outcome on
+    top rather than the provisional row.
+    """
+    q = "SELECT * FROM runs WHERE run_id = ? ORDER BY recorded_at DESC"
+    cur = conn.execute(q, (run_id,))
+    cols = [d[0] for d in cur.description]
+    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+    if not rows:
+        cur = conn.execute(
+            "SELECT * FROM runs WHERE run_id LIKE ? ORDER BY recorded_at DESC LIMIT 20",
+            (run_id.replace("%", r"\%") + "%",),
+        )
+        cols = [d[0] for d in cur.description]
+        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+    return rows
+
+
+def format_run(rec: dict) -> str:
+    """One pass, rendered the way the run card renders it -- so a reader who was handed the id
+    in a chat gets the same answer the panel would give, without a browser."""
+    ts = rec.get("recorded_at") or 0
+    when = datetime.datetime.fromtimestamp(ts, tz=datetime.timezone.utc).astimezone().strftime(
+        "%a %b %d %Y, %-I:%M %p %Z") if ts else "unknown time"
+    cost = rec.get("cost_usd")
+    took = f"{round((rec.get('duration_ms') or 0) / 60000)} min" if rec.get("duration_ms") else "--"
+    out = [
+        f"{rec.get('member') or '?'}  [{rec.get('status') or '?'}]  {when}",
+        f"{'run':<9}{rec.get('run_id')}",
+        f"{'took':<9}{took} · {'$%.3f' % cost if isinstance(cost, (int, float)) else '--'}"
+        f"{' · %s turns' % rec['num_turns'] if rec.get('num_turns') else ''}",
+    ]
+    if rec.get("pr"):
+        out.append(f"{'pr':<9}#{rec['pr']}")
+    if rec.get("item_id"):
+        out.append(f"{'item':<9}#{rec['item_id']}")
+    for label, key in (("outcome", "outcome"), ("evidence", "evidence"), ("report", "report")):
+        if rec.get(key):
+            out.append(f"{label:<9}{rec[key]}")
+    # Same rule the run card enforces: a pass that critiqued nothing did not look, so say so
+    # here too rather than printing a tidy "none" an agent would quote back as a clean run.
+    crit = (rec.get("self_critique") or "").strip()
+    state = critique_state(crit)
+    if state == "changed":
+        out.append(f"{'improved':<9}{crit}")
+    elif state == "said":
+        out.append(f"{'improved':<9}{crit}")
+        out.append("        ^ said, not done -- no issue, PR or file behind it")
+    else:
+        out.append(f"{'improved':<9}NOTHING -- this pass left no change behind")
+    return "\n".join(out)
+
+
+# Reif, 2026-09-18: "if you are critiquing and not making changes, then you are a soap opera,
+# lots of words said, no change." A self-critique is graded on whether it left a REFERENCE
+# behind -- an issue, a PR, or a file the pass edited -- not on whether it produced words.
+# Mirrors critiqueState() in fleet_home.html; keep the two in step.
+_NO_CRITIQUE = re.compile(r"^(none|n/a|nothing|no findings?|clean)\b[\s\S]{0,60}$", re.I)
+_CRITIQUE_REF = re.compile(
+    r"(?:^|[^\w/])#\d{2,6}\b|/(?:pull|issues)/\d+|[\w.\-/]+\.(?:py|sh|md|html|js|json|ya?ml)(?::\d+)?")
+
+
+def critique_state(text: str | None) -> str:
+    """'changed' (a real, referenced improvement), 'said' (words only), or 'empty'."""
+    t = (text or "").strip()
+    if not t or _NO_CRITIQUE.match(t):
+        return "empty"
+    return "changed" if _CRITIQUE_REF.search(t) else "said"
+
+
 def main(argv=None) -> int:
     import argparse
     ap = argparse.ArgumentParser(description="Query/sync the fleet's SQLite run index.")
@@ -522,6 +601,10 @@ def main(argv=None) -> int:
     p_spend = sub.add_parser("spend", help="trailing spend, grouped by member")
     p_spend.add_argument("--member")
     p_spend.add_argument("--hours", type=float, default=24.0)
+
+    p_show = sub.add_parser("show", help="resolve one run id (exact, or a prefix) to its full record")
+    p_show.add_argument("run_id")
+    p_show.add_argument("--json", action="store_true", help="raw record instead of the readable card")
 
     p_query = sub.add_parser("query", help="recent runs, optionally filtered")
     p_query.add_argument("--member")
@@ -553,6 +636,17 @@ def main(argv=None) -> int:
     if a.cmd == "spend":
         sync(conn)
         print(json.dumps(spend(conn, member=a.member, hours=a.hours), indent=2))
+        return 0
+    if a.cmd == "show":
+        sync(conn)
+        rows = find_run(conn, a.run_id)
+        if not rows:
+            print(f"no run matches {a.run_id!r}", file=sys.stderr)
+            return 1
+        if a.json:
+            print(json.dumps(rows, indent=2))
+            return 0
+        print(("\n\n" + "-" * 60 + "\n\n").join(format_run(r) for r in rows))
         return 0
     if a.cmd == "query":
         sync(conn)
