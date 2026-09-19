@@ -17,6 +17,9 @@
 #
 # TWO DISTINCT STATES, two problem keys, so alert_store dedupes each on its own:
 #   silent        -- critical, pages immediately: nothing ran and we do not know why.
+#   blocked       -- degraded, pages once: passes ARE running and every one declines
+#                    (paced/dispatch_skipped/budget_declined/killed). Awake, not building.
+#                    Fires on its own short window, not on MAX_AGE_S -- see fk#1147.
 #   out_of_tokens -- degraded, pages once: the pool's own exhausted-state file names a reset
 #                    in the future. Legitimate, bounded, and the page carries the reset time
 #                    instead of 592 declined runs saying nothing.
@@ -37,6 +40,14 @@ KIT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 LOG_DIR="${FLEET_LOG_DIR:?set FLEET_LOG_DIR -- the instance's log dir (host mount of the container's /var/log/fleet-kit), where fleet.db lives}"
 INSTANCE="${FLEET_INSTANCE_NAME:-$(basename "$(dirname "$LOG_DIR")")}"
 MAX_AGE_S="${LIVENESS_MAX_AGE_S:-10800}"
+# fk#1147: "blocked" is a THIRD state, and the one that cost 95 minutes on 2026-09-19. The
+# fleet was awake the whole time -- passes started, went `paced`, and never reached `ok` --
+# so it was neither silent (something was running) nor out_of_tokens (the pool's state file
+# named no future reset). Both existing branches stayed quiet while nothing got built.
+# A blocked fleet is LOUDER than a silent one: it reports a problem every few minutes. So it
+# pages on its own short window instead of waiting out MAX_AGE_S.
+BLOCKED_WINDOW_S="${LIVENESS_BLOCKED_WINDOW_S:-1800}"
+BLOCKED_MIN="${LIVENESS_BLOCKED_MIN:-3}"
 NTFY_TOPIC="${NTFY_TOPIC:-}"   # optional: fleet_alert.sh emails regardless (and falls back to anchor.env's topic)
 DB="$LOG_DIR/fleet.db"
 EXHAUSTED_STATE="${ACCOUNT_POOL_STATE_FILE:-$LOG_DIR/account-pool-exhausted.state}"
@@ -77,14 +88,22 @@ if [ ! -f "$DB" ]; then
   exit 0
 fi
 
-read -r NEWEST MEMBER < <(python3 - "$DB" <<'PY'
-import sqlite3, sys
+read -r NEWEST MEMBER BLOCKED_N OK_N < <(python3 - "$DB" "$BLOCKED_WINDOW_S" <<'PY'
+import sqlite3, sys, time
+# fk#1147: one pass returns the newest ok AND the shape of the recent window, so the blocked
+# check costs no second query and cannot disagree with the silence check about "now".
+BLOCKED = ("paced", "dispatch_skipped", "budget_declined", "killed")
 try:
     c = sqlite3.connect(f"file:{sys.argv[1]}?mode=ro", uri=True)
     r = c.execute("select recorded_at, member from runs where status='ok' order by recorded_at desc limit 1").fetchone()
-    print(f"{int(r[0])} {r[1]}" if r else "0 none")
+    newest = f"{int(r[0])} {r[1]}" if r else "0 none"
+    since = time.time() - int(sys.argv[2])
+    rows = [s for (s,) in c.execute("select status from runs where recorded_at>?", (since,))]
+    blocked = sum(1 for s in rows if s in BLOCKED)
+    ok = sum(1 for s in rows if s == "ok")
+    print(f"{newest} {blocked} {ok}")
 except Exception as exc:  # noqa: BLE001 -- report, never crash the pager
-    print(f"ERR {type(exc).__name__}")
+    print(f"ERR {type(exc).__name__} 0 0")
 PY
 )
 
@@ -101,6 +120,18 @@ NOW=$(date -u +%s)
 AGE=$(( NOW - NEWEST ))
 AGE_H=$(( AGE / 3600 ))
 NEWEST_HUMAN=$( [ "$NEWEST" -gt 0 ] && date -u -d "@$NEWEST" '+%Y-%m-%d %H:%M UTC' 2>/dev/null || echo never )
+
+# fk#1147: awake but not building. Checked BEFORE the age gate, because this is precisely
+# the case the age gate cannot see -- the fleet is producing rows, just never `ok` ones.
+if [ "$OK_N" -eq 0 ] && [ "$BLOCKED_N" -ge "$BLOCKED_MIN" ]; then
+  BLOCKED_M=$(( BLOCKED_WINDOW_S / 60 ))
+  _log "PAGED blocked -- 0 ok and $BLOCKED_N declined/paced in ${BLOCKED_M}m (newest ok ${AGE}s ago)"
+  _page "fleet-kit: $INSTANCE is awake but not building" \
+        "No member has completed work in the last ${BLOCKED_M}m, but $BLOCKED_N pass(es) ran and declined (paced / dispatch_skipped / budget_declined / killed). The fleet is up and choosing not to work -- a different problem from silence, and from a clean quota gap. Newest ok run: $MEMBER at $NEWEST_HUMAN. Check, in order: bash $KIT_DIR/scripts/account_readiness.sh (is every account gated, and WHY -- an 'other' gate is an unknown cause, not exhaustion, fk#1146); tail $LOG_DIR/account-pool.log (which account failed, and how it was classified); tail $LOG_DIR/gru.log (is the allowance reading zero)." \
+        blocked degraded
+  echo "PAGED blocked"
+  exit 0
+fi
 
 if [ "$AGE" -le "$MAX_AGE_S" ]; then
   _log "OK newest ok run ${AGE}s ago ($MEMBER at $NEWEST_HUMAN)"
