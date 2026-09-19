@@ -601,6 +601,23 @@ def _gh_dates(kind: str, *extra: str) -> list[dict]:
     return rows
 
 
+def _fleet_prs_opened() -> list[dict]:
+    """createdAt of every PR the fleet opened (head branch `member/…`), any state, cached 10 min."""
+    key = "fleet_prs_opened"
+    hit = _TTL_CACHE.get(key)
+    if hit and time.time() - hit[0] < 600:
+        return hit[1]  # type: ignore[return-value]
+    raw = _gh("pr", "list", "--state", "all", "--search", "head:member/", "--limit", "200",
+              "--json", "createdAt", timeout=60)
+    try:
+        rows = json.loads(raw) if raw else []
+    except Exception:  # noqa: BLE001
+        rows = []
+    if rows:
+        _TTL_CACHE[key] = (time.time(), rows)
+    return rows
+
+
 def metrics_snapshot() -> dict:
     """Current value + sub + series for every registered metric. Never raises."""
     days = _last_days(14)
@@ -717,6 +734,40 @@ def metrics_snapshot() -> dict:
                 hours[23 - age_h] += 1
         out["fleet.ok_runs_per_hour"] = {"value": hours[-1], "newest_ok_ts": newest, "sub": "this hour",
                                          "series": [{"day": f"-{23 - i}h", "value": v} for i, v in enumerate(hours)]}
+
+        # fleet.minion_spawns_per_hour + fleet.prs_opened_per_hour (native, last 24 hours).
+        # Reif 2026-09-19: "PRs last 24 hours on a graph would be good. And spawns last 24 hours
+        # (minion). If spawns > PRs not good." A minion pass that ends without a PR is spend
+        # with no output; the two tiles sit side by side and the spawn tile turns red when the
+        # 24h spawn count exceeds the 24h count of PRs the fleet opened.
+        spawns = [0] * 24
+        for r in runs:
+            if r.get("member") != "minion" or r.get("status") != "started":
+                continue
+            ts = r.get("ts")
+            if not isinstance(ts, (int, float)):
+                continue
+            age_h = int((now - ts) // 3600)
+            if 0 <= age_h < 24:
+                spawns[23 - age_h] += 1
+        opened = [0] * 24
+        for row in _fleet_prs_opened():
+            try:
+                ts = datetime.datetime.fromisoformat(str(row.get("createdAt", "")).replace("Z", "+00:00")).timestamp()
+            except ValueError:
+                continue
+            age_h = int((now - ts) // 3600)
+            if 0 <= age_h < 24:
+                opened[23 - age_h] += 1
+        spawns24, opened24 = sum(spawns), sum(opened)
+        out["fleet.minion_spawns_per_hour"] = {
+            "value": spawns24, "bad": spawns24 > opened24,
+            "sub": f"minion passes started, 24h · {opened24} PR{'s' if opened24 != 1 else ''} opened"
+                   + (" · MORE SPAWNS THAN PRS" if spawns24 > opened24 else ""),
+            "series": [{"day": f"-{23 - i}h", "value": v} for i, v in enumerate(spawns)]}
+        out["fleet.prs_opened_per_hour"] = {
+            "value": opened24, "sub": f"member/ branches opened, 24h · {spawns24} spawns",
+            "series": [{"day": f"-{23 - i}h", "value": v} for i, v in enumerate(opened)]}
         db.commit()
     finally:
         db.close()

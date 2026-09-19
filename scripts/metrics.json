@@ -1,7 +1,7 @@
 {
  "_doc": "fk#1058: the metric registry. Every console tile is a row here; the OKR file references tiles by id. A KR that names an id not in this file fails a selftest. Order = display order.",
  "metrics": [
-    {
+  {
    "id": "okr.verified_claims",
    "label": "The number",
    "unit": "claims",
@@ -10,7 +10,7 @@
    "lane": "product",
    "history": "daily"
   },
-    {
+  {
    "id": "okr.clicks",
    "label": "Claims started",
    "unit": "claims/wk",
@@ -19,7 +19,7 @@
    "lane": "product",
    "history": "daily"
   },
-    {
+  {
    "id": "okr.conversion",
    "label": "Claim completion",
    "unit": "%",
@@ -28,7 +28,7 @@
    "lane": "product",
    "history": "daily"
   },
-    {
+  {
    "id": "fleet.backlog_open",
    "label": "Backlog",
    "unit": "issues",
@@ -37,7 +37,7 @@
    "lane": "fleet",
    "history": "daily"
   },
-    {
+  {
    "id": "fleet.prs_open",
    "label": "Open PRs",
    "unit": "PRs",
@@ -46,7 +46,7 @@
    "lane": "fleet",
    "history": "daily"
   },
-    {
+  {
    "id": "fleet.merged_per_day",
    "label": "Merged",
    "unit": "PRs",
@@ -55,7 +55,7 @@
    "lane": "fleet",
    "history": "native"
   },
-    {
+  {
    "id": "gh.actions_spend_mtd",
    "label": "GitHub Actions",
    "unit": "USD",
@@ -64,7 +64,7 @@
    "lane": "fleet",
    "history": "native"
   },
-    {
+  {
    "id": "fleet.accounts_live",
    "label": "Claude accounts",
    "unit": "live",
@@ -73,12 +73,30 @@
    "lane": "fleet",
    "history": "daily"
   },
-    {
+  {
    "id": "fleet.ok_runs_per_hour",
    "label": "Alive",
    "unit": "ok runs",
    "window": "per hour, 24h",
    "source": "runs.jsonl",
+   "lane": "fleet",
+   "history": "native"
+  },
+  {
+   "id": "fleet.minion_spawns_per_hour",
+   "label": "Spawns (minion)",
+   "unit": "passes",
+   "window": "per hour, 24h",
+   "source": "runs.jsonl",
+   "lane": "fleet",
+   "history": "native"
+  },
+  {
+   "id": "fleet.prs_opened_per_hour",
+   "label": "PRs opened",
+   "unit": "PRs",
+   "window": "per hour, 24h",
+   "source": "gh pr list head:member/",
    "lane": "fleet",
    "history": "native"
   }
