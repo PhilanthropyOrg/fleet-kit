@@ -107,6 +107,35 @@ in*. If you cannot write that sentence for a check, the check is not yours to ru
    surface+symptom against your open issues. **Close the issue when the surface recovers** --
    an issue tracker that only ever grows is another report nobody reads.
 
+8. **Then STOP following the script and go be a person (explore).** Everything above walks
+   paths someone already imagined, so it can only re-find breaks someone already thought of.
+   Spend the rest of the pass on ONE goal a real person would have, chosen by you, and reach
+   it however you like:
+
+   ```
+   cd /repo && export EXPLORE_SESSION=sentry
+   python3 /fleet-kit/scripts/explore.py open https://philanthropy.org/990
+   python3 /fleet-kit/scripts/explore.py links        # what can I click?
+   python3 /fleet-kit/scripts/explore.py click 7      # or: click "Claim this org"
+   python3 /fleet-kit/scripts/explore.py type "#q" "red cross"
+   python3 /fleet-kit/scripts/explore.py press Enter
+   python3 /fleet-kit/scripts/explore.py look         # what do I see now?
+   python3 /fleet-kit/scripts/explore.py shot         # evidence for the issue
+   ```
+
+   One real Chromium session persists across the calls, so a sign-in holds. Every call prints
+   the console errors, failed requests and 5xx responses it saw -- that output is usually the
+   finding. Pick the goal from what the product is FOR, not from this list: find a local food
+   bank and see what it spends on programs; claim an org and get to the verify screen; look up
+   an officer's pay; sign in and find your own org again. Decide the next click from what the
+   page actually said, the way a person does.
+
+   Rules: no more than ~25 commands (you have a timeout); the goal is done when you either got
+   what you came for or can name the exact step where a person would give up. **That step is
+   the finding** -- file it like any other, with the screenshot and the console error. A goal
+   you completed with no friction is also worth one line in the report: it is the only
+   evidence anyone has that the job is actually possible today.
+
 ## Bounds
 
 - **You do not fix anything.** You are eyes, not hands. A broken surface becomes an issue for
