@@ -51,5 +51,37 @@ class BlockPaceTests(unittest.TestCase):
         self.assertFalse(block_over_pace({"session_used_pct": "abc", "five_reset_in_sec": 900}))
 
 
+class ZeroCeilingSaysWhy(unittest.TestCase):
+    """fk#1174 follow-up: a 0.0000 ceiling names its reason on stderr, so a member log that
+    reads PACED also says whether the block was over pace or its fields were missing."""
+
+    def _run(self, budget):
+        import io, contextlib
+        import maxx_share_ceiling as m
+        orig = m.get_headroom
+        m.get_headroom = lambda: (1.0, "ok", budget)
+        out, err = io.StringIO(), io.StringIO()
+        try:
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                m.main(["p", "0.6"])
+        finally:
+            m.get_headroom = orig
+        return out.getvalue().strip(), err.getvalue()
+
+    def test_missing_block_field_is_named(self):
+        os.environ.pop("FLEET_BLOCK_PACE_REQUIRE_ANCHOR", None)
+        out, err = self._run({"verdict": "ok", "sustainable_pct_per_hour": 0.5,
+                              "reserved_pct": 0, "session_used_pct": 1})
+        self.assertEqual(out, "0.0000")
+        self.assertIn("block fields missing", err)
+        self.assertIn("five_reset_in_sec=None", err)
+
+    def test_over_pace_is_named(self):
+        out, err = self._run({"verdict": "ok", "sustainable_pct_per_hour": 0.5, "reserved_pct": 0,
+                              "session_used_pct": 77, "five_reset_in_sec": 12534})
+        self.assertEqual(out, "0.0000")
+        self.assertIn("5h block over pace (used 77%", err)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
