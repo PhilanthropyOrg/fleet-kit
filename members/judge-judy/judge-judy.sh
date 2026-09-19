@@ -600,11 +600,25 @@ $PR_VISION_LINK"
         | python3 -c 'import json,sys; p=sys.argv[1]; print(next((str(i["number"]) for i in json.load(sys.stdin) if (i.get("title") or "").startswith(p)), ""))' \
           "fix: PR #$PR failed code review" 2>/dev/null || true)
       if [ -n "$EXISTING_FIX" ]; then
-        gh issue comment "$EXISTING_FIX" --body "Blocked again at head ${HEAD_SHA:0:12}:
+        # gh#6483: a re-review at a new head SHA re-posts the SAME finding text every time a
+        # stuck PR gets re-pushed with no fix -- #6074 alone generated 16 near-identical
+        # comments this way. Skip the comment (not just the issue) when the fix item's own
+        # newest comment already contains this tick's finding text; a lookup failure here
+        # must fall through to commenting, same fail-open direction as the EXISTING_FIX
+        # lookup above -- going quiet on an unconfirmed match would be the wrong side to
+        # fail on.
+        LATEST_FIX_COMMENT=$(gh issue view "$EXISTING_FIX" --json comments \
+            --jq '.comments[-1].body // ""' 2>/dev/null || true)
+        if [ -n "$LATEST_FIX_COMMENT" ] && [ -n "$FINDINGS" ] \
+            && [[ "$LATEST_FIX_COMMENT" == *"$FINDINGS"* ]]; then
+          log "PR #$PR: block unchanged since ${HEAD_SHA:0:12}, no board write"
+        else
+          gh issue comment "$EXISTING_FIX" --body "Blocked again at head ${HEAD_SHA:0:12}:
 
 $FINDINGS" >>"$LOG" 2>&1 \
-          && log "PR #$PR: blocked again -- commented on open fix item #$EXISTING_FIX instead of filing a twin" \
-          || log "PR #$PR: WARN failed to comment on fix item #$EXISTING_FIX"
+            && log "PR #$PR: blocked again -- commented on open fix item #$EXISTING_FIX instead of filing a twin" \
+            || log "PR #$PR: WARN failed to comment on fix item #$EXISTING_FIX"
+        fi
       else
         python3 "$KIT_DIR/scripts/board_github.py" file "$FIX_TITLE" --context "$FIX_BODY" \
             --priority high >>"$LOG" 2>&1 \
