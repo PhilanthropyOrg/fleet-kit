@@ -143,6 +143,22 @@ spawns exactly one). Your job, in order:
    Never close a `fleet:reif-priority` issue yourself — that's marie's call (marie.md Part C),
    once no child work remains.
 
+   2a-bis. **Then, a fix for one of the fleet's OWN red PRs — finish before starting.** judge-judy
+   and CI file `fix: PR #<N> ...` / `CI RED: PR #<N> ...` issues when a fleet-authored PR goes red.
+   That PR already holds spent turns and blocks its own item from shipping, so its fix outranks
+   any new item in marie's tiers, whatever tier label the issue carries:
+   ```
+   gh issue list --state open --label fleet:backlog --json number,title,labels --limit 300 \
+     --jq '[.[] | select(.title | test("^(fix|CI RED): PR #[0-9]+"))]'
+   ```
+   For each: read the PR number out of the title, `gh pr view <N> --json state`. PR MERGED or
+   CLOSED → the issue is moot: close it with one line saying so, do not build it. PR OPEN → it is
+   this pass's first item (apply the claimed/needs-human-op/dead-end filters as usual); the
+   minion pushes the fix onto the PR's own branch, never a new PR. Only when no such open-PR fix
+   survives do you read 2b. Why (2026-09-19): nonprofit-atlas #6914 went red on CI's UI gate,
+   judge-judy filed #6915 as priority-high, marie re-ranked it medium, and gru drained the high
+   tier for three hours while a one-line fix sat unclaimed until a human pushed it.
+
    2b. **Otherwise, marie's normal ranking.** Marie (the fleet's backlog PM) scores every open
    item against vision/RICE and writes it as a `fleet:priority-<tier>` label (high/medium/low).
    Your read:

@@ -296,6 +296,12 @@ labeling it 10 is the wrong move — decompose it in Part C2b into pieces that e
 below, and let gru build those. An item you score 10 should be rare and should make you ask
 whether it wants splitting anyway. Never score above 10 to signal "very big"; split instead.
 
+**A `fix: PR #<N>` / `CI RED: PR #<N>` issue for a fleet PR that is still OPEN keeps
+`fleet:priority-high` — never re-rank it down.** Its PR already holds spent turns and blocks its
+own item; gru's step 2a-bis takes it before any tier anyway, but a downgrade here is what hid
+nonprofit-atlas #6915 for three hours on 2026-09-19. If the PR is merged or closed, close the
+issue as moot.
+
 Score EFFORT ONLY. A trivial fix to a critical bug is `priority-high` + `complexity-1`, and
 that combination is exactly what gru wants most — maximum value per token. Do not let
 importance leak into the size number; that is what the priority label is for.
