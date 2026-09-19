@@ -1717,7 +1717,7 @@ def _maxx_share_ceiling_uses_hourly_headroom_not_the_week_bank():
         assert maxx_share_ceiling.main(["prog", "0.40"]) == 0
 
         # Same computation, share=1.0, to isolate the raw hourly-headroom formula from the
-        # fraction multiply: (0.35 - 0.10 - 0) = 0.25.
+        # fraction multiply: 0.35 - 0 = 0.35 (fk#1169: pace, not pace minus allowance).
         import io
         from contextlib import redirect_stdout
         buf = io.StringIO()
@@ -1796,7 +1796,8 @@ def _maxx_share_ceiling_subtracts_local_leases_not_just_the_remotes_reserved_pct
             maxx_lease.STATE_FILE = state_file
 
             # The remote's own reserved_pct is 0 (its honest, real-world default -- it has no
-            # idea a local lease exists). sustainable=0.35, used=0.10 -> raw headroom 0.25.
+            # idea a local lease exists). sustainable=0.35 -> raw headroom 0.35 (the 0.10
+            # per-diem allowance is no longer subtracted). fk#1169: pace, not pace-allowance
             remote_budget = {
                 "verdict": "ok", "sustainable_pct_per_hour": 0.35,
                 "per_diem_hourly_pct": 0.10, "reserved_pct": 0,
@@ -1810,7 +1811,7 @@ def _maxx_share_ceiling_subtracts_local_leases_not_just_the_remotes_reserved_pct
             buf = io.StringIO()
             with redirect_stdout(buf):
                 maxx_share_ceiling.main(["prog", "1.0"])
-            assert abs(float(buf.getvalue().strip()) - 0.25) < 1e-6, buf.getvalue()
+            assert abs(float(buf.getvalue().strip()) - 0.35) < 1e-6, buf.getvalue()  # fk#1169: pace, not pace-allowance
 
             # A REAL concurrent lease exists on disk (e.g. judge-judy on the other instance,
             # or an earlier call this same instance made) -- the remote still reports
@@ -1819,7 +1820,7 @@ def _maxx_share_ceiling_subtracts_local_leases_not_just_the_remotes_reserved_pct
             buf = io.StringIO()
             with redirect_stdout(buf):
                 maxx_share_ceiling.main(["prog", "1.0"])
-            assert abs(float(buf.getvalue().strip()) - 0.17) < 1e-6, buf.getvalue()  # 0.25-0.08
+            assert abs(float(buf.getvalue().strip()) - 0.27) < 1e-6, buf.getvalue()  # 0.35-0.08, fk#1169: pace, not pace-allowance
         finally:
             maxx_lease.STATE_FILE = orig_state
             maxx_share_ceiling.get_headroom = orig_headroom
@@ -14185,7 +14186,7 @@ def _maxx_share_ceiling_holds_a_5h_block_ahead_of_pace_gh781():
     import os as _os
     _os.environ["FLEET_BLOCK_PACE_REQUIRE_ANCHOR"] = "0"
     try:
-        assert abs(float(ceiling(healthy_hour)) - 0.25) < 1e-6, ceiling(healthy_hour)
+        assert abs(float(ceiling(healthy_hour)) - 0.35) < 1e-6, ceiling(healthy_hour)  # fk#1169: pace, not pace-allowance
     finally:
         del _os.environ["FLEET_BLOCK_PACE_REQUIRE_ANCHOR"]
     # The reader passes both fields through, otherwise the clamp can never see them.
