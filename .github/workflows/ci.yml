@@ -47,6 +47,8 @@ jobs:
         run: python3 members/librarian/test_librarian.py
       - name: run test_worktree_lock.py
         run: python3 scripts/test_worktree_lock.py
+      - name: run test_explore_tool.py
+        run: python3 scripts/test_explore_tool.py
       - name: run test_fleet_home_spawns_vs_prs.py
         run: python3 scripts/test_fleet_home_spawns_vs_prs.py
       - name: run test_worktree_prune.py
