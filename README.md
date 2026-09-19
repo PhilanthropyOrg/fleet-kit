@@ -12,6 +12,8 @@ An unattended software-development fleet you point at a git repo. It runs the fu
 observe, rank, build, review, gate, merge, deploy — with a human touching only the parts that
 genuinely need judgment: initial auth, scheduler install, and a one-time branch-protection call.
 
+**Operating it: [`RUNBOOK.md`](RUNBOOK.md) — every lever on one page (alive-check, restart, kick a member, verify a deploy, members + cadence, accounts, paths). Start there when something is wrong.**
+
 ## Why "magikarp"
 
 Magikarp is the joke Pokémon. It is famously, aggressively useless — it flops on the ground, its
