@@ -162,5 +162,50 @@ class ApplyRecordsAlertResultTests(unittest.TestCase):
         self.assertEqual(results["a2"], "comment on #412")
 
 
+class DedupeLookupTests(unittest.TestCase):
+    """fk#1154: the open-twin lookup is the REST list, never the search flag. Search is a
+    30/min bucket shared by every member and its index lags a fresh issue, which is how
+    [app_error] filed a new issue every hour for three hours with the last one still open."""
+
+    def _run_both_filers(self, list_rc, list_stdout):
+        calls = []
+
+        def fake_run(cmd):
+            calls.append(cmd)
+            r = unittest.mock.Mock()
+            r.stderr = ""
+            if cmd[:3] == ["gh", "issue", "list"]:
+                r.returncode, r.stdout = list_rc, list_stdout
+            elif cmd[:3] == ["gh", "issue", "create"]:
+                r.returncode, r.stdout = 0, "https://github.com/x/y/issues/900\n"
+            else:
+                r.returncode, r.stdout = 0, ""
+            return r
+
+        logged = []
+        with unittest.mock.patch.dict("os.environ", {"FLEET_REPO_URL": "https://github.com/x/y"}), \
+             unittest.mock.patch.object(inbox, "log", logged.append):
+            alert = inbox.file_or_comment_alert({"check": "app_error", "text": "boom"}, run=fake_run)
+            mail = inbox.file_backlog("prod alert [app_error]", "boom", "box@x", run=fake_run)
+        return calls, logged, alert, mail
+
+    def test_lookup_is_the_rest_list_not_search(self):
+        twin = json.dumps([{"number": 7, "title": "prod alert [app_error]", "url": "u7"}])
+        calls, _, alert, mail = self._run_both_filers(0, twin)
+        lists = [c for c in calls if c[:3] == ["gh", "issue", "list"]]
+        self.assertEqual(len(lists), 2, "both filers must look before filing")
+        for c in lists:
+            self.assertNotIn("--search", c, c)
+        self.assertEqual(alert, ("u7", False))
+        self.assertEqual(mail, "u7")
+        self.assertFalse([c for c in calls if c[:3] == ["gh", "issue", "create"]], "twin filed")
+
+    def test_a_failed_lookup_is_logged_and_still_files(self):
+        calls, logged, alert, _ = self._run_both_filers(1, "")
+        self.assertEqual(len([c for c in calls if c[:3] == ["gh", "issue", "create"]]), 2)
+        self.assertTrue(alert[1], "first firing with no readable board must still create")
+        self.assertTrue([m for m in logged if "dedupe lookup failed" in m], logged)
+
+
 if __name__ == "__main__":
     unittest.main()

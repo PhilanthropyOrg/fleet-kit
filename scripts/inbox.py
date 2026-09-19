@@ -317,6 +317,33 @@ def answer_asks(answers: list[dict], run=None) -> list[str]:
     return out
 
 
+def open_issue_titled(slug: str, title: str, run) -> dict | None:
+    """The one open board item whose title equals `title` (case-insensitive), or None.
+
+    REST list, never the search flag: the search API is a separate, much smaller rate-limit
+    bucket (30/min per token, shared with every other member's searches) and its index lags
+    a fresh issue by seconds to minutes. Both failure shapes were live on 2026-09-19: the
+    hourly `[app_error]` pager filed a NEW issue every hour for three hours with the previous
+    hour's twin still open (#6863/#6866/#6870), and the box copy and the mailed copy of the
+    same firing, 4s apart, each filed their own (#6870/#6871). The REST list is read-after-
+    write consistent and draws on the 5000/hr core bucket, so the second copy sees the first.
+    A failed lookup is LOGGED (it used to fall through to `create` in silence, which is how
+    the duplicates hid) and still returns None: filing a twin beats dropping a pager."""
+    r = run(["gh", "issue", "list", "--repo", slug, "--state", "open",
+             "--json", "number,title,url", "--limit", "300"])
+    if r.returncode != 0:
+        log(f"dedupe lookup failed (rc={r.returncode}): {(r.stderr or r.stdout or '').strip()[:200]}")
+        return None
+    try:
+        for it in json.loads(r.stdout or "[]"):
+            if (it.get("title") or "").strip().lower() == title.strip().lower():
+                it.setdefault("url", f"https://github.com/{slug}/issues/{it['number']}")
+                return it
+    except (json.JSONDecodeError, KeyError, TypeError) as exc:
+        log(f"dedupe lookup unreadable: {exc}")
+    return None
+
+
 def file_backlog(title: str, body: str, sender: str, run=None) -> str:
     """`gh issue create` in the product repo, label fleet:backlog. Returns the issue URL."""
     run = run or (lambda cmd: subprocess.run(cmd, capture_output=True, text=True, timeout=60))
@@ -326,17 +353,11 @@ def file_backlog(title: str, body: str, sender: str, run=None) -> str:
     text = (body or "").strip() or title
     # Dedupe by exact open title: a pager that fires hourly must not file hourly. The repeat
     # becomes a comment on the open item (so the count is visible), never a twin.
-    r = run(["gh", "issue", "list", "--repo", slug, "--state", "open", "--search", f'"{title}" in:title',
-             "--json", "number,title,url", "--limit", "20"])
-    if r.returncode == 0:
-        try:
-            for it in json.loads(r.stdout or "[]"):
-                if (it.get("title") or "").strip().lower() == title.strip().lower():
-                    run(["gh", "issue", "comment", "--repo", slug, str(it["number"]),
-                         "--body", f"Fired again by email from {sender}:\n\n{text[:1500]}"])
-                    return it.get("url") or f"https://github.com/{slug}/issues/{it['number']}"
-        except (json.JSONDecodeError, KeyError, TypeError):
-            pass
+    it = open_issue_titled(slug, title, run)
+    if it:
+        run(["gh", "issue", "comment", "--repo", slug, str(it["number"]),
+             "--body", f"Fired again by email from {sender}:\n\n{text[:1500]}"])
+        return it["url"]
     r = run(["gh", "issue", "create", "--repo", slug, "--label", backlog_labels(title),
              "--title", title, "--body", f"{text}\n\nFiled by email from {sender} (fk#1056)."])
     if r.returncode != 0:
@@ -483,17 +504,11 @@ def file_or_comment_alert(row: dict, run=None) -> tuple[str, bool]:
     title = alert_title(row["check"])
     first_line = (row.get("text") or row.get("subject") or "").strip().splitlines()[0:1]
     first_line = first_line[0] if first_line else row.get("subject") or ""
-    r = run(["gh", "issue", "list", "--repo", slug, "--state", "open", "--search", f'"{title}" in:title',
-             "--json", "number,title,url", "--limit", "20"])
-    if r.returncode == 0:
-        try:
-            for it in json.loads(r.stdout or "[]"):
-                if (it.get("title") or "").strip().lower() == title.strip().lower():
-                    run(["gh", "issue", "comment", "--repo", slug, str(it["number"]),
-                         "--body", f"Fired again: {first_line}"[:1500]])
-                    return it.get("url") or f"https://github.com/{slug}/issues/{it['number']}", False
-        except (json.JSONDecodeError, KeyError, TypeError):
-            pass
+    it = open_issue_titled(slug, title, run)
+    if it:
+        run(["gh", "issue", "comment", "--repo", slug, str(it["number"]),
+             "--body", f"Fired again: {first_line}"[:1500]])
+        return it["url"], False
     r = run(["gh", "issue", "create", "--repo", slug, "--label", "fleet:backlog,lane:devops,fleet:priority-high",
              "--title", title, "--body", f"{first_line}\n\nFiled by intake from {row.get('from') or row.get('source')} (fk#1129)."])
     if r.returncode != 0:
