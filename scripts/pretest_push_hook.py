@@ -79,6 +79,53 @@ def _is_git_push(command: str) -> bool:
     return bool(re.search(r"(^|[;&|]\s*)git\b[^;&|]*\bpush\b", command))
 
 
+_VALUE_OPTS = {"-n", "-k", "-m", "-p", "-o", "-c", "-W", "-r", "--tb", "--timeout", "--maxfail",
+               "--rootdir", "--deselect", "--ignore", "--durations"}
+_WHOLE_TREE = {"tests", "tests/", ".", "./tests", "./tests/"}
+
+
+def _is_whole_suite_pytest(command: str) -> bool:
+    """True for a raw pytest call that would collect the entire tree: `pytest`, `pytest tests/`,
+    `python3 -m pytest -q -n auto tests`, with or without flags, in any segment of a chain.
+    A call naming a test file/dir under tests/ or a `-k` expression is targeted and allowed.
+
+    fk#1166: 563 such calls in 7 days on philanthropy, 1,008 commands backgrounded at the 120s
+    harness cap, 103 passes ended "waiting" with a finished build never pushed. None of them
+    could even produce the receipt this hook wants -- only verified_test.sh writes it -- so a
+    whole-tree pytest from a member is pure spend."""
+    for seg in re.split(r"[;&|]+", command):
+        toks = seg.strip().split()
+        if not toks:
+            continue
+        idx = None
+        for i, t in enumerate(toks):
+            if t == "pytest" or t.endswith("/pytest"):
+                idx = i
+                break
+            if t == "-m" and i + 1 < len(toks) and toks[i + 1] == "pytest":
+                idx = i + 1
+                break
+        if idx is None:
+            continue
+        rest = toks[idx + 1:]
+        if "-k" in rest or "--collect-only" in rest or "--co" in rest:
+            continue
+        positional, skip = [], False
+        for t in rest:
+            if skip:
+                skip = False
+                continue
+            if t in _VALUE_OPTS:
+                skip = True
+                continue
+            if t.startswith("-") or re.match(r"^\d*[<>]", t) or t.startswith("&>"):
+                continue  # flags and shell redirections (`2>&1`, `>log`) are not test paths
+            positional.append(t.strip("'\""))
+        if all(p in _WHOLE_TREE for p in positional):
+            return True
+    return False
+
+
 def _only_docs(wt: str) -> bool:
     """True iff nothing this branch changes can alter behaviour."""
     base = _git(["merge-base", "HEAD", "origin/main"], wt) or "origin/main"
@@ -99,6 +146,12 @@ def decide(payload: dict, env: dict) -> str | None:
     if payload.get("tool_name") != "Bash":
         return None
     command = (payload.get("tool_input") or {}).get("command") or ""
+    if _is_whole_suite_pytest(command):
+        return (f"BLOCKED: a whole-tree pytest cannot produce the receipt the push needs and "
+                f"takes longer than this pass can wait (fk#1166). Run `bash "
+                f"{env.get('FLEET_KIT', '/fleet-kit')}/scripts/verified_test.sh` with no "
+                f"arguments in {wt} instead -- it runs the repo's diff-scoped tests and writes "
+                f"the receipt -- or name the specific test file(s) you touched.")
     if not _is_git_push(command):
         return None
     if _only_docs(wt):
