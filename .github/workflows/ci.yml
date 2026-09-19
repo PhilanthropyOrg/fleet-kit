@@ -51,6 +51,8 @@ jobs:
         run: python3 scripts/test_explore_tool.py
       - name: run test_sentry_files_what_it_finds.py
         run: python3 scripts/test_sentry_files_what_it_finds.py
+      - name: run test_findings_are_always_raised.py
+        run: python3 scripts/test_findings_are_always_raised.py
       - name: run test_fleet_home_spawns_vs_prs.py
         run: python3 scripts/test_fleet_home_spawns_vs_prs.py
       - name: run test_worktree_prune.py

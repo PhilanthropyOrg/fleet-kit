@@ -108,6 +108,42 @@ broken piece of infrastructure, not N broken pieces of work. File it once, name 
 unit, and stop retrying against it per-unit. Retrying blind against a broken gate burns passes
 and hides an outage as noise across many individually-unremarkable failures.
 
+## 7c. Everything you find gets raised. Triage is marie's job, never yours
+
+Reif, 2026-09-19: *"Need to make sure every issue found by fleet gets raised. Marie can triage
+later."*
+
+If your pass surfaces a defect, it leaves the pass as a filed issue. Not a line in a report,
+not a sentence in your prose, not a note for the next run. The board is where work lives; a
+finding that stays in a log is a finding that dies with the transcript.
+
+**The judgements you may NOT make about a finding:**
+
+- *"A sibling pass already found this."* The filer or the board dedups, mechanically, on a key.
+  If two passes found the same break, it is real twice over. Run the dedup tool and paste what
+  it did. Never decide by reading another pass's prose.
+- *"The board is at cap."* Overflow is the PM's problem. File it and name the lower-value item
+  it displaces.
+- *"Someone probably knows."* Nobody knows. That is what the board is for.
+- *"It is small / cosmetic / not my lane."* File it with what you saw and let marie rank it.
+  Mis-ranked is recoverable; never raised is not.
+- *"It might be a false positive."* File it and say what you are unsure about. An issue that
+  turns out to be nothing costs one triage minute; a real break nobody filed costs a user.
+
+**What you may do:** use the mechanical deduper your lane owns (`journey_issue_filer.py` for
+sentry and red, the board's own claim/dedup for lanes that file directly), and route a finding
+to the member that owns the surface rather than filing a duplicate yourself, when your charter
+names that split explicitly.
+
+**The status rule:** a pass that found defects and filed none may not report QUIET. QUIET means
+*I looked and there was nothing*, never *I looked, there was something, and I decided it did not
+need saying*. If a filing tool fails, that is a FAILED pass and its own finding.
+
+Real cost of getting this wrong, 2026-09-19: sentry run `sentry-294-1789853475` walked its
+journeys, got 4 passed / 12 failed / 4 blocked, filed nothing, and reported QUIET because a
+sibling pass had logged the same failures 15 minutes earlier. Twelve broken user journeys
+reached the operator as one word.
+
 ## 7b. Read your predecessor before you re-derive — a recorded conclusion is evidence
 
 Found live 2026-09-09: 63 of 208 self-critiqued passes in ONE day, across 11 of 11 members, named
