@@ -431,7 +431,12 @@ _account_pool_order() {
     fi
     if [[ "$epoch" =~ ^[0-9]+$ ]] && [ "$epoch" -gt "$now" ]; then
       known="${known}${epoch} ${account}"$'\n'
-    elif [[ "$epoch" =~ ^[0-9]+$ ]]; then
+    elif [[ "$epoch" =~ ^[0-9]+$ ]] && ! { bank=$(_account_pool_week_bank "$account"); wr=$(_account_pool_week_reset "$account"); [[ "$wr" =~ ^[0-9]+$ ]] && [ -n "$bank" ]; }; then
+      # gh#462: a lapsed gate with NO week reading is the freshest guess we have, so it goes
+      # first. fk#1174: with a reading, the bank is the truth and the account sorts below with
+      # the others -- on 2026-09-19 a lapsed 'other' gate on gmail (bank -23, headroom 0) put
+      # it ahead of tgp (bank -10, ceiling 0.30) and every member read 0.0000 and held PACED
+      # for 40 minutes while tgp sat idle.
       lapsed="${lapsed}${epoch} ${account}"$'\n'
     else
       # gh#616: healthy account -- ask maxx when its WEEK resets and sort on that.
