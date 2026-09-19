@@ -237,6 +237,12 @@ fi
 git pull --ff-only origin main -q
 exec 8>&-  # release the shared git lock before the (potentially half-hour) deploy below
 
+# fk#1149: a key assigned twice in the instance env means the live value is whichever line
+# comes last, and a reader (or a handoff) quotes the wrong one. Warn on every deploy; never
+# block one -- bash already resolved it, this is about the next person who reads the file.
+python3 "$KIT_DIR/scripts/fleet_env_lint.py" "${FLEET_INSTANCE_DIR:?set FLEET_INSTANCE_DIR}/fleet.env" 2>&1 \
+  | while IFS= read -r line; do log "$line"; done
+
 if FLEET_INSTANCE_DIR="${FLEET_INSTANCE_DIR:?set FLEET_INSTANCE_DIR}" bash "$KIT_DIR/scripts/deploy.sh" >> "$LOG" 2>&1; then
   echo "$REMOTE_SHA" > "$STATE"
   date +%s > "$DEPLOYED_AT_FILE"
