@@ -160,6 +160,15 @@ class ApplyRecordsAlertResultTests(unittest.TestCase):
             results = {json.loads(l)["id"]: json.loads(l)["result"] for l in results_path.read_text().splitlines()}
         self.assertEqual(results["a1"], "board item #412 created")
         self.assertEqual(results["a2"], "comment on #412")
+        # fk#1158: the created item must be claimable -- a Vision-link line (else the gate
+        # classifies it `missing` and drops it) and the severity label (else a linked-KR
+        # candidate anywhere on the board crowds it out).
+        creates = [c for c in calls if c[:3] == ["gh", "issue", "create"]]
+        self.assertEqual(len(creates), 1, calls)
+        labels = creates[0][creates[0].index("--label") + 1]
+        body = creates[0][creates[0].index("--body") + 1]
+        self.assertIn("fleet:severity-live", labels, labels)
+        self.assertIn("Vision-link: none (maintenance)", body, body)
 
 
 class DedupeLookupTests(unittest.TestCase):
