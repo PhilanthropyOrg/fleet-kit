@@ -335,6 +335,7 @@ while :; do
     TRUNC_NOTE="NOTE: the diff was truncated at ${MAX_DIFF_BYTES} bytes; flag that in your review if it limits confidence."
   fi
   gh pr view "$PR" --json title,body -q '"TITLE: \(.title)\n\n\(.body)"' > "$BODY_FILE" 2>/dev/null || true
+  HEAD_REF=$(gh pr view "$PR" --json headRefName -q '.headRefName' 2>/dev/null || true)
 
   # Self-reserve against FLEET_SHARE_CEILING_PCT (run_member.sh, if FLEET_SHARE_FRACTION is
   # active on this instance) right before spending, not once for the whole tick: the ceiling
@@ -582,10 +583,35 @@ print()' "$PR" "$HEAD_SHA" >> "$LOG_DIR/judge-judy-blocks.jsonl" 2>>"$LOG" \
 $FINDINGS
 
 $PR_VISION_LINK"
-    python3 "$KIT_DIR/scripts/board_github.py" file "$FIX_TITLE" --context "$FIX_BODY" \
-        --priority high >>"$LOG" 2>&1 \
-      && log "PR #$PR: filed fix item for blocked review" \
-      || log "PR #$PR: WARN failed to file fix item for blocked review"
+    # fk#1154: a fix item exists so GRU'S lane picks the block up -- that only means anything
+    # for a PR the fleet authored (run_member.sh names every fleet branch `member/...`, the
+    # same test north.py uses). A human's PR already has a human on it: the review comment is
+    # the whole hand-off, and a "fix" item per push was pure noise -- PR #6802 (a person's
+    # branch) took six blocks in three hours on 2026-09-18 and got six fix items, all of
+    # which marie closed as cruft at ~$9 a pass. And for a fleet PR, one item per PR, not one
+    # per head: a re-push that fails again COMMENTS on the open item (a re-review is a new
+    # head, so the title's summary changes and exact-title dedupe never matched -- marie
+    # found "three copies of one judge-judy finding" the same night).
+    if [[ "${HEAD_REF:-}" != member/* ]]; then
+      log "PR #$PR: not a fleet branch (${HEAD_REF:-?}) -- the review comment is the hand-off, no fix item"
+    else
+      EXISTING_FIX=$(gh issue list --state open --label "${FLEET_LABEL_PREFIX:-fleet:}backlog" \
+          --json number,title --limit 300 2>/dev/null \
+        | python3 -c 'import json,sys; p=sys.argv[1]; print(next((str(i["number"]) for i in json.load(sys.stdin) if (i.get("title") or "").startswith(p)), ""))' \
+          "fix: PR #$PR failed code review" 2>/dev/null || true)
+      if [ -n "$EXISTING_FIX" ]; then
+        gh issue comment "$EXISTING_FIX" --body "Blocked again at head ${HEAD_SHA:0:12}:
+
+$FINDINGS" >>"$LOG" 2>&1 \
+          && log "PR #$PR: blocked again -- commented on open fix item #$EXISTING_FIX instead of filing a twin" \
+          || log "PR #$PR: WARN failed to comment on fix item #$EXISTING_FIX"
+      else
+        python3 "$KIT_DIR/scripts/board_github.py" file "$FIX_TITLE" --context "$FIX_BODY" \
+            --priority high >>"$LOG" 2>&1 \
+          && log "PR #$PR: filed fix item for blocked review" \
+          || log "PR #$PR: WARN failed to file fix item for blocked review"
+      fi
+    fi
 
     report_run "$PR" "$HEAD_SHA" "$USAGE_FILE" "blocked PR #$PR" "head ${HEAD_SHA:0:12}, fleet-code-review: failure, see PR comment" "$SELF_CRITIQUE" "$FINDINGS"
   fi
