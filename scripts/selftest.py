@@ -4910,10 +4910,13 @@ def _email_reply_answers_asks_and_files_backlog_without_a_model():
     def run(cmd):
         calls.append(cmd)
         if cmd[:3] == ["gh", "issue", "list"]:
-            # one open twin exists only for the prod-alert title (fk#1129: keyed by `check`,
-            # "prod alert [app_error]" with no trailing text), so the repeat becomes a comment
-            return R('[{"number": 7, "title": "prod alert [app_error]", "url": "https://github.com/o/r/issues/7"}]'
-                     if "prod alert" in cmd[cmd.index("--search") + 1] else "[]\n")
+            # fk#1154: the lookup is the REST list of every open issue (no --search, no title
+            # in the query), so the fake returns the same board every time and the CODE's
+            # exact-title filter decides. One open twin exists for the prod-alert title
+            # (fk#1129: keyed by `check`, "prod alert [app_error]" with no trailing text), so
+            # that repeat becomes a comment; the backlog title matches nothing and is created.
+            assert "--search" not in cmd, cmd
+            return R('[{"number": 7, "title": "prod alert [app_error]", "url": "https://github.com/o/r/issues/7"}]')
         return R("https://github.com/o/r/issues/99\n" if cmd[0] == "gh" else "ask 17 answered\n")
     def reply(to, subject, text, in_reply_to=None): replies.append((to, subject, text, in_reply_to))
     with tempfile.TemporaryDirectory() as tmp:
