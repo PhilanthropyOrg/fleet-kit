@@ -116,7 +116,14 @@ work done).
    individually. If an item turns out genuinely blocked or its spec doesn't hold up once you're
    building it, drop it (see step 11) and continue with the rest of the batch — one bad item
    does not sink the others.
-3. **Test locally** before you push — run whatever this repo's test command is. **You are a
+3. **Test locally** before you push — the command is `bash /fleet-kit/scripts/verified_test.sh`
+   with NO arguments: it runs the repo's diff-scoped tests where the repo ships a runner
+   (philanthropy's `scripts/tests_for_diff.py`), falls back to the suite only when the diff is
+   too wide to scope, and writes the receipt the push hook checks. A raw whole-tree
+   `pytest tests/` is blocked by that hook: it cannot produce a receipt, and it was the #1 way
+   a pass died (563 whole-suite runs, 1,008 commands backgrounded at 120s, 103 passes that
+   ended "waiting for the background run" with a finished build never pushed, 7 days to
+   2026-09-19). **You are a
    one-shot `claude -p` pass, same as gru and the-fixer (persona_law.md §12): if you background
    that test command, use `Bash(run_in_background: true)` — never a raw shell `&` + `wait
    "$PID"`, which gh#152/gh#283 showed silently drops the result (it either errors instantly
