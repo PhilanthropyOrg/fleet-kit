@@ -18,14 +18,30 @@
 #
 # Usage: bash account_readiness.sh
 # Output (stdout, one line, machine-parseable):
-#   "ready=<N> total=<N> gated=<name:reason,name:reason,...>"
+#   "ready=<N> total=<N> ready_names=<name,...> gated=<name:reason,name:reason,...>"
+# fk#1148: ready_names is there so the line can be diffed against FLEET_ACCOUNTS by eye, and
+# an unset FLEET_ACCOUNTS is a loud exit 2 rather than a confident "ready=1 total=1".
 # gh#134: the state file's 3rd column (written by account_pool.sh for the unauthenticated/
 # other branches, absent -> "exhausted" for the original 2-column format) is now surfaced here
 # too -- a bare "gated=acctname" told a reader an account was down but not why, and "why" is
 # exactly what tells a human whether to wait (a weekly reset) or act (re-authenticate).
 set -uo pipefail
 
-ACCOUNTS="${FLEET_ACCOUNTS:-primary}"
+# fk#1148: FLEET_ACCOUNTS unset used to fall back to the single name "primary", so running
+# this without the instance env printed a confident "ready=1 total=1 gated=" for a
+# three-account pool. That is indistinguishable from a genuinely healthy one-account pool,
+# and it is the FIRST line a human or an agent reads when asking "does the fleet have
+# capacity right now" -- during the 2026-09-19 outage it answered "everything is fine" while
+# two of three accounts were gated. A capacity meter that can silently report on a subset of
+# the pool cannot be used to diagnose a capacity problem, so this now says so loudly.
+if [ -z "${FLEET_ACCOUNTS:-}" ]; then
+  echo "ready=0 total=0 gated= error=FLEET_ACCOUNTS_unset" >&2
+  echo "account_readiness: FLEET_ACCOUNTS is not set -- refusing to guess the pool." >&2
+  echo "  Run it with the instance env, e.g.:" >&2
+  echo "    set -a; . <instance-dir>/fleet.env; set +a; bash \$0" >&2
+  exit 2
+fi
+ACCOUNTS="$FLEET_ACCOUNTS"
 # Default MUST match account_pool.sh's own default exactly (same env var, same fallback) --
 # confirmed live, 2026-08-25: this used $FLEET_LOG_DIR:-/var/log/fleet-kit while
 # account_pool.sh uses $FLEET_LOG_DIR:-$HOME/Library/Logs/fleet-kit. Without FLEET_LOG_DIR
@@ -38,6 +54,7 @@ now=$(date +%s)
 ready=0
 total=0
 gated_names=()
+ready_names=()
 
 for acct in $ACCOUNTS; do
   total=$((total + 1))
@@ -58,11 +75,16 @@ for acct in $ACCOUNTS; do
     gated_names+=("${acct}:${reason}")
   else
     ready=$((ready + 1))
+    ready_names+=("$acct")
   fi
 done
 
 gated_str=$(IFS=,; echo "${gated_names[*]:-}")
-echo "ready=$ready total=$total gated=$gated_str"
+# fk#1148: name the READY accounts too. Counts alone cannot be sanity-checked against
+# FLEET_ACCOUNTS by eye -- "ready=2 total=3" does not say WHICH two, so a reader cannot tell
+# a healthy pair from the wrong pair, and cannot spot a pool that lost a member entirely.
+ready_str=$(IFS=,; echo "${ready_names[*]:-}")
+echo "ready=$ready total=$total ready_names=$ready_str gated=$gated_str"
 
 # Exit 0 if at least one account is ready, 1 if the whole pool is currently gated -- lets a
 # caller do `account_readiness.sh || echo "skip this pass"` without parsing the line.
