@@ -354,3 +354,43 @@ COMMIT onto that existing PR's branch — every member's mental model is "claim 
 it in place." Needs a charter addition (the-fixer or gru) treating a review-BLOCK on an open PR
 as the same class of fire as a failing CI check, pushing to that PR's own branch rather than
 opening a competing one.
+
+## 22. Cron inside the container can die silently right after a deploy, and restarting the cron PROCESS does not bring it back (fk#1171, 2026-09-19)
+
+`deploy OK at 9c9c79c` 15:16Z. The new container seeded its canary at 15:18:58Z and then no
+cron job fired for two hours: no gitpull `date -u` line, no gru/minion/judge-judy/sentry ticks,
+nothing cron-driven in `runs.jsonl` after 15:28Z. The entrypoint watchdog saw the stale canary
+every five minutes and restarted `cron -f` 24 times. Zero effect. A `* * * * * root date -u
+>> /tmp/cronprobe` dropped into `/etc/cron.d/` never fired in that container. The crontab was
+0644 root, `validate_crontab.py` said OK, trailing newline present, so this was not the
+fleet-kit#418 render bug. What fixed it was an unrelated merge at 17:20Z: `auto_deploy.sh`
+replaced the container and the same probe fired within a minute.
+
+Two things to take from it:
+
+- **Process restart is the wrong altitude.** Whatever wedged cron survived `kill -9` + `cron -f`
+  and was cured only by a fresh container. After a few consecutive stale verdicts the entrypoint
+  should exit non-zero and let the host bring a new container up, because that is the only
+  recovery that has ever worked.
+- **The liveness check was blind to it.** `member_liveness_check.sh` at 17:20Z printed `OK newest
+  ok run 3434s ago (the-fixer at 16:22 UTC)`. That the-fixer run was webhook-fired by a red CI
+  run, not by cron, so "some member completed something" was true while the scheduler was
+  dead. Liveness has to key on the cron canary itself, not on the newest ok run of any kind.
+
+Reif found it by eye ("not seeing any PRs coming out"), which is exactly the failure a fleet
+is supposed to make impossible.
+
+## 23. The share ceiling is the sustainable pace, not pace minus the per-diem allowance (fk#1169, 2026-09-19)
+
+`maxx_share_ceiling.py` used to compute `sustainable_pct_per_hour - per_diem_hourly_pct -
+reserved`. `per_diem_hourly_pct` is the hourly ALLOWANCE Maxx grants, not consumption, so
+subtracting it charged the fleet for money it had not spent. Live effect on the tgp account:
+sustainable 0.55, per-diem 0.46, so the instance got 0.052 % of week per hour and every member
+read `PACED` with 71% of the week still left. Reif's ruling: "we are supposed to use whatever
+is available, not just the extras" — "just sustainable pace". After the fix the first gru tick
+read `FLEET_SHARE_CEILING_PCT=0.3096` (was 0.04).
+
+Verification trap that bit the same day: the container's `/fleet-kit` is baked into the image,
+so `git rev-parse HEAD` on the host checkout says nothing about what runs. A merged fleet-kit
+PR is live only after `auto_deploy.log` says `deploy OK at <sha>`; then confirm with
+`podman exec philanthropy grep -c "<unique string>" /fleet-kit/scripts/<file>`.
