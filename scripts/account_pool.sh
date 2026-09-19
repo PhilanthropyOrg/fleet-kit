@@ -183,6 +183,28 @@ _account_pool_note_unauthenticated() {
 # Trip gate window (5 minutes) mirrors the existing "unparseable exhaustion" fallback above --
 # same reasoning: bias toward re-trying too eagerly on an ambiguous classification rather than
 # staying dark.
+# _account_pool_other_account_usable <account> -- fk#1146. Is ANY account other than
+# <account> currently ungated? Reads the same state file account_readiness.sh reads, so the
+# two cannot disagree about who is available. Returns 0 (usable) when at least one other
+# account is free, 1 when <account> is the last one standing.
+#
+# Fails OPEN (returns 0, "someone else is usable") when the pool list or state file cannot
+# be read: an unreadable file is not evidence that the pool is empty, and the cost of being
+# wrong in that direction is one extra gate rather than a dark fleet.
+_account_pool_other_account_usable() {
+  local me="$1" acct epoch now
+  now=$(date +%s)
+  [ -n "${ACCOUNT_POOL_ORDER:-}" ] || return 0
+  for acct in $ACCOUNT_POOL_ORDER; do
+    [ "$acct" = "$me" ] && continue
+    epoch=$(awk -v a="$acct" '$1==a{print $2}' "$ACCOUNT_POOL_STATE_FILE" 2>/dev/null | tail -1)
+    if ! [[ "$epoch" =~ ^[0-9]+$ ]] || [ "$now" -ge "$epoch" ]; then
+      return 0   # this one is not gated (or has no gate on record) -- pool is not empty
+    fi
+  done
+  return 1
+}
+
 _account_pool_note_other_failure() {
   local account="$1" count epoch
   mkdir -p "$(dirname "$ACCOUNT_POOL_STREAK_FILE")" 2>/dev/null
@@ -193,6 +215,23 @@ _account_pool_note_other_failure() {
   echo "$account $count" >> "${ACCOUNT_POOL_STREAK_FILE}.tmp"
   mv "${ACCOUNT_POOL_STREAK_FILE}.tmp" "$ACCOUNT_POOL_STREAK_FILE"
   if [ "$count" -ge "$ACCOUNT_POOL_OTHER_FAILURE_THRESHOLD" ]; then
+    # fk#1146: an 'other' gate must never take the LAST usable account out of the pool.
+    # 'other' means "we do not know why this failed" -- not "out of quota". On 2026-09-19
+    # a generic rc=1 gated `tgp` while it held 84% of its week unused; philanthropy was
+    # genuinely exhausted and gmail genuinely overdrawn, so gating the one healthy account
+    # produced "ALL accounts ... failed this call" and the fleet built nothing for 95
+    # minutes. Converting *unknown* into *exhausted* spent a whole week's headroom on one
+    # bad minute -- the same confusion maxx's own doctrine names ("an unreadable meter is
+    # not an exhausted account").
+    #
+    # So: if every OTHER account is already gated, log and skip the gate. The account stays
+    # in rotation and the next pass retries it. A genuine quota response still gates via
+    # the exhaustion branch above; this guard is only on the ambiguous classification.
+    if ! _account_pool_other_account_usable "$account"; then
+      _account_pool_log "account=$account hit $count consecutive 'other' failures, but every other account is gated -- NOT gating (fk#1146: 'other' is unknown, not exhausted; keeping the last account in rotation)"
+      _account_pool_clear_streak "$account"
+      return 0
+    fi
     epoch=$(( $(date +%s) + 300 ))
     mkdir -p "$(dirname "$ACCOUNT_POOL_STATE_FILE")" 2>/dev/null
     grep -v "^${account} " "$ACCOUNT_POOL_STATE_FILE" 2>/dev/null > "${ACCOUNT_POOL_STATE_FILE}.tmp" || true
