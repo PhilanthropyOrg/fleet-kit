@@ -438,9 +438,14 @@ def cron_with_instance(text: str, name: str, d: Path, ntfy: str = "") -> str:
     kit = KIT_DIR
     logs = Path.home() / "fleet-kit-logs"
     tag = f" # control_plane:{name}"
+    # fk#1164: `flock -o` closes the lock fd before exec. Without it every child of
+    # auto_deploy.sh inherits the OUTER lock on fd 3 -- deploy.sh's detached reaper (which
+    # closes only fd 9, the inner lock) held it for the retired container's whole lifetime,
+    # and every tick in between gave up at -w 240 in silence: no deploy for up to 2h after
+    # each deploy, measured 2026-09-19 (`fuser .git/.auto_deploy.lock` -> the reaper's bash).
     lines = [
         f"*/5 * * * * cd {kit} && FLEET_INSTANCE_DIR={d} FLEET_CONTAINER_NAME={name} FLEET_LOG_DIR={logs} "
-        f"flock -w 240 {kit}/.git/.auto_deploy.lock bash scripts/auto_deploy.sh >> {logs}/auto_deploy.{name}.cron.log 2>&1{tag}",
+        f"flock -o -w 240 {kit}/.git/.auto_deploy.lock bash scripts/auto_deploy.sh >> {logs}/auto_deploy.{name}.cron.log 2>&1{tag}",
         f"*/5 * * * * FLEET_LOG_DIR={d}/logs FLEET_INSTANCE_NAME={name} NTFY_TOPIC={ntfy} "
         f"bash {kit}/scripts/member_liveness_check.sh >> {logs}/member_liveness.{name}.cron.log 2>&1{tag}",
         f"*/5 * * * * PUBLIC_PATH_URL={PUBLIC_BASE}/fleet/{name} NTFY_TOPIC={ntfy} STATE_FILE={d}/logs/.path_health_paged.state "
@@ -468,7 +473,7 @@ def run_deploy(d: Path, name: str, log: Path) -> None:
     env = dict(os.environ, FLEET_INSTANCE_DIR=str(d), FLEET_CONTAINER_NAME=name,
                FLEET_LOG_DIR=str(Path.home() / "fleet-kit-logs"))
     with log.open("a") as fh:
-        subprocess.run(["flock", "-w", "600", str(KIT_DIR / ".git" / ".auto_deploy.lock"),
+        subprocess.run(["flock", "-o", "-w", "600", str(KIT_DIR / ".git" / ".auto_deploy.lock"),
                         "bash", str(KIT_DIR / "scripts" / "deploy.sh")],
                        env=env, stdout=fh, stderr=subprocess.STDOUT, timeout=1800, check=True)
 
