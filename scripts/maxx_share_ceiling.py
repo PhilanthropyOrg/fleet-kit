@@ -131,10 +131,22 @@ def main(argv: list[str]) -> int:
         # them alone, without also checking this, would spend straight through maxx's own
         # hard stop. An honest zero, not suppressed: this IS a real reading, distinct from
         # the unreadable-meter branch above.
+        print("ceiling 0.0000: maxx verdict is over (its own stop signal)", file=sys.stderr)
         print("0.0000")
         return 0
 
     if block_over_pace(budget):
+        # fk#1174 follow-up: say WHY on stderr (run_member.sh appends it to the member log).
+        # On 2026-09-19 every member logged 0.0000 for 40 min and nothing said whether the
+        # 5h block was over pace or the block fields were simply missing (fail-closed).
+        used = budget.get("session_used_pct")
+        left = budget.get("five_reset_in_sec")
+        if used is None or left is None:
+            why = (f"block fields missing (session_used_pct={used!r}, five_reset_in_sec={left!r}); "
+                   "fail-closed, FLEET_BLOCK_PACE_REQUIRE_ANCHOR=0 opts out")
+        else:
+            why = f"5h block over pace (used {used}% with {int(float(left))}s left)"
+        print(f"ceiling 0.0000: {why}", file=sys.stderr)
         print("0.0000")
         return 0
 
