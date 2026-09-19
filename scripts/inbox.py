@@ -509,8 +509,17 @@ def file_or_comment_alert(row: dict, run=None) -> tuple[str, bool]:
         run(["gh", "issue", "comment", "--repo", slug, str(it["number"]),
              "--body", f"Fired again: {first_line}"[:1500]])
         return it["url"], False
-    r = run(["gh", "issue", "create", "--repo", slug, "--label", "fleet:backlog,lane:devops,fleet:priority-high",
-             "--title", title, "--body", f"{first_line}\n\nFiled by intake from {row.get('from') or row.get('source')} (fk#1129)."])
+    # fk#1158: an alert item was filed with no Vision-link line and no severity label, so
+    # vision_link_gate classified it `missing` and dropped it from every claim pack -- filed,
+    # never built, then closed by marie as a twin (~$9 a pass). A firing pager IS "an active,
+    # ongoing failure" (the label's own description); the box's health check detected it, not
+    # a model reading issue text. Filed as `none (maintenance)` + severity-live so it survives
+    # the crowding-out drop while it is firing; marie clears the label when it stops.
+    r = run(["gh", "issue", "create", "--repo", slug,
+             "--label", "fleet:backlog,lane:devops,fleet:priority-high,fleet:severity-live",
+             "--title", title,
+             "--body", f"{first_line}\n\nFiled by intake from {row.get('from') or row.get('source')} (fk#1129).\n\n"
+                       f"Vision-link: none (maintenance)"])
     if r.returncode != 0:
         raise RuntimeError((r.stderr or r.stdout).strip()[:300])
     return r.stdout.strip().splitlines()[-1], True
