@@ -339,6 +339,10 @@ enable_cron_in()  { podman exec "$1" sh -c 'mv -f /etc/cron.d/fleet-kit.retired 
 spawn_reaper() {
     local name="$1"
     setsid nohup bash -c '
+        # fk#1164: drop EVERY inherited fd above stderr, not just 9. The crontab wraps
+        # auto_deploy.sh in its own flock(1), which hands the outer lock down on fd 3; this
+        # reaper kept it as long as the retired container lived and blocked every tick.
+        for f in /proc/$$/fd/*; do f=${f##*/}; [ "$f" -gt 2 ] 2>/dev/null && eval "exec $f>&-"; done
         name="$1"; max="$2"; log="$3"; waited=0
         while :; do
             state="$(podman inspect "$name" --format "{{.State.Running}}" 2>/dev/null || echo gone)"
