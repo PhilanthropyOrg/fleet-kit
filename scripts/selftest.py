@@ -11741,7 +11741,7 @@ def _epoch_beyond_sanity_ceiling_is_refused_not_written():
     )
 
 
-def _run_pool_then_readiness(account_cmds):
+def _run_pool_then_readiness(account_cmds, accounts="acct"):
     """Run account_pool_run once per entry in `account_cmds` (a shell command each) against a
     shared scratch state, then return account_readiness.sh's own output line -- gh#134's ACs
     are about what readiness reports, not the state file's internal shape, so tests should
@@ -11754,7 +11754,7 @@ def _run_pool_then_readiness(account_cmds):
         lines = [
             "set -uo pipefail",
             f'export FLEET_LOG_DIR="{tmp}"',
-            'export FLEET_ACCOUNTS="acct"',
+            f'export FLEET_ACCOUNTS="{accounts}"',
             f'source "{pool}"',
         ]
         for cmd in account_cmds:
@@ -11801,12 +11801,25 @@ def _other_failure_gates_after_consecutive_threshold():
     out_two = _run_pool_then_readiness([_OTHER_FAIL, _OTHER_FAIL])
     assert "ready=1" in out_two, f"two consecutive 'other' failures gated early: {out_two!r}"
 
+    # fk#1146: this helper drives a SINGLE-account pool (FLEET_ACCOUNTS="acct"), and an
+    # 'other' gate now refuses to take the last usable account out of rotation -- 'other'
+    # means "cause unknown", not "out of quota", and gating the only account switches the
+    # fleet off entirely (95-minute outage, 2026-09-19). So the streak still trips here,
+    # and the gate is deliberately NOT written.
     out_three = _run_pool_then_readiness([_OTHER_FAIL, _OTHER_FAIL, _OTHER_FAIL])
-    assert "ready=0" in out_three, (
-        f"three consecutive 'other' failures did not trip the gate: {out_three!r}"
+    assert "ready=1" in out_three, (
+        f"the last usable account must stay in rotation on an 'other' streak (fk#1146): {out_three!r}"
     )
-    assert "gated=acct:other" in out_three, (
-        f"gate tripped by 'other' failures is not tagged 'other': {out_three!r}"
+    assert "gated=" in out_three and "acct:other" not in out_three, (
+        f"the last account must not be tagged gated on an unknown cause: {out_three!r}"
+    )
+
+    # The gate itself still trips when the pool has somewhere else to go -- same streak,
+    # two accounts, so refusing to gate is not just "the gate stopped working".
+    out_multi = _run_pool_then_readiness([_OTHER_FAIL, _OTHER_FAIL, _OTHER_FAIL],
+                                         accounts="acct spare")
+    assert "gated=acct:other" in out_multi, (
+        f"with a spare account available the 'other' gate must still trip: {out_multi!r}"
     )
 
 
@@ -11849,9 +11862,12 @@ def _gated_skip_writes_a_non_empty_reason_and_never_invokes_the_command():
             f'export ACCOUNT_POOL_LOG_FILE="{log_file}"',
             'export FLEET_ACCOUNTS="acct"',
             f'source "{pool}"',
-            f"account_pool_run bash -c {json.dumps(_OTHER_FAIL)} >/dev/null 2>&1 || true",
-            f"account_pool_run bash -c {json.dumps(_OTHER_FAIL)} >/dev/null 2>&1 || true",
-            f"account_pool_run bash -c {json.dumps(_OTHER_FAIL)} >/dev/null 2>&1 || true",
+            # fk#1146: reach the gated state through the UNAUTHENTICATED branch, which gates
+            # on the first occurrence and is unambiguous. The 'other' branch no longer gates
+            # a single-account pool at all -- gating the only account on an unknown cause
+            # switches the fleet off (95-minute outage, 2026-09-19). What this test is about
+            # is what a GATED SKIP writes, not which branch produced the gate.
+            f"account_pool_run bash -c {json.dumps(_UNAUTH_FAIL)} >/dev/null 2>&1 || true",
             f'export ACCOUNT_POOL_REASON_FILE="{reason_file}"',
             f'account_pool_run bash -c {json.dumps("echo ran >> " + str(marker) + "; echo ok")} >/dev/null 2>&1',
             'echo "RC=$?"',
@@ -11868,7 +11884,10 @@ def _gated_skip_writes_a_non_empty_reason_and_never_invokes_the_command():
             "ACCOUNT_POOL_REASON_FILE was empty/missing on a gated skip -- run_member.sh's "
             "`pass end` line would read `reason=` empty, indistinguishable from a crash"
         )
-        assert reason_text.startswith("gated:other until "), (
+        # fk#1146: the gate is now reached through the unauthenticated branch (the 'other'
+        # branch no longer gates a single-account pool). What matters here is the SHAPE --
+        # a named reason plus the wait -- not which branch set it.
+        assert reason_text.startswith("gated:unauthenticated until "), (
             f"gated reason does not name the gate and the wait: {reason_text!r}"
         )
         log_text = log_file.read_text() if log_file.exists() else ""
