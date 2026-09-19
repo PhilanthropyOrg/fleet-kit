@@ -1723,7 +1723,7 @@ def _maxx_share_ceiling_uses_hourly_headroom_not_the_week_bank():
         buf = io.StringIO()
         with redirect_stdout(buf):
             maxx_share_ceiling.main(["prog", "1.0"])
-        assert abs(float(buf.getvalue().strip()) - 0.25) < 1e-6, buf.getvalue()
+        assert abs(float(buf.getvalue().strip()) - 0.35) < 1e-6, buf.getvalue()  # fk#1169: pace itself, not pace minus the per-diem allowance
 
         # Other members' live reservations subtract too -- a busy fleet has less ceiling
         # left for the next member to self-reserve against.
@@ -1732,12 +1732,12 @@ def _maxx_share_ceiling_uses_hourly_headroom_not_the_week_bank():
         buf = io.StringIO()
         with redirect_stdout(buf):
             maxx_share_ceiling.main(["prog", "1.0"])
-        assert abs(float(buf.getvalue().strip()) - 0.05) < 1e-6, buf.getvalue()  # 0.35-0.10-0.20
+        assert abs(float(buf.getvalue().strip()) - 0.15) < 1e-6, buf.getvalue()  # 0.35-0.20 (fk#1169)
 
         # An hour already at or past sustainable pace (once reservations are subtracted) is
         # an honest, printed zero -- not suppressed, not negative.
         maxx_share_ceiling.get_headroom = lambda: (
-            1.0, "ok", {**healthy_hour_bad_week, "per_diem_hourly_pct": 0.90})
+            1.0, "ok", {**healthy_hour_bad_week, "reserved_pct": 0.40})  # fk#1169: only reservations can zero it
         buf = io.StringIO()
         with redirect_stdout(buf):
             maxx_share_ceiling.main(["prog", "1.0"])
@@ -14173,7 +14173,7 @@ def _maxx_share_ceiling_holds_a_5h_block_ahead_of_pace_gh781():
     # Same block, spent on pace (30% elapsed, 35% used, inside the 10-point slack) -> the
     # ordinary hourly number, not a hold.
     paced = {**live, "session_used_pct": 35}
-    assert abs(float(ceiling(paced)) - 0.25) < 1e-6, ceiling(paced)
+    assert abs(float(ceiling(paced)) - 0.35) < 1e-6, ceiling(paced)  # fk#1169: pace, not pace minus allowance
     # Fresh block, small burst inside the slack -> run; past the slack -> hold.
     assert ceiling({**live, "session_used_pct": 9, "five_reset_in_sec": 18000}) != "0.0000"
     assert ceiling({**live, "session_used_pct": 11, "five_reset_in_sec": 18000}) == "0.0000"

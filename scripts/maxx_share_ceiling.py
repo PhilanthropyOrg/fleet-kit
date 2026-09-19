@@ -16,10 +16,20 @@ WHY HOURLY, NOT THE WEEK BANK: the old formula multiplied by `week_bank_pct` -- 
 already-spent number. The moment the week goes over pace (bank negative), that clamps to 0.0
 and every member's ceiling goes to zero even during an hour with real headroom. This version
 uses `sustainable_pct_per_hour` (the burn rate that finishes the week on pace) minus
-`per_diem_hourly_pct` (this hour's actual burn so far) minus `reserved_pct` (every OTHER
-instance/member's currently-live reservation, gh#161 part 2/PR #163) -- a leading, real-time,
-already-coordinated number. FLEET_SHARE_FRACTION slices that hourly headroom the same way it
-always sliced the old one.
+`reserved_pct` (every OTHER instance/member's currently-live reservation, gh#161 part 2/PR
+#163) -- a leading, real-time, already-coordinated number. FLEET_SHARE_FRACTION slices that
+hourly headroom the same way it always sliced the old one.
+
+WHY NOT MINUS `per_diem_hourly_pct` (fk#1169, Reif 2026-09-19: "just sustainable pace"). This
+file used to subtract that field as "this hour's actual burn so far". It is not that: the maxx
+server defines it as the per-diem ALLOWANCE divided by 24 (handler.mjs, `per_diem_hourly_pct`),
+the amount the account may spend per hour. Subtracting the allowance from the sustainable
+rate left the fleet the sliver between two nearly-equal numbers: live on 2026-09-19 the tgp
+account read sustainable 0.55, per_diem_hourly 0.46, so the whole instance got 0.08% of week
+per hour and read PACED whenever that rounded to zero, while the meter's own verdict was
+`on_pace: true` with 71% of the week left. Consumption is already inside `sustainable`: maxx
+recomputes it every read from what remains of the week, and the 5h-block clamp above holds a
+burst. The fleet spends TO the sustainable pace, sliced by FLEET_SHARE_FRACTION.
 
 Prints exactly one number to stdout: the ceiling in pct-of-week units, or empty string if
 there is no trustworthy reading (unreadable meter -- FAILS OPEN, same law as
@@ -129,8 +139,7 @@ def main(argv: list[str]) -> int:
         return 0
 
     sustainable = budget.get("sustainable_pct_per_hour")
-    hourly_used = budget.get("per_diem_hourly_pct")
-    if sustainable is None or hourly_used is None:
+    if sustainable is None:
         print("")
         return 0
 
@@ -173,7 +182,7 @@ def main(argv: list[str]) -> int:
     # licence to overdraw the account. If the hour is actually spent (every instance's real
     # burn, plus everyone's live leases), the honest answer is a smaller number -- or zero --
     # regardless of whose slice it nominally is.
-    global_left_pct = max(0.0, sustainable - hourly_used - reserved)
+    global_left_pct = max(0.0, sustainable - reserved)  # fk#1169: pace, not pace minus allowance
     ceiling_pct = min(ceiling_pct, global_left_pct)
 
     print(f"{ceiling_pct:.4f}")

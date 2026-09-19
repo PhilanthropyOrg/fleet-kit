@@ -73,6 +73,8 @@ jobs:
         run: python3 scripts/test_run_mail.py
       - name: run test_judge_judy_verdict.py
         run: python3 scripts/test_judge_judy_verdict.py
+      - name: run test_share_ceiling_sustainable_pace.py
+        run: python3 scripts/test_share_ceiling_sustainable_pace.py
       - name: run test_verified_test_diff_scoped.py
         run: python3 scripts/test_verified_test_diff_scoped.py
       - name: run test_fleet_env_lint.py
