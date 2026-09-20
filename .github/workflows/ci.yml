@@ -95,8 +95,6 @@ jobs:
         run: python3 scripts/test_red_walker.py
       - name: run test_rework_metric.py
         run: python3 scripts/test_rework_metric.py
-      - name: run test_run_card_reference.py
-        run: python3 scripts/test_run_card_reference.py
       - name: run test_vision_link_gate.py
         run: python3 scripts/test_vision_link_gate.py
       - name: run test_vp_due.py
@@ -163,7 +161,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: install playwright
-        run: pip install playwright==1.62.0
+        run: pip install playwright==1.62.0 pyyaml
       - name: cache playwright browsers
         uses: actions/cache@v4
         with:
@@ -177,6 +175,8 @@ jobs:
         run: python3 scripts/test_home_page_default.py
       - name: run test_journey_walker.py
         run: python3 scripts/test_journey_walker.py
+      - name: run test_run_card_reference.py
+        run: python3 scripts/test_run_card_reference.py
 
       # gh#809: give the fleet a pre-merge look at its own UI. Only runs the (heavier) render
       # step when the diff actually touches a rendered surface -- criterion 3, no added latency
