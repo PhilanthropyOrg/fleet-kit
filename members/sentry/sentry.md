@@ -85,6 +85,23 @@ in*. If you cannot write that sentence for a check, the check is not yours to ru
    ```
    python3 scripts/journey_issue_filer.py --results qa-out/<run>/journeys/results.json
    ```
+   **Run it on EVERY pass that produced a results.json, without exception, and paste its
+   output.** Deduplication is the filer's job, not yours: it keys each failure on
+   journey+step+deploy-sha against `journey_last_pass.json`, so a break a sibling pass already
+   filed is silently skipped and a break that RECOVERED closes its issue. You cannot do that
+   arithmetic by reading a sibling's report, and when you try, the failures reach the human as
+   the word QUIET.
+
+   That is not hypothetical. Run `sentry-294-1789853475` (2026-09-19 21:37Z) walked the
+   journeys, got **4 passed / 12 failed / 4 blocked**, never invoked the filer, and reported
+   `QUIET -- no new issues filed ... every failure duplicates a sibling pass's findings from
+   15 minutes earlier`. Twelve real failures reached the operator as one word. The sibling had
+   found the same breaks because they were REAL, which is an argument for filing, not against.
+
+   **A pass with `journeys_failed > 0` may never report QUIET.** Report `ISSUES` and say how
+   many the filer opened, skipped as already-open, and closed as recovered. If the filer itself
+   fails to run, that is a FAILED pass and its own finding, not a reason to summarise by hand.
+
    Read `results.json`'s own `summary` object (`journeys_passed`/`journeys_failed`/
    `journeys_blocked`) and put those counts in your own report's Outcome line -- this is what
    AC4 means by "a human/dashboard can see it without opening qa-out/".
