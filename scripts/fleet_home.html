@@ -426,7 +426,7 @@ async function renderMinionRuns() {
   if (MINION_RUNS_INFLIGHT) return;
   MINION_RUNS_INFLIGHT = true;
   let runs = [];
-  try { runs = (await (await fetch('/api/minion_runs?limit=12')).json()).runs || []; }
+  try { runs = (await (await fetch(withBase('/api/minion_runs?limit=12'))).json()).runs || []; }
   catch (e) { $('minionRuns').innerHTML = `<li class="empty">could not load minion runs: ${esc(e.message)}</li>`; MINION_RUNS_INFLIGHT = false; return; }
   MINION_RUNS_INFLIGHT = false;
   const base = repoBase();

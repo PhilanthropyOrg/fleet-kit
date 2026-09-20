@@ -111,6 +111,12 @@ def _boot_mocks_factory(number_payload):
         elif path == "/api/alerts":
             route.fulfill(json=({"open": [], "recently_resolved": [], "counts": {},
                                   "budget_safe": True, "worst": "ok"}))
+        elif path == "/api/budget_preview":
+            # fk: every page that grows a new fetch must be taught to these stubs, or the
+            # page 404s in test only and the failure reads as "the console is broken".
+            route.fulfill(json=({"ok": True, "per_pass_usd": 0, "week": {}, "accounts": []}))
+        elif path == "/api/minion_runs":
+            route.fulfill(json=({"runs": []}))
         elif path == "/api/stream":
             route.fulfill(status=200, headers={"Content-Type": "text/event-stream"}, body="")
         else:
