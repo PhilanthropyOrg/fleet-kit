@@ -75,8 +75,6 @@ jobs:
         run: python3 scripts/test_fleet_db.py
       - name: run test_fleet_stats_precompute.py
         run: python3 scripts/test_fleet_stats_precompute.py
-      - name: run test_home_page_default.py
-        run: python3 scripts/test_home_page_default.py
       - name: run test_journey_issue_filer.py
         run: python3 scripts/test_journey_issue_filer.py
       - name: run test_journey_walker.py
@@ -177,6 +175,8 @@ jobs:
         run: playwright install --with-deps chromium
       - name: run test_settings_wiring.py
         run: python3 scripts/test_settings_wiring.py
+      - name: run test_home_page_default.py
+        run: python3 scripts/test_home_page_default.py
 
       # gh#809: give the fleet a pre-merge look at its own UI. Only runs the (heavier) render
       # step when the diff actually touches a rendered surface -- criterion 3, no added latency
