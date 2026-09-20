@@ -17,15 +17,15 @@ CI = ROOT / ".github" / "workflows" / "ci.yml"
 # file -> why it is deliberately not in CI. Keep this SHORT; a growing list is the smell.
 KNOWN_UNRUN: dict[str, str] = {
     "test_console_path_prefix.py":
-        "fk#1183: hand-rolled API stubs drifted from the page; needs porting to console_api_stubs",
-    "test_fleet_home_base_path.py": "fk#1183: same stub drift",
-    "test_fleet_home_health.py": "fk#1183: same stub drift",
-    "test_queue_filter_wiring.py": "fk#1183: same stub drift",
+        "fk#1185: hand-rolled API stubs drifted from the page; needs porting to console_api_stubs",
+    "test_fleet_home_base_path.py": "fk#1185: same stub drift",
+    "test_fleet_home_health.py": "fk#1185: same stub drift",
+    "test_queue_filter_wiring.py": "fk#1185: same stub drift",
     "test_fleet_view_subprocess_env.py":
         "fk#1184: REAL regression, not stub drift -- fleet_view_server spawns board_github.py "
         "with no env=, so it inherits a bare environment and falls back to the host default",
     "test_pretest_push_hook.py":
-        "fk#1183: asserts the pre-push hook leaves non-push commands alone; the hook now blocks "
+        "fk#1186: asserts the pre-push hook leaves non-push commands alone; the hook now blocks "
         "a whole-tree pytest anywhere (fk#1166), so the test encodes the pre-1166 contract",
 }
 
