@@ -47,6 +47,64 @@ jobs:
         run: python3 members/librarian/test_librarian.py
       - name: run test_worktree_lock.py
         run: python3 scripts/test_worktree_lock.py
+      - name: run test_ci_runs_every_test_file.py
+        run: python3 scripts/test_ci_runs_every_test_file.py
+      - name: run test_account_pool_config_dir.py
+        run: python3 scripts/test_account_pool_config_dir.py
+      - name: run test_account_pool_order.py
+        run: python3 scripts/test_account_pool_order.py
+      - name: run test_account_pool_other_gate_last_account.py
+        run: python3 scripts/test_account_pool_other_gate_last_account.py
+      - name: run test_alert_store.py
+        run: python3 scripts/test_alert_store.py
+      - name: run test_block_pace_fails_closed.py
+        run: python3 scripts/test_block_pace_fails_closed.py
+      - name: run test_board_github.py
+        run: python3 scripts/test_board_github.py
+      - name: run test_closes_gate.py
+        run: python3 scripts/test_closes_gate.py
+      - name: run test_console_api_stubs_cover_the_pages.py
+        run: python3 scripts/test_console_api_stubs_cover_the_pages.py
+      - name: run test_console_number_unit.py
+        run: python3 scripts/test_console_number_unit.py
+      - name: run test_deploy_sha_resolution.py
+        run: python3 scripts/test_deploy_sha_resolution.py
+      - name: run test_fleet_brand.py
+        run: python3 scripts/test_fleet_brand.py
+      - name: run test_fleet_db.py
+        run: python3 scripts/test_fleet_db.py
+      - name: run test_fleet_stats_precompute.py
+        run: python3 scripts/test_fleet_stats_precompute.py
+      - name: run test_home_page_default.py
+        run: python3 scripts/test_home_page_default.py
+      - name: run test_journey_issue_filer.py
+        run: python3 scripts/test_journey_issue_filer.py
+      - name: run test_journey_walker.py
+        run: python3 scripts/test_journey_walker.py
+      - name: run test_judge_judy_dedupe_comment_gh6483.py
+        run: python3 scripts/test_judge_judy_dedupe_comment_gh6483.py
+      - name: run test_liveness_blocked_fleet.py
+        run: python3 scripts/test_liveness_blocked_fleet.py
+      - name: run test_messenger_brief.py
+        run: python3 scripts/test_messenger_brief.py
+      - name: run test_needs_human_op.py
+        run: python3 scripts/test_needs_human_op.py
+      - name: run test_plan_rank.py
+        run: python3 scripts/test_plan_rank.py
+      - name: run test_prod_incident.py
+        run: python3 scripts/test_prod_incident.py
+      - name: run test_quality_gate.py
+        run: python3 scripts/test_quality_gate.py
+      - name: run test_red_walker.py
+        run: python3 scripts/test_red_walker.py
+      - name: run test_rework_metric.py
+        run: python3 scripts/test_rework_metric.py
+      - name: run test_run_card_reference.py
+        run: python3 scripts/test_run_card_reference.py
+      - name: run test_vision_link_gate.py
+        run: python3 scripts/test_vision_link_gate.py
+      - name: run test_vp_due.py
+        run: python3 scripts/test_vp_due.py
       - name: run test_explore_tool.py
         run: python3 scripts/test_explore_tool.py
       - name: run test_fleet_home_spawns_vs_prs.py
