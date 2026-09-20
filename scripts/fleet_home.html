@@ -169,6 +169,12 @@
     .member{grid-template-columns:1fr;gap:4px} .member .when{text-align:left}
     .side{width:100vw;min-width:0;max-width:none;padding:14px 14px 40px}
   }
+  .signin[hidden]{display:none}
+  .signin{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:50;display:flex;align-items:center;justify-content:center;padding:16px}
+  .signin-box{background:var(--paper);border:1px solid var(--rule);border-radius:8px;padding:18px;width:min(420px,100%);display:flex;flex-direction:column;gap:10px}
+  .signin-box small{color:var(--muted,#666)}
+  .signin-box input{font:inherit;font-size:16px;min-height:36px;padding:0 10px;border:1px solid var(--rule);border-radius:6px;background:var(--paper);color:var(--ink)}
+  .signin-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 </style>
 </head>
 <body>
@@ -221,6 +227,14 @@
 </div>
 <div id="sideBack" class="side-back" hidden></div>
 <aside id="side" class="side" hidden aria-label="run details"></aside>
+<div id="signin" class="signin" hidden role="dialog" aria-label="sign in">
+  <div class="signin-box">
+    <b>Sign in to change the fleet</b>
+    <small>Paste FLEET_API_KEY from fleet.env. It becomes a cookie; the page does not keep it.</small>
+    <input id="signinKey" type="password" autocomplete="off" placeholder="fleet API key">
+    <div class="signin-row"><button id="signinGo" class="primary">Sign in</button><button id="signinCancel">Cancel</button><span id="signinMsg" class="err"></span></div>
+  </div>
+</div>
 
 <script>
 'use strict';
@@ -237,12 +251,35 @@ const ctTime = () => new Date().toLocaleTimeString('en-US', {timeZone: 'America/
 const BASE_PATH = (() => { const p = location.pathname; return p.endsWith('/') ? p : p + '/'; })();
 const withBase = path => BASE_PATH + String(path).replace(/^\//, '');
 async function getJSON(path) { const r = await fetch(withBase(path), {cache: 'no-store'}); if (!r.ok) throw new Error(`${path} ${r.status}`); return r.json(); }
-async function postJSON(path, body) {
+async function postJSON(path, body, retried) {
   const r = await fetch(withBase(path), {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
   const j = await r.json().catch(() => ({}));
-  if (r.status === 401) throw new Error('sign in first (Settings on the classic console)');
+  // No session yet: ask for the key right here, then retry the same write once. Before this
+  // the page said "sign in first (Settings on the classic console)", which sent the operator
+  // to a different app to press a button on this one (Reif, 2026-09-19: "thats stupid").
+  if (r.status === 401 && !retried) { await signIn(); return postJSON(path, body, true); }
+  if (r.status === 401) throw new Error('sign in first');
   if (!r.ok || j.ok === false) throw new Error(j.error || `${path} ${r.status}`);
   return j;
+}
+// Inline sign-in: same /api/login the classic console uses. The key never stays in the page;
+// the server answers with an HttpOnly cookie and the input is cleared. Resolves on success,
+// rejects if the operator cancels, so the caller's catch shows a plain message.
+function signIn() {
+  return new Promise((resolve, reject) => {
+    const box = $('signin'); box.hidden = false;
+    const inp = $('signinKey'), msg = $('signinMsg'); inp.value = ''; msg.textContent = ''; inp.focus();
+    const done = ok => { box.hidden = true; $('signinGo').onclick = null; $('signinCancel').onclick = null; inp.onkeydown = null; ok ? resolve() : reject(new Error('not signed in')); };
+    $('signinGo').onclick = async () => {
+      const r = await fetch(withBase('/api/login'), {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({key: inp.value})});
+      const j = await r.json().catch(() => ({}));
+      inp.value = '';
+      if (j.ok) { done(true); return; }
+      msg.textContent = j.error || 'that key was not accepted';
+    };
+    $('signinCancel').onclick = () => done(false);
+    inp.onkeydown = ev => { if (ev.key === 'Enter') $('signinGo').click(); if (ev.key === 'Escape') done(false); };
+  });
 }
 
 let OPEN = null, OPEN_RUN = null, LIVE_TIMER = null;
