@@ -15947,6 +15947,33 @@ def _fold_candidates_matches_four_reasons_in_order_and_excludes_bad_prs_fk1127()
         "draft / stale / DIRTY PRs must never produce a candidate: " + str(out)
 
 
+def _worktree_builder_pins_the_item_and_force_pushes_the_fold_fk1202():
+    """fk#1202: (1) `--item <n>` claims THAT issue via board_github.claim_item, never
+    claim_next_n (which skips a pre-claimed item and grabs another); (2) the fold push after
+    the rebase is --force-with-lease, so a PR branch that carried merge commits does not make
+    the push non-fast-forward and drop the build."""
+    import board_github, json as _json
+    src = (ROOT / "scripts" / "worktree_builder.sh").read_text()
+    assert re.search(r'--item\)\s*ITEM_PIN=', src), "--item is not parsed into ITEM_PIN"
+    assert 'board_github.py" claim-item "$WORKER_NAME" "$ITEM_PIN"' in src, "a pinned item must go through claim-item"
+    assert 'git push --force-with-lease origin "HEAD:$WT_BRANCH"' in src, "fold push is not --force-with-lease (fk#1202)"
+    gru = (ROOT / "members" / "gru" / "gru.md").read_text()
+    assert "worktree_builder.sh --item <n> --onto-pr <N>" in gru, "gru still dispatches a fold without --item"
+    calls = []
+    def run(cmd):
+        calls.append(cmd)
+        if cmd[:3] == ["gh", "issue", "view"]:
+            return 0, _json.dumps({"number": 7123, "title": "fix: PR #7119", "body": "the findings", "labels": [{"name": "fleet:claimed"}]})
+        return 0, ""
+    got = board_github.claim_item("builder", 7123, run=run)
+    assert got == [{"id": 7123, "text": "fix: PR #7119", "context": "the findings"}], got
+    assert calls[0][:4] == ["gh", "issue", "view", "7123"], calls
+    assert ["gh", "issue", "edit", "7123", "--add-label", board_github.LABEL_CLAIMED] in calls, "claim-item must (re)apply the claim label"
+    assert any(c[:3] == ["gh", "issue", "comment"] and c[3] == "7123" for c in calls), calls
+    # a failed view returns [], never a guessed item
+    assert board_github.claim_item("builder", 1, run=lambda c: (1, "not found")) == []
+
+
 def _worktree_builder_parses_onto_pr_flag_and_has_the_queue_fallback_fk1127():
     """fk#1127: worktree_builder.sh accepts `--onto-pr N` (checks out N's own branch, rebases
     and pushes once instead of opening a new PR) and falls back to a fresh branch + `gh pr
@@ -16466,6 +16493,7 @@ if __name__ == "__main__":
 
     check("fold_candidates matches the four reasons in strongest-rule-first order, excludes draft/stale/DIRTY PRs (fk#1127)", _fold_candidates_matches_four_reasons_in_order_and_excludes_bad_prs_fk1127)
     check("worktree_builder.sh parses --onto-pr and falls back to a new PR on a queue-rejected push (fk#1127)", _worktree_builder_parses_onto_pr_flag_and_has_the_queue_fallback_fk1127)
+    check("worktree_builder.sh --item claims that exact issue and the fold push is --force-with-lease (fk#1202)", _worktree_builder_pins_the_item_and_force_pushes_the_fold_fk1202)
     check("marie's charter wires fold_candidates.py and the fleet:fold-into-pr label (fk#1127)", _marie_charter_wires_fold_candidates_and_the_fold_label_fk1127)
     check("roster is 10 members after fk#1195's fold, no archived member still on cron, every moved duty lands (fk#1195)", _roster_is_ten_members_after_fk1195_fold)
     for n in ok:

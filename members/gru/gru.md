@@ -329,9 +329,10 @@ spawns exactly one). Your job, in order:
    dispatch it OUTSIDE the batch loop, still one claim per item first (step 4's claim, done here
    instead):
    ```
-   gh issue edit <n> --add-label fleet:claimed
-   FLEET_RUN_NOW=1 bash /fleet-kit/scripts/worktree_builder.sh --onto-pr <N>
+   FLEET_RUN_NOW=1 bash /fleet-kit/scripts/worktree_builder.sh --item <n> --onto-pr <N>
    ```
+   `--item <n>` claims that exact issue (fk#1202); never pre-claim it by hand and never omit
+   `--item`, or the builder claims the next UNCLAIMED issue and builds it onto N's branch.
    Remove fold-labeled items from the candidate set before step 3 sees it — they are handled,
    not skipped. Report each one: item, target PR, and whether the push landed on N or fell back
    to a new PR (worktree_builder.sh logs "protected branch hook declined" on a queued target).
