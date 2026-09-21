@@ -76,8 +76,8 @@ cron slot. Budget three hours from merge to first evidence, not thirty minutes.
 fleet.env narrows the set. One invalid crontab field silently discards the whole file
 (fleet-kit#418): `python3 scripts/validate_crontab.py /etc/cron.d/fleet-kit` inside the container.
 
-**Change a member's instructions:** edit `members/<name>/<name>.md`, PR, `gh pr merge N --auto`
-(never `--squash`/`--admin`, the merge queue owns it), wait for `deploy OK`, then §4. Per-member
+**Change a member's instructions:** edit `members/<name>/<name>.md`, PR, `gh pr merge N --auto --squash`
+(no merge queue any more -- fleet-kit#1193; never `--admin`), wait for `deploy OK`, then §4. Per-member
 caps live in the manifest (`llm.max_turns`, `mandate.limits.max_budget_usd`); the fleet.env
 `FLEET_MAX_BUDGET_USD` / `FLEET_BUILDER_MAX_TURNS` reach only `worktree_builder.sh` and judge-judy.
 

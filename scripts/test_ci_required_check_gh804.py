@@ -58,7 +58,7 @@ def test_required_job_has_no_with_deps_step() -> None:
 def test_playwright_dependent_tests_still_run_every_pr() -> None:
     ci_text = CI_YML.read_text()
     # test_settings_wiring.py imports playwright at module level -- it must still run on
-    # every PR (AC4), just not gate the merge queue on an apt mirror.
+    # every PR (AC4), just not gate the merge on an apt mirror.
     assert "run: python3 scripts/test_settings_wiring.py" in ci_text, (
         "test_settings_wiring.py must still run on every PR, just outside the required job"
     )
