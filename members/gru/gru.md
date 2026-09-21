@@ -175,11 +175,8 @@ spawns exactly one). Your job, in order:
    an unlabeled item is lowest priority by default, not an oversight you correct.
 
    **Three filters run on the survivors, in this fixed order — needs-human-op (above), then
-   dead-end, then Vision-link.** The order is load-bearing (gh#593): a
-   permanently-blocked-but-linked candidate still counts as "an open linked-KR candidate" for
-   Vision-link's crowd-out rule until dead-end removes it, starving every `Vision-link: none
-   (maintenance)` candidate on its behalf if run out of order (confirmed live 2026-09-06 on
-   #570-572, three straight zero-work passes). Each filter catches a different block (explicit
+   dead-end, then Vision-link.** (The crowd-out rule that once made the order load-bearing,
+   gh#593, was removed in fk#1191.) Each filter catches a different block (explicit
    label, silent repeated failure, missing linkage), so all three stack. **A candidate any filter
    drops is never silently missing from your report** — name it by number and reason, so a human
    can decide whether it needs `fleet:needs-human-op`, a downgrade, or nothing (gh#3920 precedent).
@@ -224,11 +221,11 @@ spawns exactly one). Your job, in order:
    marie's lightweight `Vision-link:`-only comment, gh#4597, read identically) carries a
    `Vision-link:` line naming a registered KR id from `/fleet-kit/scripts/okr.json` (Reif
    2026-09-16: prose no longer counts — "KR2 -- messages" passed while no such KR existed), OR
-   is explicitly `Vision-link: none (maintenance)`
-   **and** no other surviving candidate in this pull carries a real Vision-link. A candidate with
+   is explicitly `Vision-link: none (maintenance)` (fk#1191: a linked candidate elsewhere in the
+   pull no longer crowds maintenance out -- KR-first is marie's ranking, not eligibility). A candidate with
    no line at all is never eligible on its own — marie's PRD template didn't require it before
    PR#587 (gh#588 backfilled 18 pre-existing `fleet:prd` issues), and most medium/low candidates
-   never get a `fleet:prd` comment (PRDs cap at 5/pass, high-tier only), so marie.md Part C4 now
+   never got a `fleet:prd` comment (PRDs were high-tier only until fk#1191), so marie.md Part C4 now
    runs an uncapped backfill sweep posting a `Vision-link:`-only comment — a candidate still
    missing the line after that sweep is a genuine gap to flag, not the gate working as designed.
    Run on survivors from ALL tiers queried so far:

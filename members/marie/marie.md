@@ -432,9 +432,16 @@ own Confidence criterion already names that failure ("clarifying-question paraly
 that costs the item a rank and nothing else. Ranking a bad spec lower does not make it
 buildable. Writing the spec does.
 
-**Scope: only what is about to be built.** Every open `fleet:priority-high` issue that is NOT
-`fleet:claimed` and does NOT already carry `fleet:prd`. That is gru's next-build queue, so
-this is where a spec converts. Do NOT PRD the whole backlog — most of it will never be built.
+**Scope: the whole unclaimed backlog, high tier first (fk#1191, Reif 2026-09-21: "limiting
+marie is nonsense, making it blind to any portion of the backlog is insane").** Every open
+`fleet:backlog` issue that is NOT `fleet:claimed` and does NOT already carry `fleet:prd`, in
+tier order (high, medium, low, untiered). Measured 2026-09-21: the old high-tier-only scope
+left 101 of 184 unclaimed items with no `quality:` label and 28 more with no Given/When/Then,
+so `quality_gate.py` made them invisible to gru and it reported 0 buildable on a 229-item
+board. An item you cannot fully PRD this pass still gets the two things the gate reads — one
+`quality:` label and at least one Given/When/Then criterion — as a lightweight comment, the
+same shape as the Vision-link sweep (gh#4597). Nothing on the board is allowed to be
+un-buildable for lack of a stamp.
 
 **No fixed count cap (2026-09-14, Reif: "limit Marie on turns not on PRDs").** The old rule
 capped this step at 5 PRDs per pass regardless of how cheap or how related they were. Your
