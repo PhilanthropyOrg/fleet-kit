@@ -1347,16 +1347,13 @@ def _vision_link_gate_eligibility_rule():
         {"number": 4, "reason": "no Vision-link line (neither a real link nor explicit "
                                  "'none (maintenance)')"}]}, out
 
-    # AC4: maintenance is eligible only when nothing number-moving is waiting -- present, it's
-    # dropped and the drop names the linked candidate (AC3); absent, it's picked.
+    # fk#1191 (was AC4's crowd-out): maintenance stays eligible even with a linked candidate
+    # in the pack -- ranking orders them, the gate never hides them.
     out_blocked = vlg.gate_candidates([
         {"number": 513, "body": "Vision-link: okr.verified_claims"},
         {"number": 100, "body": "Vision-link: none (maintenance)"},
     ])
-    assert out_blocked["eligible"] == [513]
-    assert out_blocked["dropped"] == [{
-        "number": 100,
-        "reason": "none (maintenance), but a linked-KR candidate is open: #513"}], out_blocked
+    assert out_blocked == {"eligible": [513, 100], "dropped": []}, out_blocked
 
     out_clear = vlg.gate_candidates([{"number": 100, "body": "Vision-link: none (maintenance)"}])
     assert out_clear == {"eligible": [100], "dropped": []}, out_clear
@@ -1395,8 +1392,8 @@ _GH716_COMMENT = 'jefe pass 2026-09-08 ~12:2x UTC — new information: this fix 
 
 
 def _vision_link_gate_severity_escape_hatch_gh726():
-    """gh#726: the crowding-out branch (STATUS_MAINTENANCE + any_linked -> dropped) has exactly
-    one escape hatch -- an active, ongoing failure marked `fleet:severity-live` survives it.
+    """gh#726 wrote this for the crowd-out branch's one escape hatch; fk#1191 removed the
+    crowd-out itself, so every maintenance line is eligible with or without the label.
     AC6's own regression case: gh#716's real body and a real comment, unmodified, plus the label
     the PRD says should have rescued it from the drop it actually suffered.
     """
@@ -1410,22 +1407,17 @@ def _vision_link_gate_severity_escape_hatch_gh726():
     ])
     assert out == {"eligible": [513, 100], "dropped": []}, out
 
-    # AC2: same pack, no fleet:severity-live -> still dropped, reason string unchanged.
-    out_no_hatch = vlg.gate_candidates([
-        {"number": 513, "body": "Vision-link: okr.verified_claims"},
-        {"number": 100, "body": "Vision-link: none (maintenance)", "labels": []},
-    ])
-    assert out_no_hatch == {"eligible": [513], "dropped": [
-        {"number": 100, "reason": "none (maintenance), but a linked-KR candidate is open: #513"}
-    ]}, out_no_hatch
-
-    # AC3: no `labels` key at all (the shape every current caller passes today) -> byte-identical
-    # to the pre-hatch output -- no KeyError, and absence never becomes an accidental rescue.
-    out_legacy = vlg.gate_candidates([
-        {"number": 513, "body": "Vision-link: okr.verified_claims"},
-        {"number": 100, "body": "Vision-link: none (maintenance)"},
-    ])
-    assert out_legacy == out_no_hatch, out_legacy
+    # AC2/AC3 (rewritten fk#1191): no label, or no `labels` key at all -> STILL eligible.
+    # The crowd-out these cases used to pin is gone: one linked ticket must never hide a
+    # maintenance item (117 of 184 hidden on the 2026-09-21 board).
+    for pack in (
+        [{"number": 513, "body": "Vision-link: okr.verified_claims"},
+         {"number": 100, "body": "Vision-link: none (maintenance)", "labels": []}],
+        [{"number": 513, "body": "Vision-link: okr.verified_claims"},
+         {"number": 100, "body": "Vision-link: none (maintenance)"}],
+    ):
+        out_pack = vlg.gate_candidates(pack)
+        assert out_pack == {"eligible": [513, 100], "dropped": []}, out_pack
 
     # AC4: fleet:severity-live present but no Vision-link line at all (missing, not maintenance)
     # -- the hatch rescues an honest maintenance line, never an unlinked one.

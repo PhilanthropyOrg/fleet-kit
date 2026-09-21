@@ -7,20 +7,15 @@ PRD says it moves the number introduced by #513 ("Vision-link:") is not read at 
 12 same-morning minion PRs, all `fix(...)` inward-spend, none evaluated against whether they
 move the number.
 
-THE RULE (gh#525's own Fix section, verbatim): a candidate is eligible only if its body/PRD
-carries a `Vision-link:` line naming something real (the number, the guardrail, the channel --
-free text is fine, per gh#525's own open question, until #513's `number.json` ships and this
-can validate against it instead) -- OR it is explicitly `Vision-link: none (maintenance)` AND
-no OTHER open candidate anywhere in the set carries a real Vision-link. A candidate with no
-`Vision-link:` line at all -- neither a real link nor an explicit `none (maintenance)` -- is
-never eligible on its own. marie's PRD template (marie.md Part C4) stamps this line on every
-new/re-scored PRD as of PR#587, and gh#588 backfilled the pre-existing `fleet:prd` population --
-but a PRD only exists at all for `fleet:priority-high` items, capped at 5/pass. Most of the
-backlog (medium/low tier, or high-tier still waiting under the cap) never gets a `fleet:prd`
-comment, so it never got this line either, until gh#4597: marie.md Part C4 now also runs an
-uncapped, lightweight sweep posting a `Vision-link:`-only comment (no PRD) on every
-`fleet:backlog` candidate that has neither `fleet:prd` nor an existing line -- this script does
-not need to know or care which kind of comment supplied the line (see below).
+THE RULE (fk#1191, Reif 2026-09-21: "making it blind to any portion of the backlog is
+insane"). A candidate is eligible if its body/PRD carries a `Vision-link:` line -- either a
+registered KR id or an explicit `none (maintenance)`. A candidate with no line at all is never
+eligible on its own. That is the whole gate. The crowd-out rule this used to carry (gh#525:
+maintenance ineligible while ANY linked candidate is open) is gone: measured 2026-09-21 it hid
+117 of 184 unclaimed items behind ONE linked ticket (#7020) that itself failed quality_gate, so
+gru reported "0 buildable" for three passes on a 229-item board. KR-first is marie's RANKING
+job (priority tiers), not an eligibility rule; a gate that empties the board is not a gate.
+The gh#726 severity hatch is kept only as a label passthrough (nothing to escape any more).
 
 WHERE THE LINE LIVES. A `Vision-link:` line can live directly in an issue BODY (Reif filing an
 item names its link himself), in a `fleet:prd` PRD comment (marie scoring it), or in a
@@ -30,15 +25,6 @@ same way regardless of what kind it is or what label the issue carries; it has n
 comments superseding an earlier one: the newest comment carrying the line wins over an older
 comment, which wins over the body. Reuses run_report._vision_claim's regex (tolerates markdown
 heading/bold wrapping) rather than a second parser for the same field.
-
-THE SEVERITY ESCAPE HATCH (gh#726). On a fleet-internal repo, `none (maintenance)` is the
-*honest* answer for most work, so one linked candidate anywhere in the pack starves everything
-else -- including, at one point, the fix for this exact starvation (gh#726 itself was in its own
-`dropped` list). A `none (maintenance)` candidate that also carries the `fleet:severity-live`
-label (an active, ongoing failure, set by hand while it is still occurring -- never auto-detected,
-and deliberately not `fleet:priority-high`, which most of this board already carries) survives
-the crowding-out drop. Every other rule is unchanged: a candidate with no `labels` key at all
-behaves exactly as before this existed.
 
 Pure core (`classify_candidate`/`gate_candidates`), thin CLI (`main`) -- same split as
 claim_history.py and cost_bridge.py.
@@ -59,12 +45,8 @@ STATUS_LINKED = "linked"
 STATUS_MAINTENANCE = "maintenance"
 STATUS_MISSING = "missing"
 
-# gh#726: the one escape hatch out of the crowding-out branch below -- a `none (maintenance)`
-# candidate that also carries this label survives even while a linked candidate is open.
-# Deliberately NOT `fleet:priority-high` (most of this board is high-tier maintenance; using
-# the tier itself as the hatch would empty the gate rather than fix it) and NOT auto-detected
-# from issue text -- marie/judge-judy sets it by hand while a failure is still occurring, per
-# its own label description (see `_SEVERITY_LABEL_META` in board_github.py).
+# gh#726's crowd-out escape hatch. Kept as a public name (other scripts import it); the
+# crowd-out it escaped from was removed in fk#1191, so it no longer changes eligibility.
 SEVERITY_LIVE_LABEL = "fleet:severity-live"
 
 # Tolerate the punctuation a model actually produces: "none(maintenance)", "None (Maintenance)",
@@ -126,13 +108,6 @@ def _classify_value(raw: str) -> tuple[str, str]:
     return STATUS_MISSING, raw
 
 
-def _label_names(labels) -> list[str]:
-    out = []
-    for lab in labels or []:
-        out.append(lab.get("name", "") if isinstance(lab, dict) else str(lab))
-    return out
-
-
 def gate_candidates(candidates: list[dict]) -> dict:
     """candidates: [{"number": int, "body": str, "comments": [...]}, ...], already in the
     order gru.md step 2b/2c produced (tier, then oldest-createdAt-first within a tier).
@@ -146,29 +121,11 @@ def gate_candidates(candidates: list[dict]) -> dict:
         (c["number"], *classify_candidate(c.get("body"), c.get("comments")), c.get("labels"))
         for c in candidates
     ]
-    linked_numbers = [n for n, status, _, _ in classified if status == STATUS_LINKED]
-    any_linked = bool(linked_numbers)
-
     eligible: list[int] = []
     dropped: list[dict] = []
     for number, status, raw, labels in classified:
-        if status == STATUS_LINKED:
+        if status in (STATUS_LINKED, STATUS_MAINTENANCE):
             eligible.append(number)
-        elif status == STATUS_MAINTENANCE:
-            # gh#726: an active, ongoing failure survives the crowding-out drop even while a
-            # linked-KR candidate is open elsewhere in the pack -- everything else about
-            # `none (maintenance)` is unchanged.
-            if any_linked and SEVERITY_LIVE_LABEL not in _label_names(labels):
-                dropped.append({
-                    "number": number,
-                    "reason": (
-                        "none (maintenance), but a linked-KR candidate is open: "
-                        f"#{linked_numbers[0]}"
-                        + (f" (+{len(linked_numbers) - 1} more)" if len(linked_numbers) > 1 else "")
-                    ),
-                })
-            else:
-                eligible.append(number)
         else:
             dropped.append({
                 "number": number,

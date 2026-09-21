@@ -125,14 +125,17 @@ class GateCandidatesOrderingTests(unittest.TestCase):
         self.assertEqual(result["eligible"], [1, 2])
         self.assertEqual(result["dropped"], [])
 
-    def test_real_link_crowds_out_maintenance(self):
+    def test_real_link_never_crowds_out_maintenance_fk1191(self):
+        # fk#1191: one linked ticket used to hide every maintenance item (117 of 184 on the
+        # 2026-09-21 board). Ranking orders them; the gate must not blind them.
         candidates = [
             {"number": 1, "body": "Vision-link: none (maintenance) -- a.", "comments": []},
             {"number": 2, "body": "Vision-link: okr.traffic -- b.", "comments": []},
+            {"number": 3, "body": "no line here", "comments": []},
         ]
         result = vlg.gate_candidates(candidates)
-        self.assertEqual(result["eligible"], [2])
-        self.assertEqual([d["number"] for d in result["dropped"]], [1])
+        self.assertEqual(result["eligible"], [1, 2])
+        self.assertEqual([d["number"] for d in result["dropped"]], [3])
 
 
 if __name__ == "__main__":
