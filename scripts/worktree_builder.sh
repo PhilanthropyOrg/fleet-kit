@@ -21,9 +21,11 @@
 # cause, fk#1197) it is caught and logged, then falls back to the normal new-branch-and-PR path
 # below so the work is never lost.
 ONTO_PR=""
+ITEM_PIN=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --onto-pr) ONTO_PR="${2:?--onto-pr needs a PR number}"; shift 2 ;;
+    --item) ITEM_PIN="${2:?--item needs an issue number}"; shift 2 ;;
     *) shift ;;
   esac
 done
@@ -80,7 +82,14 @@ if ! { . "$KIT_DIR/scripts/postflight_dirty_check.sh"; } 2>>"$LOG" || ! command 
 fi
 
 # --- STEP 1: claim one item -------------------------------------------------------------------
-CLAIM_JSON=$(python3 "$KIT_DIR/scripts/board_github.py" claim "$WORKER_NAME" 1 2>>"$LOG")
+# fk#1202: `--item <n>` claims THAT issue (claim-item, idempotent) instead of the next unclaimed
+# one. gru pre-claims a fold item before dispatching; `claim <worker> 1` then skipped it and
+# built a different issue onto the fold target's branch (caught by hand, 2026-09-21).
+if [ -n "${ITEM_PIN:-}" ]; then
+  CLAIM_JSON=$(python3 "$KIT_DIR/scripts/board_github.py" claim-item "$WORKER_NAME" "$ITEM_PIN" 2>>"$LOG")
+else
+  CLAIM_JSON=$(python3 "$KIT_DIR/scripts/board_github.py" claim "$WORKER_NAME" 1 2>>"$LOG")
+fi
 ITEM_ID=$(echo "$CLAIM_JSON" | python3 -c 'import json,sys; a=json.load(sys.stdin); print(a[0]["id"] if a else "")' 2>/dev/null)
 if [ -z "$ITEM_ID" ]; then
   log "no unclaimed backlog items -- nothing to build this tick"
@@ -265,7 +274,10 @@ if [ -n "${ONTO_PR:-}" ]; then
   # the string is kept for any other protection), fall back to a NEW branch + `gh pr create` below
   # (the builder's commits already exist locally in $WT_PATH -- push those, not lose them).
   (cd "$WT_PATH" && git fetch origin main >>"$LOG" 2>&1 && git rebase origin/main >>"$LOG" 2>&1)
-  PUSH_ERR=$(cd "$WT_PATH" && git push origin "HEAD:$WT_BRANCH" 2>&1 1>>"$LOG"); PUSH_RC=$?
+  # fk#1202: the rebase linearizes any merge-from-main commits the PR branch already carried, so
+  # a plain push can never fast-forward and the built commits were dropped with the worktree.
+  # --force-with-lease rewrites only if nobody else pushed since our fetch.
+  PUSH_ERR=$(cd "$WT_PATH" && git push --force-with-lease origin "HEAD:$WT_BRANCH" 2>&1 1>>"$LOG"); PUSH_RC=$?
   if [ "$PUSH_RC" -eq 0 ]; then
     PR_NUM="$ONTO_PR"
     log "item #$ITEM_ID: folded onto PR #$ONTO_PR ($WT_BRANCH), pushed"

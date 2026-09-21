@@ -56,6 +56,10 @@ def build_list_cmd() -> list[str]:
     ]
 
 
+def build_view_cmd(number: int) -> list[str]:
+    return ["gh", "issue", "view", str(number), "--json", "number,title,body,labels"]
+
+
 def build_claim_cmds(number: int, worker: str) -> list[list[str]]:
     return [
         ["gh", "issue", "edit", str(number), "--add-label", LABEL_CLAIMED],
@@ -228,12 +232,35 @@ def claim_next_n(worker: str, n: int) -> list[dict]:
     return claimed
 
 
+def claim_item(worker: str, number: int, run=None) -> list[dict]:
+    """fk#1202: claim ONE named issue, claimed already or not, and return it in the same
+    [{id,text,context}] shape as claim_next_n. gru pre-claims an item before dispatching a
+    fold build; claim_next_n then skipped it (it only picks unclaimed) and built a different
+    issue onto the fold target's branch. Idempotent: re-adding the label is a no-op for gh."""
+    run = run or _run
+    rc, out = run(build_view_cmd(number))
+    if rc != 0:
+        print(f"board_github: view #{number} FAILED: {out[:200]}", file=sys.stderr)
+        return []
+    try:
+        issue = json.loads(out)
+    except json.JSONDecodeError:
+        print(f"board_github: view #{number} returned non-JSON: {out[:200]}", file=sys.stderr)
+        return []
+    for cmd in build_claim_cmds(number, worker):
+        rc, out = run(cmd)
+        if rc != 0:
+            print(f"board_github: claim #{number} step FAILED: {out[:200]}", file=sys.stderr)
+            return []
+    return [to_board_item(issue)]
+
+
 def main() -> int:
     args = sys.argv[1:]
     if not args:
         print("usage: board_github.py file <title> [--context <body>] [--lane <lane>] "
               "[--priority <high|medium|low>] | "
-              "claim <worker> <n> | list | done <number> [note] | release <number> [note]",
+              "claim <worker> <n> | claim-item <worker> <number> | list | done <number> [note] | release <number> [note]",
               file=sys.stderr)
         return 2
     cmd = args[0]
@@ -260,6 +287,12 @@ def main() -> int:
             print("claim needs <worker> <n>", file=sys.stderr)
             return 2
         print(json.dumps(claim_next_n(args[1], int(args[2]))))
+        return 0
+    if cmd == "claim-item":
+        if len(args) != 3:
+            print("claim-item needs <worker> <number>", file=sys.stderr)
+            return 2
+        print(json.dumps(claim_item(args[1], int(args[2]))))
         return 0
     if cmd == "list":
         print(json.dumps(list_unclaimed()))
