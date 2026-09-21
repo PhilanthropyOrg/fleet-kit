@@ -296,9 +296,21 @@ if [ -z "${FIXER_HEALTH_URL:-}" ] || [ -z "${FIXER_PAGE_URL:-}" ]; then
   PROD_NOTE=" (prod unobserved: FIXER_HEALTH_URL/FIXER_PAGE_URL unset)"
 fi
 if [ -n "${FIXER_HEALTH_URL:-}" ] && [ -n "${FIXER_PAGE_URL:-}" ]; then
+  # gh#7069/#7071 made philanthropy's /990 managed-challenge PERMANENT: a plain probe with no
+  # bypass header now gets 403 "Just a moment..." on every single tick, forever, on any
+  # FIXER_PAGE_URL under a gated path -- indistinguishable from a real outage to this check
+  # (docs/ops/cloudflare-waf.md's own 2026-09-19 section already names this exact false-alarm
+  # shape). ATLAS_TEST_BYPASS carries the shared secret for Cloudflare's `x-atlas-test` skip
+  # rule (same header used by scripts/qa/click_crawl.py); when set, send it so this probe reads
+  # as a monitor, not a scraper. Optional and additive -- an instance/repo with no such rule
+  # (sketchyswap, etc.) simply never sets the var, and probing is unchanged.
+  BYPASS_HDR=()
+  if [ -n "${ATLAS_TEST_BYPASS:-}" ]; then
+    BYPASS_HDR=(-H "x-atlas-test: ${ATLAS_TEST_BYPASS}")
+  fi
   probe() {
     local code
-    code=$(curl -s -m 20 -o /dev/null -w '%{http_code}' -A 'Mozilla/5.0 (fleet-kit the-fixer)' "$1" 2>/dev/null)
+    code=$(curl -s -m 20 -o /dev/null -w '%{http_code}' -A 'Mozilla/5.0 (fleet-kit the-fixer)' "${BYPASS_HDR[@]}" "$1" 2>/dev/null)
     [ -z "$code" ] && code=000
     printf '%s' "$code"
   }
@@ -330,7 +342,7 @@ if [ -n "${FIXER_HEALTH_URL:-}" ] && [ -n "${FIXER_PAGE_URL:-}" ]; then
       # the healthy case while making "p95" a real percentile rather than a synonym for max.
       local n="${FIXER_DEGRADED_SAMPLE_REQUESTS:-10}" i out code t errors=0 times=()
       for i in $(seq 1 "$n"); do
-        out=$(curl -s -m 10 -o /dev/null -w '%{http_code} %{time_total}' -A 'Mozilla/5.0 (fleet-kit the-fixer)' "$FIXER_PAGE_URL" 2>/dev/null)
+        out=$(curl -s -m 10 -o /dev/null -w '%{http_code} %{time_total}' -A 'Mozilla/5.0 (fleet-kit the-fixer)' "${BYPASS_HDR[@]}" "$FIXER_PAGE_URL" 2>/dev/null)
         code="${out%% *}"; t="${out#* }"
         [ -z "$code" ] && code=000
         [ -z "$t" ] && t=0
