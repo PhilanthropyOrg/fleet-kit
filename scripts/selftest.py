@@ -4977,7 +4977,10 @@ def _intake_classifies_and_dedupes_alerts_by_check():
     creates = [c for c in calls if c[:3] == ["gh", "issue", "create"]]
     comments = [c for c in calls if c[:3] == ["gh", "issue", "comment"]]
     assert len(creates) == 1 and creates[0][creates[0].index("--title") + 1] == "prod alert [app_error]", creates
-    assert "fleet:priority-high" in creates[0][creates[0].index("--label") + 1] and "lane:devops" in creates[0][creates[0].index("--label") + 1], creates[0]
+    # gh#6575: an automated filer must not assign the top tier -- that is marie's to set.
+    labels = creates[0][creates[0].index("--label") + 1]
+    assert "fleet:priority-low" in labels and "lane:devops" in labels, creates[0]
+    assert "fleet:priority-high" not in labels, creates[0]
     assert len(comments) == 1 and comments[0][5] == "42" and "Fired again" in comments[0][-1], comments
 
 
