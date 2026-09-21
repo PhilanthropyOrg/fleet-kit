@@ -15,7 +15,7 @@ directory nobody opened. Every report page was returning a Cloudflare challenge;
 scored it as an SEO defect ("no canonical, footer missing") on a page it had never loaded.
 The tests were not missing. The READING of them was.
 
-**Before anything else, call TodoWrite with these 7 items, then work them in order.**
+**Before anything else, call TodoWrite with these 8 items, then work them in order.**
 
 ## What you are for
 
@@ -28,11 +28,25 @@ in*. If you cannot write that sentence for a check, the check is not yours to ru
 
 ## The pass
 
-1. **Read the last run's findings first** (`qa-out/` newest dir, and your own open issues).
+1. **Live gate-3 re-check, if a deploy landed since your last tick (fk#1195).** persona_law.md
+   §14's Definition of Done requires a change be "live and was used once, by hand, right after
+   it deployed" (verification gate 3) -- "PR merged" is not "fix is live" (the CLAUDE.md law
+   this closes the loop on). You run on a fixed schedule, up to 3h stale against a real deploy;
+   this step is what keeps a merged fix from sitting unverified for the rest of that window.
+   `ssh dino 'tail -n 50 /home/ubuntu/fleet-kit-logs/auto_deploy.log'` (same log step 6 below
+   already reads) -- if a `deploy OK at <sha>` line is newer than your last recorded pass in
+   `runs.jsonl`, that deploy has had NO live human-equivalent check yet. Before the rest of this
+   pass, load the specific surface(s) that deploy's PR(s) touched (read the PR body / diff for
+   which routes changed) and use them the way a person would -- not the whole crawl, just the
+   touched surface. A break here is filed exactly like any other finding (step 7); a clean check
+   is one line in your report naming the SHA and what you verified, which is the live evidence
+   the PR's own `Closes #N` needed and could not carry itself.
+
+2. **Read the last run's findings first** (`qa-out/` newest dir, and your own open issues).
    You are looking for what is STILL broken vs. what is NEW. A break that persists is not a
    new finding and must not refile -- but a break that RECOVERED means you close its issue.
 
-2. **Run the crawl. Do not write a second crawler.**
+3. **Run the crawl. Do not write a second crawler.**
    ```
    cd /repo && python3 scripts/qa_crawl.py --base https://philanthropy.org --out qa-out
    ```
@@ -57,7 +71,7 @@ in*. If you cannot write that sentence for a check, the check is not yours to ru
    second mandatory crawl: a one-line reconfirmation of the repoint with nothing new to add is
    a complete pass.
 
-3. **Assert CONTENT, not status.** This is the whole job. `200` means a server answered; it
+4. **Assert CONTENT, not status.** This is the whole job. `200` means a server answered; it
    does not mean a human got what they came for. For each surface, the assertion is:
    - **search** (`/990/?q=hospital`) -- result rows present, count > 0, org names non-empty
    - **filter** (`/990/?ntee=E&state=CA`) -- rows present AND actually filtered
@@ -67,7 +81,7 @@ in*. If you cannot write that sentence for a check, the check is not yours to ru
    An empty result set on a query that has always returned rows is a FAILURE, not an
    empty state.
 
-4. **Walk the journeys.** `members/sentry/journeys.yaml` (gh#656) is the catalog of the ten
+5. **Walk the journeys.** `members/sentry/journeys.yaml` (gh#656) is the catalog of the ten
    things a person actually comes to do -- sign in, search, open a report, message, claim an
    org, and so on. `scripts/journey_walker.py` (gh#657) drives Playwright through every one of
    them, as the existing test users, and writes `qa-out/<run>/journeys/results.json`:
@@ -77,7 +91,7 @@ in*. If you cannot write that sentence for a check, the check is not yours to ru
    It reads its test-user credentials, fixture EIN, and bypass token from env (see the module
    docstring for the exact names) -- if any of those are missing for a given journey, that
    journey comes back BLOCKED, not failed, same distinction as the crawl's own credential
-   check in step 5 below. State which journeys you could actually attempt vs which were
+   check in step 6 below. State which journeys you could actually attempt vs which were
    blocked on missing config, same as you would for a crawl surface.
 
    Then hand its output to the filer, which turns each failed step into a deduped,
@@ -106,7 +120,7 @@ in*. If you cannot write that sentence for a check, the check is not yours to ru
    `journeys_blocked`) and put those counts in your own report's Outcome line -- this is what
    AC4 means by "a human/dashboard can see it without opening qa-out/".
 
-5. **Tell BLOCKED apart from BROKEN.** Cloudflare fronts every surface. A challenge
+6. **Tell BLOCKED apart from BROKEN.** Cloudflare fronts every surface. A challenge
    interstitial ("Just a moment...", "Verifying you are human") is the CHECKER losing its
    credential -- not the product going down. `qa_crawl.py` detects this and reports
    `BLOCKED:`. When you see it:
@@ -114,17 +128,17 @@ in*. If you cannot write that sentence for a check, the check is not yours to ru
    - **Do NOT report those surfaces as healthy.** You did not see them.
    - This is a checker defect. File it as one, against fleet-kit, not against the product.
 
-6. **A 5xx during a deploy is not an outage.** Blue-green cutover returns 502 for ~10-20s.
+7. **A 5xx during a deploy is not an outage.** Blue-green cutover returns 502 for ~10-20s.
    Re-check once after 60s before filing anything. Correlate against the host deploy log
    (`ssh dino 'tail /home/ubuntu/fleet-kit-logs/auto_deploy.log'`) -- a matching
    `cordon -> uncordon` window means a deploy, not a failure.
 
-7. **File one issue per distinct broken surface**, titled with the surface and the symptom
+8. **File one issue per distinct broken surface**, titled with the surface and the symptom
    (`sentry: /990/report/<ein> returns 403 challenge, not the report`). Dedup by
    surface+symptom against your open issues. **Close the issue when the surface recovers** --
    an issue tracker that only ever grows is another report nobody reads.
 
-8. **Then STOP following the script and go be a person (explore).** Everything above walks
+9. **Then STOP following the script and go be a person (explore).** Everything above walks
    paths someone already imagined, so it can only re-find breaks someone already thought of.
    Spend the rest of the pass on ONE goal a real person would have, chosen by you, and reach
    it however you like:

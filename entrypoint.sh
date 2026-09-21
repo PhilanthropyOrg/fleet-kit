@@ -152,7 +152,7 @@ case "${1:-cron-foreground}" in
     # `FLEET_CRON_MEMBERS=judge-judy`) to schedule only those. dont-shoot-the-messenger is
     # excluded from ALL_CRON_MEMBERS because its own cron line is already commented out
     # (archived 2026-09-04, see below) -- re-enabling it is a separate step from this mechanism.
-    ALL_CRON_MEMBERS=(the-fixer judge-judy gru jefe roomba marie datta dumbledore sentry librarian librarian-scrub red custodian signals dont-shoot-the-messenger)
+    ALL_CRON_MEMBERS=(the-fixer judge-judy gru marie sentry librarian librarian-scrub red dont-shoot-the-messenger)
     if [ -n "${FLEET_CRON_MEMBERS:-}" ]; then
       IFS=', ' read -ra RESOLVED_CRON_MEMBERS <<< "$FLEET_CRON_MEMBERS"
       for m in "${RESOLVED_CRON_MEMBERS[@]}"; do
@@ -280,38 +280,25 @@ case "${1:-cron-foreground}" in
       if cron_member_enabled gru; then
         echo "3 ${FLEET_GRU_CADENCE:-*} * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_gru_fanout.sh >> $LOG_DIR/gru.log 2>&1"
       fi
-      if cron_member_enabled jefe; then
-        echo "21 * * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh jefe >> $LOG_DIR/jefe.log 2>&1"
-      fi
-      if cron_member_enabled roomba; then
-        echo "41 * * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh roomba >> $LOG_DIR/roomba.log 2>&1"
-      fi
-      # custodian (fk#807): one surface per job, driven DOWN. ui_surfaces.py's ratchet already
-      # stops a job GAINING a surface; nothing drove an existing count down, so duplication sat
-      # frozen at 26 extra surfaces across 19 jobs (ops-hud 6, collections 4, org-console 4).
-      # Daily, not hourly: a retirement is a human-reviewed PR, so filing more than one a day
-      # just builds the backlog this member exists to prevent -- it files ONE item and refuses
-      # to file again while that one is open. kind: shell, so it costs no model turns.
-      # 13:17 is off the hourly grids above and well clear of gru's :03 fanout.
-      if cron_member_enabled custodian; then
-        echo "17 13 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh custodian >> $LOG_DIR/custodian.log 2>&1"
-      fi
-      # signals (fk#1042): the daily analyst. 06:05 Central = 11:05 UTC (12:05 in winter --
-      # same drift custodian and the brief accept). Runs after the product's overnight crons
-      # so the funnel it reads is yesterday's complete day.
-      if cron_member_enabled signals; then
-        echo "5 11 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh signals >> $LOG_DIR/signals.log 2>&1"
-      fi
+      # jefe, roomba, custodian, signals, datta, dumbledore: folded into other members and
+      # removed from cron entirely (fk#1195). jefe and dumbledore were already enabled=false
+      # since 2026-09-17 and archived with nothing moved; roomba's worktree sweep and
+      # custodian's surface-debt duty are now marie's Part E/F (marie.md); signals' funnel read
+      # and "doubt the number" rule are now nerd's datadog lane (nerd.md); datta's coverage
+      # scoring and nerd-dispatch is now gru's own step 9 (gru.md) -- gru spawns nerd directly,
+      # on demand, instead of a separate hourly/daily dispatcher.
       # librarian (philanthropy#4439, nonprofit-atlas#4410 seq:1): scrubs credential-shaped
       # strings out of session transcripts and enforces the compress/drop retention window.
-      # Hourly like roomba/marie/datta. Moved off :55 to :06 (gh#754, 2026-09-08): :55 was
-      # dead last in the hour after every other member had already drawn down that hour's
-      # shared account headroom, so librarian was declined at the budget gate on 83% of its
-      # runs. :06 runs right after the hour's headroom resets, matching the schedule
-      # librarian.fleet.json's schedule.hourly_at_minute already declared -- fleet.json edits
-      # do not update this line by themselves (see the selftest check that now compares them).
-      # fleet-kit#784: the hourly scrub is a shell member now (no model); librarian itself is
-      # the daily reader (memory under cap, INTENT.md) at 05:15 UTC, before the morning brief.
+      # Moved off :55 to :06 (gh#754, 2026-09-08): :55 was dead last in the hour after every
+      # other member had already drawn down that hour's shared account headroom, so librarian
+      # was declined at the budget gate on 83% of its runs. :06 runs right after the hour's
+      # headroom resets, matching the schedule librarian.fleet.json's schedule.hourly_at_minute
+      # already declared -- fleet.json edits do not update this line by themselves (see the
+      # selftest check that now compares them). fleet-kit#784: the hourly scrub is a shell
+      # member now (no model); librarian itself is the daily reader (memory under cap,
+      # INTENT.md) at 05:15 UTC, before the morning brief. Kept as its own dispatch target
+      # (fk#1195): a `kind: shell` zero-token hourly pass and a real daily model pass cannot
+      # share one member's schedule/tool grant under today's dispatch mechanism.
       if cron_member_enabled librarian-scrub; then
         echo "6 * * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh librarian-scrub >> $LOG_DIR/librarian-scrub.log 2>&1"
       fi
@@ -321,35 +308,10 @@ case "${1:-cron-foreground}" in
       if cron_member_enabled marie; then
         echo "33 ${FLEET_MARIE_CADENCE:-*} * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh marie >> $LOG_DIR/marie.log 2>&1"
       fi
-      # datta (:12, analysis) -- the coverage dispatcher. It spawns nerds itself, so ONLY datta
-      # gets a cron line; nerd ships enabled:false and never self-fires, exactly like minion
-      # under gru. Added 2026-08-26 after roomba filed nonprofit-atlas#3321: datta had been
-      # enabled+scheduled in its own spec since 11:39 that day and had run ZERO times, because
-      # a member's spec does not put it on cron -- THIS hand-maintained list does, and nobody
-      # remembered. The dashboard read "never run" and nothing else complained.
-      # datta's hour field is instance-tunable via FLEET_DATTA_CADENCE (default "*", hourly at
-      # :12), the same splice shape as FLEET_GRU_CADENCE above and validated by the same
-      # _CRON_HOUR_FIELDS family (fleet-kit#514). On the fleet-kit instance datta+nerd were
-      # 47% of the window analysing the fleet itself while the score they feed sat flat for
-      # 11 days; "9" makes that a daily 09:12 pass instead of 24 hourly ones.
-      if cron_member_enabled datta; then
-        echo "12 ${FLEET_DATTA_CADENCE:-*} * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh datta >> $LOG_DIR/datta.log 2>&1"
-      fi
-      # dumbledore: daily -> every 7h (2026-08-25, Reif), now that it OWNS the Magikarp score
-      # rather than treating it as one rot-hunt item among five. A once-daily owner gets 1
-      # feedback tick per day against a score sampled every 3h; at 7h it gets 3-4, which is
-      # what makes its Prediction/Last-verdict loop mean anything.
-      #
-      # Explicit hours, NOT `13 */7 * * *`: cron's step operator restarts the pattern each day,
-      # so */7 fires at 00,07,14,21 and then again at 00 -- a 3h gap across midnight, not 7h.
-      # 01/08/15/22 keeps 15:13-ish (its long-standing slot) in the rotation and stays off the
-      # :03/:21/:33/:41/:47/:51 minutes the other members already own.
-      if cron_member_enabled dumbledore; then
-        echo "13 1,8,15,22 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh dumbledore >> $LOG_DIR/dumbledore.log 2>&1"
-      fi
       # sentry: every 3h, the USER-FACING surfaces (990 search/report, superadmin, this
-      # dashboard). Explicit hours for the same reason dumbledore uses them -- `*/3` restarts
-      # its pattern each day. :17 is unclaimed (:03/:12/:13/:21/:33/:41 are taken).
+      # dashboard). Explicit hours, not `*/3` (cron's step operator restarts its pattern each
+      # day, which would break the even 3h spacing across midnight). :17 is unclaimed
+      # (:03/:12/:13/:21/:33/:41 are taken).
       if cron_member_enabled sentry; then
         echo "17 0,3,6,9,12,15,18,21 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh sentry >> $LOG_DIR/sentry.log 2>&1"
       fi

@@ -128,7 +128,10 @@ slice for the planner, not a slice of the product, and it can never close the pa
 An epic closes only when every child is accepted. GitHub sub-issues carry that structure.
 
 Enforced by: marie decomposes into vertical slices and links them as sub-issues; the closes
-gate refuses a `Closes` from a docs-only PR on a product item; jefe closes epics, not PRs.
+gate refuses a `Closes` from a docs-only PR on a product item. jefe used to close epics (never
+PRs) once every child was accepted; jefe is archived (fk#1195) and this specific closing step
+has no current owner — `closes_gate.py --epic` still computes closability, it just has no
+caller today, so an accepted epic now needs a human (or a re-wired member) to close it.
 
 ### 4. The reviewer reads the ticket, and asks for proof per criterion
 
@@ -148,8 +151,9 @@ thing and says yes or no. Nothing else counts as acceptance for a request in Rei
 
 Enforced by: issues Reif filed or quoted get the label `fleet:reif-asked`. The closes gate
 blocks every `Closes` on them. When all criteria have evidence, the finishing PR files an ask
-of class `acceptance` with the demo link; Reif answers from the brief; jefe closes the issue
-with the answer quoted.
+of class `acceptance` with the demo link; Reif answers from the brief. jefe used to close the
+issue with the answer quoted; jefe is archived (fk#1195), so this close is a human step today
+until a current member is wired to `ask.py answer` the same way.
 
 ### 6. Quality gates in CI, not in opinions
 
@@ -174,7 +178,8 @@ The item names the number it should move (Vision-link, already law) and the fini
 names how to see it move. A week later the learner reads whether it did. Shipping is not
 the goal; the number moving is.
 
-Enforced by: dumbledore's weekly plan reads each accepted item's number delta.
+Enforced by: dumbledore used to read each accepted item's number delta in its weekly plan;
+dumbledore is archived (fk#1195) with nothing moved, so this read has no current owner.
 
 ### 9. Freshman 101 language, everywhere, always
 

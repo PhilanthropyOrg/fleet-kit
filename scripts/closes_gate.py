@@ -198,9 +198,12 @@ def stays_open_marker(iss: dict) -> tuple[str, str] | None:
 
 
 def epic_closable(iss: dict, issues: dict[int, dict]) -> dict:
-    """Whether an epic issue can be closed right now -- jefe's own pre-close check
-    (members/jefe/jefe.md), independent of any PR. {"closable": bool, "reason": str}.
-    See the module docstring for the three distinct meanings `closable: true` can carry."""
+    """Whether an epic issue can be closed right now -- a pre-close check jefe used to run
+    before every epic close, independent of any PR. jefe was archived 2026-09-21 (fk#1195)
+    with nothing moved; no other member currently calls this in --epic mode, so this check is
+    dormant, not deleted, until a human/epic-closing member is wired to it again.
+    {"closable": bool, "reason": str}. See the module docstring for the three distinct
+    meanings `closable: true` can carry."""
     found, open_children = epic_open_children(iss, issues)
     if open_children:
         return {
@@ -328,7 +331,8 @@ def main(argv=None) -> int:
         "--epic",
         type=int,
         help="check whether THIS issue (an epic) can be closed right now, no PR involved "
-        "-- the check members/jefe/jefe.md runs before it closes an epic (fk#652). "
+        "-- the check jefe used to run before it closed an epic (fk#652); jefe is archived "
+        "as of fk#1195, dormant until re-wired to a current member. "
         "closable:true means one of three things: goal met, no children discoverable, or "
         "a stays-open marker was outranked by a later child close -- read `reason` (fk#879)",
     )

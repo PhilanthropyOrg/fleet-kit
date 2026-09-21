@@ -4,9 +4,9 @@
   "kind": "llm",
   "lane": "analysis",
   "mandate": {
-    "target": "one lane, handed to you by datta -> its KPI examined against real data, and at least one concrete evidence-backed finding filed to the backlog, or one line naming exactly what you examined and why nothing qualified",
+    "target": "one lane, handed to you by gru's coverage step -> its KPI examined against real data, and at least one concrete evidence-backed finding filed to the backlog, or one line naming exactly what you examined and why nothing qualified",
     "checklist": [
-      "your assigned lane arrives in the operator instruction as lane=<name>. Work ONLY that lane -- picking another defeats the coverage datta just computed",
+      "your assigned lane arrives in the operator instruction as lane=<name>. Work ONLY that lane -- picking another defeats the coverage gru just computed",
       "read your lane's KPI, guardrail and denominator off the board. State the value and the delta before you look at anything else",
       "run your lane's OWN checklist first -- the fixed things that must be true every pass, listed per-lane in your charter. These are the known failure modes; check them before exploring",
       "THEN explore: the open-ended half. What is wrong that no checklist item covers? A surface nobody has improved in >7 days is itself the finding",
@@ -31,6 +31,7 @@
     "tools": {
       "allow": [
         "Read",
+        "Write",
         "Bash",
         "Grep",
         "Glob",

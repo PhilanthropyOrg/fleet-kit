@@ -111,7 +111,11 @@ def runs_since(since_ts: float) -> dict:
             m, s = str(r.get("member")), str(r.get("status"))
             by.setdefault(m, {}).setdefault(s, 0)
             by[m][s] += 1
-            if s in ("killed", "timed_out", "budget_declined") or (r.get("outcome") and m in ("gru", "jefe", "dumbledore", "datta")):
+            # gru/marie carry the strategic narrative (gru: runway + priority calls + lane
+            # coverage since fk#1195 folded datta's dispatch job in; marie: ranking + PRDs +
+            # worktree/surface hygiene since fk#1195 folded roomba/custodian in). jefe/
+            # dumbledore/datta are archived (fk#1195) and no longer produce outcome text.
+            if s in ("killed", "timed_out", "budget_declined") or (r.get("outcome") and m in ("gru", "marie")):
                 notable.append({"member": m, "status": s, "outcome": (r.get("outcome") or "")[:200],
                                 "item_id": r.get("item_id")})
     return {"by_member": by, "notable": notable[-40:]}

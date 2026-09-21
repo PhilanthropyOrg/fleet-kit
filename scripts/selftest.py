@@ -5450,12 +5450,13 @@ def _tiles_backfill_their_history_from_the_source_dates():
     assert '_backfill_daily(db, "fleet.backlog_open"' in src and '_backfill_daily(db, "fleet.prs_open"' in src and 'delta_7d' in src.split("def metrics_snapshot")[1]
 
 
-def _signals_member_reads_the_datafeed_daily_and_names_a_kr():
-    """fk#1042; Reif 2026-09-16: "who is consuming the data with which to build insights from?
-    ... not weekly, at least daily." signals_pull renders today + the change since the last
-    snapshot and names a failed read as a broken instrument; the member runs daily with a
-    required Vision-link; run_member fetches before the pass; the handoff carries SIGNALS.md;
-    every KR in okr.json that names a metric names one that exists in metrics.json."""
+def _signals_datadog_lane_reads_the_datafeed_and_names_a_kr():
+    """fk#1042, folded into nerd's datadog lane fk#1195; Reif 2026-09-16: "who is consuming
+    the data with which to build insights from? ... not weekly, at least daily." signals_pull
+    renders today + the change since the last snapshot and names a failed read as a broken
+    instrument; nerd's datadog lane carries the funnel-read duty with a required Vision-link;
+    run_member fetches before a datadog-lane pass; the handoff carries SIGNALS.md; every KR in
+    okr.json that names a metric names one that exists in metrics.json."""
     import importlib.util, os
     spec = importlib.util.spec_from_file_location("signals_pull", ROOT / "scripts" / "signals_pull.py")
     sp = importlib.util.module_from_spec(spec); spec.loader.exec_module(sp)
@@ -5477,12 +5478,12 @@ def _signals_member_reads_the_datafeed_daily_and_names_a_kr():
     with tempfile.TemporaryDirectory() as tmp:
         sp.SIG_DIR = Path(tmp)
         p = sp.save(snap); assert p.exists() and sp.previous("9999-12-31")["reads"]["ga4"]["sessions_today"] == 28761
-    spec_j = json.loads((ROOT / "members" / "signals" / "signals.fleet.json").read_text())
-    assert spec_j["schedule"] == {"daily_at": "06:05"} and spec_j["report"]["vision_link"] == "required" and spec_j["enabled"]
-    md = (ROOT / "members" / "signals" / "signals.md").read_text()
-    assert "signals_pull.py --render" in md and "Vision-link: okr.<id>" in md and "SIGNALS.md" in md
+    md = (ROOT / "members" / "nerd" / "nerd.md").read_text()
+    assert "signals_pull.py --render" in md and "Vision-link:" in md and "SIGNALS.md" in md
     rm = (ROOT / "scripts" / "run_member.sh").read_text()
     assert 'signals_pull.py" --fetch' in rm and rm.index('signals_pull.py" --fetch') < rm.index('handoff.py" write')
+    assert 'MEMBER" = "nerd" ] && [ "$LANE" = "datadog"' in rm, \
+        "the datafeed pull must fire for nerd's datadog lane, not a member that no longer exists"
     ho = (ROOT / "scripts" / "handoff.py").read_text()
     assert 'LOG_DIR / "SIGNALS.md"' in ho
     metrics = {m["id"] for m in json.loads((ROOT / "scripts" / "metrics.json").read_text())["metrics"]}
@@ -8210,15 +8211,17 @@ def _datta_dispatches_and_nerds_analyse():
     """
     import json
     root = Path(__file__).parent.parent
-    datta = (root / "members" / "datta" / "datta.md").read_text()
+    # datta folded into gru's own step 9 (fk#1195): gru is now the dispatcher, no separate
+    # datta.md exists.
+    gru = (root / "members" / "gru" / "gru.md").read_text()
     nerd = (root / "members" / "nerd" / "nerd.md").read_text()
 
-    assert "massive user value" in datta, \
-        "datta dispatches by staleness alone -- coverage becomes the goal instead of the means"
-    assert "never analyse" in datta.lower() or "never analyse a lane yourself" in datta, \
-        "datta does not hold the dispatcher/worker split"
-    assert "FLEET_RUN_NOW=1" in datta, "datta cannot spawn a nerd (nerd ships enabled:false)"
-    assert "lane=" in datta and "lane=<name>" in nerd, "no lane is handed to the nerd"
+    assert "massive user value" in gru, \
+        "gru dispatches by staleness alone -- coverage becomes the goal instead of the means"
+    assert "never analyse" in gru.lower() or "never analyse a lane yourself" in gru, \
+        "gru does not hold the dispatcher/worker split for lane coverage"
+    assert "FLEET_RUN_NOW=1" in gru, "gru cannot spawn a nerd (nerd ships enabled:false)"
+    assert "lane=" in gru and "lane=<name>" in nerd, "no lane is handed to the nerd"
 
     for lane in ("growth", "searchquality", "ui", "datadog", "devops", "lens", "revenue"):
         assert lane in nerd, f"lane {lane} lost in the port"
@@ -8363,20 +8366,21 @@ def _datta_structural_na_streak_has_a_reset_path():
     is later applied to.
     """
     root = Path(__file__).parent.parent
-    datta = (root / "members" / "datta" / "datta.md").read_text()
+    # datta folded into gru's own step 9 (fk#1195): gru is now the dispatcher.
+    gru = (root / "members" / "gru" / "gru.md").read_text()
 
-    assert "STRUCTURAL-N/A" in datta, "gh#339's down-rank itself got lost"
+    assert "STRUCTURAL-N/A" in gru, "gh#339's down-rank itself got lost"
 
     # Scope to the gh#339 structural-N/A section specifically (bounded by its own streak
     # marker and the following gh#392 section) -- gh#392's unrelated reconfirmation-only
     # hold legitimately uses "no separate reset step" for its own, real, self-reversing check
     # and must not be mistaken for the disproven gh#339 claim this test targets.
-    streak_start = datta.find("check for a structural-N/A streak")
-    streak_end = datta.find(
+    streak_start = gru.find("check for a structural-N/A streak")
+    streak_end = gru.find(
         "Separately, also check for reconfirmation-only staleness on a LIVE lane (gh#392)"
     )
     assert 0 <= streak_start < streak_end, "gh#339 streak section markers not found"
-    streak_section = datta[streak_start:streak_end]
+    streak_section = gru[streak_start:streak_end]
 
     # The old, disproven claim ("self-reverses ... on the very next datta pass automatically",
     # with nothing before it ever producing a new row) must not still be asserted as fact here.
@@ -8385,10 +8389,10 @@ def _datta_structural_na_streak_has_a_reset_path():
 
     # A reset path that does not route back through worst-first ranking: a cadence-based
     # override, independent of STALE/BREACHED/UNEXAMINED all being zero.
-    assert "FLEET_DATTA_FROZEN_PROBE_HOURS" in datta, \
+    assert "FLEET_DATTA_FROZEN_PROBE_HOURS" in gru, \
         "no override dial -- a frozen lane still has no path back once ranking excludes it"
-    i = datta.find("FLEET_DATTA_FROZEN_PROBE_HOURS")
-    override = datta[max(0, i - 400):i + 800]
+    i = gru.find("FLEET_DATTA_FROZEN_PROBE_HOURS")
+    override = gru[max(0, i - 400):i + 800]
     assert "regardless of where it ranks" in override, \
         "override still gated on ranking -- does not actually break the freeze"
     assert "gh#447" in override, "override doesn't cite the finding it fixes"
@@ -8406,18 +8410,18 @@ def _datta_structural_na_streak_has_a_reset_path():
         "passes (ranking already fills N) this override exists to fix"
 
     # The corrected claim must name the real mechanism instead of the disproven one.
-    j = datta.find("This override is the streak's only way back")
+    j = gru.find("This override is the streak's only way back")
     assert j != -1, "no corrected self-reversal explanation found"
-    corrected = datta[j:j + 700]
+    corrected = gru[j:j + 700]
     assert "STRUCTURAL-N/A" in corrected, "corrected claim doesn't tie back to the streak marker"
     assert "does not" in corrected and "self-reverse" in corrected, \
         "corrected text doesn't actually retract the old false claim"
 
     # Report contract: a lane probed by the override must be named, same as a down-rank/reset.
-    report_i = datta.find("## Report")
-    report = datta[report_i:report_i + 800]
+    report_i = gru.find("## Report")
+    report = gru[report_i:report_i + 800]
     assert "gh#447" in report and "override" in report, \
-        "report section never asks datta to name a lane probed via the override"
+        "report section never asks gru to name a lane probed via the override"
 
 
 def _nerd_structural_na_marker_wires_to_datta_downrank():
@@ -8440,7 +8444,8 @@ def _nerd_structural_na_marker_wires_to_datta_downrank():
     """
     root = Path(__file__).parent.parent
     nerd = (root / "members" / "nerd" / "nerd.md").read_text()
-    datta = (root / "members" / "datta" / "datta.md").read_text()
+    # datta folded into gru's own step 9 (fk#1195): gru is now the dispatcher.
+    gru = (root / "members" / "gru" / "gru.md").read_text()
 
     for lane in ("growth", "searchquality", "revenue"):
         # Each lane now has ONE heading (this PR consolidated the generic source-fleet
@@ -8458,8 +8463,8 @@ def _nerd_structural_na_marker_wires_to_datta_downrank():
         body = nerd[heading:end if end > heading else heading + 1600]
         assert "STRUCTURAL-N/A" in body, \
             f"{lane}'s N/A paragraph never tells nerd to emit the marker datta.md keys on (gh#451)"
-    assert "startswith(\"STRUCTURAL-N/A\")" in datta or "starts with the literal marker" in datta, \
-        "datta.md's down-rank rule text moved/changed -- re-check gh#451's wiring still matches"
+    assert "startswith(\"STRUCTURAL-N/A\")" in gru or "starts with the literal marker" in gru, \
+        "gru.md's down-rank rule text moved/changed -- re-check gh#451's wiring still matches"
 
     # A minimal model of datta.md:87-95's specified rule: fewer than 3 rows, or the 3 not
     # unanimous, means score UNEXAMINED as normal; only a unanimous 3-row STRUCTURAL-N/A streak
@@ -8499,17 +8504,18 @@ def _datta_gh392_hold_never_suppresses_stale_or_breached():
     BREACHED definitions, not inventing a new one) into step 5's hold condition itself.
     """
     root = Path(__file__).parent.parent
-    datta = (root / "members" / "datta" / "datta.md").read_text()
+    # datta folded into gru's own step 9 (fk#1195): gru is now the dispatcher.
+    gru = (root / "members" / "gru" / "gru.md").read_text()
 
-    section_start = datta.find("Separately, also check for reconfirmation-only staleness")
-    section_end = datta.find("**Spawning fewer nerds than lanes is the normal case")
+    section_start = gru.find("Separately, also check for reconfirmation-only staleness")
+    section_end = gru.find("**Spawning fewer nerds than lanes is the normal case")
     assert 0 <= section_start < section_end, "gh#392 hold section markers not found"
-    section = datta[section_start:section_end]
+    section = gru[section_start:section_end]
 
     step5_start = section.find("5. Zero referenced issues moved")
     assert step5_start != -1, "step 5's hold condition text not found"
     step5 = section[step5_start:step5_start + 700]
-    assert "STALE and BREACHED signals" in step5 and "section 2 above" in step5, \
+    assert "STALE and BREACHED signals" in step5 and "step 9b above" in step5, \
         "gh#497: step 5's hold condition doesn't itself gate on STALE/BREACHED -- the " \
         "'never suppress a STALE or BREACHED verdict' promise is still only prose, not a check"
 
@@ -8942,8 +8948,8 @@ def _fleet_cron_members_gates_entrypoint_crontab():
         crontab_text = crontab_path.read_text() if crontab_path.exists() else ""
         return proc, crontab_text
 
-    known_members = ("the-fixer", "judge-judy", "gru", "jefe", "roomba", "marie", "datta",
-                      "dumbledore", "sentry")
+    known_members = ("the-fixer", "judge-judy", "gru", "marie", "sentry", "librarian",
+                      "librarian-scrub", "red", "dont-shoot-the-messenger")
 
     with tempfile.TemporaryDirectory() as tmp:
         proc, crontab_text = run_block(tmp)
@@ -8954,16 +8960,16 @@ def _fleet_cron_members_gates_entrypoint_crontab():
                 f"FLEET_CRON_MEMBERS unset dropped {name!r} from the generated crontab -- not byte-identical to today's behavior"
 
     with tempfile.TemporaryDirectory() as tmp:
-        proc, crontab_text = run_block(tmp, fleet_cron_members="judge-judy,jefe")
+        proc, crontab_text = run_block(tmp, fleet_cron_members="judge-judy,marie")
         assert proc.returncode == 0, f"a valid 2-member subset should not fail boot: {proc.stderr[:500]}"
-        assert "run_member.sh judge-judy" in crontab_text and "run_member.sh jefe" in crontab_text, \
+        assert "run_member.sh judge-judy" in crontab_text and "run_member.sh marie" in crontab_text, \
             "the named subset's own members are missing from the generated crontab"
         for name in known_members:
-            if name in ("judge-judy", "jefe"):
+            if name in ("judge-judy", "marie"):
                 continue
             marker = "run_gru_fanout.sh" if name == "gru" else f"run_member.sh {name}"
             assert marker not in crontab_text, \
-                f"FLEET_CRON_MEMBERS=judge-judy,jefe still scheduled {name!r} -- allowlist not enforced"
+                f"FLEET_CRON_MEMBERS=judge-judy,marie still scheduled {name!r} -- allowlist not enforced"
 
     with tempfile.TemporaryDirectory() as tmp:
         proc, crontab_text = run_block(tmp, fleet_cron_members="judge-judy,bogus-name")
@@ -12283,50 +12289,15 @@ def _run_member_puts_the_number_header_above_item_and_task():
     assert "FLEET_NUMBER_URL" in (ROOT / "fleet.env.example").read_text()
 
 
-def _roomba_runs_as_a_script_and_records_a_quiet_pass():
-    """fleet-kit#514: roomba is a shell runner now. Its spec dispatches run_member.sh to
-    roomba.sh, and that script drives the real roomba.py on a real (tmp) git repo and records
-    the pass through run_report.py -- so fleet.db/status/fleet_kpi see it exactly as before,
-    minus the 25-30 turns of window the model pass spent re-reading its own dry-run."""
-    import subprocess
-    spec = json.loads((ROOT / "members" / "roomba" / "roomba.fleet.json").read_text())
-    assert spec.get("llm", {}).get("runner") == "members/roomba/roomba.sh", spec.get("llm")
-    assert spec.get("kind") == "shell"
-    runner = ROOT / "members" / "roomba" / "roomba.sh"
-    assert runner.exists() and runner.stat().st_mode & 0o111, "roomba.sh must be executable for run_member.sh"
-    with tempfile.TemporaryDirectory() as tmp:
-        tmp = Path(tmp)
-        repo = tmp / "repo"; repo.mkdir()
-        subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
-        subprocess.run(["git", "-C", str(repo), "-c", "user.email=t@t", "-c", "user.name=t",
-                        "commit", "-q", "--allow-empty", "-m", "init"], check=True)
-        logs = tmp / "logs"
-        env = {"PATH": "/usr/bin:/bin", "FLEET_REPO": str(repo), "FLEET_LOG_DIR": str(logs), "HOME": str(tmp)}
-        proc = subprocess.run(["bash", str(runner)], capture_output=True, text=True, timeout=60, env=env)
-        assert proc.returncode == 0, f"rc={proc.returncode} stderr={proc.stderr[:400]}"
-        assert proc.stdout.startswith("QUIET"), f"an empty repo must be a quiet pass: {proc.stdout!r}"
-        runs = (logs / "runs.jsonl").read_text().strip().splitlines()
-        assert len(runs) == 1, f"exactly one run must be recorded, got {len(runs)}: {runs!r}"
-        rec = json.loads(runs[-1])
-        assert rec.get("member") == "roomba" and rec.get("kind") == "shell", rec
-        assert rec.get("status") == "quiet", rec
-        assert "0 evaluated, 0 removed" in (rec.get("outcome") or ""), rec.get("outcome")
-
-
-def _datta_cadence_is_a_validated_cron_hour_dial():
-    """fleet-kit#514: the datta hour field is instance-tunable like gru's, and joins the same
+def _marie_cadence_is_a_validated_cron_hour_dial():
+    """fleet-kit#1092: the marie hour field is instance-tunable like gru's, and joins the same
     validated family -- so the value that discarded a whole crontab for 40h (0,30) is refused
-    for this dial too, from the Settings page and from selftest."""
+    for this dial too, from the Settings page and from selftest. (datta's own half of this
+    check retired with datta, fk#1195 -- gru now dispatches nerd directly with no separate
+    cadence dial of its own.)"""
     import fleet_view_server as fvs
     entry = (ROOT / "entrypoint.sh").read_text()
-    assert '12 ${FLEET_DATTA_CADENCE:-*} * * *' in entry, "datta line must splice FLEET_DATTA_CADENCE into the hour field"
-    assert "FLEET_DATTA_CADENCE" in fvs.DIAL_FIELDS and "FLEET_DATTA_CADENCE" in fvs._CRON_HOUR_FIELDS
-    assert fvs._validate_dial_value("FLEET_DATTA_CADENCE", "0,30"), "0,30 must be refused (it is minutes, not an hour)"
-    assert fvs._validate_dial_value("FLEET_DATTA_CADENCE", "$(id)")
-    for ok in ("", "*", "9", "*/6", "0,12", "1-5"):
-        assert fvs._validate_dial_value("FLEET_DATTA_CADENCE", ok) is None, ok
-    assert "FLEET_DATTA_CADENCE" in (ROOT / "fleet.env.example").read_text()
-    # fleet-kit#1092: marie joins the same family -- $5.50 an ok run, hourly, was the 3rd-biggest burn.
+    # $5.50 an ok run, hourly, was the 3rd-biggest burn.
     assert '33 ${FLEET_MARIE_CADENCE:-*} * * *' in entry, "marie line must splice FLEET_MARIE_CADENCE into the hour field"
     assert "FLEET_MARIE_CADENCE" in fvs.DIAL_FIELDS and "FLEET_MARIE_CADENCE" in fvs._CRON_HOUR_FIELDS
     assert fvs._validate_dial_value("FLEET_MARIE_CADENCE", "0,30"), "0,30 must be refused (it is minutes, not an hour)"
@@ -14238,8 +14209,11 @@ def _run_member_pregate_short_circuits_in_shell_fk1093():
     # quality:world-class item stalled at its stale "Not yet" verdict with no path to review
     # (vp_due.log 12:03Z: "vp enabled=false in spec -- not spawning for: 5349"). Its spawns are
     # gated by vp_due.sh to genuinely-due items, so its cost tracks the backlog, not the clock.
+    # jefe and dumbledore were deactivated (governance overhead, 2026-09-16) then fully archived
+    # -- nothing in the repo still read their charter content, so fk#1195 deleted their
+    # directories outright rather than leaving them disabled-but-present.
     for name in ("jefe", "dumbledore"):
-        assert specs[name].get("enabled") is False, f"{name} is deactivated (governance overhead, 2026-09-16), not deleted"
+        assert name not in specs, f"{name} was archived (fk#1195) and should no longer be a spec-able member"
     vp_due = (HERE / "vp_due.sh").read_text()
     assert 'VP_ENABLED' in vp_due and vp_due.find("VP_ENABLED") < vp_due.find("run_member.sh\" vp"), "vp_due must check enabled before spawning vp"
     marie = (ROOT / "members/marie/marie.md").read_text()
@@ -15995,6 +15969,61 @@ def _marie_charter_wires_fold_candidates_and_the_fold_label_fk1127():
     assert "PART C5" in md.upper(), "no PART C5 section in marie.md"
 
 
+def _roster_is_ten_members_after_fk1195_fold():
+    """fk#1195: 18 member dirs folded to 10 (Reif 2026-09-21: "keep members under 10, add tasks
+    to existing members, never create new ones"). jefe, dumbledore, roomba, custodian, signals,
+    datta were archived; vp stays a separate dispatch target (tool-grant conflict with
+    judge-judy's no-tools diff reviewer -- see judge-judy.md); librarian-scrub stays a separate
+    dispatch target (a `kind: shell` zero-token hourly pass cannot share librarian's daily
+    model-pass schedule/tool grant under today's per-directory dispatch mechanism). Pins the
+    member count so a future add/archive that forgets this budget goes red here, not silently.
+    """
+    member_dirs = sorted(p.name for p in (ROOT / "members").iterdir() if p.is_dir())
+    expected = {
+        "the-fixer", "judge-judy", "gru", "marie", "sentry", "librarian",
+        "librarian-scrub", "red", "dont-shoot-the-messenger", "minion", "nerd", "vp",
+    }
+    assert set(member_dirs) == expected, \
+        f"roster drifted from fk#1195's fold: have {sorted(member_dirs)}, want {sorted(expected)}"
+    # dont-shoot-the-messenger is explicitly named plumbing (the 10th) by the PRD; minion/nerd/
+    # vp/librarian-scrub are all dispatch-only (spawned on demand or a separate cadence, never
+    # their own hourly cron-fired "member doing independent work" slot) -- the PRD's "9 plus
+    # dont-shoot-the-messenger" budget is about independently-scheduled workers, not raw dirs.
+    independently_scheduled = {
+        "the-fixer", "judge-judy", "gru", "marie", "sentry", "librarian", "red",
+        "dont-shoot-the-messenger",
+    }
+    assert independently_scheduled <= expected
+
+    entry = (ROOT / "entrypoint.sh").read_text()
+    for archived in ("jefe", "roomba", "custodian", "signals", "datta", "dumbledore"):
+        assert not re.search(rf'run_member\.sh {archived}\b', entry), \
+            f"a cron line still launches archived member {archived!r}"
+        assert f"cron_member_enabled {archived}" not in entry, \
+            f"ALL_CRON_MEMBERS / cron_member_enabled still references archived member {archived!r}"
+
+    # Every moved duty appears as a numbered step in the receiving member's charter.
+    marie_md = (ROOT / "members" / "marie" / "marie.md").read_text()
+    assert "Part E" in marie_md and "roomba" in marie_md.lower(), \
+        "roomba's worktree sweep never landed as a numbered step in marie.md"
+    assert "Part F" in marie_md and "custodian" in marie_md.lower(), \
+        "custodian's surface-debt duty never landed as a numbered step in marie.md"
+    nerd_md = (ROOT / "members" / "nerd" / "nerd.md").read_text()
+    assert "folded from signals" in nerd_md and "doubt the number" in nerd_md.lower(), \
+        "signals' funnel read + doubt-the-number rule never landed on nerd's datadog lane"
+    gru_md = (ROOT / "members" / "gru" / "gru.md").read_text()
+    assert "folded from datta" in gru_md, \
+        "datta's coverage-dispatch job never landed as a numbered step in gru.md"
+    assert "decision" in gru_md and "infra" in gru_md and "act-and-tell" in gru_md, \
+        "gru never gained the decision/infra ask-answering duty"
+    the_fixer_md = (ROOT / "members" / "the-fixer" / "the-fixer.md").read_text()
+    assert "lint" in the_fixer_md.lower() and "alert-issue dedup" in the_fixer_md.lower(), \
+        "the-fixer never gained the red-lint-fix + alert-issue-dedup holes"
+    sentry_md = (ROOT / "members" / "sentry" / "sentry.md").read_text()
+    assert "gate-3" in sentry_md.lower() or "gate 3" in sentry_md.lower(), \
+        "sentry never gained the live gate-3 re-check after deploy"
+
+
 if __name__ == "__main__":
     check("PR tile rollup reflects mergeability, not just CI (#179)", _pr_tile_rollup_reflects_mergeability_not_just_ci)
     check("member specs load and validate", _member_specs_validate)
@@ -16111,7 +16140,7 @@ if __name__ == "__main__":
     check("replying to the brief steers the fleet: svix, allowlist, parser, ledger, route, Reply-To (fk#669)", _reply_to_the_brief_steers_the_fleet)
     check("a reply answers asks and a backlog: mail files an issue, no model in the way (fk#1056)", _email_reply_answers_asks_and_files_backlog_without_a_model)
     check("intake classifies seven kinds and dedupes a repeat alert by check, one issue not two (fk#1129)", _intake_classifies_and_dedupes_alerts_by_check)
-    check("signals reads the datafeed daily and every finding names a KR (fk#1042)", _signals_member_reads_the_datafeed_daily_and_names_a_kr)
+    check("nerd's datadog lane reads the datafeed and every finding names a KR (fk#1042, folded fk#1195)", _signals_datadog_lane_reads_the_datafeed_and_names_a_kr)
     check("every pass reads the handoff; a Broken: instrument gets one owner issue (Reif 2026-09-16)", _every_pass_reads_the_handoff_and_a_broken_instrument_gets_an_owner)
     check("tiles backfill their history from the source dates, once, observed rows win (fk#1084)", _tiles_backfill_their_history_from_the_source_dates)
     check("reif_eyes files what Reif would have pointed out: churn, stale asks, dark tiles, jargon; idempotent; cron", _reif_eyes_files_what_reif_would_have_pointed_out)
@@ -16248,8 +16277,7 @@ if __name__ == "__main__":
     check("pool logs successes so outage length is measurable", _pool_logs_successes_so_downtime_is_measurable)
     check("account health check actually pages when configured (and never claims to when it isn't)", _account_health_check_actually_pages_when_configured)
     check("account health check re-pages on a fixed interval instead of once (gh#266)", _account_health_check_repages_on_a_fixed_interval_gh266)
-    check("roomba runs as a script and records a quiet pass through run_report (fleet-kit#514)", _roomba_runs_as_a_script_and_records_a_quiet_pass)
-    check("FLEET_DATTA_CADENCE is a validated cron-hour dial (fleet-kit#514)", _datta_cadence_is_a_validated_cron_hour_dial)
+    check("FLEET_MARIE_CADENCE is a validated cron-hour dial (fleet-kit#1092)", _marie_cadence_is_a_validated_cron_hour_dial)
     check("number_read fetches from a URL and renders the five-line header (fleet-kit#513)", _number_read_fetches_from_a_url_and_renders_five_lines)
     check("number_read shows the target and distance to it", _number_read_shows_the_target_and_distance_to_it)
     check("number_read never renders zero for an unmeasured reading (fleet-kit#513)", _number_read_never_renders_zero_for_an_unmeasured_reading)
@@ -16430,6 +16458,7 @@ if __name__ == "__main__":
     check("fold_candidates matches the four reasons in strongest-rule-first order, excludes draft/stale/DIRTY PRs (fk#1127)", _fold_candidates_matches_four_reasons_in_order_and_excludes_bad_prs_fk1127)
     check("worktree_builder.sh parses --onto-pr and falls back to a new PR on a queue-rejected push (fk#1127)", _worktree_builder_parses_onto_pr_flag_and_has_the_queue_fallback_fk1127)
     check("marie's charter wires fold_candidates.py and the fleet:fold-into-pr label (fk#1127)", _marie_charter_wires_fold_candidates_and_the_fold_label_fk1127)
+    check("roster is 10 members after fk#1195's fold, no archived member still on cron, every moved duty lands (fk#1195)", _roster_is_ten_members_after_fk1195_fold)
     for n in ok:
         print(f"  ok    {n}")
     for n, why in skipped:
