@@ -448,12 +448,20 @@ def process(results_path: Path, state_path: Path = DEFAULT_STATE_PATH, runner=_r
                 summary["skipped"].append({"key": key, "reason": "lookup_failed"})
                 continue
             if existing:
+                # gh#7099: the recovery branch remembers its last run in state; this branch did
+                # not, so a second invocation on the same results.json (a retry, a re-run to
+                # capture JSON) posted a second identical "Recurred again" comment on every
+                # open issue. Same guard here: one comment per (key, run).
+                if state.get(key, {}).get("last_fail_run") == run:
+                    summary["skipped"].append({"key": key, "issue": existing, "reason": "already_commented_this_run"})
+                    continue
                 note = f"Recurred again on run `{run}` (sha `{deploy_sha or 'unknown'}`)."
                 if not dry_run:
                     rc, out = runner(build_comment_cmd(existing, note, repo))
                     if rc != 0:
                         summary["errors"].append(f"comment #{existing} failed: {out[:200]}")
                         continue
+                state[key] = {**state.get(key, {}), "last_fail_run": run, "last_fail_issue": existing}
                 summary["commented"].append({"issue": existing, "key": key})
             else:
                 title = build_issue_title(journey.get("name", journey["id"]), step.get("action", ""), profile.title_suffix)
