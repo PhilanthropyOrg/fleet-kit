@@ -7070,13 +7070,15 @@ def _git_pull_guard_serializes_via_a_lock_on_the_git_directory():
 
 
 def _judge_block_pulls_the_pr_out_of_the_queue():
-    """fleet-kit#523: main is merge-queue-controlled on both repos, and `fleet-code-review` is
-    not (cannot be) a required check there -- the queue only waits for checks that report on
-    its own temporary branch, and judge-judy posts on the PR head. So the verdict has to move
-    the arm itself: BLOCK dequeues + disarms, approve arms. Otherwise a BLOCK is a comment."""
+    """fleet-kit#523: `fleet-code-review` is not (cannot be) a required check on either repo,
+    so a green CI run alone would merge a BLOCKed PR -- the verdict has to move the arm
+    itself: BLOCK disarms auto-merge, approve (re)arms it. Otherwise a BLOCK is a comment.
+    fleet-kit's own merge queue was deleted 2026-09-21 (fleet-kit#1193); the dequeuePullRequest
+    call is a harmless no-op here now and still load-bearing against nonprofit-atlas, which
+    still runs one."""
     src = (ROOT / "members" / "judge-judy" / "judge-judy.sh").read_text()
     assert "dequeuePullRequest" in src and "--disable-auto" in src, \
-        "a BLOCK must dequeue the PR and disarm auto-merge -- the queue merges whatever is armed"
+        "a BLOCK must dequeue the PR (if queued) and disarm auto-merge"
     block = src.index("fleet-code-review: BLOCK")
     assert 'unqueue_pr "$PR"' in src[block:], "the BLOCK branch never calls unqueue_pr"
     approve = src.index('"Code review passed')
@@ -10716,9 +10718,11 @@ def _green_pr_with_no_auto_merge_gets_armed():
         # itself in the real thing, so the stub returns what that filter WOULD select.
         #
         # The merge stub rejects a strategy flag exactly as the real `gh` CLI does on a
-        # merge-queue-controlled main (fleet-kit#523: fleet-kit's main has a queue now, same as
-        # nonprofit-atlas's). A regression back to `--squash` fails this instead of passing
-        # silently -- that regression is what left philanthropy PRs unarmed (PR #4215).
+        # merge-queue-controlled main (fleet-kit#523: nonprofit-atlas's main runs a queue;
+        # fleet-kit's own queue was deleted 2026-09-21, fleet-kit#1193, but this script and
+        # arm_pr_auto_merge still need to work against either shape). A regression back to
+        # `--squash` fails this instead of passing silently -- that regression is what left
+        # philanthropy PRs unarmed (PR #4215).
         (bin_dir / "gh").write_text(
             "#!/bin/bash\n"
             "if [ \"$1\" = \"repo\" ]; then echo 'The-Good-Project-Team/fleet-kit'; exit 0; fi\n"

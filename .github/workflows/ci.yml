@@ -22,9 +22,10 @@ jobs:
   # This is the ONLY required status check (branch protection + auto-merge key on the name
   # "selftest" -- see docs/ops/fleet-kit-governance.md). gh#804: it must never run a step that
   # reaches a third party, or that third party's uptime becomes this repo's ability to merge
-  # anything -- an apt 403 from packages.microsoft.com ejected PR #801 (one markdown file, no
-  # relation to Playwright) from the merge queue. Playwright's system-dependency install lives
-  # in the playwright-tests job below instead, which still runs on every PR but is not required.
+  # anything -- an apt 403 from packages.microsoft.com blocked PR #801 (one markdown file, no
+  # relation to Playwright) from merging (this was back when the repo still had a merge queue,
+  # since deleted -- fleet-kit#1193). Playwright's system-dependency install lives in the
+  # playwright-tests job below instead, which still runs on every PR but is not required.
   selftest:
     runs-on: ubuntu-latest
     timeout-minutes: 15

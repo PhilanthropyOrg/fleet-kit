@@ -190,26 +190,16 @@ work done).
    green. You do not merge directly (a check might still be running), and you do not wait for
    a human to drive it through — arming auto-merge IS finishing the job.
 
-   **Check whether `main` is queue-controlled before picking a strategy flag — this shape
-   changes over time (fleet-kit's own `main` has flipped between the two), don't assume last
-   pass's answer still holds.** A bare arm with no strategy flag ERRORS on a repo with no queue
-   (`--merge, --rebase, or --squash required when not running interactively` — cost a wasted
-   retry on nearly every minion pass across #406/#407/#413/#414/#416/#417 in one day before
-   fleet-kit's `main` moved onto a queue); an explicit strategy flag ERRORS on a repo where
-   `main` IS queue-controlled instead (`! The merge strategy for main is set by the merge
-   queue`, confirmed on both nonprofit-atlas issue #3108 and fleet-kit). The ruleset LIST
-   endpoint alone can't tell you which — it returns only summaries (id/name/target/enforcement),
-   never the `rules` array, so an unrelated ruleset reads as "non-empty" too. Fetch each
-   ruleset's detail instead:
-   ```
-   gh api repos/<owner>/<repo>/rulesets --jq '.[].id' | while read -r id; do
-     gh api repos/<owner>/<repo>/rulesets/$id --jq '.rules[].type'
-   done
-   gh api repos/<owner>/<repo>/merge-queue
-   ```
-   A `merge_queue` rule type in any ruleset's detail (or a non-404 from the second call) means
-   a queue is live — use a bare `gh pr merge` and let `gh` pick the queue path. Neither means
-   no queue — use `gh pr merge --squash` (or your repo's equivalent) explicitly.
+   **Use `scripts/merge_arm.sh`'s `arm_pr_auto_merge` rather than a raw `gh pr merge` call —
+   it already picks the right strategy flag for you.** fleet-kit has no merge queue any more
+   (deleted 2026-09-21, fleet-kit#1193), so the live path is its explicit-strategy fallback; a
+   bare arm with no strategy flag ERRORS on a repo with no queue (`--merge, --rebase, or
+   --squash required when not running interactively` — cost a wasted retry on nearly every
+   minion pass across #406/#407/#413/#414/#416/#417 in one day). `arm_pr_auto_merge` tries the
+   bare form first anyway and falls back to an explicit strategy on that exact error string, so
+   it stays correct even against a repo (like nonprofit-atlas) that DOES run a queue, where an
+   explicit strategy flag ERRORS instead (`! The merge strategy for main is set by the merge
+   queue`, confirmed on nonprofit-atlas issue #3108).
    CHECK THE EXIT CODE regardless of shape — issue #3108's root cause was this exact command
    failing silently, with the failure never mentioned in the final report, leaving
    fully-green PRs stuck for hours with no human or orchestrator any the wiser. A non-zero

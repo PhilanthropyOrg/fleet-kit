@@ -97,17 +97,18 @@ REPO_SLUG=$(gh repo view --json nameWithOwner -q '.nameWithOwner' 2>/dev/null ||
 [ -z "$REPO_SLUG" ] && { log "FATAL: cannot resolve repo slug (gh auth?)"; exit 1; }
 
 unqueue_pr() { # <pr>
-  # fleet-kit#523: main is merge-queue-controlled, and fleet-code-review is not a required
-  # check (it cannot be -- the queue only waits for checks on its own temporary branch, and
-  # this status lands on the PR head). So a BLOCK has to pull the PR out of the queue and
-  # disarm auto-merge itself; auto_update_branch.sh then refuses to re-arm a head whose
+  # fleet-kit#523: fleet-code-review is not (and cannot be) a required check, so a BLOCK has
+  # to disarm auto-merge itself; auto_update_branch.sh then refuses to re-arm a head whose
   # latest fleet-code-review is failure. Before this, a BLOCK was a comment: 2026-09-06 01:50Z
-  # three BLOCKed PRs (#494 #505 #518) were queued to merge.
+  # three BLOCKed PRs (#494 #505 #518) merged anyway.
+  # main was merge-queue-controlled at the time this landed; the queue was deleted 2026-09-21
+  # (fleet-kit#1193). The dequeuePullRequest call below is a harmless no-op on a plain repo
+  # (no queue entry to remove) -- left in so this still works if a queue ever comes back.
   local id
   id=$(timeout 25s gh pr view "$1" --json id -q '.id' 2>/dev/null || true)
   [ -n "$id" ] && timeout 25s gh api graphql -f query="mutation{dequeuePullRequest(input:{id:\"$id\"}){clientMutationId}}" >/dev/null 2>&1
   timeout 25s gh pr merge "$1" --disable-auto >/dev/null 2>&1
-  log "PR #$1: dequeued + auto-merge disarmed (blocked)"
+  log "PR #$1: auto-merge disarmed (blocked)"
 }
 
 post_status() { # <sha> <state> <description>
