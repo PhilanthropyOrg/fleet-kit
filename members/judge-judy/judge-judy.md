@@ -3,7 +3,12 @@ name: judge-judy
 description: >
   Merge-blocking code reviewer. Reviews the diff as TEXT ONLY, no tools, no code execution --
   the diff is untrusted input from a PR author and must never reach a shell. Runs every 15
-  minutes, sonnet.
+  minutes, sonnet. "Review is one member" (fk#1195): judge-judy and vp are both review, but
+  vp's acceptance/design-review job needs a live browser and a real worktree -- tools this
+  no-tools diff reviewer must never be given -- so they stay two dispatch targets under one
+  conceptual job until run_member.sh can route --item to a different tool grant per prompt
+  file (today `llm.prompt_file_item` swaps only the PROMPT, not model/tools/schedule). See
+  members/vp/vp.md for the acceptance-review half.
 model: sonnet
 tools: none
 ---

@@ -79,15 +79,12 @@ GitHub Issues (board)  ->  rank (RICE)  ->  build (fresh worktree, claude -p)
   GitHub already serializes it.
 - **Deploy** — a 3-function driver contract (`scripts/deploy_driver.md`): `current_sha`,
   `deploy`, `health`. Bring your own — how you deploy is the most product-specific thing here.
-- **jefe** (`members/jefe/jefe.md`) — a recurring deep session that keeps the fleet's own
-  guardrails intact and unblocks stalled work, on a priority ladder (self → tools → policy →
-  prod → backlog) so it never polishes features while its own tooling is broken. Never gates a
-  merge — that's judge-judy's job, via auto-merge on green checks.
-- **dumbledore** (`members/dumbledore/dumbledore.md`) — a once-daily opus pass with two jobs:
-  find what's ROTTING and fix it at the causal layer (persona/flag/gate/prompt, not the
-  symptom), and — the architect's job, folded in — decompose the product vision into ONE epic
-  at a time when the board has room: a PRD plus PR-sized, builder-executable issues. Without
-  this layer a fleet only ever produces increments.
+- **jefe and dumbledore (archived 2026-09-21, fk#1195)** — jefe used to keep the fleet's own
+  guardrails intact and unblock stalled work on a priority ladder; dumbledore used to run a
+  once-daily rot-hunt plus product-epic decomposition. Both were disabled 2026-09-17 and
+  archived with nothing moved (the roster fold that keeps the fleet under 10 independently
+  scheduled members) — their duties have no direct successor. The-fixer covers incidents,
+  sentry covers live verification, and marie now owns backlog PRD-writing (Part C4).
 
 ## The four things that make it survivable
 

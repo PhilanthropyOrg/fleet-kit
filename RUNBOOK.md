@@ -51,25 +51,28 @@ cron slot. Budget three hours from merge to first evidence, not thirty minutes.
 
 ## 5. Members (manifest = `members/<name>/<name>.fleet.json`, instructions = `members/<name>/<name>.md`)
 
+**Rostered down from 18 to 12 dirs, 2026-09-21 (fk#1195, "keep members under 10, add tasks to
+existing members, never create new ones").** jefe, dumbledore, roomba, custodian, signals, and
+datta were archived; their live duties moved onto the members below (marie's Part E/F, nerd's
+datadog lane, gru's own step 9) rather than staying separate dispatch targets. vp and
+librarian-scrub stay separate dispatch targets despite the letter of the PRD's 10-dir budget —
+both hit a real tool-grant/cadence conflict with the member they'd otherwise fold into (see
+judge-judy.md and librarian.md for the specifics); that is a stated deviation, not an oversight.
+
 | member | cadence (UTC) | job |
 |---|---|---|
-| gru | hourly :03 | orchestrator: reads runway, picks how many minions, fans out |
+| gru | hourly :03 | orchestrator: reads runway, picks how many minions, fans out; also computes lane coverage and spawns nerd on demand (folded from datta), and answers decision/infra asks within the hour |
 | minion | spawned by gru | builds a batch of backlog items → `member/…` branch → PR |
 | judge-judy | every 15 min | text-only merge-blocking code review of open PRs |
-| the-fixer | hourly :47 + webhook on red CI | incident response: red CI/deploy, dark prod, stuck PR |
-| jefe | hourly :21 | keeps the fleet itself healthy, drives the product backlog |
-| marie | every 4h :33 | backlog hygiene, RICE ranking, stale-claim clearing |
-| sentry | every 3h :17 | uses the product like a person; files what breaks |
-| vp | on `quality:*` labels (`vp_due.sh`) | acceptance judge |
-| datta | every 6h :12 | data/analytics pass |
-| nerd | hourly | filed-findings pass (ui/quality) |
+| the-fixer | hourly :47 + webhook on red CI | incident response: red CI/deploy, dark prod, stuck PR, red lint, alert-issue dedup |
+| marie | every 4h :33 | backlog hygiene, RICE ranking, stale-claim clearing; also worktree/branch sweep (folded from roomba) and surface-debt hygiene (folded from custodian) |
+| sentry | every 3h :17 | uses the product like a person; files what breaks; also re-checks the last deploy live (gate 3) at the top of every pass |
+| vp | on `quality:*` labels (`vp_due.sh`) | acceptance judge (kept as its own dispatch target — see fk#1195 note above) |
+| nerd | spawned by gru with `lane=<name>` | filed-findings pass (ui/quality/datadog/…); the datadog lane also carries the product funnel read and "doubt the number" rule (folded from signals) |
 | red | every 6h :23 | adversary: `members/red/attacks.yaml` |
-| dumbledore | every 7h | reads a day of signal, finds what is rotting |
 | dont-shoot-the-messenger | daily 06:30 CT (+12:30, 17:30) | the one voice to the human: the brief |
-| signals | daily 06:05 | the analyst: the number, the funnel, the OKR |
-| librarian | daily 05:15 | tends memory dirs; `librarian-scrub` hourly :06 is the shell credential scrub |
-| custodian | daily 13:17 | every surface perfected or retired (shell) |
-| roomba | hourly :41 | worktree sweep (shell) |
+| librarian | daily 05:15 | tends memory dirs; writes INTENT.md |
+| librarian-scrub | hourly :06 | the shell credential scrub (kept as its own dispatch target — see fk#1195 note above) |
 
 `entrypoint.sh` renders these into `/etc/cron.d/fleet-kit` at container start; the manifest's
 `cadence` is documentation of that line, not the source of it. `FLEET_CRON_MEMBERS` in

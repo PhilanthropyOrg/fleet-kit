@@ -111,7 +111,11 @@ runner writes the QUIET record itself, $0). The line shapes it emits and what ea
   - `check-failed` -- check out the PR's own branch (never a worktree off main), read the
     failing check's log (`gh run view --log-failed` on its head SHA, or `gh pr checks N`), push
     a fix commit straight onto the PR's branch (the one case where pushing to a non-default
-    branch that isn't your own worktree is correct -- it's the PR author's branch).
+    branch that isn't your own worktree is correct -- it's the PR author's branch). **A red
+    lint check is a `check-failed` case like any other, not a special one (fk#1195): gh#7076
+    sat unstuck through this loop and needed a human by hand, so name it explicitly here.**
+    Read the lint job's own log the same way, push the fix (or the lint-tool's own autofix
+    command, where one exists) onto the PR's branch, same as any other failing check.
   - `merge-conflict` -- fetch and merge the default branch into the PR's branch yourself
     (`git fetch origin main && git merge origin/main`), resolve conflicts reading both sides
     (never mechanically keep-both in a way that leaves the file syntactically broken -- same
@@ -166,6 +170,15 @@ runner writes the QUIET record itself, $0). The line shapes it emits and what ea
 
 A fix isn't obvious within the turn budget -> open the REVERT PR, don't keep guessing. Prod is
 down and no diagnosis driver is configured -> log it loudly and stop, don't improvise access.
+
+**Alert-issue dedup, before you file anything (fk#1195).** 13 identical pg_lock issues landed
+in 26 minutes on 2026-09-20: the same underlying condition, filed as 13 units of work instead
+of one. Before `gh issue create` for any fire this pass diagnosed, search first:
+`gh issue list --state open --search "<the specific symptom, e.g. pg_lock> in:title" --limit 20`.
+An open issue whose title names the same symptom -> comment the new occurrence's timestamp/SHA
+on it instead of filing a twin; a symptom recurring inside one open issue's own lifetime is
+evidence for THAT issue, never a new one (persona_law.md §7, the systemic-failure rule: one
+broken piece of infrastructure firing on multiple ticks is one issue, not N).
 
 ## Report
 

@@ -19,8 +19,8 @@
 # same as any other tool, rather than the script BEING the member's whole behavior.
 #
 # Usage: run_member.sh <member-name> [--dry-run] [--item <issue-number> | --items <n1,n2,...>] [--task "<instruction>"]
-#   e.g.  run_member.sh dumbledore
-#         run_member.sh roomba --dry-run     # print the resolved command, run nothing
+#   e.g.  run_member.sh marie
+#         run_member.sh sentry --dry-run     # print the resolved command, run nothing
 #         run_member.sh minion --item 3072   # gru spawns a single-item minion this way (legacy path, still valid)
 #         run_member.sh minion --items 3072,3081,3090
 #                                            # gru spawns a batched minion this way -- batch size is
@@ -639,8 +639,10 @@ fi
 # The handoff (Reif 2026-09-16: "the next run should be informed by the last set of runs, so
 # the team self learns"): regenerated from runs.jsonl right now (deterministic, <1s) and put
 # FIRST in the prompt, before the charter, so a member starts from what the team just learned.
-# signals (fk#1042): the datafeed pull is deterministic, so it happens here, before the model.
-if [ "$MEMBER" = "signals" ]; then
+# signals (fk#1042, folded into nerd's datadog lane fk#1195): the datafeed pull is
+# deterministic, so it happens here, before the model, whenever nerd is about to run the
+# datadog lane (the lane that inherited signals' funnel-read duty).
+if [ "$MEMBER" = "nerd" ] && [ "$LANE" = "datadog" ]; then
   FLEET_LOG_DIR="$LOG_DIR" python3 "$KIT_DIR/scripts/signals_pull.py" --fetch >>"$LOG" 2>&1 || true
 fi
 HANDOFF_FILE="$LOG_DIR/HANDOFF.md"

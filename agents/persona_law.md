@@ -372,7 +372,7 @@ operator reviewing claims) — never "the user" in the abstract.>
 instance is configured against (fk#513's `number.json`/`FLEET_NUMBER_URL`, rendered by
 `scripts/number_read.py --render`), or `none (maintenance)` if this instance carries no
 number or the change doesn't move one. Same convention `scripts/vision_link_gate.py` and
-`members/dumbledore/dumbledore.md`/`members/jefe/jefe.md` already use for `Vision-link:`.>
+`members/marie/marie.md`/`members/gru/gru.md` already use for `Vision-link:`.>
 ```
 
 **Write the first block as if the reader has never seen the codebase.** No file paths, no
