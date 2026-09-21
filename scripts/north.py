@@ -33,9 +33,11 @@ import json
 import os
 import pathlib
 import re
+import socket
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.request
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -154,8 +156,41 @@ def load_okr(path: pathlib.Path | None = None) -> dict:
         return {}
 
 
+FUNNEL_TIMEOUT_S = 45  # fk#1189: the live endpoint answered in 30.5s; 20s read as "unreadable"
+
+
+def source_env_file(path: pathlib.Path | None = None) -> dict[str, str]:
+    """`set -a; . fleet.env` for a Python process: every KEY=value in FLEET_ENV_FILE lands in
+    os.environ unless the process already has that key. fk#1189: run outside run_member.sh (a
+    hand `podman exec`, a debugging shell) north.py had no token at all and every funnel read
+    said "unreadable" for a reason that was not the product's. Returns what it applied."""
+    p = path or pathlib.Path(os.environ.get("FLEET_ENV_FILE") or HERE.parent / "fleet.env")
+    try:
+        text = p.read_text(errors="ignore")
+    except OSError:
+        return {}
+    applied = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        if line.startswith("export "):
+            line = line[len("export "):]
+        k, _, v = line.partition("=")
+        k, v = k.strip(), v.strip()
+        if len(v) >= 2 and v[0] == v[-1] and v[0] in "'\"":
+            v = v[1:-1]
+        if k and k not in os.environ:
+            os.environ[k] = v
+            applied[k] = v
+    return applied
+
+
 def load_funnel(url: str | None = None, token: str | None = None) -> tuple[dict, str | None]:
-    """The product's funnel + OKR readings, or ({}, why)."""
+    """The product's funnel + OKR readings, or ({}, why). `why` names which of the four it was
+    (no token / 401-403 / timeout / endpoint error) so an operator reading NORTH.md knows what
+    to fix instead of guessing between a WAF rule, a missing env and a slow query (fk#1189)."""
+    source_env_file()
     url = url or os.environ.get("FLEET_FUNNEL_URL") or ""
     if not url:
         base = (os.environ.get("FLEET_NUMBER_URL") or "").rsplit("/api/", 1)[0]
@@ -163,15 +198,29 @@ def load_funnel(url: str | None = None, token: str | None = None) -> tuple[dict,
     if not url:
         return {}, "no FLEET_FUNNEL_URL / FLEET_NUMBER_URL"
     token = token or os.environ.get("FLEET_NUMBER_TOKEN") or ""
-    headers = {"User-Agent": "fleet-kit/north"}
-    if token:
-        headers["X-PM-Token"] = token
+    if not token:
+        return {}, f"{url} -> no token (FLEET_NUMBER_TOKEN unset; source FLEET_ENV_FILE)"
+    headers = {"User-Agent": "fleet-kit/north", "X-PM-Token": token}
     req = urllib.request.Request(url, headers=headers)
     try:
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            return json.loads(resp.read().decode()), None
+        with urllib.request.urlopen(req, timeout=FUNNEL_TIMEOUT_S) as resp:
+            body = json.loads(resp.read().decode())
+    except urllib.error.HTTPError as e:
+        if e.code in (401, 403):
+            return {}, f"{url} -> {e.code} (token or waf)"
+        return {}, f"{url} -> endpoint error: HTTP {e.code}"
+    except (TimeoutError, socket.timeout):
+        return {}, f"{url} -> timeout after {FUNNEL_TIMEOUT_S}s"
+    except urllib.error.URLError as e:
+        if isinstance(e.reason, (TimeoutError, socket.timeout)) or "timed out" in str(e.reason):
+            return {}, f"{url} -> timeout after {FUNNEL_TIMEOUT_S}s"
+        return {}, f"{url} -> endpoint error: {str(e.reason)[:80]}"
     except Exception as e:  # noqa: BLE001
-        return {}, f"{url} -> {type(e).__name__}: {str(e)[:80]}"
+        return {}, f"{url} -> endpoint error: {type(e).__name__}: {str(e)[:80]}"
+    err = (body.get("errors") or {}).get("funnel") if isinstance(body, dict) else None
+    if err:
+        return {}, f"{url} -> endpoint error: {str(err)[:120]}"
+    return body, None
 
 
 def worst_step_kr(funnel: dict) -> str | None:
