@@ -5295,6 +5295,67 @@ def _reif_eyes_files_what_reif_would_have_pointed_out():
     assert re_.file_findings(churn, "o/r", state, [], run=run, now=now + 8 * 86400) == ["https://github.com/o/r/issues/5"], "after 7 days it may be filed again"
     ep = (ROOT / "entrypoint.sh").read_text()
     assert "python3 /fleet-kit/scripts/reif_eyes.py >> $LOG_DIR/reif_eyes.log" in ep, "no cron line for reif_eyes.py"
+def _north_sources_fleet_env_and_names_why_the_funnel_is_unreadable_fk1189():
+    """fk#1189: run by hand (podman exec, no run_member.sh) north.py had no token and every
+    funnel miss read "unreadable" for a reason that was not the product's. Now it sources
+    FLEET_ENV_FILE itself, waits 45s (the live endpoint took 30.5s), and the reason names
+    which of the four it was: no token / 401-403 / timeout / endpoint error."""
+    import importlib.util, io, os, socket, tempfile, urllib.error
+    spec = importlib.util.spec_from_file_location("north", ROOT / "scripts" / "north.py")
+    n = importlib.util.module_from_spec(spec); spec.loader.exec_module(n)
+    keys = ("FLEET_ENV_FILE", "FLEET_FUNNEL_URL", "FLEET_NUMBER_URL", "FLEET_NUMBER_TOKEN", "FK1189_PROBE")
+    saved = {k: os.environ.pop(k, None) for k in keys}
+    real_urlopen = n.urllib.request.urlopen
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            env = pathlib.Path(d) / "fleet.env"
+            env.write_text("# comment\nFLEET_NUMBER_URL=https://x.test/990/api/number\nexport FK1189_PROBE='quoted'\n")
+            os.environ["FLEET_ENV_FILE"] = str(env)
+            # 1. sourced with set -a semantics: file fills what the process lacks, never overrides
+            os.environ["FLEET_NUMBER_TOKEN"] = ""
+            applied = n.source_env_file()
+            assert applied.get("FK1189_PROBE") == "quoted" and os.environ["FLEET_NUMBER_URL"] == "https://x.test/990/api/number", applied
+            assert "FLEET_NUMBER_TOKEN" not in applied, "a key the process already has is not overridden"
+            # 2. no token
+            _, why = n.load_funnel()
+            assert why and "no token" in why and "FLEET_NUMBER_TOKEN" in why, why
+            os.environ["FLEET_NUMBER_TOKEN"] = "t"
+            seen = {}
+            def fake(req, timeout=None):
+                seen["timeout"] = timeout
+                raise seen["raise"]
+            n.urllib.request.urlopen = fake
+            # 3. 401/403 = token or waf, named as such
+            seen["raise"] = urllib.error.HTTPError("u", 403, "Forbidden", {}, io.BytesIO(b""))
+            _, why = n.load_funnel()
+            assert why and "403 (token or waf)" in why and why.startswith("https://x.test/990/api/signals/funnel"), why
+            assert seen["timeout"] == 45, f"timeout must be 45s, got {seen['timeout']}"
+            # 4. timeout, both spellings urllib uses
+            seen["raise"] = socket.timeout("timed out")
+            _, why = n.load_funnel(); assert why and "timeout after 45s" in why, why
+            seen["raise"] = urllib.error.URLError(TimeoutError("timed out"))
+            _, why = n.load_funnel(); assert why and "timeout after 45s" in why, why
+            # 5. endpoint error: a 500, a refused socket, and a 200 whose body carries errors.funnel
+            seen["raise"] = urllib.error.HTTPError("u", 500, "boom", {}, io.BytesIO(b""))
+            _, why = n.load_funnel(); assert why and "endpoint error: HTTP 500" in why, why
+            seen["raise"] = urllib.error.URLError(ConnectionRefusedError("refused"))
+            _, why = n.load_funnel(); assert why and "endpoint error:" in why and "refused" in why, why
+            class R:
+                def __enter__(self): return self
+                def __exit__(self, *a): return False
+                def read(self): return b'{"funnel": {}, "errors": {"funnel": "statement timeout"}}'
+            n.urllib.request.urlopen = lambda req, timeout=None: R()
+            _, why = n.load_funnel(); assert why == "https://x.test/990/api/signals/funnel -> endpoint error: statement timeout", why
+            # 6. and a clean read still reads
+            R.read = lambda self: b'{"funnel": {"worst_step": "cta_clicked->page_viewed"}}'
+            body, why = n.load_funnel(); assert why is None and body["funnel"]["worst_step"], (body, why)
+    finally:
+        n.urllib.request.urlopen = real_urlopen
+        for k, v in saved.items():
+            if v is None: os.environ.pop(k, None)
+            else: os.environ[k] = v
+
+
 def _north_weights_every_kr_by_what_reif_shipped_and_where_the_funnel_leaks():
     """fk#1097, Reif 2026-09-16: "add weight on the things that I am shipping personally... then
     the okrs, then whats burning... so we are all paddling in the same direction." The
@@ -16124,6 +16185,7 @@ if __name__ == "__main__":
     check("tiles backfill their history from the source dates, once, observed rows win (fk#1084)", _tiles_backfill_their_history_from_the_source_dates)
     check("reif_eyes files what Reif would have pointed out: churn, stale asks, dark tiles, jargon; idempotent; cron", _reif_eyes_files_what_reif_would_have_pointed_out)
     check("north weights every KR by what Reif shipped and where the funnel leaks; NORTH.md in every prompt (fk#1097)", _north_weights_every_kr_by_what_reif_shipped_and_where_the_funnel_leaks)
+    check("north sources FLEET_ENV_FILE itself, waits 45s, and names why the funnel is unreadable: no token / 401-403 / timeout / endpoint error (fk#1189)", _north_sources_fleet_env_and_names_why_the_funnel_is_unreadable_fk1189)
     check("a finished run carries its plain-English words for the console, haiku, opt-in", _run_record_carries_plain_words_when_opted_in)
     check("an open ask also lands on the board so an agent picks it up (opt-in, idempotent)", _an_open_ask_also_lands_on_the_board_for_an_agent)
     check("the-fixer fires only for a red run on the default branch (fk#1055)", _the_fixer_fires_only_for_the_default_branch)
