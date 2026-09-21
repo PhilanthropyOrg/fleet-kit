@@ -15175,6 +15175,24 @@ def _gru_md_wires_plan_rank_before_packing_gh572():
         "gru.md's report step must require naming the bet each picked item serves (gh#572 AC5)"
 
 
+def _walkers_send_the_bypass_header_cloudflare_actually_reads_gh7077():
+    """gh#7077: journey_walker and red_walker sent `X-Atlas-Test-Bypass`; Cloudflare's skip rule
+    reads `x-atlas-test` (prod_health_check already had it right). Once the /990 edge shield
+    went permanent (gh#7069) every journey touching sign-in, report, claim or messaging 403'd:
+    0 passed / 14 failed / 6 blocked on the 2026-09-21 12:20Z sentry run. One name, three files."""
+    import re
+    want = "x-atlas-test"
+    phc = (ROOT / "scripts" / "prod_health_check.py").read_text()
+    m = re.search(r'^CF_BYPASS_HEADER = "([^"]+)"', phc, re.M)
+    assert m and m.group(1) == want, m
+    for name in ("journey_walker.py", "red_walker.py"):
+        src = (ROOT / "scripts" / name).read_text()
+        m = re.search(r'^BYPASS_HEADER = "([^"]+)"', src, re.M)
+        assert m, f"{name}: no BYPASS_HEADER constant"
+        assert m.group(1) == want, f"{name} sends {m.group(1)!r}; Cloudflare reads {want!r} (gh#7077)"
+        assert "X-Atlas-Test-Bypass" not in src.replace("guessed\n                          `X-Atlas-Test-Bypass`", ""), f"{name}: stale header name still in code"
+
+
 def _journey_walker_console_url_defaults_to_fleet_instance_path_gh724():
     """gh#724 AC1: with no FLEET_CONSOLE_URL set, TestUsers must resolve the instance's real
     console path (dino.luckymachines.co/fleet/<instance>), not the bare host -- the bare host
@@ -16458,6 +16476,7 @@ if __name__ == "__main__":
     check("plan_rank on a malformed plan file exits 0, unchanged order, one stderr diagnostic, no traceback (gh#572 AC4)", _plan_rank_ac4_malformed_plan_exits_0_with_one_diagnostic_never_a_traceback_gh572)
     check("gru.md wires plan_rank.py after the quality gate and before packing, and its report names the bet served (gh#572 AC5)", _gru_md_wires_plan_rank_before_packing_gh572)
 
+    check("journey_walker + red_walker send the bypass header Cloudflare actually reads, same as prod_health_check (gh#7077)", _walkers_send_the_bypass_header_cloudflare_actually_reads_gh7077)
     check("journey_walker fleet-console default resolves to the instance's real console path, not the bare host (gh#724 AC1)", _journey_walker_console_url_defaults_to_fleet_instance_path_gh724)
     check("journey_walker fleet-console URL: an explicit FLEET_CONSOLE_URL wins unchanged (gh#724 AC2)", _journey_walker_console_url_env_override_wins_unchanged_gh724)
 
