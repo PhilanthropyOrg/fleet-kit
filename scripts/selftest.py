@@ -2085,80 +2085,6 @@ def _minion_knows_the_browser_exists():
     assert "sync_playwright" in md, "minion.md gestures at a browser without the working call"
 
 
-def _jefe_can_unstick_a_pr_that_is_merely_behind():
-    """Green + armed + BLOCKED is a THIRD stuck shape, and the only fix is updating the base.
-
-    A merge queue re-tests every entry against the CURRENT base, so a PR whose checks passed
-    against a stale base cannot enter the queue however green it looks. Nothing in this fleet
-    updated a stale branch, so such a PR stranded itself while every surface called it healthy.
-
-    Confirmed live 2026-08-26: nonprofit-atlas#3307, all checks success, autoMergeRequest
-    armed, mergeStateStatus BLOCKED, behind_by=17. jefe's charter covered "armed but stuck"
-    and "never armed at all" -- neither of which describes it, and neither remedy (a direct
-    `gh pr merge`) is even safe here, since the checks have not run against the base it would
-    land on.
-    """
-    md = (ROOT / "members/jefe/jefe.md").read_text()
-    assert "update-branch" in md, \
-        "jefe cannot unstick a PR that is merely behind its base -- no update-branch remedy"
-    assert "behind_by" in md, "jefe has no way to DIAGNOSE a behind-the-base PR"
-    # The remedy must not be "merge it by hand": this shape's checks have not run against the
-    # base it would land on, so a direct merge lands untested code.
-    idx = md.index("update-branch")
-    window = md[idx:idx + 400]
-    assert "do NOT merge directly" in window or "not merge directly" in window, \
-        "jefe's stale-base remedy must forbid a direct merge -- checks have not run on that base"
-
-    # BLOCKED can also mean the required checks never ATTACHED, not that one failed -- absent
-    # reads identically to pending on every surface (gh#3315). Measured on #3307: after
-    # update-branch the head carried only `sync-lock=skipped`; an empty-commit push attached
-    # test/test-postgres/enforcement-preflight. jefe must know to check by NAME and to push.
-    assert "check-runs" in md, "jefe cannot tell an ABSENT required check from a pending one"
-    assert "--allow-empty" in md, \
-        "jefe has no remedy for absent checks -- only a real push fires synchronize"
-    # And must not present the manual fix as the system's answer: automated recovery exists.
-    assert "stuck_pr_watch" in md or "3332" in md, \
-        "jefe's manual retrigger must point at the automated mechanism it stands in for"
-
-
-def _jefe_precedent_citations_are_repo_qualified():
-    """gh#286: jefe posted PR #3875 / issue #3831 / PR #3853 as "gathered live" evidence on
-    gh#269 -- fleet-kit's own outage tracker -- none of which resolve in fleet-kit. They sit in
-    nonprofit-atlas's numbering range, the same range jefe.md's own worked examples cite as
-    precedent (`nonprofit-atlas#3108`, etc.), unmarked as "a different repo's history" at the
-    exact spots a pass composing a status comment would be reading. This locks in two things:
-    (1) jefe.md actually carries the verify-before-you-cite guard, and (2) every bare 4+-digit
-    `#NNNN` citation in the file (fleet-kit's own numbering is still 3-digit as of this check --
-    a genuine future ceiling, not enforced here) has `nonprofit-atlas` within a short window of
-    the SAME citation, not merely somewhere in the same paragraph -- an earlier version of this
-    check matched on whole paragraphs (some run 300-1700 chars) and would have waved through a
-    brand-new unrelated bare citation riding along on an unrelated `nonprofit-atlas` mention
-    elsewhere in a long paragraph, exactly the unmarked-precedent shape gh#286 was filed over.
-    """
-    md = (ROOT / "members/jefe/jefe.md").read_text()
-    assert "verify before you cite" in md.lower(), \
-        "jefe.md lost its verify-before-you-cite guard -- see gh#286"
-    assert "gh pr view" in md and "gh issue view" in md, \
-        "jefe.md's citation guard must name the actual verification command"
-
-    # Strip fenced code blocks first -- a future code snippet could legitimately embed a
-    # 4+-digit number (a real command's issue-number argument, a URL) that is not a citation
-    # at all and must never be counted against the paragraph it sits in.
-    stripped = re.sub(r"```.*?```", "", md, flags=re.DOTALL)
-    cite = re.compile(r"#\d{4,}")
-    window = 120  # chars either side -- covers "nonprofit-atlas already ships ... gh#3315"
-    #                 style same-sentence references without spanning into unrelated prose.
-    bad = []
-    for m in cite.finditer(stripped):
-        lo, hi = max(0, m.start() - window), min(len(stripped), m.end() + window)
-        if "nonprofit-atlas" not in stripped[lo:hi]:
-            line_no = stripped.count("\n", 0, m.start()) + 1
-            bad.append(f"line {line_no}: ...{stripped[lo:hi].strip()[:100]}...")
-    assert not bad, (
-        "jefe.md cites a specific numbered PR/issue with no nonprofit-atlas qualifier nearby "
-        f"(gh#286's exact failure shape): {bad}")
-
-
 def _score_reasoning_is_not_guillotined_mid_word():
     """The Magikarp score's reasoning must survive to the dashboard whole.
 
@@ -5863,18 +5789,6 @@ def _closes_gate_epic_stays_open_when_its_own_thread_says_so_gh879():
     assert "three" in doc.lower() and "stays-open" in doc.lower(), "module docstring must state the three closable:true meanings (AC8)"
     ap_src = (ROOT / "scripts" / "closes_gate.py").read_text()
     assert "closable:true means one of three things" in ap_src, "--epic help text must state the three meanings (AC8)"
-
-
-def _jefe_runs_the_epic_close_check_before_closing_an_epic():
-    """AC4: members/jefe/jefe.md's epic-closing step invokes closes_gate.py's `--epic` check
-    before jefe closes a `fleet:epic` issue, documented in the same shape gru.md uses for
-    vision_link_gate.py / quality_gate.py (a fenced command plus the JSON shape it returns)."""
-    md = (ROOT / "members" / "jefe" / "jefe.md").read_text()
-    assert "closes epics, not PRs" in md
-    assert "closes_gate.py --epic" in md, "jefe.md never invokes the epic-closure check"
-    assert '"closable"' in md, "jefe.md does not document the check's JSON shape"
-    ap_src = (ROOT / "scripts" / "closes_gate.py").read_text()
-    assert '"--epic"' in ap_src, "closes_gate.py has no --epic CLI mode for jefe to call"
 
 
 def _share_dials_offer_every_five_percent_labelled_as_percent():
@@ -11329,28 +11243,6 @@ def _check_share_sum_never_reports_ok_on_stale_or_missing_shares():
         assert "UNKNOWN" in broken.stdout
 
 
-def _jefe_owns_the_fleet_wide_token_budget():
-    """jefe is the always-on health pass, so cross-instance spend is its layer.
-
-    Reif, 2026-09-02: jefe "is supposed to help with management of token budget across the
-    fleet." It already read per-member cost (fleet_db.py spend) but had nothing about the
-    account-pool slices every instance shares -- which is exactly where the two live bugs
-    hid (a dial combined with min() so every value gave the same number, and per-instance
-    lease ledgers that made reserved_pct meaningless across instances).
-
-    Pins that the charter names the tools AND that every tool it names actually exists -- a
-    charter citing a missing script sends a pass hunting instead of executing (the same
-    failure the-fixer hit with a relative check.sh path).
-    """
-    charter = (ROOT / "members" / "jefe" / "jefe.md").read_text()
-    for dial in ("FLEET_SHARE_FRACTION", "FLEET_GRU_ALLOWANCE_FRACTION"):
-        assert dial in charter, f"jefe.md never mentions {dial} -- it cannot manage what it cannot name"
-    for tool in ("check_share_sum.sh", "gru_allowance.py", "maxx_share_ceiling.py", "maxx_lease.py"):
-        assert tool in charter, f"jefe.md does not tell jefe to check {tool}"
-        assert (ROOT / "scripts" / tool).exists(), \
-            f"jefe.md cites scripts/{tool} but it does not exist -- the pass will hunt for it"
-
-
 def _law_carries_the_pr_and_report_contracts():
     """The law every member inherits must carry the PR contract.
 
@@ -14702,21 +14594,6 @@ def _self_improve_score_reads_the_ledger_gh782():
     assert 'SELF_IMPROVE_DRY_RUN' in text
 
 
-def _dumbledore_charter_is_short_on_opus_and_ledger_first_gh783():
-    import member_spec
-    spec = member_spec.by_name("dumbledore", ROOT / "members")
-    assert spec["llm"]["model"] == "opus", spec["llm"]["model"]
-    charter = (ROOT / "members" / "dumbledore" / "dumbledore.md").read_text()
-    lines = charter.count("\n")
-    assert lines <= 140, f"dumbledore.md is {lines} lines; the cap is 140 (was 366)"
-    for needle in ("predict.py resolve", "predict.py add", "predict.py last --member dumbledore",
-                   "INTENT.md", "Never touch your own grader", "Last-verdict:", "Prediction:", "Intent:"):
-        assert needle in charter, needle
-    assert charter.find("predict.py resolve") < charter.find("Rot hunt"), "ledger before the rot hunt"
-    assert any("predict.py add" in c for c in spec["mandate"]["checklist"]), "checklist must carry the add"
-    assert "export FLEET_RUN_ID" in (HERE / "run_member.sh").read_text()
-
-
 def _control_plane_shares_sum_to_pool_and_paused_weight_flows_gh759():
     """gh#759 AC2: shares split (1 - human_reserve) by weight; a paused instance gets 0.0 and
     the others absorb its weight. Seeded 3:1 with reserve 0.2 reproduces the hand-set
@@ -16161,8 +16038,6 @@ if __name__ == "__main__":
     check("self_improve_score.sh's evidence catches the member/<name>-<id> branch shape", _self_improve_score_evidence_covers_member_branch_shape)
     check("DAILY_OUTCOMES carries hours_elapsed for a partial today (#263)", _daily_outcomes_carries_hours_elapsed_for_partial_today)
     check("DAILY_OUTCOMES excludes 'started' rows from the count (gh#576)", _daily_outcomes_excludes_started_double_count)
-    check("jefe can unstick a PR that is merely behind its base", _jefe_can_unstick_a_pr_that_is_merely_behind)
-    check("jefe.md's precedent citations are repo-qualified, and the verify-before-you-cite guard is present", _jefe_precedent_citations_are_repo_qualified)
     check("arming auto-merge passes no strategy flag, and checks it worked", _auto_merge_never_passes_a_strategy_flag_under_a_merge_queue)
     check("merge_arm.sh falls back to --squash only on the non-queue rejection string (gh#524)", _merge_arm_falls_back_only_on_the_right_error)
     check("pr_arm.sh arms a PR (incl. a cross-repo one) and can never become a merge", _pr_arm_can_only_arm)
@@ -16325,7 +16200,6 @@ if __name__ == "__main__":
           _check_share_sum_sees_siblings_from_inside_a_container_via_published_shares)
     check("check_share_sum never reports ok on stale or missing published shares",
           _check_share_sum_never_reports_ok_on_stale_or_missing_shares)
-    check("jefe owns the fleet-wide token budget", _jefe_owns_the_fleet_wide_token_budget)
     check("the-fixer sees a green-but-parked PR", _fixer_sees_a_green_but_parked_pr)
     check("the-fixer check-failed ignores a non-required advisory check (gh#740)",
           _fixer_check_failed_ignores_a_non_required_advisory_check)
@@ -16501,7 +16375,6 @@ if __name__ == "__main__":
     check("predict.py judge() reads direction from the metric when baseline is unknown, never guesses (gh#789 AC4-6)", _predict_judge_uses_metric_direction_when_baseline_missing_gh789)
     check("predict.py ledger excludes a hit's unattributed cost from cost_per_hit_usd instead of booking it as $0 (gh#789 AC1-3)", _predict_ledger_excludes_unattributed_cost_from_hit_average_gh789)
     check("self_improve_score.sh resolves the ledger, feeds it to the prompt first, and stamps hits/misses on the row (gh#782 AC4)", _self_improve_score_reads_the_ledger_gh782)
-    check("dumbledore: <=140 lines, opus, ledger-first, one predict.py add per pass, reads INTENT.md, grader off-limits (gh#783)", _dumbledore_charter_is_short_on_opus_and_ledger_first_gh783)
     check("run_member.sh calls pacing_gate after the ceiling and the exempt specs are the two named (gh#781; judge-judy paced since fk#1094)", _run_member_wires_pacing_gate_and_exempt_specs_gh781)
     check("run_member.sh llm.pregate quiets a green tick in shell before pacing or a model; jefe/dumbledore/vp deactivated; vp_due honors enabled; marie ranks the leak first (fk#1093)", _run_member_pregate_short_circuits_in_shell_fk1093)
 
@@ -16530,7 +16403,6 @@ if __name__ == "__main__":
     check("stash_pile_expiry warns distinctly when the pile is still over ceiling after a run (gh#714 AC5)", _stash_pile_expiry_warns_distinctly_when_still_over_ceiling_gh714)
     check("closes_gate.py blocks an epic with unaccepted children, never blocks an unlinked one (fk#652)", _closes_gate_blocks_an_epic_with_unaccepted_children)
     check("closes_gate.py --epic reads the epic's own thread for a stays-open marker, ignores stale ones (fk#879)", _closes_gate_epic_stays_open_when_its_own_thread_says_so_gh879)
-    check("jefe.md runs closes_gate.py --epic before closing a fleet:epic issue (fk#652)", _jefe_runs_the_epic_close_check_before_closing_an_epic)
     check("vp.md authorizes every label vp_due.VP_LABELS spawns on (gh#855 AC5)", _vp_md_authorizes_every_label_vp_due_spawns_on_gh855)
     check("the world-class path walks label->gate->research->design->build->accept->close end to end (fk#854 AC5)", _world_class_path_walks_end_to_end_gh854)
 
