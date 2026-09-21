@@ -543,7 +543,7 @@ class SearchClickThroughSubResourceRaceBlockedTest(unittest.TestCase):
                     self.send_response(403)
                     self.send_header("Content-Type", "text/html")
                     self.send_header("X-Test-Marker", "cf-challenge")
-                    self.send_header("X-Bypass-Echo", self.headers.get("X-Atlas-Test-Bypass", ""))
+                    self.send_header("X-Bypass-Echo", self.headers.get("x-atlas-test", ""))  # gh#7077: the name Cloudflare reads
                     self.end_headers()
                     self.wfile.write(b"<html><body>Checking your browser...</body></html>")
                 elif self.path == "/990/report/123456789/pixel.png":

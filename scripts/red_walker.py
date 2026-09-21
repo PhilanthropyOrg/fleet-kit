@@ -43,7 +43,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 
 ROOT = Path(__file__).resolve().parent.parent
-BYPASS_HEADER = "X-Atlas-Test-Bypass"
+BYPASS_HEADER = "x-atlas-test"  # gh#7077: the name Cloudflare's skip rule reads; prod_health_check.CF_BYPASS_HEADER is the same string
 PAYLOAD_OVERFLOW = re.compile(r"^(.)\s*x\s*(\d+)$")  # "A x 10000" -> "A"*10000
 
 

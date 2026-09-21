@@ -24,11 +24,13 @@ lacks a credential, not that the product broke):
                           spell out full https://philanthropy.org/... URLs; this walker swaps
                           in the configured host so it can also be pointed at a staging host or
                           a local fixture (see the test file) without editing the catalog.
-  ATLAS_TEST_BYPASS       if set, sent as the `X-Atlas-Test-Bypass` request header on every
-                          context this walker opens. The exact header name is this walker's own
-                          assumption (the #4507 audit precedent this issue cites lives in the
-                          product repo, not here, so the real mechanism was not visible to
-                          build against) -- change BYPASS_HEADER in one place if it differs.
+  ATLAS_TEST_BYPASS       if set, sent as the `x-atlas-test` request header on every context
+                          this walker opens, only to the target host. That is the header name
+                          Cloudflare's skip rule reads (gh#7077: this walker guessed
+                          `X-Atlas-Test-Bypass` for two months and every challenged journey
+                          403'd once the /990 edge shield went permanent). BYPASS_HEADER here,
+                          in red_walker.py and prod_health_check.CF_BYPASS_HEADER must agree;
+                          selftest pins it.
   ALICE_EMAIL, BOB_EMAIL + QA_SESSION_TOKEN (or *_PASSWORD for a venture with a sign-in
   form)  -- test users; the product mints a magic link, fleet-kit#1033.
   FIXTURE_EIN             a known EIN with a filed 990, for open-990-report and the claim flow.
@@ -115,7 +117,7 @@ import plan_rank  # noqa: E402 -- shared instance-name resolver, same pattern me
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 
-BYPASS_HEADER = "X-Atlas-Test-Bypass"
+BYPASS_HEADER = "x-atlas-test"  # gh#7077: the name Cloudflare's skip rule reads; prod_health_check.CF_BYPASS_HEADER is the same string
 
 # gh#890: the exact text Chromium's own devtools protocol logs as a console "error" when a
 # sub-resource fetch fails (a 404, a blocked request, a net:: error) -- distinct from a
