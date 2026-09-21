@@ -13643,6 +13643,40 @@ def _filer_lookup_failure_never_files_a_duplicate_gh914():
     assert len(summary["skipped"]) == 1, summary
 
 
+def _filer_comments_recurred_once_per_run_gh7099():
+    """gh#7099: run the filer twice on the same results.json and the still-failing branch
+    posted "Recurred again on run X" twice on every open issue (7 real duplicates on
+    2026-09-21). The recovery branch already remembered its run in state; this one now does
+    too, so the second invocation reports the key under `skipped`, not `commented`."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("jif", ROOT / "scripts" / "journey_issue_filer.py")
+    jif = importlib.util.module_from_spec(spec); sys.modules[spec.name] = jif; spec.loader.exec_module(jif)
+    key = jif.step_key("send-message", 0)
+    comments = []
+    def recording(cmd):
+        if cmd[:3] == ["gh", "issue", "list"]:
+            return 0, json.dumps([{"number": 41, "title": "x", "body": "open\n" + jif.marker_for(key)}])
+        if cmd[:3] == ["gh", "issue", "comment"]:
+            comments.append(cmd)
+        return 0, ""
+    d = Path(tempfile.mkdtemp())
+    results = {"run": "20260921T151616Z", "deploy_sha": "", "journeys": [
+        {"id": "send-message", "name": "Send a message",
+         "steps": [{"index": 0, "action": "fill and send", "observable_result": "sent", "status": "fail"}]}]}
+    (d / "results.json").write_text(json.dumps(results))
+    first = jif.process(d / "results.json", d / "state.json", runner=recording, repo="owner/name")
+    assert first["commented"] == [{"issue": 41, "key": key}] and len(comments) == 1, (first, comments)
+    second = jif.process(d / "results.json", d / "state.json", runner=recording, repo="owner/name")
+    assert second["commented"] == [], f"second run re-commented (gh#7099): {second}"
+    assert second["skipped"] == [{"key": key, "issue": 41, "reason": "already_commented_this_run"}], second
+    assert len(comments) == 1, f"a second identical comment was posted: {comments}"
+    # a NEW run on the same still-open issue is a real recurrence and does comment again
+    results["run"] = "20260921T160000Z"
+    (d / "results.json").write_text(json.dumps(results))
+    third = jif.process(d / "results.json", d / "state.json", runner=recording, repo="owner/name")
+    assert third["commented"] == [{"issue": 41, "key": key}] and len(comments) == 2, (third, comments)
+
+
 def _filer_ensure_label_forwards_repo_gh922():
     # gh#922: ensure_label() was the one call site process() made that dropped `repo`, so on a
     # fresh target repo it created the label in the WRONG (ambient) repo and every later
@@ -16394,6 +16428,7 @@ if __name__ == "__main__":
     check("journey_issue_filer red profile files under fleet:red-team with its own marker, sentry unchanged (gh#785 AC4)", _filer_red_profile_uses_red_label_and_marker_gh785)
     check("journey_issue_filer never files a duplicate when the dedup lookup itself fails (gh#914)", _filer_lookup_failure_never_files_a_duplicate_gh914)
     check("journey_issue_filer ensure_label forwards --repo to every gh call, label create included (gh#922)", _filer_ensure_label_forwards_repo_gh922)
+    check("journey_issue_filer posts Recurred-again once per (key, run); a re-run on the same results is skipped, a new run comments (gh#7099)", _filer_comments_recurred_once_per_run_gh7099)
     check("journey_issue_filer dedupes a markerless hand-filed issue by journey id + step, not just its own marker (gh#849)", _filer_dedupes_a_markerless_hand_filed_issue_gh849)
     check("red is a paced 6h member and vp requires a red pass before Accepted (gh#785 AC5)", _red_member_paced_and_vp_gates_on_red_gh785)
     check("worktree_guard_hook blocks an Edit under the shared $REPO when isolated (gh#592 AC2)", _worktree_guard_blocks_edit_under_shared_repo_gh592)
