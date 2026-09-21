@@ -489,7 +489,8 @@ def alert_title(check: str) -> str:
 def file_or_comment_alert(row: dict, run=None) -> tuple[str, bool]:
     """fk#1129 slice 1: one open board item per `check`, ever -- a firing that finds it open
     appends ONE comment with the new firing's first line and stops; only a `check` with no
-    open item yet creates one, priority-high on devops. Same search-by-title shape as
+    open item yet creates one, priority-low on devops (gh#6575: an automated filer must not
+    assign the top tier -- that is marie's call, not a pager's). Same search-by-title shape as
     file_backlog() (dedupe by exact open title), split out because an alert is keyed by
     `check`, not by the mail's subject verbatim (two firings of the same check rarely share
     an identical subject line -- differing counts, timestamps).
@@ -515,8 +516,12 @@ def file_or_comment_alert(row: dict, run=None) -> tuple[str, bool]:
     # ongoing failure" (the label's own description); the box's health check detected it, not
     # a model reading issue text. Filed as `none (maintenance)` + severity-live so it survives
     # the crowding-out drop while it is firing; marie clears the label when it stops.
+    # gh#6575: priority-low, not priority-high -- the top tier is marie's to assign after she
+    # has scored the item, not a default an unattended pager hands itself. severity-live above
+    # is what keeps a genuinely firing alert visible despite the low tier (gh#726's escape
+    # hatch keys off severity-live + a linked candidate, not off priority).
     r = run(["gh", "issue", "create", "--repo", slug,
-             "--label", "fleet:backlog,lane:devops,fleet:priority-high,fleet:severity-live",
+             "--label", "fleet:backlog,lane:devops,fleet:priority-low,fleet:severity-live",
              "--title", title,
              "--body", f"{first_line}\n\nFiled by intake from {row.get('from') or row.get('source')} (fk#1129).\n\n"
                        f"Vision-link: none (maintenance)"])
