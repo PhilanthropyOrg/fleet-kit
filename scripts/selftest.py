@@ -1928,8 +1928,8 @@ def _merge_arm_falls_back_only_on_the_right_error():
     """
     src = (ROOT / "scripts/merge_arm.sh").read_text()
     assert "arm_pr_auto_merge" in src, "merge_arm.sh no longer defines arm_pr_auto_merge"
-    assert "required when not running interactively" in src, \
-        "merge_arm.sh's fallback is no longer gated on the non-queue rejection string"
+    assert "set by the merge queue" in src, \
+        "merge_arm.sh's bare-form fallback is no longer gated on the queue-repo rejection string (fk#1197)"
 
     import subprocess
 
@@ -1948,8 +1948,20 @@ exit $rc
         proc = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=10)
         return proc.returncode, proc.stdout
 
-    # Branch 1: a plain repo. The bare `--auto` call fails with the non-interactive string;
-    # the fallback retries with --squash, which succeeds -- no real GitHub API involved.
+    # fk#1197: `--auto --squash` is the FIRST call on every arm (no queue anywhere now); the
+    # bare form is only the fallback for a queue-controlled repo's "set by the merge queue".
+    import os as _os, tempfile as _tempfile
+    _log = _tempfile.mktemp()
+    _os.environ["STUB_LOG"] = _log
+    try:
+        rc, out = run_with_stub_gh('  echo "$*" >> "$STUB_LOG"\n  exit 0\n')
+        first = open(_log).read().splitlines()[0] if _os.path.exists(_log) else ""
+    finally:
+        _os.environ.pop("STUB_LOG", None)
+    assert rc == 0 and "--squash" in first, f"first arm call must be --auto --squash (fk#1197), got {first!r}"
+
+    # Branch 1: a plain repo. --squash succeeds outright (the bare form would fail with the
+    # non-interactive string) -- no real GitHub API involved.
     plain_repo_stub = """
   if [[ "$*" == *--squash* ]]; then
     exit 0
@@ -1961,8 +1973,8 @@ exit $rc
     assert rc == 0, f"plain-repo branch should succeed via the --squash fallback, got rc={rc} out={out!r}"
     assert out == "", f"a successful fallback must not surface a stale error, got {out!r}"
 
-    # Branch 2: a merge-queue repo. The bare `--auto` call itself succeeds -- the fallback must
-    # never even be attempted (an explicit --squash there is the OTHER invalid combination).
+    # Branch 2: a merge-queue repo. --squash is rejected ("set by the merge queue"); the bare
+    # `--auto` fallback succeeds.
     queue_repo_stub = """
   if [[ "$*" == *--squash* ]]; then
     echo "! The merge strategy for main is set by the merge queue" >&2

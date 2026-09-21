@@ -16,9 +16,10 @@
 # --onto-pr N (fk#1127): fold the claimed item's delta onto PR N's own branch instead of
 # opening a new PR -- for an item marie labelled fleet:fold-into-pr (her comment names N).
 # Builds in the SAME worktree lock/collision path as the normal flow, just checked out on
-# N's headRefName. After the build: rebase onto origin/main, push ONCE. A PR already in the
-# merge queue rejects that push with "protected branch hook declined" -- caught and logged,
-# then falls back to the normal new-branch-and-PR path below so the work is never lost.
+# N's headRefName. After the build: rebase onto origin/main, push ONCE. If branch protection
+# rejects that push ("protected branch hook declined"; the merge queue used to be the usual
+# cause, fk#1197) it is caught and logged, then falls back to the normal new-branch-and-PR path
+# below so the work is never lost.
 ONTO_PR=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -259,9 +260,9 @@ PR_NUM=""
 FOLD_FELL_BACK=0
 if [ -n "${ONTO_PR:-}" ]; then
   # Fold path: rebase the builder's commits onto current origin/main, then push ONCE to the
-  # PR's own branch -- never a new PR. If N is already enqueued in the merge queue, GitHub
-  # rejects a plain push with "protected branch hook declined" (a queued PR's branch is
-  # locked); catch exactly that and fall back to a NEW branch + normal `gh pr create` below
+  # PR's own branch -- never a new PR. If branch protection rejects the push with "protected
+  # branch hook declined" (a queue used to lock a queued PR's branch; no queue now, fk#1197,
+  # the string is kept for any other protection), fall back to a NEW branch + `gh pr create` below
   # (the builder's commits already exist locally in $WT_PATH -- push those, not lose them).
   (cd "$WT_PATH" && git fetch origin main >>"$LOG" 2>&1 && git rebase origin/main >>"$LOG" 2>&1)
   PUSH_ERR=$(cd "$WT_PATH" && git push origin "HEAD:$WT_BRANCH" 2>&1 1>>"$LOG"); PUSH_RC=$?
@@ -269,13 +270,13 @@ if [ -n "${ONTO_PR:-}" ]; then
     PR_NUM="$ONTO_PR"
     log "item #$ITEM_ID: folded onto PR #$ONTO_PR ($WT_BRANCH), pushed"
   elif [[ "$PUSH_ERR" == *"protected branch hook declined"* ]]; then
-    log "item #$ITEM_ID: PR #$ONTO_PR is queued to merge (protected branch hook declined) -- falling back to a normal new PR: $PUSH_ERR"
+    log "item #$ITEM_ID: push to PR #$ONTO_PR rejected by branch protection (protected branch hook declined) -- falling back to a normal new PR: $PUSH_ERR"
     FALLBACK_BRANCH="build/${ITEM_ID}-${WORKER_NAME}-foldfallback"
     if (cd "$WT_PATH" && git push origin "HEAD:refs/heads/$FALLBACK_BRANCH" >>"$LOG" 2>&1); then
       FOLD_FELL_BACK=1
       PR_NUM=$(cd "$WT_PATH" && gh pr create --head "$FALLBACK_BRANCH" \
-        --title "item #$ITEM_ID (fold onto PR #$ONTO_PR was queued -- opened new)" \
-        --body "Was meant to fold into #$ONTO_PR (fleet:fold-into-pr), but that PR was already in the merge queue and rejected the push. Opened fresh so item #$ITEM_ID isn't lost." \
+        --title "item #$ITEM_ID (fold onto PR #$ONTO_PR was rejected -- opened new)" \
+        --body "Was meant to fold into #$ONTO_PR (fleet:fold-into-pr), but branch protection rejected the push to that PR's branch. Opened fresh so item #$ITEM_ID isn't lost." \
         2>>"$LOG" | grep -oE '[0-9]+$')
       [ -n "$PR_NUM" ] && log "item #$ITEM_ID: fold fallback opened new PR #$PR_NUM on $FALLBACK_BRANCH"
     else
@@ -305,12 +306,9 @@ if [ -n "$PR_NUM" ]; then
   if ! grep -qE 'Backlog:[[:space:]]*#[0-9]+' <<<"$BODY"; then
     printf '%s\n\nBacklog: #%s\n' "$BODY" "$ITEM_ID" | gh pr edit "$PR_NUM" --body-file - >/dev/null 2>&1
   fi
-  # arm_pr_auto_merge (scripts/merge_arm.sh) tries the bare form first -- the only form that's
-  # ever valid on a merge-queue-controlled repo, where an explicit --squash is an invalid
-  # combination and gh ERRORS ("The merge strategy for main is set by the merge queue") instead
-  # of enqueueing (confirmed live -- issue #3108, and again 2026-08-26 on nonprofit-atlas#3307,
-  # which sat green and unmerged for hours with autoMergeRequest=null) -- and falls back to
-  # --squash only on a plain repo's own non-interactive rejection (gh#524).
+  # arm_pr_auto_merge (scripts/merge_arm.sh) tries `--auto --squash` first (no repo we touch
+  # runs a merge queue any more, fk#1197) and falls back to the bare form only on the one error
+  # a queue-controlled repo gives an explicit strategy.
   #
   # And CHECK THE EXIT CODE. This call used to end in `>/dev/null 2>&1` with the "auto-merge
   # armed" line unconditionally after it -- so a failed arm logged as a successful one and the
