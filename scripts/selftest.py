@@ -10836,12 +10836,12 @@ def _stale_pr_candidate_filter_excludes_human_branches_and_fresh_prs():
     assert "605" not in picked, "a draft PR was selected -- a draft is explicitly not ready to judge"
 
 
-def _stale_pr_closed_and_claim_freed_but_a_queued_pr_is_untouched():
+def _stale_prs_closed_and_claims_freed_no_queue_exemption():
     """gh#527: a PR that never arms (red CI, blocked, or stuck cycling in/out of the merge
     queue) must be closed after 48h with a reason, and its issue's fleet:claimed label freed
-    so gru can re-pick it -- but a PR correctly waiting its turn in the queue must NOT be
-    closed just for being old (gh#4305: autoMergeRequest stays null for a queued PR too, so
-    only a raw GraphQL mergeQueueEntry call can tell "dead" from "patiently queued").
+    so gru can re-pick it. fk#1197: the "patiently queued" exemption (gh#4305, a raw GraphQL
+    mergeQueueEntry read) is retired with the merge queue itself, so a second stale red PR
+    (#702, which the old fixture marked queued) must now close too.
 
     Stubs `gh` end to end (same boundary as `_green_pr_with_no_auto_merge_gets_armed`) so the
     real closing/release path runs, including the real board_github.py release() call for the
@@ -10856,7 +10856,7 @@ def _stale_pr_closed_and_claim_freed_but_a_queued_pr_is_untouched():
         calls = Path(tmp) / "calls.txt"
 
         # #701: stale, member/* branch, red checks, no mergeQueueEntry -> MUST close + release.
-        # #702: stale, member/* branch, but HAS a mergeQueueEntry -> MUST be left alone.
+        # #702: stale, member/* branch, red checks -> MUST close too (no queue exemption, fk#1197).
         (bin_dir / "gh").write_text(f"""#!/bin/bash
 if [ "$1" = "repo" ] && [ "$2" = "view" ]; then echo "acme/testrepo"; exit 0; fi
 if [ "$1" = "pr" ] && [ "$2" = "list" ]; then
@@ -10873,9 +10873,9 @@ fi
 if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
   num="$3"
   case "$*" in
-    *--json*commits*) [ "$num" = "701" ] && echo "2026-09-01T00:00:00Z"; exit 0 ;;
+    *--json*commits*) echo "2026-09-01T00:00:00Z"; exit 0 ;;
     *--json*headRefOid*) echo "sha$num"; exit 0 ;;
-    *--json*statusCheckRollup*) [ "$num" = "701" ] && echo 1 || echo 0; exit 0 ;;
+    *--json*statusCheckRollup*) echo 1; exit 0 ;;
     *--json*body*) echo "Backlog: #9001"; exit 0 ;;
     *) exit 0 ;;
   esac
@@ -10904,9 +10904,8 @@ exit 0
             "a stale, red, member/* PR was never closed -- it can sit open forever with its "
             f"issue's fleet:claimed label stuck: {made!r}"
         )
-        assert "close 702" not in made, (
-            "a PR correctly waiting its turn in the merge queue was closed just for being old "
-            f"(gh#4305 shape): {made!r}"
+        assert "close 702" in made, (
+            f"the retired queue exemption still spared a stale red PR (fk#1197): {made!r}"
         )
         assert "issue-edit 9001 --remove-label fleet:claimed" in made, (
             f"closing PR #701 did not free its originating issue's fleet:claimed label: {made!r}"
@@ -10918,8 +10917,6 @@ exit 0
         logtext = (log_dir / "auto_update_branch.log").read_text()
         assert "closed stale PR (red" in logtext, \
             f"tick log never named the close reason: {logtext[-2000:]!r}"
-        assert "correctly waiting its turn in the merge queue" in logtext, \
-            f"tick log never explained why the queued PR was left alone: {logtext[-2000:]!r}"
 
 
 def _fleet_view_reads_the_api_key_from_the_env_file():
@@ -16253,8 +16250,8 @@ if __name__ == "__main__":
           _arm_loop_never_arms_an_unreviewed_head_gh862)
     check("stale-PR close filter excludes human branches and fresh PRs (gh#527)",
           _stale_pr_candidate_filter_excludes_human_branches_and_fresh_prs)
-    check("a stale unarmed/red PR is closed and its claim freed, a queued one is untouched (gh#527)",
-          _stale_pr_closed_and_claim_freed_but_a_queued_pr_is_untouched)
+    check("stale unarmed/red PRs are closed and their claims freed; no queue exemption any more (gh#527, fk#1197)",
+          _stale_prs_closed_and_claims_freed_no_queue_exemption)
     check("fleet-view reads FLEET_API_KEY from fleet.env", _fleet_view_reads_the_api_key_from_the_env_file)
     check("FLEET_API_KEY never reaches an LLM pass", _api_key_never_reaches_an_llm)
     check("incidental 'rate limit' text does not gate an account", _classifier_ignores_incidental_rate_limit_text)
