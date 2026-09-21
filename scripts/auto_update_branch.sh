@@ -53,9 +53,9 @@ if command -v flock >/dev/null 2>&1 && ! flock -n 9; then
 fi
 
 # --- close stale (>48h) unarmed/red/queue-rejected PRs, free the claim --------------------
-# fleet-kit#527 (the other half of #523's "nothing sits"): a PR that never arms -- red CI,
-# blocked by fleet-code-review with no fix pushed since, or stuck cycling in and out of the
-# merge queue -- can sit open indefinitely, and its issue's fleet:claimed label sits with it:
+# fleet-kit#527 (the other half of #523's "nothing sits"): a PR that never arms -- red CI, or
+# blocked by fleet-code-review with no fix pushed since -- can sit open indefinitely, and its
+# issue's fleet:claimed label sits with it:
 # invisible to gru (it only ever picks unclaimed items) and invisible to marie's Part A
 # stale-claim check (marie.md: that only clears a claim with NO open PR at all, never one
 # stuck behind a dead PR).
@@ -67,40 +67,19 @@ fi
 # (see run_member.sh's WT_BRANCH). A hand-authored branch (`fix/...`, `feat/...`, etc.) never
 # matches and is always skipped, never closed.
 #
-# Never a PR correctly waiting its turn in the queue: gh#4305 already burned this once --
-# `autoMergeRequest` stays null for a PR that's already enqueued (the queue entry doesn't
-# populate that field), so the only reliable signal is a raw GraphQL `mergeQueueEntry` call,
-# same lesson members/the-fixer/check.sh's `queued_prs()` encodes. Reused here in the same
-# batched-single-call shape (one round trip for every candidate, not N).
+# fk#1197: the merge-queue exemption (a raw GraphQL `mergeQueueEntry` read, gh#4305) is gone
+# with the queue itself (fleet-kit#1193; philanthropy's went 2026-09-18). No PR can be "waiting
+# its turn" any more, so a stale candidate is judged on pushes and verdicts alone.
 STALE_HOURS="${FLEET_STALE_PR_HOURS:-48}"
 STALE_CUTOFF=$(date -u -d "-${STALE_HOURS} hours" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
                || date -u -v-"${STALE_HOURS}"H +%Y-%m-%dT%H:%M:%SZ)
 CLOSED=0
 
-queued_prs() { # <space-separated pr numbers> -> the subset that already has a mergeQueueEntry
-  local nums="$1" owner name query n
-  [ -z "$nums" ] && return
-  owner="${REPO_SLUG%%/*}"; name="${REPO_SLUG#*/}"
-  query="query {"
-  for n in $nums; do
-    query+=" pr$n: repository(owner: \"$owner\", name: \"$name\") { pullRequest(number: $n) { mergeQueueEntry { state } } }"
-  done
-  query+=" }"
-  timeout 25s gh api graphql -f query="$query" \
-    -q '.data | to_entries[] | select(.value.pullRequest.mergeQueueEntry != null) | .key | ltrimstr("pr")' \
-    2>/dev/null
-}
 
 STALE_CANDIDATES=$(gh pr list --state open --json number,isDraft,headRefName,createdAt \
   -q '.[] | select(.isDraft|not) | select(.headRefName | test("^(member|minion)/")) | select(.createdAt < "'"$STALE_CUTOFF"'") | .number' 2>/dev/null)
-STALE_QUEUED=$(queued_prs "$STALE_CANDIDATES")
 
 for pr in $STALE_CANDIDATES; do
-  if grep -qx "$pr" <<<"$STALE_QUEUED"; then
-    log "PR #$pr: not closing -- correctly waiting its turn in the merge queue (gh#4305)"
-    continue
-  fi
-
   # A genuine push (a real fix, not this same script's own branch-sync merge) resets the
   # clock: closing right after someone pushed a fix would race the next CI/review cycle.
   # Filter out `update-branch`'s own "Merge branch ... into ..." sync commits so a PR this
@@ -204,25 +183,10 @@ done
 ARMED=0
 for pr in $(gh pr list --state open --json number,isDraft,autoMergeRequest \
               -q '.[] | select(.isDraft|not) | select(.autoMergeRequest==null) | .number' 2>/dev/null); do
-  # fleet-kit#1113: a PR the queue's own watchdog
-  # (scripts/ci/merge_queue_watchdog.py in the product repo) just pulled and labelled
-  # `ci:batch-red` still has a SUCCESS fleet-code-review verdict on its own head -- the batch
-  # failure is a merge-queue-only signal (this PR combined with whatever is queued ahead of
-  # it), invisible to the per-head verdict check below. Without this guard, this loop re-arms
-  # the PR every cadence tick the instant the queue naturally dequeues it, producing an
-  # enqueue/dequeue cycle roughly every 20 minutes indefinitely (measured live: PR #6235 on
-  # philanthropy cycled 21 times over 8.5h, blocking every PR queued behind it). The label
-  # clears itself on the next push (merge_queue_watchdog.py's own contract), which is also
-  # when this PR should become armable again.
-  labels=$(gh pr view "$pr" --json labels -q '[.labels[].name] | join(",")' 2>/dev/null || true)
-  case ",$labels," in
-    *,ci:batch-red,*)
-      log "PR #$pr: not armed -- labelled ci:batch-red by the merge-queue watchdog"
-      continue
-      ;;
-  esac
+  # fk#1197: the `ci:batch-red` hold (fleet-kit#1113) went with the product repo's merge queue
+  # and its watchdog (scripts/ci/merge_queue_watchdog.py no longer exists there).
   # fleet-kit#523: never re-arm a head judge-judy blocked. fleet-code-review is not a required
-  # check under the merge queue, so an armed BLOCKed PR simply merges. Newest status first.
+  # check, so an armed BLOCKed PR simply merges. Newest status first.
   # gh#806: "error" (judge-judy gave up after MAX_PARSE_STRIKES schema-invalid runs) holds the
   # same as "failure" -- judge-judy.sh itself already disarms via unqueue_pr the moment it
   # posts state=error, but this guard existed to stop a LATER re-arm from undoing that, and it
