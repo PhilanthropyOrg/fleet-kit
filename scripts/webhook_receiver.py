@@ -74,6 +74,12 @@ PR_TRIGGER_ACTIONS = {"opened", "synchronize", "reopened", "ready_for_review"}
 
 def log(msg: str) -> None:
     LOG_DIR.mkdir(parents=True, exist_ok=True)
+    # gh#1219: LOG_FILE is derived from LOG_DIR once at import time, so a caller (or test) that
+    # reassigns module-level LOG_DIR afterward leaves LOG_FILE pointing at the old path -- mkdir
+    # ITS parent too, don't assume the LOG_DIR mkdir above covers it. On a fresh Linux CI runner
+    # this raised FileNotFoundError inside the HTTP handler thread, which the client only ever
+    # saw as a RemoteDisconnected.
+    LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
     import datetime
 
     ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S %Z")
