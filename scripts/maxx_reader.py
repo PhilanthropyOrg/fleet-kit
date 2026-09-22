@@ -57,6 +57,10 @@ SAFE_VERDICTS = {"ok", "degraded"}
 # fell back to a several-hours-stale cached allowance instead of the real "spend ~0" signal
 # maxx was actually sending (nonprofit-atlas#3422).
 OVER_VERDICTS = {"over"}
+
+# maxx has no data for this account at all -- distinct from a broken/unreadable meter that
+# HAS data and cannot parse it. See the lifetime_billed=0 branch below.
+CALIBRATING_VERDICTS = {"calibrating"}
 TIMEOUT_S = 20.0  # matches m_budget_maxx.py's measured 2-6s real latency through Cloudflare
 
 
@@ -175,6 +179,21 @@ def get_headroom(
         # never None (None means "no trustworthy reading", which would send the caller back to
         # a stale fallback instead of the fresh "spend ~0" signal maxx just gave it).
         return 0.0, "over", allowance
+    if verdict in CALIBRATING_VERDICTS and budget.get("lifetime_billed") == 0:
+        # A never-anchored account (no session on this account has ever run maxx_emit) reads
+        # verdict=calibrating with lifetime_billed=0 forever -- maxx has no data, not bad data.
+        # Before this, that read as unreadable (below) and _account_pool_order's "unknown"
+        # bucket sorts LAST, behind every account with a real reading -- including a NEGATIVE
+        # one. Confirmed live 2026-09-22: philanthropy (freshly onboarded, never billed)
+        # ranked behind gmail (week_bank_pct=-5.7, actively over its share) and tgp
+        # (week_bank_pct=-12.8), so the pool kept spending on two accounts already negative
+        # while a fresh one with its FULL week sat unused. A never-billed account is the one
+        # case where "no reading" and "full headroom" are the same fact, so it is safe to
+        # answer 1.0 rather than None -- unlike a genuinely broken meter (missing fields,
+        # wrong shape, an account that HAS billed but reads calibrating), which must still
+        # fall through to unreadable, because there lifetime_billed>0 means real spend exists
+        # that this reading is failing to reflect.
+        return 1.0, "calibrating_unbilled", allowance
     if verdict not in SAFE_VERDICTS:
         return None, f"maxx_verdict_{verdict or 'missing'}", allowance
 

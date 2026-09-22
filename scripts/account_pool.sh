@@ -382,6 +382,20 @@ _account_pool_week_reset() {
     # (maxx_reader.get_headroom's docstring) -- so cache it as a 4th field and let
     # _account_pool_order sort on it. One curl, two facts.
     local fresh bank
+    # fk#(pending): a never-anchored account reads verdict=calibrating with week_reset AND
+    # week_bank_pct both null forever -- maxx has no data, not bad data (lifetime_billed=0
+    # confirms it, not merely a slow/failed fetch). Before this, `fresh` stayed unset, so this
+    # branch never cached a line for the account at all, and _account_pool_order's `unknown`
+    # bucket sorts LAST -- behind every account with a real reading, including a NEGATIVE
+    # bank. Confirmed live 2026-09-22: philanthropy (fresh, never billed) ranked behind gmail
+    # (bank=-5.7, over its share) and tgp (bank=-12.8), so the pool kept draining two accounts
+    # already negative while a fresh one with its FULL week sat unused. Synthesize a
+    # one-week-out reset + bank=100 (full headroom) for exactly this case; any other
+    # unreadable shape (missing fields, wrong response, an account that HAS billed but still
+    # reads calibrating) is a genuinely broken meter and must fall through unchanged below.
+    calibrating_unbilled=$(python3 -c 'import json,sys
+d=json.load(sys.stdin); t=json.loads(d["result"]["content"][0]["text"])
+print("1" if str(t.get("verdict","")).lower()=="calibrating" and t.get("lifetime_billed")==0 else "")' <<<"$out" 2>/dev/null)
     fresh=$(python3 -c 'import json,sys
 d=json.load(sys.stdin); t=json.loads(d["result"]["content"][0]["text"]); v=t.get("week_reset")
 print(int(v)) if v else None' <<<"$out" 2>/dev/null)
@@ -389,6 +403,11 @@ print(int(v)) if v else None' <<<"$out" 2>/dev/null)
 d=json.load(sys.stdin); t=json.loads(d["result"]["content"][0]["text"]); v=t.get("week_bank_pct")
 print(float(v)) if v is not None else None' <<<"$out" 2>/dev/null)
     [[ "$bank" =~ ^-?[0-9]+(\.[0-9]+)?$ ]] || bank=""
+    if [ "$calibrating_unbilled" = "1" ] && [ -z "$fresh" ]; then
+      fresh=$((now + 604800))  # one week out -- a real reset epoch will overwrite this the
+                                # moment this account actually bills something
+      bank="100"
+    fi
     if [[ "$fresh" =~ ^[0-9]+$ ]]; then
       epoch="$fresh"
       mkdir -p "$(dirname "$ACCOUNT_POOL_WEEK_RESET_CACHE")" 2>/dev/null
