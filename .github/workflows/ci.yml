@@ -54,8 +54,12 @@ jobs:
         run: python3 scripts/test_account_pool_config_dir.py
       - name: run test_account_pool_order.py
         run: python3 scripts/test_account_pool_order.py
+      - name: run test_account_pool_calibrating_unbilled.py
+        run: python3 scripts/test_account_pool_calibrating_unbilled.py
       - name: run test_account_pool_other_gate_last_account.py
         run: python3 scripts/test_account_pool_other_gate_last_account.py
+      - name: run test_maxx_reader_calibrating_unbilled.py
+        run: python3 scripts/test_maxx_reader_calibrating_unbilled.py
       - name: run test_alert_store.py
         run: python3 scripts/test_alert_store.py
       - name: run test_block_pace_fails_closed.py
