@@ -2,7 +2,7 @@
 
 RED without subprocess_env(): the child inherits a process environment that never carried
 FLEET_MAXX_* (the container is handed FLEET_ENV_FILE, a path, not the file's values), so
-maxx_share_ceiling.py reads an unconfigured meter and the Settings page reports the meter
+maxx_reader.py reads an unconfigured meter and the Settings page reports the meter
 as unreadable while it is healthy.
 """
 import http.client

@@ -1604,263 +1604,14 @@ def _gru_md_clamps_allowance_to_share_ceiling():
         "fanout.py --allowance-pct call site still inlines the raw unclamped formula"
 
 
-def _maxx_lease_reserves_releases_and_self_expires():
-    """gh#161 part 2: reserve/release were documented in gru.md since forever but never
-    implemented -- reserved_pct stayed permanently 0 no matter how many leases should
-    logically be live. This proves the local ledger actually holds, drops, and self-expires
-    a lease, and that maxx_reader.py's CLI surfaces the total on top of the remote reading."""
-    import maxx_lease
-
-    with tempfile.TemporaryDirectory() as d:
-        state_file = Path(d) / "maxx-leases.json"
-
-        assert maxx_lease.total_reserved_pct(state_file) == 0.0
-
-        lease_id = maxx_lease.maxx_reserve(pct=0.05, label="gru-test", ttl_sec=3600,
-                                           state_file=state_file)
-        assert lease_id
-        assert abs(maxx_lease.total_reserved_pct(state_file) - 0.05) < 1e-9
-
-        # A second, concurrent lease adds on top -- this is the whole point (back-to-back gru
-        # passes must see each other's in-flight spend).
-        lease_id2 = maxx_lease.maxx_reserve(pct=0.03, label="gru-test2", ttl_sec=3600,
-                                            state_file=state_file)
-        assert abs(maxx_lease.total_reserved_pct(state_file) - 0.08) < 1e-9
-
-        maxx_lease.maxx_release(lease_id, state_file=state_file)
-        assert abs(maxx_lease.total_reserved_pct(state_file) - 0.03) < 1e-9
-        # Releasing an already-released (or never-existent) lease is a no-op, never an error --
-        # gru.md step 6 calls this unconditionally, even on a failure path.
-        maxx_lease.maxx_release(lease_id, state_file=state_file)
-
-        # A lease past its own TTL self-expires WITHOUT an explicit release -- gru.md's
-        # documented backstop ("a lease that outlives its own hour self-expires instead of
-        # choking every later pass forever").
-        maxx_lease.maxx_release(lease_id2, state_file=state_file)
-        expired_id = maxx_lease.maxx_reserve(pct=0.5, label="gru-expired", ttl_sec=-1,
-                                             state_file=state_file)
-        assert expired_id
-        assert maxx_lease.total_reserved_pct(state_file) == 0.0
 
 
-def _maxx_lease_concurrent_reserves_dont_clobber_each_other():
-    """fleet-code-review BLOCK on PR #163: unlocked read-modify-write meant two overlapping
-    gru passes calling maxx_reserve at once could silently clobber each other's write (a lost
-    lease, no error), and the shared non-unique .tmp path could raise a bare FileNotFoundError
-    out of a concurrent caller. Fired real threads at the same state file to prove the fix
-    (an flock-guarded critical section) actually serializes them -- every lease survives and
-    nothing raises."""
-    import threading
-
-    import maxx_lease
-
-    with tempfile.TemporaryDirectory() as d:
-        state_file = Path(d) / "maxx-leases.json"
-        n = 20
-        errors = []
-
-        def _reserve(i):
-            try:
-                maxx_lease.maxx_reserve(pct=0.01, label=f"concurrent-{i}", ttl_sec=3600,
-                                        state_file=state_file)
-            except Exception as exc:  # noqa: BLE001 -- capturing for the assert below
-                errors.append(exc)
-
-        threads = [threading.Thread(target=_reserve, args=(i,)) for i in range(n)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
-
-        assert not errors, f"concurrent maxx_reserve raised: {errors}"
-        leases = json.loads(state_file.read_text())
-        assert len(leases) == n, f"expected {n} surviving leases, got {len(leases)} -- lost a write"
-        assert abs(maxx_lease.total_reserved_pct(state_file) - n * 0.01) < 1e-9
 
 
-def _maxx_share_ceiling_uses_hourly_headroom_not_the_week_bank():
-    """Replaces the old maxx_share_check.py, which multiplied a member's budget by
-    `week_bank_pct` -- a LAGGING, already-spent number. The moment the week goes over pace
-    (bank negative), that clamps to 0.0 and zeros every member's spend even during an hour
-    with real headroom. This proves the ceiling is computed from `sustainable_pct_per_hour`
-    minus `per_diem_hourly_pct` minus `reserved_pct` instead -- a leading, real-time number
-    that stays positive on a healthy hour even while the week bank is deep negative.
-    """
-    import maxx_share_ceiling
-
-    # A week deep over pace (bank very negative) but a healthy CURRENT hour: sustainable
-    # pace is 0.35%/hr, only 0.10%/hr actually spent so far this hour, nothing reserved.
-    healthy_hour_bad_week = {
-        "verdict": "ok",
-        "week_bank_pct": -34.4,             # would clamp headroom_fraction to 0.0 under the
-                                             # old formula -- must NOT zero this ceiling.
-        "sustainable_pct_per_hour": 0.35,
-        "per_diem_hourly_pct": 0.10,
-        "reserved_pct": 0,
-        # Anchored block: nothing spent, full 5h window left -- keeps the fail-closed
-        # block-pace clamp (maxx_share_ceiling.block_over_pace) out of a test about the
-        # HOURLY slice formula. An unanchored budget now clamps to 0.0 on purpose.
-        "session_used_pct": 0.0,
-        "five_reset_in_sec": 5 * 3600,
-    }
-    orig = maxx_share_ceiling.get_headroom
-    try:
-        maxx_share_ceiling.get_headroom = lambda: (1.0, "ok", healthy_hour_bad_week)
-        assert maxx_share_ceiling.main(["prog", "0.40"]) == 0
-
-        # Same computation, share=1.0, to isolate the raw hourly-headroom formula from the
-        # fraction multiply: 0.35 - 0 = 0.35 (fk#1169: pace, not pace minus allowance).
-        import io
-        from contextlib import redirect_stdout
-        buf = io.StringIO()
-        with redirect_stdout(buf):
-            maxx_share_ceiling.main(["prog", "1.0"])
-        assert abs(float(buf.getvalue().strip()) - 0.35) < 1e-6, buf.getvalue()  # fk#1169: pace itself, not pace minus the per-diem allowance
-
-        # Other members' live reservations subtract too -- a busy fleet has less ceiling
-        # left for the next member to self-reserve against.
-        maxx_share_ceiling.get_headroom = lambda: (
-            1.0, "ok", {**healthy_hour_bad_week, "reserved_pct": 0.20})
-        buf = io.StringIO()
-        with redirect_stdout(buf):
-            maxx_share_ceiling.main(["prog", "1.0"])
-        assert abs(float(buf.getvalue().strip()) - 0.15) < 1e-6, buf.getvalue()  # 0.35-0.20 (fk#1169)
-
-        # An hour already at or past sustainable pace (once reservations are subtracted) is
-        # an honest, printed zero -- not suppressed, not negative.
-        maxx_share_ceiling.get_headroom = lambda: (
-            1.0, "ok", {**healthy_hour_bad_week, "reserved_pct": 0.40})  # fk#1169: only reservations can zero it
-        buf = io.StringIO()
-        with redirect_stdout(buf):
-            maxx_share_ceiling.main(["prog", "1.0"])
-        assert float(buf.getvalue().strip()) == 0.0, buf.getvalue()
-
-        # Unreadable meter -> prints nothing (fails open: caller falls back to its own
-        # pre-existing cap, never reads an absent ceiling as "reserve 0").
-        maxx_share_ceiling.get_headroom = lambda: (None, "maxx_unreachable", {})
-        buf = io.StringIO()
-        with redirect_stdout(buf):
-            maxx_share_ceiling.main(["prog", "0.40"])
-        assert buf.getvalue().strip() == "", buf.getvalue()
-
-        # FLEET_SHARE_FRACTION > 1.0 (operator typo) must never raise the ceiling above the
-        # fleet's own real hourly headroom -- clamped to 1.0 same as the old script.
-        maxx_share_ceiling.get_headroom = lambda: (1.0, "ok", healthy_hour_bad_week)
-        buf = io.StringIO()
-        with redirect_stdout(buf):
-            maxx_share_ceiling.main(["prog", "1.0"])
-        uncapped = float(buf.getvalue().strip())
-        buf = io.StringIO()
-        with redirect_stdout(buf):
-            maxx_share_ceiling.main(["prog", "1.5"])
-        assert float(buf.getvalue().strip()) == uncapped, (uncapped, buf.getvalue())
-    finally:
-        maxx_share_ceiling.get_headroom = orig
 
 
-def _maxx_share_ceiling_subtracts_local_leases_not_just_the_remotes_reserved_pct():
-    """fleet-code-review BLOCK on PR #184: the ceiling formula read `budget["reserved_pct"]`
-    from `get_headroom()` (the plain function), but that field only ever carries whatever the
-    REMOTE maxx endpoint reports -- which today is nothing, because the remote never learns
-    about a LOCAL maxx_lease.py reservation (gh#161 part 2). The merge of local leases into
-    reserved_pct only happened inside maxx_reader.py's own CLI `main()`, which
-    maxx_share_ceiling.py never goes through. Net effect: two concurrent callers (this
-    instance's judge-judy running twice, or the OTHER instance) each saw the SAME generous
-    ceiling and each reserved against it, seeing none of each other's live leases --
-    reproducing, in a new form, the exact "no coordination" problem this PR set out to fix.
-
-    This test exercises the REAL integration (an actual on-disk maxx_lease reservation, not a
-    mocked reserved_pct in the dict) so it cannot pass the way the original, weaker version of
-    this test did -- that one monkeypatched get_headroom with a dict that ALREADY contained
-    reserved_pct, which is exactly the value the real code path never produces on its own.
-    """
-    import tempfile
-    from pathlib import Path
-
-    import maxx_lease
-    import maxx_share_ceiling
-
-    with tempfile.TemporaryDirectory() as d:
-        state_file = Path(d) / "maxx-leases.json"
-        orig_state = maxx_lease.STATE_FILE
-        orig_headroom = maxx_share_ceiling.get_headroom
-        try:
-            maxx_lease.STATE_FILE = state_file
-
-            # The remote's own reserved_pct is 0 (its honest, real-world default -- it has no
-            # idea a local lease exists). sustainable=0.35 -> raw headroom 0.35 (the 0.10
-            # per-diem allowance is no longer subtracted). fk#1169: pace, not pace-allowance
-            remote_budget = {
-                "verdict": "ok", "sustainable_pct_per_hour": 0.35,
-                "per_diem_hourly_pct": 0.10, "reserved_pct": 0,
-                # Anchored block -- see the note on the other budget fixtures.
-                "session_used_pct": 0.0, "five_reset_in_sec": 5 * 3600,
-            }
-            maxx_share_ceiling.get_headroom = lambda: (1.0, "ok", remote_budget)
-
-            import io
-            from contextlib import redirect_stdout
-            buf = io.StringIO()
-            with redirect_stdout(buf):
-                maxx_share_ceiling.main(["prog", "1.0"])
-            assert abs(float(buf.getvalue().strip()) - 0.35) < 1e-6, buf.getvalue()  # fk#1169: pace, not pace-allowance
-
-            # A REAL concurrent lease exists on disk (e.g. judge-judy on the other instance,
-            # or an earlier call this same instance made) -- the remote still reports
-            # reserved_pct=0 (it never learns about this), but the ceiling MUST see it anyway.
-            maxx_lease.maxx_reserve(pct=0.08, label="concurrent-caller", ttl_sec=3600)
-            buf = io.StringIO()
-            with redirect_stdout(buf):
-                maxx_share_ceiling.main(["prog", "1.0"])
-            assert abs(float(buf.getvalue().strip()) - 0.27) < 1e-6, buf.getvalue()  # 0.35-0.08, fk#1169: pace, not pace-allowance
-        finally:
-            maxx_lease.STATE_FILE = orig_state
-            maxx_share_ceiling.get_headroom = orig_headroom
 
 
-def _maxx_share_ceiling_respects_a_real_over_verdict_not_just_unreadable_meters():
-    """fleet-code-review BLOCK on PR #184: `verdict=="over"` is maxx's own DEFINITIVE "stop"
-    signal -- get_headroom() returns fraction=0.0 (never None) for it specifically, per
-    maxx_reader.py's own header, so a real stop can't be confused with an unreadable meter.
-    The ceiling script only checked `fraction is None` and then discarded `fraction`
-    entirely, recomputing purely from the hourly fields -- which are populated independently
-    of verdict and can look like real headroom even while verdict=="over". That let a real
-    hard-stop reading still yield a positive, spendable ceiling.
-
-    Failing scenario this reproduces: maxx returns verdict="over" (session/week over) but
-    with healthy-looking hourly numbers (sustainable=0.35, used=0.10) -- plausible in
-    practice, since those are independent signals.
-    """
-    import maxx_share_ceiling
-
-    over_but_hourly_looks_fine = {
-        "verdict": "over",
-        "sustainable_pct_per_hour": 0.35,
-        "per_diem_hourly_pct": 0.10,
-        "reserved_pct": 0,
-        # Anchored block: nothing spent, full 5h window left -- keeps the fail-closed
-        # block-pace clamp (maxx_share_ceiling.block_over_pace) out of a test about the
-        # HOURLY slice formula. An unanchored budget now clamps to 0.0 on purpose.
-        "session_used_pct": 0.0,
-        "five_reset_in_sec": 5 * 3600,
-    }
-    orig = maxx_share_ceiling.get_headroom
-    try:
-        # get_headroom() itself returns (0.0, "over", ...) for this verdict -- match that
-        # real contract exactly (maxx_reader.py:147-151), not an arbitrary fraction.
-        maxx_share_ceiling.get_headroom = lambda: (0.0, "over", over_but_hourly_looks_fine)
-
-        import io
-        from contextlib import redirect_stdout
-        buf = io.StringIO()
-        with redirect_stdout(buf):
-            rc = maxx_share_ceiling.main(["prog", "1.0"])
-        assert rc == 0
-        assert float(buf.getvalue().strip()) == 0.0, (
-            f"verdict=='over' must yield a zero ceiling regardless of hourly fields, got: {buf.getvalue()!r}"
-        )
-    finally:
-        maxx_share_ceiling.get_headroom = orig
 
 
 def _auto_merge_never_passes_a_strategy_flag_under_a_merge_queue():
@@ -4434,20 +4185,6 @@ def _entrypoint_crontab_forwards_fleet_share_dir():
         "unset again (gh#569)")
 
 
-def _entrypoint_crontab_forwards_fleet_lease_dir():
-    """gh#579: same env-forwarding gap as gh#569's FLEET_SHARE_DIR (sibling variable). Every
-    cron-triggered job starts from entrypoint.sh's crontab-wide env block, not PID 1's own
-    environment -- so if it doesn't forward FLEET_LEASE_DIR, maxx_lease.py's own docstring
-    behavior kicks in ("SHARED ACROSS INSTANCES when FLEET_LEASE_DIR is set, and per-instance
-    when it is not") and a cron-triggered pass silently reads a per-instance/empty ledger,
-    reporting reserved_pct: 0 even though the real shared bind-mount is populated. Assert the
-    crontab-wide block forwards it so a future refactor can't silently drop it again.
-    """
-    entry = (Path(__file__).parent.parent / "entrypoint.sh").read_text()
-    assert 'echo "FLEET_LEASE_DIR=' in entry, (
-        "entrypoint.sh's crontab-wide env block doesn't forward FLEET_LEASE_DIR -- "
-        "maxx_lease.py (and any other cron-triggered reader) will silently fall back to a "
-        "per-instance/empty ledger again (gh#579)")
 
 
 def _entrypoint_crontab_forwards_fleet_instance_name():
@@ -11046,115 +10783,10 @@ def _gru_charter_does_not_reinstate_the_broken_math():
         "charter still tells gru to min() the two fractions -- the dead-dial bug"
 
 
-def _lease_ledger_is_shared_across_instances():
-    """Two instances on one box share ONE maxx account pool -- and had two private ledgers.
-
-    Live 2026-09-02: philanthropy kept maxx-leases.json under instances/nonprofit-atlas/logs
-    and fleet-kit-server-fleet kept its own under fleet-kit-server-fleet/logs. Neither could
-    see the other's in-flight spend, so `reserved_pct` -- the number maxx_share_ceiling.py
-    subtracts specifically to prevent double-spend, and whose result its own comment calls
-    "already-coordinated" -- was never coordinated across instances at all.
-    """
-    import importlib, os, sys as _sys
-    _sys.path.insert(0, str(ROOT / "scripts"))
-    with tempfile.TemporaryDirectory() as tmp:
-        shared = Path(tmp) / "shared"
-        os.environ["FLEET_LEASE_DIR"] = str(shared)
-        os.environ["FLEET_LOG_DIR"] = str(Path(tmp) / "per-instance")
-        import maxx_lease
-        importlib.reload(maxx_lease)
-        try:
-            assert str(shared) in str(maxx_lease.STATE_FILE), (
-                f"FLEET_LEASE_DIR ignored -- ledger still at {maxx_lease.STATE_FILE}, so each "
-                "instance keeps a private ledger and cannot coordinate"
-            )
-            # A lease taken by one instance must be visible in the other's global total.
-            maxx_lease.maxx_reserve(0.05, "a", 3600, instance="philanthropy")
-            total = maxx_lease.total_reserved_pct()
-            assert abs(total - 0.05) < 1e-9, f"lease invisible in shared total: {total}"
-            mine = maxx_lease.reserved_pct_for(instance="server-fleet")
-            assert mine == 0.0, "another instance's lease counted against this one's slice"
-        finally:
-            os.environ.pop("FLEET_LEASE_DIR", None)
-            os.environ.pop("FLEET_LOG_DIR", None)
-            importlib.reload(maxx_lease)
 
 
-def _an_instance_cannot_spend_past_its_own_slice():
-    """A share must be a RESERVATION, not a rate limit on a race.
-
-    Reif, 2026-09-02: "we could reserve a slice of the hourly for a certain instance, say 30%
-    -- and then before gru gets there, it could be all gone." That was literally true: the
-    ceiling was computed from whatever remained at the moment of asking, so the first caller
-    took the pot and a later caller's 30% was 30% of the leftovers.
-
-    Enforcement means a caller is REFUSED once its own live leases fill its budget, and that
-    the refusal protects the neighbour's slice rather than the global pot.
-    """
-    import importlib, os, sys as _sys
-    _sys.path.insert(0, str(ROOT / "scripts"))
-    with tempfile.TemporaryDirectory() as tmp:
-        os.environ["FLEET_LEASE_DIR"] = tmp
-        import maxx_lease
-        importlib.reload(maxx_lease)
-        try:
-            budget = 0.30
-            maxx_lease.maxx_reserve(0.20, "gru", 3600, instance="A", budget_pct=budget)
-            maxx_lease.maxx_reserve(0.09, "judge", 3600, instance="A", budget_pct=budget)
-            try:
-                maxx_lease.maxx_reserve(0.05, "greedy", 3600, instance="A", budget_pct=budget)
-            except maxx_lease.LeaseDenied:
-                pass
-            else:
-                raise AssertionError(
-                    "instance A reserved past its own 0.30 slice -- the share is unenforced"
-                )
-            # B's slice is untouched by A having exhausted its own.
-            b = maxx_lease.maxx_reserve(0.30, "b-gru", 3600, instance="B", budget_pct=budget)
-            assert b, "instance B was blocked by A's spend -- slices are not independent"
-            assert abs(maxx_lease.reserved_pct_for(instance="A") - 0.29) < 1e-9
-            assert abs(maxx_lease.reserved_pct_for(instance="B") - 0.30) < 1e-9
-        finally:
-            os.environ.pop("FLEET_LEASE_DIR", None)
-            importlib.reload(maxx_lease)
 
 
-def _share_ceiling_is_a_slice_of_the_hour_not_the_leftovers():
-    """The ceiling must not shrink just because a NEIGHBOUR spent first.
-
-    Old formula: (sustainable - used - reserved) * share -- an instance arriving after a
-    greedy neighbour got `share` of the remainder. New: sustainable * share, minus only what
-    this instance itself already holds, then clamped to what genuinely remains globally.
-    """
-    import subprocess
-    with tempfile.TemporaryDirectory() as tmp:
-        stub = Path(tmp) / "stubs"; stub.mkdir()
-        # A neighbour has burned a big chunk of the hour; this instance has spent nothing.
-        (stub / "maxx_reader.py").write_text(
-            "def get_headroom():\n"
-            "    return (1.0, 'ok', {'sustainable_pct_per_hour': 1.0,\n"
-            "                        'per_diem_hourly_pct': 0.50, 'reserved_pct': 0,\n"
-            # Anchored block -- the fail-closed block-pace clamp must not fire in a
-            # test about the hourly slice formula.
-            "                        'session_used_pct': 0.0,\n"
-            "                        'five_reset_in_sec': 5 * 3600})\n")
-        (stub / "maxx_lease.py").write_text(
-            "def total_reserved_pct():\n    return 0.0\n"
-            "def reserved_pct_for(*a, **k):\n    return 0.0\n")
-        kit = Path(tmp) / "scripts"; kit.mkdir()
-        import shutil
-        shutil.copy(ROOT / "scripts" / "maxx_share_ceiling.py", kit / "maxx_share_ceiling.py")
-        for f in stub.glob("*.py"):
-            shutil.copy(f, kit / f.name)
-        out = subprocess.run([sys.executable, str(kit / "maxx_share_ceiling.py"), "0.30"],
-                             capture_output=True, text=True, timeout=20).stdout.strip()
-        assert out, "ceiling produced no reading"
-        got = float(out)
-        # Slice of the HOUR: 1.0 * 0.30 = 0.30, and 0.50 remains globally so it is not clamped.
-        assert abs(got - 0.30) < 1e-4, (
-            f"expected a 0.30 slice of the hour, got {got} -- this is the old "
-            "share-of-the-leftovers behaviour (0.5*0.3=0.15) the fix removes"
-        )
 
 
 def _oversubscribed_shares_are_caught():
@@ -11192,8 +10824,7 @@ def _check_share_sum_sees_siblings_from_inside_a_container_via_published_shares(
     scan matches zero directories and total stays 0 no matter how oversubscribed the fleet
     really is.
 
-    FLEET_SHARE_DIR is the fix: a small, purpose-built, non-secret shared directory (same shape
-    as FLEET_LEASE_DIR/maxx_lease.py's already-shipped fix for the identical problem) that each
+    FLEET_SHARE_DIR is the fix: a small, purpose-built, non-secret shared directory that each
     instance publishes just {instance, fraction, published_at} into. Pre-populates two
     "siblings'" published files by hand (standing in for their own earlier check_share_sum.sh
     runs) and runs the script as a THIRD instance to prove it sees all three, not just itself.
@@ -14111,57 +13742,6 @@ def _prod_incident_target_discriminator_separates_concurrent_outages_gh836():
     assert not created4 and number4 == 1 and len(gh4.issues) == 1
 
 
-def _maxx_share_ceiling_holds_a_5h_block_ahead_of_pace_gh781():
-    """Reif 2026-09-09: "it's the session limits we should respect." Live that day the
-    hourly ceiling stayed 0.015-0.048 while the account burned 77% of its 5h window in the
-    first 90 minutes (session_used_pct=77, five_reset_in_sec=12534 at 16:51Z), walled, then
-    sat budget_declined for 3.5h. The ceiling must read 0.0000 while the block is ahead of
-    linear pace, and the usual number once it is not. Missing fields fail CLOSED."""
-    import io
-    from contextlib import redirect_stdout
-    import maxx_share_ceiling
-
-    def ceiling(budget):
-        orig = maxx_share_ceiling.get_headroom
-        maxx_share_ceiling.get_headroom = lambda: (1.0, "ok", budget)
-        try:
-            buf = io.StringIO()
-            with redirect_stdout(buf):
-                assert maxx_share_ceiling.main(["prog", "1.0"]) == 0
-            return buf.getvalue().strip()
-        finally:
-            maxx_share_ceiling.get_headroom = orig
-
-    healthy_hour = {"verdict": "ok", "sustainable_pct_per_hour": 0.35,
-                    "per_diem_hourly_pct": 0.10, "reserved_pct": 0}
-    # The live 16:51Z reading: 30% of the block elapsed, 77% of it spent -> hold.
-    live = {**healthy_hour, "session_used_pct": 77, "five_reset_in_sec": 12534}
-    assert ceiling(live) == "0.0000", ceiling(live)
-    # Same block, spent on pace (30% elapsed, 35% used, inside the 10-point slack) -> the
-    # ordinary hourly number, not a hold.
-    paced = {**live, "session_used_pct": 35}
-    assert abs(float(ceiling(paced)) - 0.35) < 1e-6, ceiling(paced)  # fk#1169: pace, not pace minus allowance
-    # Fresh block, small burst inside the slack -> run; past the slack -> hold.
-    assert ceiling({**live, "session_used_pct": 9, "five_reset_in_sec": 18000}) != "0.0000"
-    assert ceiling({**live, "session_used_pct": 11, "five_reset_in_sec": 18000}) == "0.0000"
-    # No block fields at all (older maxx, or a stripped reading) -> fail CLOSED. Inverted
-    # 2026-09-11 (Reif locked out 40min mid-block): a null session_used_pct means the handle
-    # has no live anchor, not that the block is healthy, and failing open made this clamp
-    # dead code on every unanchored handle. Eyes-open opt-out restores the old reading.
-    assert ceiling(healthy_hour) == "0.0000", ceiling(healthy_hour)
-    import os as _os
-    _os.environ["FLEET_BLOCK_PACE_REQUIRE_ANCHOR"] = "0"
-    try:
-        assert abs(float(ceiling(healthy_hour)) - 0.35) < 1e-6, ceiling(healthy_hour)  # fk#1169: pace, not pace-allowance
-    finally:
-        del _os.environ["FLEET_BLOCK_PACE_REQUIRE_ANCHOR"]
-    # The reader passes both fields through, otherwise the clamp can never see them.
-    import maxx_reader
-    _, _, allowance = maxx_reader.get_headroom(
-        "https://example.invalid", "h", "k",
-        fetcher=lambda *a, **k: {"verdict": "ok", "week_bank_pct": 1.9,
-                                 "session_used_pct": 77, "five_reset_in_sec": 12534})
-    assert allowance.get("session_used_pct") == 77 and allowance.get("five_reset_in_sec") == 12534, allowance
 
 
 def _pacing_gate_holds_zero_ceiling_unless_exempt_gh781():
@@ -16094,11 +15674,6 @@ if __name__ == "__main__":
     check("gru.md gates on a Vision-link before packing (gh#525)", _gru_md_gates_on_vision_link_before_packing)
     check("maxx reader reports the fleet's hourly slice, not a laptop's pacing", _maxx_reader_reports_the_fleets_hourly_slice_not_a_laptops_pacing)
     check("maxx fetch_budget classifies an MCP-level auth rejection, not maxx_unexpected_shape (gh#825)", _maxx_fetch_budget_classifies_mcp_auth_rejection)
-    check("maxx lease reserves, releases, and self-expires", _maxx_lease_reserves_releases_and_self_expires)
-    check("maxx lease concurrent reserves don't clobber each other", _maxx_lease_concurrent_reserves_dont_clobber_each_other)
-    check("maxx share ceiling uses hourly headroom, not the week bank", _maxx_share_ceiling_uses_hourly_headroom_not_the_week_bank)
-    check("maxx share ceiling subtracts local leases, not just the remote's reserved_pct", _maxx_share_ceiling_subtracts_local_leases_not_just_the_remotes_reserved_pct)
-    check("maxx share ceiling respects a real over verdict, not just unreadable meters", _maxx_share_ceiling_respects_a_real_over_verdict_not_just_unreadable_meters)
     check("no member ships a turn or budget cap", _no_member_ships_a_cap)
     check("minion knows the browser in its own image exists", _minion_knows_the_browser_exists)
     check("score reasoning is not guillotined mid-word", _score_reasoning_is_not_guillotined_mid_word)
@@ -16145,7 +15720,6 @@ if __name__ == "__main__":
     check("entrypoint.sh: the container's port env wins over fleet.env (rolling deploy pairs, gh#625/#708)", _entrypoint_container_port_env_wins_over_fleet_env)
     check("console v2: a run row opens a right-hand panel with the whole run; every run has a report (fk#748)", _console_run_panel_shows_everything_about_one_run_fk748)
     check("entrypoint.sh: no crontab line exports a port and then re-sources fleet.env", _entrypoint_cron_never_resources_fleet_env_after_exporting_the_port)
-    check("entrypoint.sh's crontab-wide env block forwards FLEET_LEASE_DIR (gh#579)", _entrypoint_crontab_forwards_fleet_lease_dir)
     check("entrypoint.sh's crontab-wide env block forwards FLEET_INSTANCE_NAME (gh#581)", _entrypoint_crontab_forwards_fleet_instance_name)
     check("run_member.sh logs CRITICAL when postflight_dirty_check.sh fails to source", _run_member_logs_critical_when_postflight_dirty_check_fails_to_source)
     check("run_member.sh rejects a non-numeric --item", _run_member_rejects_a_non_numeric_item)
@@ -16260,9 +15834,6 @@ if __name__ == "__main__":
     check("gru allowance dial actually changes the number", _gru_allowance_dial_actually_changes_the_number)
     check("gru allowance fails open and clamps typos", _gru_allowance_fails_open_and_clamps_typos)
     check("gru charter does not reinstate the broken math", _gru_charter_does_not_reinstate_the_broken_math)
-    check("lease ledger is shared across instances", _lease_ledger_is_shared_across_instances)
-    check("an instance cannot spend past its own slice", _an_instance_cannot_spend_past_its_own_slice)
-    check("share ceiling is a slice of the hour, not the leftovers", _share_ceiling_is_a_slice_of_the_hour_not_the_leftovers)
     check("oversubscribed instance shares are caught", _oversubscribed_shares_are_caught)
     check("check_share_sum sees siblings from inside a container via published shares",
           _check_share_sum_sees_siblings_from_inside_a_container_via_published_shares)
@@ -16431,7 +16002,6 @@ if __name__ == "__main__":
     check("control_plane: an agent creates and removes an instance over HTTP with a bearer token (gh#759 AC1)", _control_plane_agent_creates_and_removes_an_instance_over_http_gh759)
     check("control_plane secrets: init/check/adopt/set build one store, include every fleet.env, never print a value (gh#759)", _control_plane_secret_store_init_check_adopt_set_gh759)
     check("deploy.sh mounts the shared secret store read-only at the same path, only when present (gh#759)", _deploy_sh_mounts_the_shared_secret_store_read_only_gh759)
-    check("share ceiling is 0.0000 while the 5h block runs ahead of linear pace (gh#781 follow-up)", _maxx_share_ceiling_holds_a_5h_block_ahead_of_pace_gh781)
     check("pacing_gate holds a zero ceiling, runs an exempt member or an unreadable meter (gh#781 AC1-3)", _pacing_gate_holds_zero_ceiling_unless_exempt_gh781)
     check("fleet_metrics computes signal_rate/avg_cost over a window, unavailable when empty (gh#782 AC1)", _fleet_metrics_windows_runs_and_says_unavailable_gh782)
     check("charter_bloat_check exits 2 with no rows when the PR list is unreadable, and reads git when gh is down (fk#908)", _charter_bloat_check_never_prints_ok_over_unread_prs_fk908)

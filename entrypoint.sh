@@ -189,12 +189,7 @@ case "${1:-cron-foreground}" in
       # oversubscribed. Forward PID 1's own value (empty/unset falls through to
       # check_share_sum.sh's pre-gh#293 host-side scan unchanged, same as today).
       echo "FLEET_SHARE_DIR=${FLEET_SHARE_DIR:-}"
-      # gh#579: same env-forwarding gap as gh#569 above, sibling variable. maxx_lease.py's
-      # ledger is SHARED ACROSS INSTANCES only when FLEET_LEASE_DIR is set -- unforwarded here,
-      # a cron-triggered pass falls back to a per-instance/empty ledger and silently reports
-      # reserved_pct: 0 even when the real shared bind-mount is populated.
-      echo "FLEET_LEASE_DIR=${FLEET_LEASE_DIR:-}"
-      # gh#581: same env-forwarding gap as gh#569/gh#579 above, third sibling variable.
+      # gh#581: same env-forwarding gap as gh#569 above, sibling variable.
       # publish_share.sh resolves this container's identity as
       # `${FLEET_INSTANCE_NAME:-default}` -- unforwarded here, every cron-triggered process
       # (including check_share_sum.sh) falls back to the literal string "default" and
@@ -503,8 +498,8 @@ case "${1:-cron-foreground}" in
       # above (gh#279).
       echo "*/5 * * * * root export FLEET_LOG_DIR=$LOG_DIR && [ -f \"\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}\" ] && { set -a; . \"\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}\"; set +a; }; bash /fleet-kit/scripts/sync_health_check.sh >> $LOG_DIR/sync_health_check.log 2>&1"
       # pacing_hold_check.py (gh#812): the fleet's SIXTH outage pager -- a real zero
-      # `FLEET_SHARE_CEILING_PCT` (maxx_share_ceiling.py's block_over_pace branch, PR#797, or
-      # maxx's own verdict=over) is a deliberate, correct hard stop, but nothing told a human
+      # `FLEET_SHARE_CEILING_PCT` (run_member.sh reading a genuinely empty maxx headroom
+      # gauge, or maxx's own verdict=over) is a deliberate, correct hard stop, but nothing told a human
       # when it held the whole fleet `status=paced` for ~19 straight hours on 2026-09-10. Same
       # class of gap as account/tunnel/path/sync-health above (a script existing is not the
       # same as it being scheduled) -- reads runs.jsonl only, no podman, so it belongs in this

@@ -184,9 +184,8 @@ def _migration_lock(db_path: Path):
     thread and per-request handlers all call `fleet_db.connect()` independently), and
     `_migrate_composite_pk` below is a rename/rebuild/drop of `runs`, not an idempotent
     ADD COLUMN -- two threads both seeing the pre-migration schema at once would both try to
-    rename the same table and one gets a raw `sqlite3.OperationalError`. Same flock-over-a-
-    sidecar-file pattern maxx_lease.py already uses for its own read-modify-write race:
-    serialize the whole migration so only one thread is ever inside it, and every later
+    rename the same table and one gets a raw `sqlite3.OperationalError`. A flock over a
+    sidecar file serializes the whole migration so only one thread is ever inside it, and every later
     thread's own PRAGMA table_info check (taken after acquiring the lock) then sees the
     already-migrated schema and returns immediately."""
     lock_path = db_path.with_suffix(db_path.suffix + ".migrate.lock")

@@ -1129,6 +1129,7 @@ def _budget_preview() -> dict:
     # exists to make visible (gh#561). Any other untrustworthy verdict (get_headroom()
     # returns fraction=None) is treated the same as an unreadable meter -- None, never a
     # number the caller cannot vouch for.
+    reading: dict = {}
     try:
         proc = subprocess.run(
             [sys.executable, str(KIT_DIR / "scripts" / "maxx_reader.py")],
@@ -1171,18 +1172,13 @@ def _budget_preview() -> dict:
         out["note"] = ("FLEET_SHARE_FRACTION is unset or 1.0, so no ceiling is exported and "
                        "gru falls back to its own default -- set it below to cap this instance.")
         return out
-    try:
-        proc = subprocess.run(
-            [sys.executable, str(KIT_DIR / "scripts" / "maxx_share_ceiling.py"), share],
-            capture_output=True, text=True, timeout=20, env=subprocess_env())
-        ceiling = (proc.stdout or "").strip()
-    except Exception as exc:  # noqa: BLE001 -- display route, never 500 on a meter hiccup
-        out["note"] = f"could not read the maxx meter: {exc}"
-        return out
-    if not ceiling:
-        # Distinguish the two causes that both print an empty ceiling. "Unreadable" was
-        # reported for months when the real answer was "this server cannot see the maxx
-        # credentials", which is an operator-fixable configuration fault, not a meter outage.
+    # Was: a subprocess call to maxx_share_ceiling.py (removed, gh#1215 -- its
+    # sustainable_pct_per_hour/block-pace math needed fields a fresh account never has,
+    # which zeroed the whole instance rather than just being an imprecise slice). The
+    # ceiling is now the same direct headroom_fraction x share computation run_member.sh
+    # does -- reuses the `reading` this function already fetched above via maxx_reader.py.
+    headroom_fraction = reading.get("headroom_fraction")
+    if headroom_fraction is None:
         missing = [k for k in ("FLEET_MAXX_URL", "FLEET_MAXX_HANDLE", "FLEET_MAXX_KEY")
                    if not (subprocess_env().get(k) or "").strip()]
         if missing:
@@ -1192,10 +1188,13 @@ def _budget_preview() -> dict:
         else:
             out["note"] = ("maxx meter unreadable right now -- no ceiling. gru fails OPEN to "
                            "its own conservative default; nothing is over-spent.")
-        if (proc.stderr or "").strip():
-            out["meter_stderr"] = (proc.stderr or "").strip()[:300]
         return out
 
+    try:
+        ceiling = f"{max(0.0, float(headroom_fraction)) * float(share) * 100:.4f}"
+    except (TypeError, ValueError):
+        out["note"] = "could not read the maxx meter: bad headroom_fraction shape"
+        return out
     out["ceiling_pct"] = ceiling
     try:
         sys.path.insert(0, str(KIT_DIR / "scripts"))
