@@ -258,7 +258,11 @@ def _backlog_history_payload(days: int):
     # New-PRs-opened + PRs-merged (shipped) per day -- the throughput counterpart to
     # backlog size, plotted on the same chart/x-axis, so it's fetched alongside rather
     # than as a separate endpoint the frontend has to join itself.
-    prs_raw = _gh("pr", "list", "--state", "all", "--json", "createdAt,mergedAt", "--limit", "500")
+    # Was --limit 500: measured live 2026-09-22, this repo alone ships ~22 PRs/day, so 500
+    # only reaches ~23 days back -- comfortable margin for a 14-day window today, but a single
+    # busier week silently truncates the tail to zero with no indication on the chart that
+    # the flatline is a fetch limit, not reality. Matched to the issues fetch's 1000.
+    prs_raw = _gh("pr", "list", "--state", "all", "--json", "createdAt,mergedAt", "--limit", "1000")
     # _gh swallows failure into "" (timeout, rate limit, auth blip), and both
     # aggregators turn "" into a full run of zero-count days -- which is
     # indistinguishable, on the chart, from a genuinely empty backlog. Caching that
@@ -670,7 +674,13 @@ def metrics_snapshot() -> dict:
         claimed = sum(1 for i in issues if i.get("_claimed"))
         upsert("fleet.backlog_open", len(issues))
         _backfill_daily(db, "fleet.backlog_open", days, lambda: _gh_dates("issue", "--label", "fleet:backlog"))
-        out["fleet.backlog_open"] = {"value": len(issues), "sub": f"{claimed} claimed · {len(issues) - claimed} free",
+        # poll_gh_state's own fetch is capped (currently 500); a true count at or past that cap
+        # would otherwise render as a precise-looking wrong number with no indication it's a
+        # floor, not the real total.
+        backlog_sub = f"{claimed} claimed · {len(issues) - claimed} free"
+        if gh.get("issues_truncated"):
+            backlog_sub += " (500+, capped)"
+        out["fleet.backlog_open"] = {"value": len(issues), "sub": backlog_sub,
                                      "series": daily_series("fleet.backlog_open")}
 
         # fleet.prs_open
@@ -961,13 +971,19 @@ def minion_runs_payload(rows: list[dict], gh: dict, limit: int = 50) -> list[dic
 def poll_gh_state() -> dict:
     prs_raw = _gh("pr", "list", "--state", "open", "--json",
                    "number,title,isDraft,headRefName,url,statusCheckRollup,mergeStateStatus,updatedAt")
+    # --limit 100 was a silent ceiling: fleet.backlog_open below is len(issues), so once the
+    # real open-backlog count passed 100 the dashboard showed exactly 100 forever, with
+    # nothing distinguishing "100 items" from "100 items, capped." Raised to 500 (real backlog
+    # measured at 30 on this repo, headroom for growth) and the fetch's own count-==-limit is
+    # now reported as `issues_truncated` so the frontend can say "500+" instead of lying with
+    # a precise-looking wrong number.
     issues_raw = _gh("issue", "list", "--state", "open", "--label", "fleet:backlog", "--json",
-                      "number,title,labels,updatedAt", "--limit", "100")
+                      "number,title,labels,updatedAt", "--limit", "500")
     # Independent call, not a filter over the fleet:backlog list above -- gh#340: nothing
     # enforces that fleet:needs-human-op issues are always also fleet:backlog, so filtering
     # the backlog-scoped list would silently miss one filed without that pairing.
     needs_human_op_raw = _gh("issue", "list", "--state", "open", "--label", "fleet:needs-human-op",
-                              "--json", "number,title,createdAt", "--limit", "100")
+                              "--json", "number,title,createdAt", "--limit", "500")
     # Recently merged: plain feed, whatever's most recent -- what just shipped, any branch.
     merged_raw = _gh("pr", "list", "--state", "merged", "--json",
                       "number,title,mergedAt,url,author,files,headRefName", "--limit", "30")
@@ -998,6 +1014,7 @@ def poll_gh_state() -> dict:
         issues = json.loads(issues_raw) if issues_raw else []
     except json.JSONDecodeError:
         issues = []
+    issues_truncated = len(issues) >= 500
     try:
         merged = json.loads(merged_raw) if merged_raw else []
     except json.JSONDecodeError:
@@ -1060,7 +1077,7 @@ def poll_gh_state() -> dict:
             continue
         oldest_age_hours = max(oldest_age_hours, age_hours)
     needs_human_op = {"count": len(needs_human_op_issues), "oldest_age_hours": oldest_age_hours}
-    return {"prs": prs, "issues": issues, "merged": merged,
+    return {"prs": prs, "issues": issues, "issues_truncated": issues_truncated, "merged": merged,
             "self_evolution": self_evolution, "needs_human_op": needs_human_op,
             "polled_at": time.time()}
 
@@ -1259,7 +1276,7 @@ class State:
     def __init__(self):
         self.lock = threading.Lock()
         self.runs: list[dict] = []
-        self.gh = {"prs": [], "issues": [],
+        self.gh = {"prs": [], "issues": [], "issues_truncated": False,
                    "needs_human_op": {"count": 0, "oldest_age_hours": 0.0}, "polled_at": 0}
         self._seen_offset = 0
 
