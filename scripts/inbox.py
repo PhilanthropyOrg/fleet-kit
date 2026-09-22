@@ -625,6 +625,14 @@ def mark_done(email_id: str, result: str = "") -> None:
     with open(DONE, "a") as fh:
         fh.write(email_id + "\n")
     if result:
+        # gh#1219: RESULTS can be reassigned independently of LOG_DIR (tests patch inbox.RESULTS
+        # directly, per test_inbox_came_in.py) or simply live under a LOG_DIR that no longer
+        # matches the module-level default -- mkdir its OWN parent, don't assume LOG_DIR's mkdir
+        # above covers it. On a fresh Linux CI runner with no prior ~/Library/Logs/fleet-kit,
+        # relying on LOG_DIR's mkdir alone left RESULTS' real parent dir missing and this raised
+        # FileNotFoundError inside every caller, including the HTTP handler thread in
+        # webhook_receiver.py (which then looked like a RemoteDisconnected to the client).
+        RESULTS.parent.mkdir(parents=True, exist_ok=True)
         with open(RESULTS, "a") as fh:
             fh.write(json.dumps({"id": email_id, "result": result, "at": time.time()}) + "\n")
 

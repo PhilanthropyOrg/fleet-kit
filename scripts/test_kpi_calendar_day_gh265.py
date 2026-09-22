@@ -50,7 +50,10 @@ class KpiCalendarDayTest(unittest.TestCase):
         # gru's real KPI pattern ("PRs shipped") counts an "Opened pull/N, auto-merge armed."
         # outcome as 1 -- see fleet_kpi.py's _PR_SHIPPED_PATTERNS.
         outcome = "Opened pull/4488, auto-merge armed."
-        before_midnight = {"member": "gru", "ts": midnight - 3600, "outcome": outcome}
+        # gh#1239: 1s before midnight, not 1h -- a fixed 3600s offset falls outside the rolling
+        # 24h window (and this test failed) any time "now" is itself within the last hour of
+        # the UTC day, which is deterministic, not rare (hit live 2026-09-22 ~23:16 UTC).
+        before_midnight = {"member": "gru", "ts": midnight - 1, "outcome": outcome}
         after_midnight = {"member": "gru", "ts": midnight + 3600, "outcome": outcome}
         fvs.STATE.runs = [before_midnight, after_midnight]
 
