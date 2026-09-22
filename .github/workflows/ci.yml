@@ -64,6 +64,8 @@ jobs:
         run: python3 scripts/test_sentry_deploy_task.py
       - name: run test_run_member_key_follows_handle.py
         run: python3 scripts/test_run_member_key_follows_handle.py
+      - name: run test_run_member_ceiling_computation.py
+        run: python3 scripts/test_run_member_ceiling_computation.py
       - name: run test_alert_store.py
         run: python3 scripts/test_alert_store.py
       - name: run test_block_pace_fails_closed.py

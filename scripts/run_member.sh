@@ -398,7 +398,20 @@ except Exception:
     print('')
 " 2>>"$LOG")
   if [ -n "$HEADROOM_FRACTION" ]; then
-    CEILING_PCT=$(python3 -c "print(f'{max(0.0, float('$HEADROOM_FRACTION')) * float('${FLEET_SHARE_FRACTION:-1.0}') * 100:.4f}')" 2>>"$LOG")
+    # gh#1222: the previous one-liner nested single-quoted float('$VAR') calls INSIDE an
+    # f-string's {...} expression delimited by the same quote character -- a SyntaxError
+    # ("f-string: unmatched '('") on every Python version this kit runs, silently swallowed by
+    # this line's own 2>>"$LOG" redirect. CEILING_PCT was empty on every single pass since
+    # gh#1215 landed, string-interpolation-into-source-code being exactly the kind of shell/
+    # Python quoting trap this kit's own headers warn about elsewhere. Passed as argv instead of
+    # interpolated into the script text -- no nested quoting, no f-string, can't recreate this class
+    # of bug.
+    CEILING_PCT=$(python3 -c "
+import sys
+frac = max(0.0, float(sys.argv[1]))
+share = float(sys.argv[2])
+print(f'{frac * share * 100:.4f}')
+" "$HEADROOM_FRACTION" "${FLEET_SHARE_FRACTION:-1.0}" 2>>"$LOG")
     log "$MEMBER: FLEET_SHARE_CEILING_PCT=${CEILING_PCT} (headroom_fraction=${HEADROOM_FRACTION} x FLEET_SHARE_FRACTION=${FLEET_SHARE_FRACTION})"
     export FLEET_SHARE_CEILING_PCT="$CEILING_PCT"
   fi
