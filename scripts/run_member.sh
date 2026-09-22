@@ -339,8 +339,23 @@ MAX_BUDGET=$(jget "['mandate']['limits'].get('max_budget_usd') or ''")
 # sets one keeps exactly its current behaviour.
 if [ "$DRY_RUN" -ne 1 ]; then
   read -r RESOLVED_HANDLE RESOLVED_KEY < <(bash "$KIT_DIR/scripts/resolve_maxx_handle.sh" 2>>"$LOG")
-  if [ -n "${RESOLVED_HANDLE:-}" ] && [ "$RESOLVED_HANDLE" != "${FLEET_MAXX_HANDLE:-}" ]; then
-    log "$MEMBER: FLEET_MAXX_HANDLE ${FLEET_MAXX_HANDLE:-unset} -> $RESOLVED_HANDLE (account this pass will spend from)"
+  # gh#1220: this used to gate the KEY export on the handle having CHANGED
+  # ($RESOLVED_HANDLE != $FLEET_MAXX_HANDLE) -- but fleet.env's own FLEET_MAXX_HANDLE
+  # can already equal the resolved handle (philanthropy's does) while FLEET_MAXX_KEY
+  # is still the generic/instance key, not the per-account FLEET_MAXX_KEY_<ACCOUNT>
+  # one resolve_maxx_handle.sh's own header says "MUST MOVE TOGETHER" with the handle.
+  # Confirmed live 2026-09-22: bare `python3 maxx_reader.py` (fleet.env sourced, no
+  # further resolution) returned maxx_auth_rejected on this exact box/account, while
+  # the SAME call with FLEET_MAXX_KEY overridden to $FLEET_MAXX_KEY_PHILANTHROPY
+  # returned a real reading -- the handle matched already, so the old guard's
+  # "handle changed" condition never fired and the key was never corrected.
+  # Export the resolved key whenever a resolution exists, regardless of whether the
+  # handle text happens to already match -- the key is the thing that was silently
+  # stale, not the handle.
+  if [ -n "${RESOLVED_HANDLE:-}" ]; then
+    if [ "$RESOLVED_HANDLE" != "${FLEET_MAXX_HANDLE:-}" ]; then
+      log "$MEMBER: FLEET_MAXX_HANDLE ${FLEET_MAXX_HANDLE:-unset} -> $RESOLVED_HANDLE (account this pass will spend from)"
+    fi
     export FLEET_MAXX_HANDLE="$RESOLVED_HANDLE"
     # The key must follow the handle or the read 401s -- see resolve_maxx_handle.sh's
     # header. An empty key here means the operator mapped a handle without its key;
