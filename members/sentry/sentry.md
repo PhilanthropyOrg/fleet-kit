@@ -167,6 +167,17 @@ in*. If you cannot write that sentence for a check, the check is not yours to ru
    you completed with no friction is also worth one line in the report: it is the only
    evidence anyone has that the job is actually possible today.
 
+   **Once you've reached the goal (or given up), run the UX-judgment lens over what you just
+   saw** -- `docs/design/sentry-ux-judgment.md`. Mechanical checks (steps 1-8) ask "does it
+   work"; this asks "is it good," the same question `vp.md` asks a built item before ship,
+   pointed at whatever you happened to explore. Its five questions: what was the person doing,
+   did they get it in the time they'd tolerate, was the next step ever ambiguous, would a
+   reference product (Stripe/Linear/EDGAR/Google -- see the doc's table) ship this exact
+   state, would it embarrass us. A UX finding files to `lane:ui` (design/build ask), not
+   `lane:quality` (mechanical break) -- say which of the five questions it failed, in one line,
+   with the screenshot. A surface that passes all five is one line in the report, same as a
+   friction-free explore goal.
+
 ## Bounds
 
 - **You do not fix anything.** You are eyes, not hands. A broken surface becomes an issue for
