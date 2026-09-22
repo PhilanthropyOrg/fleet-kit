@@ -4,7 +4,8 @@
 #
 # WHY THIS EXISTS (incident 2026-09-02/03, cost: ~2.5 days of a whole account unused):
 # the budget chain has THIRTEEN fail-open paths and, before this script, ZERO notifications.
-# maxx_reader returns (None, "<label>") on a bad read; maxx_share_ceiling prints ""; and
+# maxx_reader returns (None, "<label>") on a bad read; run_member.sh's ceiling computation
+# then has nothing to derive from and leaves FLEET_SHARE_CEILING_PCT unset; and
 # gru_allowance's own comment says it plainly -- `return ""  # fail open: no ceiling => caller
 # keeps its own fallback`. Each is individually CORRECT: a bad reading may only ever be used
 # to conserve, never to invent headroom. But "conserve" silently is indistinguishable from
@@ -115,8 +116,9 @@ WEEK_BANK=$(printf '%s' "$BUDGET_TSV" | sed -n 5p | tr -cd '0-9.-')
 # WHICH LIMIT IS BINDING -- three different situations, only two are problems.
 #
 # A 5h session-block wall is NOT a fault and must never page. maxx returns verdict=over
-# (and maxx_share_ceiling hard-stops to 0.0) when session_used_pct passes
-# session_advised_pct, which reads identically to a broken meter at the label level --
+# (and run_member.sh's ceiling computation correctly reads that as a real 0.0) when
+# session_used_pct passes session_advised_pct, which reads identically to a broken meter at
+# the label level --
 # this check reported exactly that and emailed "meter unreadable" for a perfectly
 # readable meter on a healthy account (2026-09-03).
 #

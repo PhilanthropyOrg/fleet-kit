@@ -2,8 +2,9 @@
 """pacing_gate.py <ceiling> <spec-json-on-stdin> -- should this pass run, or wait for headroom?
 
 WHY (fleet-kit#781, Reif 2026-09-09: "we keep hitting session limits - likely something the
-fleet needs to do about that"). run_member.sh already computes FLEET_SHARE_CEILING_PCT from
-maxx_share_ceiling.py on every pass. That number was 0.0000 for hours on 2026-09-09 while
+fleet needs to do about that"). run_member.sh already computes FLEET_SHARE_CEILING_PCT
+(directly from maxx's own headroom_fraction gauge, gh#1215) on every pass. That number was
+0.0000 for hours on 2026-09-09 while
 budget_read_check.log read "the week is -65.7% over pace" -- and every member launched
 `claude -p` anyway, because the ceiling was advisory: only gru reads it. 200 quiet passes on
 an over-pace day is the spend that ran both accounts dry by Wednesday.

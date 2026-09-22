@@ -69,10 +69,9 @@ def _ask_classes():
 
 @contextlib.contextmanager
 def _locked(store: Path):
-    """Exclusive, blocking lock around a read-modify-write cycle -- same pattern
-    maxx_lease.py's `_locked` uses for its own flat-file ledger: two concurrent `grant()` calls
-    (a member and an operator, or two operators) must not both read the pre-grant file and
-    silently clobber each other's write."""
+    """Exclusive, blocking lock around a read-modify-write cycle: two concurrent `grant()`
+    calls (a member and an operator, or two operators) must not both read the pre-grant file
+    and silently clobber each other's write."""
     lock_path = store.with_suffix(store.suffix + ".lock")
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     with open(lock_path, "w") as fh:

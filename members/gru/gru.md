@@ -61,9 +61,14 @@ spawns exactly one). Your job, in order:
    allowance_pct = FLEET_SHARE_CEILING_PCT * FLEET_GRU_ALLOWANCE_FRACTION
                  = 0.0142 * 0.75  =  0.0106
    ```
-   `FLEET_SHARE_CEILING_PCT` (exported by run_member.sh from maxx_share_ceiling.py) is already
-   this instance's share of REAL, cross-instance-coordinated hourly headroom — it subtracts
-   other instances' live reservations, the double-spend guard gh#163 exists for. The rest,
+   `FLEET_SHARE_CEILING_PCT` (exported by run_member.sh, computed directly from maxx's own
+   headroom_fraction gauge x FLEET_SHARE_FRACTION — gh#1215) is this instance's share of the
+   account's real headroom. It is NOT cross-instance-coordinated: an earlier version tried to
+   subtract other instances' live reservations, which needed pacing fields (sustainable rate,
+   5h-block anchor) a fresh account doesn't have and zeroed the whole instance instead of
+   just being imprecise. Two instances on one account can each independently spend up to
+   their own share with no cross-check now — accepted tradeoff (Reif, 2026-09-22: "maxx
+   didnt work as a pooled usage engine, but it does work as a gas guage"). The rest,
    `1 - FLEET_GRU_ALLOWANCE_FRACTION`, is left for the other eight members (marie, jefe,
    judge-judy, the-fixer, roomba, dumbledore, messenger).
 

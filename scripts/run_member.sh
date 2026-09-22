@@ -353,26 +353,38 @@ if [ "$DRY_RUN" -ne 1 ]; then
   fi
 fi
 
-# FLEET_SHARE_FRACTION -- this instance's slice of the fleet's CURRENT hourly headroom,
-# exported as FLEET_SHARE_CEILING_PCT (percent-of-week units, maxx's own scale -- same units
-# maxx_lease.py's --pct takes). This is a CEILING, not a reservation: the member decides for
-# itself how much of it a given pass actually needs (a quiet judge-judy tick reviewing one PR
-# needs less than a five-PR backlog) and calls `python3 scripts/maxx_lease.py reserve --pct
-# <its own estimate, <= ceiling> --label ... --ttl-sec ...` itself, then `... release
-# --lease-id ...` when done -- see judge-judy.sh for a worked example. run_member.sh never
-# reserves on a member's behalf and never touches MAX_BUDGET/FLEET_MAX_BUDGET_USD for this.
-# Only exported when an operator has explicitly set FLEET_SHARE_FRACTION < 1.0 on this
-# instance -- an instance that never sets it never calls maxx_share_ceiling.py at all, so
-# every member behaves exactly as before this change. An unreadable maxx meter or missing
-# hourly fields prints nothing (fails open, script's own contract) -- FLEET_SHARE_CEILING_PCT
-# stays unset, and a member that checks for it before self-reserving simply skips reserving,
-# same as if FLEET_SHARE_FRACTION were never set. Skipped entirely under --dry-run: this is a
-# live network call (maxx_reader.get_headroom()), and --dry-run's own contract is "print the
-# resolved command, run nothing" (see this script's header comment).
+# FLEET_SHARE_FRACTION -- this instance's slice of the fleet's CURRENT week-bank headroom,
+# exported as FLEET_SHARE_CEILING_PCT (percent-of-week units, maxx's own scale).
+#
+# Was: maxx_share_ceiling.py's own sustainable_pct_per_hour/block_over_pace/cross-instance
+# reservation math (removed, gh#1215). Reif, 2026-09-22, after that machinery zeroed the
+# philanthropy instance for 30+ min on a freshly-onboarded account with no pacing history to
+# compute a rate from: "maxx didnt work as a pooled usage engine, but it does work as a gas
+# guage." maxx's own headroom_fraction (get_headroom(), already fixed for a never-billed
+# account to read 1.0 rather than unreadable -- fk#1206) IS the gauge. Slicing it into a
+# precisely-coordinated hourly rate across instances was the part that didn't work: it needs
+# fields (sustainable_pct_per_hour, the 5h-block anchor) a fresh account doesn't have yet, and
+# a broken read there zeroed the whole instance instead of just being an imprecise slice.
+#
+# This reads the gauge directly and multiplies by the configured share -- no rate, no block
+# clamp, no cross-instance lease ledger. Two instances sharing one maxx account (philanthropy
+# + nonprofit-atlas both read the same handle) can each independently spend up to their own
+# share with no cross-check; accepted, not solved -- the coordination attempt was the source
+# of the false zero, and Reif chose losing the coordination over losing an honest gauge.
 if [ "$DRY_RUN" -ne 1 ] && [ "${FLEET_SHARE_FRACTION:-1.0}" != "1.0" ]; then
-  CEILING_PCT=$(python3 "$KIT_DIR/scripts/maxx_share_ceiling.py" "${FLEET_SHARE_FRACTION:-1.0}" 2>>"$LOG")
-  if [ -n "$CEILING_PCT" ]; then
-    log "$MEMBER: FLEET_SHARE_CEILING_PCT=${CEILING_PCT} (FLEET_SHARE_FRACTION=${FLEET_SHARE_FRACTION} of this hour's real headroom)"
+  HEADROOM_JSON=$(python3 "$KIT_DIR/scripts/maxx_reader.py" 2>>"$LOG")
+  HEADROOM_FRACTION=$(printf '%s' "$HEADROOM_JSON" | python3 -c "
+import json, sys
+try:
+    d = json.load(sys.stdin)
+    f = d.get('headroom_fraction')
+    print(f if f is not None else '')
+except Exception:
+    print('')
+" 2>>"$LOG")
+  if [ -n "$HEADROOM_FRACTION" ]; then
+    CEILING_PCT=$(python3 -c "print(f'{max(0.0, float('$HEADROOM_FRACTION')) * float('${FLEET_SHARE_FRACTION:-1.0}') * 100:.4f}')" 2>>"$LOG")
+    log "$MEMBER: FLEET_SHARE_CEILING_PCT=${CEILING_PCT} (headroom_fraction=${HEADROOM_FRACTION} x FLEET_SHARE_FRACTION=${FLEET_SHARE_FRACTION})"
     export FLEET_SHARE_CEILING_PCT="$CEILING_PCT"
   fi
 fi
@@ -562,8 +574,8 @@ MODEL=$(jget "['llm']['model']")
 # charter instead of fixing it; dumbledore's rot hunt owns that tuning.
 MAX_TURNS=$(jget "['llm'].get('max_turns') or ''")
 # MAX_BUDGET is computed earlier, before the custom-runner branch, unscaled -- FLEET_SHARE_
-# CEILING_PCT (also computed earlier) is a separate signal a member self-reserves against via
-# maxx_lease.py, not a multiplier on this. See that block's comment.
+# CEILING_PCT (also computed earlier) is a separate signal (pacing_gate.py reads it to decide
+# run vs paced), not a multiplier on this. See that block's comment.
 
 PROMPT=$(awk 'BEGIN{d=0} /^---$/{d++; next} d>=2{print}' "$BEHAVIOR")
 if [ -z "$PROMPT" ]; then

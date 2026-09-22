@@ -2,13 +2,14 @@
 """pacing_hold_check.py -- pages when a pacing hold zeroes the WHOLE fleet for multiple
 consecutive hourly ticks with nobody told (gh#812).
 
-WHY: PR#797 added `maxx_share_ceiling.py`'s `block_over_pace()` branch, a deliberate hard
-stop that holds spend when the account's 5h session block is running ahead of linear pace
-(maxx's own `verdict=="over"` hits the same real-zero path). Both are honest, correct
-zeroes -- but once one trips, nothing told anyone. On 2026-09-10 it held nearly every
-fleet-kit member at `status=paced` for ~19 consecutive hours (~4 session blocks back to
-back); the only trace was `paced` rows in runs.jsonl/fleet.db and a per-member log line
-(run_member.sh's `PACED: ...` line) that nothing pages on.
+WHY: PR#797 added a deliberate hard stop (since simplified, gh#1215 -- run_member.sh now
+computes the ceiling directly from maxx's headroom_fraction gauge x FLEET_SHARE_FRACTION,
+no separate pace/block math) that holds spend when the account has genuinely no headroom
+(maxx's own `verdict=="over"` hits the same real-zero path). An honest, correct zero --
+but once it trips, nothing told anyone. On 2026-09-10 it held nearly every fleet-kit
+member at `status=paced` for ~19 consecutive hours; the only trace was `paced` rows in
+runs.jsonl/fleet.db and a per-member log line (run_member.sh's `PACED: ...` line) that
+nothing pages on.
 
 NOT THE SAME ALARM AS budget_read_check.sh. That script pages when the meter is
 UNREADABLE (maxx_reader.py returning a None fraction / label like `not_configured` or
@@ -116,8 +117,8 @@ def compose_page(streak_hours: int) -> tuple[str, str]:
     title = f"pacing hold: fleet-wide paced for {streak_hours}+ consecutive hours"
     body = (
         f"Every run recorded in runs.jsonl for the last {streak_hours} consecutive hourly "
-        "ticks landed status=paced -- maxx_share_ceiling.py computed a real 0.0000 ceiling "
-        "(its block_over_pace branch, PR#797, or maxx's own verdict=over hard stop), and "
+        "ticks landed status=paced -- run_member.sh computed a real 0.0000 ceiling from "
+        "maxx's headroom_fraction gauge (or maxx's own verdict=over hard stop), and "
         "pacing_gate.py correctly held every pass rather than spend through it (fk#781). "
         "This is NOT the unreadable-meter case budget_read_check.sh already pages for "
         "(maxx_reader.py returning label=not_configured/parse_fail with fraction=None) -- "

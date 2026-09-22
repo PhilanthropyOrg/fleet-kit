@@ -8,9 +8,7 @@
 # `instances/` parent tree those fractions used to be scanned from (that tree also carries
 # every instance's live CLAUDE_CODE_OAUTH_TOKEN/FLEET_MAXX_KEY, so mounting it wholesale would
 # leak credentials across instances). FLEET_SHARE_DIR is a small, purpose-built shared
-# directory -- same shape as FLEET_LEASE_DIR/maxx_lease.py's already-shipped fix for the
-# identical cross-instance-visibility problem -- that carries ONLY {instance, fraction,
-# published_at} per file, nothing secret.
+# directory that carries ONLY {instance, fraction, published_at} per file, nothing secret.
 #
 # Called from two places: entrypoint.sh at container boot (so a sibling has SOMETHING to read
 # even before this instance's first jefe pass), and check_share_sum.sh itself at the start of

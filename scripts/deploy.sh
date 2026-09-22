@@ -113,20 +113,15 @@ GH_TOKEN="${GH_TOKEN:-$(gh auth token 2>/dev/null || true)}"
 # so a direct run doesn't interleave with auto_deploy's own poll-tick log.
 LOG_DIR="${FLEET_LOG_DIR:-$HOME/Library/Logs/fleet-kit}"
 
-# ONE lease ledger for every instance on this box. Each instance keeps its own $INSTANCE_DIR
-# for logs/repo/env, but they all draw from a SINGLE maxx account pool, so a reservation
-# ledger only one instance can see coordinates nothing (live 2026-09-02: philanthropy and
-# fleet-kit-server-fleet each kept a private maxx-leases.json, both sat at `[]` while both
-# fleets ran, and maxx_share_ceiling.py's "already-coordinated" reserved_pct never contained
-# the other instance's spend). Deliberately OUTSIDE $INSTANCE_DIR -- that is the whole point.
-SHARED_LEASE_DIR="${FLEET_LEASE_DIR:-$HOME/.cache/fleet-kit/leases}"
-mkdir -p "$SHARED_LEASE_DIR"
-
-# Same shape, one number: every instance publishes just its own FLEET_SHARE_FRACTION here
-# (publish_share.sh) so check_share_sum.sh can sum every sibling's share from inside any one
-# container (gh#293) -- without bind-mounting the `instances/` parent tree wholesale, which
-# would leak every instance's fleet.env (live CLAUDE_CODE_OAUTH_TOKEN/FLEET_MAXX_KEY) into
-# every other instance's container. Deliberately OUTSIDE $INSTANCE_DIR, same as the lease dir.
+# Every instance publishes just its own FLEET_SHARE_FRACTION here (publish_share.sh) so
+# check_share_sum.sh can sum every sibling's share from inside any one container (gh#293) --
+# without bind-mounting the `instances/` parent tree wholesale, which would leak every
+# instance's fleet.env (live CLAUDE_CODE_OAUTH_TOKEN/FLEET_MAXX_KEY) into every other
+# instance's container. Deliberately OUTSIDE $INSTANCE_DIR.
+#
+# Was also home to a cross-instance maxx lease ledger (removed, gh#1215 -- it needed pacing
+# fields a fresh account never has and zeroed the whole instance instead of being imprecise;
+# Reif chose losing the coordination over losing an honest gauge read).
 SHARED_SHARE_DIR="${FLEET_SHARE_DIR:-$HOME/.cache/fleet-kit/shares}"
 mkdir -p "$SHARED_SHARE_DIR"
 mkdir -p "$LOG_DIR"
@@ -211,10 +206,8 @@ run_args() {
         -e FLEET_ENV_FILE=/fleet-kit/fleet.env \
         -e FLEET_WEBHOOK_PORT="$webhook_port" \
         -e FLEET_REPO=/repo \
-        -e FLEET_LEASE_DIR=/fleet-kit/leases \
         -e FLEET_SHARE_DIR=/fleet-kit/shares \
         -e FLEET_INSTANCE_NAME="$instance_name" \
-        -v "$SHARED_LEASE_DIR:/fleet-kit/leases" \
         -v "$SHARED_SHARE_DIR:/fleet-kit/shares" \
         -v "$INSTANCE_DIR/repo:/repo" \
         -v "$INSTANCE_DIR/logs:/var/log/fleet-kit" \
