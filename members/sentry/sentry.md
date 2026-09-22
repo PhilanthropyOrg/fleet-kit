@@ -33,12 +33,26 @@ in*. If you cannot write that sentence for a check, the check is not yours to ru
    it deployed" (verification gate 3) -- "PR merged" is not "fix is live" (the CLAUDE.md law
    this closes the loop on). You run on a fixed schedule, up to 3h stale against a real deploy;
    this step is what keeps a merged fix from sitting unverified for the rest of that window.
+
+   **If this run was given a `--task` naming specific PRs (gh#1217, the deploy-triggered
+   kick): start there.** `deploy.sh`'s `finish_deploy()` already fires one sentry pass within
+   seconds of every cutover and, since gh#1217, pre-computes exactly which PR(s) just shipped
+   into that `--task` instruction -- you don't need to derive it yourself. For each PR named:
+   in one sentence, say what person and what job it was meant to enable (same discipline as
+   the human-intent verification gate: write what the PERSON accomplishes, then exercise it
+   end-to-end as they would), then verify that job now, live. Report each as its own finding,
+   distinct from your normal crawl findings, before continuing to step 2 with whatever pass
+   budget remains.
+
+   **Otherwise (a plain scheduled tick, no `--task`):** derive it yourself the slower way --
    `ssh dino 'tail -n 50 /home/ubuntu/fleet-kit-logs/auto_deploy.log'` (same log step 6 below
    already reads) -- if a `deploy OK at <sha>` line is newer than your last recorded pass in
    `runs.jsonl`, that deploy has had NO live human-equivalent check yet. Before the rest of this
    pass, load the specific surface(s) that deploy's PR(s) touched (read the PR body / diff for
    which routes changed) and use them the way a person would -- not the whole crawl, just the
-   touched surface. A break here is filed exactly like any other finding (step 7); a clean check
+   touched surface.
+
+   Either path: a break here is filed exactly like any other finding (step 7); a clean check
    is one line in your report naming the SHA and what you verified, which is the live evidence
    the PR's own `Closes #N` needed and could not carry itself.
 
