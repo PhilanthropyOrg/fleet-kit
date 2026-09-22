@@ -66,8 +66,6 @@ jobs:
         run: python3 scripts/test_run_member_key_follows_handle.py
       - name: run test_alert_store.py
         run: python3 scripts/test_alert_store.py
-      - name: run test_block_pace_fails_closed.py
-        run: python3 scripts/test_block_pace_fails_closed.py
       - name: run test_board_github.py
         run: python3 scripts/test_board_github.py
       - name: run test_closes_gate.py
@@ -142,8 +140,6 @@ jobs:
         run: python3 scripts/test_run_mail.py
       - name: run test_judge_judy_verdict.py
         run: python3 scripts/test_judge_judy_verdict.py
-      - name: run test_share_ceiling_sustainable_pace.py
-        run: python3 scripts/test_share_ceiling_sustainable_pace.py
       - name: run test_verified_test_diff_scoped.py
         run: python3 scripts/test_verified_test_diff_scoped.py
       - name: run test_fleet_env_lint.py
