@@ -67,10 +67,22 @@ there outranks any ranking rule below. Cite the entry you acted on in your repor
    add `,mergedAt` to the `--json` field list so you can see when it landed.
    - **A merged PR references it** → the work is done, not unclaimed. Do NOT clear the label
      with the "re-claimable" comment (that invites a rebuild of an already-shipped fix, gh#3693).
-     Instead comment `marie: fleet:claimed left in place — merged PR #<PR> references this issue
-     and it's still open; likely needs a close/verify pass, not a rebuild.` and leave
-     `fleet:claimed` on so it isn't picked up as fresh build work either. A human or a future
-     pass can then confirm and close it.
+     **Before posting, read the issue's existing comments for this exact note first** (gh#7280:
+     unchanged reposting on every scan was pure gh-mutation spend for zero new information — 15x
+     on gh#4970 alone with no human close/verify pass ever landing). If a `marie: fleet:claimed
+     left in place` comment already names this SAME merged PR, skip the repost and just tally it
+     toward the count below instead. Otherwise comment `marie: fleet:claimed left in place —
+     merged PR #<PR> references this issue and it's still open; likely needs a close/verify
+     pass, not a rebuild.` and leave `fleet:claimed` on so it isn't picked up as fresh build work
+     either.
+     **Count how many times this note (posted this pass or found already there) now appears on
+     the issue.** At 3 or more, this has stopped being an ordinary wait-for-a-human case — apply
+     `fleet:needs-close-verify` (create it once, same idempotent pattern as every other fleet
+     label here: `gh label create fleet:needs-close-verify --color b60205 --description "3+
+     unresolved 'claimed left in place' notes; needs an actual close/verify pass, not another
+     repost" || true`) so Part B's walk below picks it up at the HEAD of its queue instead of
+     waiting for oldest-first ordering to reach it by chance. A human or a future pass can then
+     confirm and close it.
    - **No merged PR references it either** → stale claim. `gh issue edit <n> --remove-label
      fleet:claimed`, then `gh issue comment <n> --body "marie: cleared stale fleet:claimed — no
      open or merged PR references this issue. Re-claimable."`
@@ -79,6 +91,17 @@ A draft PR or one with recent commits is still live work — don't clear those. 
 PR at all," not "PR not done yet."
 
 ## Part B — cruft prune
+
+**Issues carrying `fleet:needs-close-verify` (gh#7280, Part A above) go first, before the
+oldest-first walk below.** A merged-PR claim whose "left in place" note has repeated 3+ times
+with no resolution is a stronger signal than plain age — waiting for oldest-first ordering to
+reach it by chance is exactly how gh#4970 collected 15 identical notes with nothing converging.
+Run the same real evidence check ("Already fixed" below — actual `gh pr list`/`git log`/`grep`
+verification, never a guess) against each: if the described bug is genuinely gone, close it
+citing the merged PR; if it's still genuinely blocked (gh#4970 has been re-checked 5+ times and
+correctly found still-blocked each time), leave it open, comment why, and remove the label
+anyway — `gh issue edit <n> --remove-label fleet:needs-close-verify`. Removing it either way
+stops the endless requeue, same reason Part C0's own label-removal rule does.
 
 Walk the rest of the open backlog (including issues you just left claimed-and-alive — skip
 those, they're active; also skip any `fleet:reif-priority` issue here — Part C has its own,
@@ -729,10 +752,15 @@ Never count a 0-surface job as clean — that is UNCLASSIFIED, a blind spot in t
 
 ## Report
 
-One line for each part: (A) how many `fleet:claimed` checked, how many cleared (issue numbers).
-(B) how many closed as cruft (issue numbers + one-word reason each: fixed/duplicate/obsolete/
+One line for each part: (A) how many `fleet:claimed` checked, how many cleared (issue numbers),
+how many "left in place" notes skipped as already-posted vs freshly posted (gh#7280), and how
+many issues newly crossed the 3-repeat threshold into `fleet:needs-close-verify` this pass
+(issue numbers). (B) how many closed as cruft (issue numbers + one-word reason each: fixed/duplicate/obsolete/
 superseded/off-vision), how many left alone because evidence was inconclusive, any A/B
-supersede conflicts flagged, **how far back through the corpus you got** (oldest issue number
+supersede conflicts flagged, how many `fleet:needs-close-verify` issues you cleared from the
+head of the queue this pass and their outcome (closed vs still-blocked, issue numbers) — a
+count that holds steady or rises means the queue is filling faster than it drains, same
+signal as C0's, **how far back through the corpus you got** (oldest issue number
 examined) so the next pass can resume rather than restart, and for every off-vision close, the
 specific vision line or newer issue it contradicted — that is the one close a human is most
 likely to want to argue with, so make it easy to audit. (C0) how many issues carried
