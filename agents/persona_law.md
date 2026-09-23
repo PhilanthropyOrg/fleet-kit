@@ -144,6 +144,26 @@ journeys, got 4 passed / 12 failed / 4 blocked, filed nothing, and reported QUIE
 sibling pass had logged the same failures 15 minutes earlier. Twelve broken user journeys
 reached the operator as one word.
 
+## 7d. A filed issue's title and body must describe the SAME finding
+
+gh#7279, found live 2026-09-22: philanthropy#7265 was filed with a title about one bug
+("PostHog's own claim-funnel cross-check is impossible and frozen: page_viewed 152x clicks...")
+and a body that was actually philanthropy#7261's body verbatim (report pages not linking to
+their own similar-orgs page — a completely different finding, from an earlier finding in the
+SAME pass). Neither half was fabricated; the pass had genuinely found both bugs and meant to
+file two issues, but the `gh issue create` call that produced #7265 pulled its body from the
+wrong draft. The result reads as a real, evidenced issue right up until a human or marie tries
+to act on the title's own topic and finds nothing about it anywhere on the issue.
+
+**If your pass investigates more than one finding before filing, re-read the exact title and
+body you are about to pass to `gh issue create` — together, immediately before running the
+command — and confirm they name the same defect.** This is the one command in this fleet where
+a single wrong argument produces a plausible-looking, fully-evidenced artifact about the wrong
+thing, and nothing downstream (marie's triage, a builder's PRD read) is positioned to catch it —
+each of them trusts that a filed issue's title and body already agree. A last look at literally
+what you are about to submit, not what you meant to submit, is the only place this is cheap to
+catch.
+
 ## 7b. Read your predecessor before you re-derive — a recorded conclusion is evidence
 
 Found live 2026-09-09: 63 of 208 self-critiqued passes in ONE day, across 11 of 11 members, named
