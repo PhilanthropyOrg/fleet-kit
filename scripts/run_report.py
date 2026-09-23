@@ -416,6 +416,21 @@ def build_record(*, member: str, run_id: str, kind: str, exit_code: int,
     return rec
 
 
+def _log_plain_words_for_exception(rec: dict, exc: Exception) -> None:
+    """gh#6287 etc: this catch-all used to swallow an import/call failure with zero trace --
+    duplicated (not imported) from run_mail._log_plain_failure so a broken `import run_mail`
+    still gets logged instead of vanishing along with the module that would have logged it."""
+    try:
+        log_dir = Path(os.environ.get("FLEET_LOG_DIR", "/var/log/fleet-kit"))
+        log_dir.mkdir(parents=True, exist_ok=True)
+        line = {"ts": time.time(), "member": rec.get("member"), "run_id": rec.get("run_id"),
+                "reason": "plain-words-for-exception", "detail": repr(exc)[:500]}
+        with open(log_dir / "plain-words.log", "a") as f:
+            f.write(json.dumps(line) + "\n")
+    except Exception:  # noqa: BLE001 -- a diagnostic must never be what breaks the side channel
+        pass
+
+
 def plain_words_for(rec: dict) -> str:
     """The plain-English rewrite for a finished run that said something, or ''."""
     if os.environ.get("FLEET_RUN_PLAIN") != "1":
@@ -427,7 +442,8 @@ def plain_words_for(rec: dict) -> str:
         if not run_mail.wants_mail(rec):
             return ""
         return run_mail.plain_words(rec)
-    except Exception:  # noqa: BLE001 -- side channel
+    except Exception as e:  # noqa: BLE001 -- side channel
+        _log_plain_words_for_exception(rec, e)
         return ""
 
 
