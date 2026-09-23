@@ -5,7 +5,9 @@ from __future__ import annotations
 import io
 import json
 import os
+import subprocess
 import sys
+import tempfile
 import unittest
 import unittest.mock
 from pathlib import Path
@@ -114,6 +116,73 @@ class Delivery(unittest.TestCase):
              unittest.mock.patch.object(mb, "deliver", side_effect=RuntimeError("boom")), \
              unittest.mock.patch.object(mb, "log"):
             self.assertEqual(run_mail.maybe_mail(REC), "error")
+
+
+class PlainWordsFailuresAreDiagnosable(unittest.TestCase):
+    """gh#6287/#6288/#6289/#6334/#6343: 0 of 98 sampled finished runs ever carried a `plain`
+    field, and every one of plain_words()'s four failure paths collapsed into an
+    indistinguishable "" with zero trace. Each path must now log which one fired."""
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmpdir.cleanup)
+        self.log_file = Path(self._tmpdir.name) / "plain-words.log"
+        patcher = unittest.mock.patch.object(run_mail, "PLAIN_LOG_FILE", self.log_file)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _last_reason(self):
+        lines = self.log_file.read_text().strip().splitlines()
+        return json.loads(lines[-1])
+
+    def test_no_account_pool_is_logged(self):
+        with unittest.mock.patch.object(run_mail, "KIT", Path("/does-not-exist")):
+            self.assertEqual(run_mail.plain_words({"member": "m", "run_id": "r1"}), "")
+        self.assertEqual(self._last_reason()["reason"], "no-account-pool")
+
+    def test_timeout_is_logged(self):
+        with unittest.mock.patch.object(subprocess, "run",
+                                         side_effect=subprocess.TimeoutExpired(cmd="x", timeout=120)):
+            self.assertEqual(run_mail.plain_words({"member": "m", "run_id": "r2"}), "")
+        entry = self._last_reason()
+        self.assertEqual(entry["reason"], "timeout")
+        self.assertEqual(entry["run_id"], "r2")
+
+    def test_subprocess_error_is_logged(self):
+        with unittest.mock.patch.object(subprocess, "run", side_effect=OSError("boom")):
+            self.assertEqual(run_mail.plain_words({"member": "m", "run_id": "r3"}), "")
+        self.assertEqual(self._last_reason()["reason"], "subprocess-error")
+
+    def test_non_zero_exit_is_logged_with_rc_and_stderr(self):
+        result = subprocess.CompletedProcess(args=["x"], returncode=3, stdout="", stderr="pool exhausted")
+        with unittest.mock.patch.object(subprocess, "run", return_value=result):
+            self.assertEqual(run_mail.plain_words({"member": "m", "run_id": "r4"}), "")
+        entry = self._last_reason()
+        self.assertEqual(entry["reason"], "non-zero-exit")
+        self.assertIn("rc=3", entry["detail"])
+        self.assertIn("pool exhausted", entry["detail"])
+
+    def test_oversized_output_is_logged(self):
+        result = subprocess.CompletedProcess(args=["x"], returncode=0, stdout="x" * 2000, stderr="")
+        with unittest.mock.patch.object(subprocess, "run", return_value=result):
+            self.assertEqual(run_mail.plain_words({"member": "m", "run_id": "r5"}), "")
+        self.assertEqual(self._last_reason()["reason"], "empty-or-oversized-output")
+
+    def test_success_writes_no_log_line(self):
+        result = subprocess.CompletedProcess(args=["x"], returncode=0, stdout="A plain sentence.", stderr="")
+        with unittest.mock.patch.object(subprocess, "run", return_value=result):
+            self.assertEqual(run_mail.plain_words({"member": "m", "run_id": "r6"}), "A plain sentence.")
+        self.assertFalse(self.log_file.exists())
+
+    def test_plain_words_for_exception_is_logged_even_if_run_mail_call_raises(self):
+        with unittest.mock.patch.object(run_mail, "wants_mail", side_effect=RuntimeError("kaboom")), \
+             unittest.mock.patch.dict(os.environ, {"FLEET_RUN_PLAIN": "1", "FLEET_LOG_DIR": self._tmpdir.name}):
+            rec = {"member": "m", "run_id": "r7", "outcome": "did a thing"}
+            self.assertEqual(run_report.plain_words_for(rec), "")
+        log_file = Path(self._tmpdir.name) / "plain-words.log"
+        entry = json.loads(log_file.read_text().strip().splitlines()[-1])
+        self.assertEqual(entry["reason"], "plain-words-for-exception")
+        self.assertIn("kaboom", entry["detail"])
 
 
 class RunReportIsTheChokepoint(unittest.TestCase):

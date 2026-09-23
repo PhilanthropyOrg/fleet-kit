@@ -22,15 +22,34 @@ Rules:
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import pathlib
 import subprocess
 import sys
+import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 KIT = pathlib.Path(__file__).resolve().parent.parent
+# gh#6287/#6288/#6289/#6334/#6343/#6419: plain_words() collapsed subprocess-error,
+# non-zero-exit, timeout and empty/oversized output into one indistinguishable "" -- 0 of 98
+# sampled finished runs across 6 members ever carried a `plain` field, and nobody could tell
+# which of the four reasons fired without reproducing the call by hand. This is the one place
+# that says why, without ever raising or slowing the caller down.
+PLAIN_LOG_FILE = pathlib.Path(os.environ.get("FLEET_LOG_DIR", "/var/log/fleet-kit")) / "plain-words.log"
+
+
+def _log_plain_failure(rec: dict, reason: str, detail: str = "") -> None:
+    try:
+        PLAIN_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        line = {"ts": time.time(), "member": rec.get("member"), "run_id": rec.get("run_id"),
+                "reason": reason, "detail": detail[:500]}
+        with open(PLAIN_LOG_FILE, "a") as f:
+            f.write(json.dumps(line) + "\n")
+    except Exception:  # noqa: BLE001 -- a diagnostic must never be what breaks the side channel
+        pass
 # reported_nothing added 2026-09-12 (Reif): "I dont want to get this mail anymore" -- a pass
 # that ran to completion and said nothing is still tracked in runs.jsonl/fleet_metrics.py for
 # signal_rate, it just no longer pages a human. See run_report.py's classify() docstring for
@@ -135,9 +154,11 @@ def raw_text(rec: dict) -> str:
 
 
 def plain_words(rec: dict) -> str:
-    """Best-effort plain-English rewrite. Empty string on any failure."""
+    """Best-effort plain-English rewrite. Empty string on any failure -- see plain-words.log
+    (PLAIN_LOG_FILE) for which of the four reasons fired."""
     pool = KIT / "scripts" / "account_pool.sh"
     if not pool.exists():
+        _log_plain_failure(rec, "no-account-pool", str(pool))
         return ""
     script = (
         f'. "{pool}"; account_pool_run claude -p "$1" --model "$2" --output-format text '
@@ -149,12 +170,20 @@ def plain_words(rec: dict) -> str:
         r = subprocess.run(["bash", "-c", script, "run_mail", PLAIN_PROMPT + raw_text(rec)[:6000],
                             PLAIN_MODEL, PLAIN_BUDGET_USD],
                            capture_output=True, text=True, timeout=PLAIN_TIMEOUT_S)
-    except (subprocess.SubprocessError, OSError):
+    except subprocess.TimeoutExpired:
+        _log_plain_failure(rec, "timeout", f"budget={PLAIN_TIMEOUT_S}s")
+        return ""
+    except (subprocess.SubprocessError, OSError) as e:
+        _log_plain_failure(rec, "subprocess-error", repr(e))
         return ""
     if r.returncode != 0:
+        _log_plain_failure(rec, "non-zero-exit", f"rc={r.returncode} stderr={(r.stderr or '').strip()[-300:]}")
         return ""
     text = (r.stdout or "").strip()
-    return text if 0 < len(text) <= 1500 else ""
+    if not (0 < len(text) <= 1500):
+        _log_plain_failure(rec, "empty-or-oversized-output", f"len={len(text)}")
+        return ""
+    return text
 
 
 def _clean_block(text: str) -> str:
