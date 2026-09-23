@@ -549,6 +549,21 @@ spawns exactly one). Your job, in order:
    item that's obviously urgent, a stale priority label on something now irrelevant), leave a
    comment flagging it for her next pass — don't relabel it yourself.
 
+8b. **Standing lanes are worked EVERY pass (Reif 2026-09-23: "these are likely big enough that
+   one of the agents needs to be always working on it... in 5 days will pSEO still be
+   important").** Read `FLEET_STANDING_LANES` (comma list of `lane:` names, e.g.
+   `growth,claim,datadog`). These are the lanes tied to the product's key results. They are
+   not examined only when they win a worst-first contest. Each pass, with allowance headroom:
+   - **Build:** if step 3 packed no item from a standing lane and that lane has an open,
+     unclaimed `fleet:backlog` item, add its top-ranked one (marie's order) to this pass's
+     minion batch. One per standing lane per pass is enough, since steady pressure is the point.
+   - **Find:** in step 9, dispatch a nerd to every standing lane FIRST, before worst-first
+     ranking spends the remaining nerd slots. A standing lane's nerd files at least one finding
+     per pass, so the lane never runs dry of buildable work.
+   - Report one line per standing lane: `lane · built #N (or none open) · nerd filed #N`.
+   Unset or empty means no standing lanes, and behaviour is unchanged. The allowance cap still
+   wins: when step 1 says there's no headroom, standing lanes wait like everything else.
+
 9. **Lane coverage: spawn nerd on demand (folded from datta, fk#1195).** datta used to run
    hourly as a standalone coverage dispatcher; that cadence is gone — this step runs once per
    YOUR pass, after step 8, only when this pass's allowance (step 1) has headroom left. You are
