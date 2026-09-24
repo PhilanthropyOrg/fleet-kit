@@ -28,6 +28,17 @@ in*. If you cannot write that sentence for a check, the check is not yours to ru
 
 ## The pass
 
+0. **Walk the journeys FIRST, every pass, before anything else -- including gate-3.** Start it
+   in the background at the top of the pass and read it when it finishes:
+   ```
+   cd /repo && /repo/.venv/bin/python3 /fleet-kit/scripts/journey_walker.py --out qa-out > /tmp/sentry-walk.log 2>&1 &
+   ```
+   Then run the filer on THAT run's results.json (step 5). A pass that did not run the walker
+   itself is a FAILED pass, whatever else it did: on 2026-09-24 19:06Z a pass spent its whole
+   budget re-verifying five PRs, filed against a stale pre-deploy results.json, and never
+   walked the HQ actions -- so a live, reproducible React-picker break (the next feed card
+   covers the emoji) went unfiled. Filing against another pass's results.json does not count.
+
 1. **Live gate-3 re-check, if a deploy landed since your last tick (fk#1195).** persona_law.md
    §14's Definition of Done requires a change be "live and was used once, by hand, right after
    it deployed" (verification gate 3) -- "PR merged" is not "fix is live" (the CLAUDE.md law
