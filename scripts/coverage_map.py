@@ -210,7 +210,7 @@ def last_runs_from_db() -> dict[str, float] | None:
     db = LOG_DIR / "fleet.db"
     if not db.exists():
         return None
-    con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=60)  # members write it all day
     try:
         rows = con.execute("SELECT member, MAX(recorded_at) FROM runs GROUP BY member").fetchall()
     finally:
@@ -237,6 +237,10 @@ def file_gaps(m: dict, repo: str | None = None) -> list[dict]:
     for g in m["retired_gaps"]:
         died.setdefault(g["id"], []).append(g["lane"])
     out = []
+    try:  # one board read per run, not one per issue; on failure file_issue retries and reports it
+        open_issues = issue_cluster.list_open(repo) if by_area else []
+    except (RuntimeError, ValueError):
+        open_issues = None
     for area, its in by_area.items():
         body = (f"Daily blind-spot audit (`scripts/coverage_map.py`, librarian): these **{area}** checks "
                 "exist on the live system but no live fleet member's `mandate.watches` names them, so "
@@ -249,7 +253,8 @@ def file_gaps(m: dict, repo: str | None = None) -> list[dict]:
                   "members: fold it into the closest lane), and the next daily map scores it watched.")
         out.append(issue_cluster.file_issue(f"blind spot: {area} watched by no fleet member", body,
                                             ["fleet:backlog", LANE_LABEL, issue_cluster.MEGA_LABEL],
-                                            repo=repo, who="librarian") | {"area": area})
+                                            repo=repo, who="librarian", open_issues=open_issues)
+                   | {"area": area})
     return out
 
 
