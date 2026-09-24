@@ -46,6 +46,7 @@ import fleet_kpi         # noqa: E402  (per-member headline-count extraction fro
 import fleet_stats       # noqa: E402  (Stats page aggregation: run timeline, tokens, backlog history)
 import fleet_metrics     # noqa: E402  (named run-derived metrics; items_per_run for the scoreboard)
 import scoreboard        # noqa: E402  (2026-09-24 throughput scoreboard: items/run, closed/run, live, trend)
+import issues_per_hour   # noqa: E402  (headline metric: issues resolved per hour, mega-credit aware)
 import member_spec       # noqa: E402
 import overrides as ov   # noqa: E402  ('overrides' shadows nothing here; keep the module name clear)
 
@@ -617,7 +618,7 @@ def _scoreboard_merged_prs(since_day: str) -> list[dict]:
     A failed read is not cached (an empty list would pin a false zero for the whole TTL)."""
     def produce():
         raw = _gh("pr", "list", "--state", "merged", "--search", f"merged:>={since_day}", "--limit", "1000",
-                  "--json", "number,headRefName,mergedAt,closingIssuesReferences", timeout=90)
+                  "--json", "number,headRefName,mergedAt,closingIssuesReferences,mergeCommit", timeout=90)
         try:
             rows = json.loads(raw) if raw else []
         except ValueError:
@@ -639,6 +640,30 @@ def _scoreboard_deploy_runs() -> list[dict]:
             rows = []
         return rows, bool(rows)
     return _cached(f"scoreboard_deploys:{wf}", 1800, produce)
+
+
+def _issues_per_hour_closed_issues(since_day: str) -> list[dict]:
+    """Issues GitHub shows closed since `since_day` -- issues_per_hour.py's closed-without-PR
+    series (dupe/stale/superseded closes, and mega-children closed by marie's "tracked in #M").
+    A failed read is not cached, same reasoning as `_scoreboard_merged_prs`."""
+    def produce():
+        raw = _gh("issue", "list", "--state", "closed", "--search", f"closed:>={since_day}",
+                  "--limit", "1000", "--json", "number,closedAt", timeout=90)
+        try:
+            rows = json.loads(raw) if raw else []
+        except ValueError:
+            rows = []
+        return rows, bool(rows)
+    return _cached(f"iph_closed_issues:{since_day}", 1800, produce)
+
+
+def _issues_per_hour_megas() -> dict[int, list[int]]:
+    """{mega_number: [child_number, ...]}, cached -- see issues_per_hour.load_megas()."""
+    def produce():
+        megas = issues_per_hour.load_megas(None, run=lambda cmd: subprocess.run(
+            cmd, cwd=REPO or None, capture_output=True, text=True, timeout=90))
+        return megas, bool(megas)
+    return _cached("iph_megas", 1800, produce)
 
 
 def _fleet_prs_opened() -> list[dict]:
@@ -847,6 +872,19 @@ def metrics_snapshot() -> dict:
             "value": trend, "bad": trend is not None and trend > 0,
             "sub": "net open-backlog change, 7 days (negative = draining)",
             "series": daily_series("fleet.backlog_trend")}
+
+        # Headline: issues resolved per hour (issues_per_hour.py) -- merged PR closes it AND
+        # the change is deployed; mega-credit aware. Full graph is /api/iph; this
+        # is the one number for the scoreboard tile + Reif HQ's /api/metrics poll.
+        megas = _issues_per_hour_megas()
+        resolved = issues_per_hour.resolved_issues(
+            merged14, deploys, megas, is_ancestor=lambda c, d: issues_per_hour.git_is_ancestor(c, d, REPO or "."))
+        iph_series = issues_per_hour.hourly_series(resolved, [])
+        iph_rate = iph_series["current_24h_rate"]
+        upsert("fleet.issues_resolved_per_hour", iph_rate)
+        out["fleet.issues_resolved_per_hour"] = {
+            "value": iph_rate, "sub": "merged + deployed, mega-credit aware, 24h avg",
+            "series": daily_series("fleet.issues_resolved_per_hour")}
         db.commit()
     finally:
         db.close()
@@ -1767,6 +1805,26 @@ class Handler(BaseHTTPRequestHandler):
                 names = sorted({r.get("member") for r in windowed if r.get("member")})
             out = [fleet_kpi.sum_kpi_over_runs(name, windowed) for name in names]
             self._json({"kpi": out, **meta})
+            return
+        if path == "/api/iph":  # short name: fleet_home.html's own 48KB cap can't spend bytes on it
+            # The headline metric (issues_per_hour.py): hourly bars for the last 7 days,
+            # stacked direct/mega-child credit, 24h+7d averages, closed-without-PR muted
+            # series. Real gh reads, each independently cached (30 min) -- see the three
+            # _issues_per_hour_*/_scoreboard_* helpers above.
+            since_day = _central_day(time.time() - 8 * 86400)
+            merged = _scoreboard_merged_prs(since_day)
+            deploys = _scoreboard_deploy_runs()
+            closed = _issues_per_hour_closed_issues(since_day)
+            megas = _issues_per_hour_megas()
+            resolved = issues_per_hour.resolved_issues(
+                merged, deploys, megas, is_ancestor=lambda c, d: issues_per_hour.git_is_ancestor(c, d, REPO or "."))
+            no_pr = issues_per_hour.closed_without_pr(closed, merged)
+            series = issues_per_hour.hourly_series(resolved, no_pr)
+            self._json({
+                "series": series, "r24": series["current_24h_rate"],
+                "svg": issues_per_hour.chart_svg(series),
+                "unavailable": not merged and not deploys,
+            })
             return
         if path == "/api/stats/runs_summary":
             qs = parse_qs(urlparse(self.path).query)

@@ -92,6 +92,15 @@
    "history": "daily"
   },
   {
+   "id": "fleet.issues_resolved_per_hour",
+   "label": "Issues resolved / hr",
+   "unit": "issues/hr",
+   "window": "24h avg",
+   "source": "issues_per_hour.py: merged PR closes it AND deployed, mega-credit aware",
+   "lane": "fleet",
+   "history": "daily"
+  },
+  {
    "id": "gh.actions_spend_mtd",
    "label": "GitHub Actions",
    "unit": "USD",
