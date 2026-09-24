@@ -59,6 +59,7 @@ from pathlib import Path
 KIT_DIR = Path(__file__).resolve().parent.parent
 LOG_DIR = Path(os.environ.get("FLEET_LOG_DIR", Path.home() / "Library" / "Logs" / "fleet-kit")).expanduser()
 LOG_FILE = LOG_DIR / "webhook_receiver.log"
+MERGED_PRS_FILE = LOG_DIR / "merged-prs.jsonl"
 SECRET = os.environ.get("FLEET_WEBHOOK_SECRET", "")
 # Which workflows count as a "the-fixer should look at this" failure. Space-separated
 # filenames, matched against workflow_run.path's basename -- same env-var convention as
@@ -235,6 +236,10 @@ class Handler(BaseHTTPRequestHandler):
 
         action = payload.get("action", "")
         pr = payload.get("pull_request", {})
+
+        if action == "closed" and pr.get("merged"):
+            record_merged_pr(payload)
+
         if pr.get("draft"):
             log(f"ignored: pull_request {action} on draft PR #{pr.get('number', '?')}")
             return
@@ -367,6 +372,52 @@ def should_fire(payload: dict) -> tuple[bool, str]:
     if branch == default:
         return True, "default branch"
     return False, f"head_branch {branch!r} is not the default branch {default!r}"
+
+
+CLOSES_RE = re.compile(
+    r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s*#(\d+)", re.IGNORECASE
+)
+
+
+def closes_refs(body: str) -> list[int]:
+    """'Closes #N' / 'Fixes #N' / 'Resolves #N' (any tense, GitHub's own auto-close set),
+    deduped and in first-seen order -- a PR body commonly repeats the same ref."""
+    seen: list[int] = []
+    for m in CLOSES_RE.finditer(body or ""):
+        n = int(m.group(1))
+        if n not in seen:
+            seen.append(n)
+    return seen
+
+
+def merged_pr_record(payload: dict) -> dict:
+    """The one JSON line appended to logs/merged-prs.jsonl per merged PR -- Reif HQ's webhook
+    task: number, title, url, merged_at, author, and any 'Closes #N' refs from the body."""
+    pr = payload.get("pull_request") or {}
+    return {
+        "number": pr.get("number"),
+        "title": pr.get("title") or "",
+        "url": pr.get("html_url") or "",
+        "merged_at": pr.get("merged_at"),
+        "author": (pr.get("user") or {}).get("login") or "",
+        "closes": closes_refs(pr.get("body") or ""),
+    }
+
+
+def record_merged_pr(payload: dict) -> None:
+    """Append-only, one line per merge -- only the default branch counts as a fleet-kit PR
+    Reif's chat cares about; a merge into a feature/release branch is not 'done'."""
+    pr = payload.get("pull_request") or {}
+    base = (pr.get("base") or {}).get("ref") or ""
+    default = (payload.get("repository") or {}).get("default_branch") or "main"
+    if base != default:
+        log(f"merged-pr ignored: PR #{pr.get('number', '?')} merged into {base!r}, not default {default!r}")
+        return
+    record = merged_pr_record(payload)
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    with open(MERGED_PRS_FILE, "a") as fh:
+        fh.write(json.dumps(record) + "\n")
+    log(f"merged-pr recorded: #{record['number']} {record['title']!r}")
 
 
 def env_value(key: str) -> str:
