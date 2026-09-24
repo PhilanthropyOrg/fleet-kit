@@ -25,13 +25,15 @@ push to one; this fires it immediately instead. Safe to fire repeatedly on rapid
 judge-judy's own checklist only reviews a head with no fresh fleet-code-review status, so a
 redundant trigger is a fast no-op pass, never a double review.
 
-Also serves two per-caller-token routes (fk#1124/fk#1129), auth'd by webhook_auth.caller_for
+Also serves three per-caller-token routes (fk#1124/fk#1129), auth'd by webhook_auth.caller_for
 against FLEET_WEBHOOK_TOKENS -- neither the GitHub HMAC secret above nor the inbox route's
 Svix secret, its own scheme, so a canary or a CI job never needs a GitHub-shaped credential:
   POST /webhook/intake  -- one central input dump (fk#1129 slice 2): any non-email input
                            (alert/monitoring/github/forward/steering) lands in the SAME
                            inbox.jsonl store as /webhook/inbox, source=<caller>, then the
                            same inbox.py apply() triage runs.
+  POST /webhook/prod-alert -- a prod box's START/RESOLVE for one alert signature, deduped on
+                           idempotency_key, appended to prod-alerts.jsonl for Reif HQ.
   POST /webhook/run     -- fire one fleet member now, off-cron, with the caller's own
                            credential (fk#1124) -- same Popen path /api/run_now uses, factored
                            into one function so there is ONE spawn path, not two.
@@ -60,6 +62,7 @@ KIT_DIR = Path(__file__).resolve().parent.parent
 LOG_DIR = Path(os.environ.get("FLEET_LOG_DIR", Path.home() / "Library" / "Logs" / "fleet-kit")).expanduser()
 LOG_FILE = LOG_DIR / "webhook_receiver.log"
 MERGED_PRS_FILE = LOG_DIR / "merged-prs.jsonl"
+PROD_ALERTS_FILE = LOG_DIR / "prod-alerts.jsonl"
 SECRET = os.environ.get("FLEET_WEBHOOK_SECRET", "")
 # Which workflows count as a "the-fixer should look at this" failure. Space-separated
 # filenames, matched against workflow_run.path's basename -- same env-var convention as
@@ -114,6 +117,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path.endswith("/webhook/run"):
             self._handle_run(body)
+            return
+        if path.endswith("/webhook/prod-alert"):
+            self._handle_prod_alert(body)
             return
         sig = self.headers.get("X-Hub-Signature-256", "")
 
@@ -304,6 +310,25 @@ class Handler(BaseHTTPRequestHandler):
             _launch_member("dont-shoot-the-messenger", ["--task", "inbox"])
         self.send_response(200); self.end_headers(); self.wfile.write(b"stored")
 
+    def _handle_prod_alert(self, body: bytes) -> None:
+        """POST /webhook/prod-alert -- a prod box's START/RESOLVE transition for one alert
+        signature (nonprofit-atlas scripts/box/hq_alert.py). Same per-caller bearer tokens as
+        /webhook/intake. Deduped on idempotency_key (the sender retries an unacked push with the
+        same key), then appended to prod-alerts.jsonl, which notify_hq_prod_alert.py (host side,
+        systemd .path) hands to Reif HQ as a headless job."""
+        caller = self._caller()
+        if not caller:
+            log(f"prod-alert REJECTED: bad or missing token from {self.client_address[0]}")
+            self.send_response(401); self.end_headers(); return
+        try:
+            record = prod_alert_record(json.loads(body), caller)
+        except (json.JSONDecodeError, ValueError) as exc:
+            self._json(400, {"ok": False, "error": str(exc)[:200]}); return
+        fresh = record_prod_alert(record)
+        log(f"prod-alert {'recorded' if fresh else 'duplicate'}: {record['transition'].upper()} "
+            f"{record['signature']} caller={caller} key={record['idempotency_key']}")
+        self._json(200, {"ok": True, "duplicate": not fresh})
+
     def _caller(self) -> str | None:
         import webhook_auth
         return webhook_auth.caller_for(self.headers.get("Authorization"),
@@ -418,6 +443,60 @@ def record_merged_pr(payload: dict) -> None:
     with open(MERGED_PRS_FILE, "a") as fh:
         fh.write(json.dumps(record) + "\n")
     log(f"merged-pr recorded: #{record['number']} {record['title']!r}")
+
+
+PROD_ALERT_TRANSITIONS = {"start", "resolve"}
+
+
+def prod_alert_record(payload, caller: str) -> dict:
+    """Validated, size-clipped JSON line for prod-alerts.jsonl. Raises ValueError on a bad
+    shape -- this text ends up in an HQ prompt, so only known fields, bounded lengths."""
+    if not isinstance(payload, dict):
+        raise ValueError("body must be a JSON object")
+    sig = str(payload.get("signature") or "").strip()
+    transition = str(payload.get("transition") or "").strip()
+    key = str(payload.get("idempotency_key") or "").strip()
+    if not sig or len(sig) > 200:
+        raise ValueError("signature required (<=200 chars)")
+    if transition not in PROD_ALERT_TRANSITIONS:
+        raise ValueError(f"transition must be one of {sorted(PROD_ALERT_TRANSITIONS)}")
+    if not re.fullmatch(r"[A-Za-z0-9_-]{8,128}", key):
+        raise ValueError("idempotency_key required ([A-Za-z0-9_-]{8,128})")
+
+    def _int(v):
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return None
+
+    return {
+        "received_at": int(time.time()),
+        "caller": caller,
+        "host": str(payload.get("host") or "")[:100],
+        "signature": sig,
+        "transition": transition,
+        "start_ts": _int(payload.get("start_ts")),
+        "observed_ts": _int(payload.get("observed_ts")),
+        "title": str(payload.get("title") or "")[:200],
+        "detail": str(payload.get("detail") or "")[:500],
+        "idempotency_key": key,
+    }
+
+
+def record_prod_alert(record: dict) -> bool:
+    """Append unless this idempotency_key is already in the file. True = new. Locked, so two
+    concurrent retries of the same push cannot both pass the check."""
+    import fcntl
+
+    PROD_ALERTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with open(PROD_ALERTS_FILE, "a+") as fh:
+        fcntl.flock(fh, fcntl.LOCK_EX)
+        fh.seek(0)
+        needle = f'"idempotency_key": "{record["idempotency_key"]}"'
+        if any(needle in line for line in fh):
+            return False
+        fh.write(json.dumps(record) + "\n")
+    return True
 
 
 def env_value(key: str) -> str:

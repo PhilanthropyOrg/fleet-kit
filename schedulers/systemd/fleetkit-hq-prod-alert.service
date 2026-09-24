@@ -1,0 +1,8 @@
+[Unit]
+Description=Hand new prod alerts (START/RESOLVE from atlas-serve) to Reif HQ via ~/reif-chat/job.sh
+
+[Service]
+Type=oneshot
+User={{USER}}
+Environment=PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+ExecStart=/usr/bin/env python3 {{KIT_PATH}}/scripts/notify_hq_prod_alert.py {{INSTANCE_DIR}}/logs/prod-alerts.jsonl
