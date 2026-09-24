@@ -46,7 +46,10 @@ class ProxyDeployRetireOrderTests(unittest.TestCase):
 
     def test_abandons_when_retired_still_running(self):
         body = self._proxy_deploy_body()
-        self.assertIn("return 1", body.split("running \"$RETIRED_MARKER\"", 1)[1][:400])
+        # fk#1281: abandoning is now bounded by RETIRE_MAX_S, so the guard is longer -- the
+        # abandon must still come BEFORE the past-the-budget terminate branch.
+        guard = body.split("running \"$RETIRED_MARKER\"", 1)[1]
+        self.assertIn("return 1", guard[:guard.index("terminate_and_stop")])
 
     def test_removes_retired_only_after_health_check_passes(self):
         body = self._proxy_deploy_body()
