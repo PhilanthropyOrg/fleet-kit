@@ -291,7 +291,13 @@ do_rollback() {
 PROXY_CADDYFILE="${FLEET_CADDYFILE:-$HOME/Caddyfile}"
 LIVE_PORTS_FILE="$INSTANCE_DIR/live_ports"
 RETIRED_PORTS_FILE="$INSTANCE_DIR/retired_ports"
-RETIRE_MAX_S="${FLEET_RETIRE_MAX_S:-7200}"
+# fk#1281: how long a retired build may keep finishing in-flight passes before they are
+# terminated (status=killed, safe to re-run) and it is stopped. Was 7200s, and the retired
+# build kept STARTING passes meanwhile, so in practice the drain never ended and every deploy
+# tick for 2h logged ABANDONED. 15 minutes covers the median pass; a longer pass is retried.
+RETIRE_MAX_S="${FLEET_RETIRE_MAX_S:-900}"
+# After SIGTERM, how long the terminated passes get to write their status=killed rows.
+RETIRE_KILL_GRACE_S="${FLEET_RETIRE_KILL_GRACE_S:-60}"
 
 live_ports() {
     # "<view> <webhook>" of the container that is live NOW. Before the first proxy-mode deploy
@@ -332,30 +338,98 @@ caddy_reload() {
 disable_cron_in() { podman exec "$1" sh -c 'mv -f /etc/cron.d/fleet-kit /etc/cron.d/fleet-kit.retired 2>/dev/null || true' 9>&- 2>/dev/null || true; }
 enable_cron_in()  { podman exec "$1" sh -c 'mv -f /etc/cron.d/fleet-kit.retired /etc/cron.d/fleet-kit 2>/dev/null || true' 9>&- 2>/dev/null || true; }
 
+# fk#1281: disabling cron alone did not stop a retired build from STARTING passes. Measured
+# 2026-09-24 in philanthropy-retired, 50 min after cutover: a gru pass that began at 14:02
+# (before cutover) had spawned 2 nerd passes and 3 worktree_builder passes from its own Bash
+# tool, judge-judy's while-loop (launched by the webhook receiver) was still merging PRs 2.5h
+# in, and its dashboard's fleet.db sync thread was fighting the live one for the write lock.
+# retire_services_in closes every one of those doors at cutover:
+#   - /fleet-kit/.retired  -> fleet_enabled_or_exit refuses every NEW pass in this container
+#                             (run_member.sh, worktree_builder.sh, judge-judy.sh, ... -- and
+#                             judge-judy's loop checks it before each next PR). It lives in the
+#                             container's own layer; fleet.env is shared with the live build.
+#   - fleet_view_server.py -> stopped: the retired dashboard is no longer behind caddy, and it
+#                             was the second fleet.db writer that held the lock (fk#1281).
+#   - webhook_receiver.py  -> stopped: caddy no longer routes webhooks to it, and it can launch
+#                             members. Children it already launched run in their own session
+#                             (start_new_session=True) and are unaffected.
+# In-flight passes keep running; only NEW ones are refused. --rollback restarts the container.
+retire_services_in() {
+    podman exec "$1" sh -c 'date -u +%s > /fleet-kit/.retired
+        pkill -TERM -f "scripts/fleet_view_server[.]py" 2>/dev/null
+        pkill -TERM -f "scripts/webhook_receiver[.]py" 2>/dev/null
+        true' 9>&- 2>/dev/null || true
+}
+
+# Every script that is a pass (or dispatches one). Used to count what is still in flight in a
+# retired build and, once RETIRE_MAX_S is up, to terminate exactly those.
+PASS_PATTERN='bash .*(run_member|worktree_builder|judge-judy)[.]sh'
+inflight_in() {
+    local n
+    n="$(podman exec "$1" pgrep -c -f "$PASS_PATTERN" 2>/dev/null 9>&- | head -1 | tr -cd '0-9' || true)"
+    echo "${n:-0}"
+}
+
+# Bounded end of a retired build's drain. No pass checkpoint exists in this kit, so: SIGTERM
+# every in-flight pass -- run_member.sh's record_killed_pass trap writes a status=killed row,
+# which fleet_stats counts as interrupted and safe to re-run -- give them RETIRE_KILL_GRACE_S
+# to land those rows, then stop the container. SIGTERM goes to the passes directly because
+# `podman stop` only signals PID 1 (entrypoint.sh, which ignores it) and then SIGKILLs, which
+# no trap can record. Stopping ends every process in it, so any fleet.db lock they held is
+# released with them (POSIX locks die with the process; SQLite rolls a hot journal back on the
+# next open). Prints how many passes were still alive when the container was stopped.
+terminate_and_stop() {
+    local name="$1" g=0 n
+    podman exec "$name" pkill -TERM -f "$PASS_PATTERN" >/dev/null 2>&1 9>&- || true
+    n="$(inflight_in "$name")"
+    while [ "$n" -gt 0 ] && [ "$g" -lt "$RETIRE_KILL_GRACE_S" ]; do
+        sleep 5; g=$((g + 5)); n="$(inflight_in "$name")"
+    done
+    podman stop -t 30 "$name" >/dev/null 2>&1 9>&- || true
+    echo "$n"
+}
+
+# Seconds since $RETIRED_MARKER was retired (retired_ports is written at that cutover), or
+# empty when unknown.
+retired_age_s() {
+    local at
+    at="$(stat -c %Y "$RETIRED_PORTS_FILE" 2>/dev/null || stat -f %m "$RETIRED_PORTS_FILE" 2>/dev/null || true)"
+    [[ "$at" =~ ^[0-9]+$ ]] && echo $(( $(date +%s) - at ))
+}
+
 # Detached reaper: stop the retired container once its passes are done (or after RETIRE_MAX_S).
 # setsid + nohup so it outlives deploy.sh AND auto_deploy.sh's cron tick; 9>&- so it never
 # inherits the deploy flock. Exits quietly if the retired container is renamed away (rollback)
 # or already stopped.
 spawn_reaper() {
     local name="$1"
+    # The helpers are shipped INTO the detached shell with declare -f/-p, so the reaper and the
+    # deploy-tick force-reap below run the exact same termination code.
     setsid nohup bash -c '
         # fk#1164: drop EVERY inherited fd above stderr, not just 9. The crontab wraps
         # auto_deploy.sh in its own flock(1), which hands the outer lock down on fd 3; this
         # reaper kept it as long as the retired container lived and blocked every tick.
         for f in /proc/$$/fd/*; do f=${f##*/}; [ "$f" -gt 2 ] 2>/dev/null && eval "exec $f>&-"; done
-        name="$1"; max="$2"; log="$3"; waited=0
+        eval "$6"
+        name="$1"; RETIRE_MAX_S="$2"; log="$3"; RETIRE_KILL_GRACE_S="$4"; PASS_PATTERN="$5"; waited=0
+        rlog() { echo "[deploy $(date "+%Y-%m-%d %H:%M:%S %Z")] reaper: $*" >> "$log"; }
         while :; do
             state="$(podman inspect "$name" --format "{{.State.Running}}" 2>/dev/null || echo gone)"
             [ "$state" = "true" ] || exit 0
-            n="$(podman exec "$name" pgrep -c -f "bash .*run_member[.]sh" 2>/dev/null | head -1 | tr -cd "0-9")"
-            [ -z "$n" ] && n=0
-            if [ "$n" -eq 0 ] || [ "$waited" -ge "$max" ]; then
+            n="$(inflight_in "$name")"
+            if [ "$n" -eq 0 ]; then
                 podman stop -t 30 "$name" >/dev/null 2>&1 || true
-                echo "[deploy $(date "+%Y-%m-%d %H:%M:%S %Z")] reaper: stopped $name after ${waited}s with $n pass(es) left (gh#625)" >> "$log"
+                rlog "stopped $name after ${waited}s -- drained cleanly, no pass left (gh#625)"
                 exit 0
             fi
-            sleep 60; waited=$((waited + 60))
-        done' _ "$name" "$RETIRE_MAX_S" "$DEPLOY_LOG" >/dev/null 2>&1 9>&- &
+            if [ "$waited" -ge "$RETIRE_MAX_S" ]; then
+                left="$(terminate_and_stop "$name")"
+                rlog "drain hit FLEET_RETIRE_MAX_S=${RETIRE_MAX_S}s with $n pass(es) still in flight -- sent them SIGTERM (status=killed, safe to re-run), $left still alive after ${RETIRE_KILL_GRACE_S}s grace; stopped $name (fk#1281)"
+                exit 0
+            fi
+            sleep 30; waited=$((waited + 30))
+        done' _ "$name" "$RETIRE_MAX_S" "$DEPLOY_LOG" "$RETIRE_KILL_GRACE_S" "$PASS_PATTERN" \
+        "$(declare -f inflight_in terminate_and_stop)" >/dev/null 2>&1 9>&- &
 }
 
 proxy_deploy() {
@@ -375,9 +449,27 @@ proxy_deploy() {
     # do_rollback depends on in the same stroke. Abandon this tick instead: leave it running,
     # log why, and let the next deploy tick (or its own reaper, RETIRE_MAX_S) retry once it has
     # actually freed the ports on its own.
+    #
+    # fk#1281: but only up to RETIRE_MAX_S. The reaper normally ends it by then; if the reaper
+    # is gone (host reboot, killed tick) or was spawned by an older deploy.sh with a longer
+    # budget (7200s), this tick applies the same bounded end itself instead of abandoning
+    # forever. Age unknown (no retired_ports file) is treated as over budget: nothing this
+    # deploy wrote can vouch for it.
     if exists "$RETIRED_MARKER" && running "$RETIRED_MARKER"; then
-        log "ABANDONED: previous retired build ($RETIRED_MARKER) still running on $nv/$nw -- not stopping its in-flight passes to force this deploy through; will retry next tick"
-        return 1
+        local age
+        age="$(retired_age_s)"
+        if [ -n "$age" ] && [ "$age" -lt "$RETIRE_MAX_S" ]; then
+            log "ABANDONED: previous retired build ($RETIRED_MARKER) still running on $nv/$nw -- $(inflight_in "$RETIRED_MARKER") pass(es) finishing, retired ${age}s ago (max ${RETIRE_MAX_S}s) -- not stopping its in-flight passes to force this deploy through; will retry next tick"
+            return 1
+        fi
+        # Older builds never had retire_services_in -- close its doors first so nothing new
+        # starts during the grace window.
+        disable_cron_in "$RETIRED_MARKER"
+        retire_services_in "$RETIRED_MARKER"
+        local was left
+        was="$(inflight_in "$RETIRED_MARKER")"
+        left="$(terminate_and_stop "$RETIRED_MARKER")"
+        log "retired build ($RETIRED_MARKER) past FLEET_RETIRE_MAX_S=${RETIRE_MAX_S}s (retired ${age:-unknown}s ago) with $was pass(es) in flight -- sent them SIGTERM (status=killed, safe to re-run), $left still alive after ${RETIRE_KILL_GRACE_S}s grace; stopped it, proceeding with this deploy (fk#1281)"
     fi
     exists "${CONTAINER}-green" && podman rm -f "${CONTAINER}-green" >/dev/null 2>&1 || true
 
@@ -413,6 +505,7 @@ proxy_deploy() {
 
     if exists "$CONTAINER"; then
         disable_cron_in "$CONTAINER"
+        retire_services_in "$CONTAINER"
         podman rename "$CONTAINER" "$RETIRED_MARKER"
         echo "$ov $ow" > "$RETIRED_PORTS_FILE"
     fi
@@ -430,7 +523,18 @@ proxy_rollback() {
     exists "$RETIRED_MARKER" || { log "ROLLBACK: no $RETIRED_MARKER to restore"; return 1; }
     read -r rv rw < "$RETIRED_PORTS_FILE" 2>/dev/null || { log "ROLLBACK: no $RETIRED_PORTS_FILE -- cannot tell which ports the retired build holds"; return 1; }
     read -r cv cw < <(live_ports)
-    running "$RETIRED_MARKER" || podman start "$RETIRED_MARKER" >/dev/null
+    # fk#1281: the retired build had its dashboard + webhook receiver stopped and the
+    # .retired flag set at cutover. Clear the flag and RESTART it so entrypoint.sh brings all of
+    # it back (fresh crontab included) -- any of its passes still in flight are TERMed first so
+    # they record status=killed instead of vanishing under the restart.
+    if running "$RETIRED_MARKER"; then
+        podman exec "$RETIRED_MARKER" pkill -TERM -f "$PASS_PATTERN" >/dev/null 2>&1 9>&- || true
+        podman exec "$RETIRED_MARKER" rm -f /fleet-kit/.retired 9>&- 2>/dev/null || true
+        podman restart -t 30 "$RETIRED_MARKER" >/dev/null 9>&-
+    else
+        podman start "$RETIRED_MARKER" >/dev/null 9>&-
+        podman exec "$RETIRED_MARKER" rm -f /fleet-kit/.retired 9>&- 2>/dev/null || true
+    fi
     health_check "$rv" || { log "ROLLBACK: retired build not healthy on $rv"; return 1; }
     caddy_swap "$PROXY_CADDYFILE" "$cv" "$cw" "$rv" "$rw" && caddy_reload
     enable_cron_in "$RETIRED_MARKER"
@@ -501,7 +605,7 @@ fi
 #
 # Skipped entirely when there is no live blue (first deploy, or recovering from a dark prod):
 # there is no work to drain, and blocking recovery on a missing container would be backwards.
-DRAIN_MAX_S="${FLEET_DRAIN_MAX_S:-1800}"
+DRAIN_MAX_S="${FLEET_DRAIN_MAX_S:-900}"
 CORDONED=0
 # TRUNCATE-AND-REWRITE, never `sed -i` / replace-then-rename. fleet.env is BIND-MOUNTED into
 # the container ($INSTANCE_DIR/fleet.env -> /fleet-kit/fleet.env), and a bind mount follows the
@@ -618,6 +722,10 @@ drain_inflight_passes() {
         if [ "$waited" -ge "$DRAIN_MAX_S" ]; then
             log "drain: STILL $inflight pass(es) in flight after ${DRAIN_MAX_S}s -- deploying ANYWAY."
             log "drain: those passes will be killed; run_member.sh records them as status=killed (safe to re-run)."
+            # fk#1281: SIGTERM them now, while there is time for the trap to write that row --
+            # the cutover's `podman stop` below only signals PID 1 and then SIGKILLs.
+            podman exec "$CONTAINER" pkill -TERM -f "$PASS_PATTERN" >/dev/null 2>&1 9>&- || true
+            sleep 10
             uncordon_fleet
             return 0
         fi

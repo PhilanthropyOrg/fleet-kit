@@ -247,6 +247,14 @@ REVIEWED_COUNT=0
 SKIPPED_THIS_TICK=""
 
 while :; do
+  # fk#1281: each iteration below is a NEW review pass. Once deploy.sh retires this container
+  # (blue-green cutover), finish the review in hand and stop -- the live build picks up the
+  # queue. Observed live 2026-09-24: one judge-judy tick in philanthropy-retired kept picking
+  # PR after PR for 2.5h after cutover, holding the drain open the whole time.
+  if declare -F fleet_retired >/dev/null 2>&1 && fleet_retired; then
+    log "retired container -- stopping after $REVIEWED_COUNT review(s), remaining PRs go to the live build (fk#1281)"
+    break
+  fi
   # Budget gate before each pick: skip on the FIRST call of the tick (nothing spent yet to
   # check against), then bail once spent-so-far + the last call's cost would clear the cap --
   # using the last call as the estimate for the next, since PR diffs are similar-order-of-
