@@ -379,11 +379,12 @@ spawns exactly one). Your job, in order:
 
    **Items-per-run floor — FLEET_MINION_TARGET_ITEMS (2026-09-24).** A minion run is almost all
    fixed overhead (real dino runs: 1 item $2.75/794s, 3 items $3.41/1312s), so an hour that
-   packs 2 items pays that overhead for 2. When step 1's maxx read is not `over`/`stale` AND
-   `on_pace` is true (burn at or under sustainable), add
+   packs 2 items pays that overhead for 2. When step 1's `maxx_reader.py` read is a usable
+   verdict (not `over`, not unreadable) AND `week_bank_pct >= 0` (the week is at or under its
+   share so far), add
    `--min-items ${FLEET_MINION_TARGET_ITEMS:-8}` to the call above. `min_items` pulls from the
    front of `skipped` (marie's order), and the result's `forced_over_floor`/`over_allowance`
-   say out loud when the floor spent past this hour's slice — quote both. Behind pace, or maxx
+   say out loud when the floor spent past this hour's slice — quote both. Bank negative, or maxx
    unreadable, pack without the floor: the target never outranks the weekly wall.
 
    **Quote the returned JSON verbatim in your report.** `n`, `chosen`, `skipped`,
