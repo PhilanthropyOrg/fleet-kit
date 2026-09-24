@@ -20,6 +20,7 @@ import argparse
 import datetime
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -69,16 +70,20 @@ def main() -> int:
     records, end_offset = read_new_records(jsonl_path, offset_path)
     if not records:
         return 0
-    out = subprocess.run(
-        ["bash", args.job_sh], input=format_job(records), text=True,
-        capture_output=True, timeout=60,
-    )
-    if out.returncode != 0:
-        print(f"job.sh failed rc={out.returncode}: {out.stderr.strip()[:300]} -- will retry next fire",
-              file=sys.stderr)
+    # Output to a temp FILE, never a pipe: job.sh backgrounds `cd ~ && setsid nohup claude ... &`,
+    # and that async subshell keeps the caller's stdout open for the whole HQ run -- a pipe never
+    # hits EOF, so capture_output hung to the timeout and killed the hand-off (found live
+    # 2026-09-24). With a file, run() returns as soon as job.sh itself exits.
+    with tempfile.TemporaryFile("w+") as out:
+        rc = subprocess.run(["bash", args.job_sh], input=format_job(records), text=True,
+                            stdout=out, stderr=subprocess.STDOUT, timeout=60).returncode
+        out.seek(0)
+        said = out.read().strip()[:300]
+    if rc != 0:
+        print(f"job.sh failed rc={rc}: {said} -- will retry next fire", file=sys.stderr)
         return 1
     offset_path.write_text(str(end_offset))
-    print(f"handed {len(records)} prod alert(s) to Reif HQ: {out.stdout.strip()}")
+    print(f"handed {len(records)} prod alert(s) to Reif HQ: {said}")
     return 0
 
 

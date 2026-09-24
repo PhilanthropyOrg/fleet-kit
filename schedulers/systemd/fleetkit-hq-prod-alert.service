@@ -3,6 +3,9 @@ Description=Hand new prod alerts (START/RESOLVE from atlas-serve) to Reif HQ via
 
 [Service]
 Type=oneshot
+# job.sh leaves the HQ run (claude -p) behind as a detached child; the default
+# KillMode=control-group would kill it the moment this oneshot exits.
+KillMode=process
 User={{USER}}
 Environment=PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
 # Coalesce: triggers while this runs are absorbed, so alerts landing within ~60s become ONE
