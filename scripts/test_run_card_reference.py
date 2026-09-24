@@ -101,6 +101,10 @@ def _mocks(route):
     elif path in ("/api/plan", "/api/asks", "/api/members", "/api/kpi", "/api/spend",
                   "/api/build", "/api/metrics", "/api/budget_preview", "/api/minion_runs"):
         route.fulfill(json={"members": [], "asks": [], "kpi": [], "spend": [], "metrics": [], "runs": []})
+    elif path == "/api/iph":
+        route.fulfill(json={"series": {"hours": [], "direct": [], "mega_child": [],
+                                        "closed_without_pr": [], "avg_24h": [], "avg_7d": [],
+                                        "current_24h_rate": 0}, "r24": 0, "svg": "", "unavailable": True})
     else:
         # Every /api/* route this page touches is mocked above; anything else is the test's
         # own gap, so fail loudly here rather than letting a 404 masquerade as a page error.

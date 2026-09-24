@@ -46,6 +46,7 @@ import fleet_kpi         # noqa: E402  (per-member headline-count extraction fro
 import fleet_stats       # noqa: E402  (Stats page aggregation: run timeline, tokens, backlog history)
 import fleet_metrics     # noqa: E402  (named run-derived metrics; items_per_run for the scoreboard)
 import scoreboard        # noqa: E402  (2026-09-24 throughput scoreboard: items/run, closed/run, live, trend)
+import issues_per_hour_chart  # noqa: E402  (full-width 7d graph on top of scoreboard.resolved_events)
 import member_spec       # noqa: E402
 import overrides as ov   # noqa: E402  ('overrides' shadows nothing here; keep the module name clear)
 
@@ -1814,6 +1815,23 @@ class Handler(BaseHTTPRequestHandler):
                 names = sorted({r.get("member") for r in windowed if r.get("member")})
             out = [fleet_kpi.sum_kpi_over_runs(name, windowed) for name in names]
             self._json({"kpi": out, **meta})
+            return
+        if path == "/api/iph":  # fleet_home's full-width graph, on top of #1279's scoreboard scoring
+            since_day = _last_days(14)[0]
+            merged = _scoreboard_merged_prs(since_day)
+            deploys = _scoreboard_deploy_runs()
+            issues_by_number = _scoreboard_issues_by_number(since_day)
+            events = scoreboard.resolved_events(merged, deploys, issues_by_number)
+            referenced = scoreboard.resolved_referenced_numbers(merged)
+            no_pr_events = [{"ts": scoreboard._ts(i.get("closedAt"))} for i in issues_by_number.values()
+                            if str(i.get("state") or "").upper() == "CLOSED" and i.get("number") not in referenced]
+            no_pr_events = [e for e in no_pr_events if e["ts"] is not None]
+            series = issues_per_hour_chart.hourly_series(events, no_pr_events)
+            self._json({
+                "series": series, "r24": series["current_24h_rate"],
+                "svg": issues_per_hour_chart.chart_svg(series),
+                "unavailable": not merged and not deploys,
+            })
             return
         if path == "/api/stats/runs_summary":
             qs = parse_qs(urlparse(self.path).query)
