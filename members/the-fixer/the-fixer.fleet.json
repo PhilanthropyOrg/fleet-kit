@@ -4,12 +4,8 @@
   "lane": "incident",
   "mandate": {
     "target": "a red CI/deploy or dark prod gets exactly one fix-or-revert PR within one fire cycle, deduped per SHA; and the CI monitor with real abilities (Reif 2026-09-17): a green PR parked without auto-merge gets armed, in either repo; a red PR a day stale gets closed, not retried",
-    "watches": [
-      "svc.errors",
-      "deploy.success",
-      "deploy.rollback"
-    ],
     "checklist": [
+      "prod-readiness items you OWN (docs/prod_readiness.json, owner=the-fixer): run each item's `check` at least every `cadence_h` hours and file what it finds -- librarian's daily audit FAILS the day one lapses; the list is permanent, so a check you cannot run is a finding to file, never an item to drop",
       "call check.sh FIRST, every run -- deterministic, zero LLM spend if green",
       "prod-down outranks a build-red fire -- check.sh buckets its dedup key by 30-minute window, not SHA",
       "check.sh fires once per failing SHA -- its own state file blocks re-firing on the same head until it changes",

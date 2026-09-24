@@ -1,51 +1,53 @@
 {
-  "_comment": "The standard production-readiness checklist every web app shares (Google SRE Production Readiness Review + the four golden signals, per system). Reif 2026-09-24: 'almost all software is the same: a server, a database, analytics' -- so the blind-spot audit starts from this list instead of discovering the world from scratch. scripts/coverage_map.py scores every item daily as watched (some member's mandate.watches names it AND that member has run recently) / unwatched / n/a (the system it needs is absent from live inventory). `needs` = the inventory kind that makes an item applicable. Add an item here when a new class of failure is found by hand; never delete one to make the map green.",
-  "items": [
-    {"id": "svc.latency", "area": "golden signals", "needs": "web", "item": "request latency (p50/p95) per service, against a budget"},
-    {"id": "svc.traffic", "area": "golden signals", "needs": "web", "item": "traffic volume per service, with a drop alarm"},
-    {"id": "svc.errors", "area": "golden signals", "needs": "web", "item": "error rate / user-facing breakage per service"},
-    {"id": "svc.saturation", "area": "golden signals", "needs": "web", "item": "saturation: pool, CPU, connection headroom"},
+ "_comment": "The standard production-readiness checklist every web app shares (Google SRE Production Readiness Review + the four golden signals, per system). PERMANENT and 100% OWNED (Reif 2026-09-24: 'keep that list, and have an agent on every one of those things'): every item names exactly one EXISTING member as `owner`, the `check` that member runs, and `cadence_h`, the longest the check may go without running. scripts/coverage_map.py (librarian, daily) FAILS if an item has no owner, its owner is not a live member, or the owner's check has not run within cadence_h -- measured from the owner's last run in fleet.db, or from the mtime of `evidence` (a file under $FLEET_LOG_DIR the deterministic check writes). `needs` = the inventory kind that makes an item applicable (n/a when absent; still owned). Add an item when a new class of failure is found by hand; never delete one to make the map green, never add a member to own one.",
+ "items": [
+  {"id": "svc.latency", "area": "golden signals", "needs": "web", "item": "request latency (p50/p95) per service, against a budget", "owner": "sentry", "check": "journey_walker: time every journey step; a step over 3s on desktop or 5s on mobile is a finding", "cadence_h": 12},
+  {"id": "svc.traffic", "area": "golden signals", "needs": "web", "item": "traffic volume per service, with a drop alarm", "owner": "nerd", "check": "read the ga4 inflow (sessions_today vs the 7-day mean from /990/api/signals/ga4); a >50% drop is a breach", "cadence_h": 72},
+  {"id": "svc.errors", "area": "golden signals", "needs": "web", "item": "error rate / user-facing breakage per service", "owner": "sentry", "check": "journey_walker walks every journey every pass; a 5xx, blank page or console error is a filed finding", "cadence_h": 12},
+  {"id": "svc.saturation", "area": "golden signals", "needs": "web", "item": "saturation: pool, CPU, connection headroom", "owner": "nerd", "check": "prod_runtime.py box-saturation + pg connection share (every 3h, deterministic)", "cadence_h": 6, "evidence": "prod_runtime.last.txt"},
 
-    {"id": "db.slow_queries", "area": "database", "needs": "db", "item": "slow queries: pg_stat_statements top-N by total and max time"},
-    {"id": "db.indexes", "area": "database", "needs": "db", "item": "index misses: sequential scans on big tables"},
-    {"id": "db.connections", "area": "database", "needs": "db", "item": "connections vs max_connections, pool sizing, idle-in-transaction"},
-    {"id": "db.timeouts", "area": "database", "needs": "db", "item": "statement_timeout / idle timeouts set per role"},
-    {"id": "db.locks", "area": "database", "needs": "db", "item": "lock waits and long-running transactions"},
-    {"id": "db.least_privilege", "area": "database", "needs": "db", "item": "app uses a least-privilege role, not the admin role"},
-    {"id": "db.backups_pitr", "area": "database", "needs": "db", "item": "backups/PITR exist AND a restore has been tested recently"},
+  {"id": "db.slow_queries", "area": "database", "needs": "db", "item": "slow queries: pg_stat_statements top-N by total and max time", "owner": "nerd", "check": "prod_runtime.py pg_statements_total/max (every 3h)", "cadence_h": 6, "evidence": "prod_runtime.last.txt"},
+  {"id": "db.indexes", "area": "database", "needs": "db", "item": "index misses: sequential scans on big tables", "owner": "nerd", "check": "prod_runtime.py pg_seqscan on tables over 1M rows (every 3h)", "cadence_h": 6, "evidence": "prod_runtime.last.txt"},
+  {"id": "db.connections", "area": "database", "needs": "db", "item": "connections vs max_connections, pool sizing, idle-in-transaction", "owner": "nerd", "check": "prod_runtime.py pg_conn vs max_connections (every 3h)", "cadence_h": 6, "evidence": "prod_runtime.last.txt"},
+  {"id": "db.timeouts", "area": "database", "needs": "db", "item": "statement_timeout / idle timeouts set per role", "owner": "nerd", "check": "prod_runtime.py pg_settings + pg_role_settings statement/idle timeouts (every 3h)", "cadence_h": 6, "evidence": "prod_runtime.last.txt"},
+  {"id": "db.locks", "area": "database", "needs": "db", "item": "lock waits and long-running transactions", "owner": "nerd", "check": "prod_runtime.py pg_locks + pg_long (every 3h)", "cadence_h": 6, "evidence": "prod_runtime.last.txt"},
+  {"id": "db.least_privilege", "area": "database", "needs": "db", "item": "app uses a least-privilege role, not the admin role", "owner": "nerd", "check": "prod_runtime.py pg_role_settings: app role is not a superuser/createrole role (every 3h)", "cadence_h": 6, "evidence": "prod_runtime.last.txt"},
+  {"id": "db.backups_pitr", "area": "database", "needs": "db", "item": "backups/PITR exist AND a restore has been tested recently", "owner": "nerd", "check": "prod-runtime pass: DO API lists atlas-pg backups (newest < 26h) and the last restore test date; no test in 90 days is a finding", "cadence_h": 72},
 
-    {"id": "box.resources", "area": "server", "needs": "host", "item": "CPU load, memory, disk per host"},
-    {"id": "box.error_logs", "area": "server", "needs": "host", "item": "error rate in system/app logs"},
-    {"id": "box.process_restarts", "area": "server", "needs": "host", "item": "service crash/restart counts"},
+  {"id": "box.resources", "area": "server", "needs": "host", "item": "CPU load, memory, disk per host", "owner": "nerd", "check": "prod_runtime.py box section: load/mem/disk (every 3h)", "cadence_h": 6, "evidence": "prod_runtime.last.txt"},
+  {"id": "box.error_logs", "area": "server", "needs": "host", "item": "error rate in system/app logs", "owner": "nerd", "check": "prod_runtime.py journal: error-priority lines per unit (every 3h)", "cadence_h": 6, "evidence": "prod_runtime.last.txt"},
+  {"id": "box.process_restarts", "area": "server", "needs": "host", "item": "service crash/restart counts", "owner": "nerd", "check": "prod_runtime.py restarts: NRestarts per app unit (every 3h)", "cadence_h": 6, "evidence": "prod_runtime.last.txt"},
 
-    {"id": "cdn.5xx", "area": "CDN/WAF", "needs": "cdn", "item": "edge 5xx rate"},
-    {"id": "cdn.challenges", "area": "CDN/WAF", "needs": "cdn", "item": "WAF challenges hitting real users or monitors"},
-    {"id": "cdn.cache_hit", "area": "CDN/WAF", "needs": "cdn", "item": "cache hit rate"},
+  {"id": "cdn.5xx", "area": "CDN/WAF", "needs": "cdn", "item": "edge 5xx rate", "owner": "nerd", "check": "prod-runtime pass: Cloudflare GraphQL httpRequestsAdaptiveGroups edge 5xx share over 24h", "cadence_h": 72},
+  {"id": "cdn.challenges", "area": "CDN/WAF", "needs": "cdn", "item": "WAF challenges hitting real users or monitors", "owner": "sentry", "check": "journey_walker from outside the edge: a WAF challenge page on any journey is a finding", "cadence_h": 12},
+  {"id": "cdn.cache_hit", "area": "CDN/WAF", "needs": "cdn", "item": "cache hit rate", "owner": "nerd", "check": "prod-runtime pass: Cloudflare GraphQL cache status share over 24h; below 50% on static paths is a finding", "cadence_h": 72},
 
-    {"id": "jobs.success", "area": "scheduled jobs", "needs": "cron", "item": "every scheduled job's last exit code and failure count"},
-    {"id": "jobs.deadman", "area": "scheduled jobs", "needs": "cron", "item": "deadman: a job that stopped running at all is noticed"},
-    {"id": "jobs.ingest_freshness", "area": "scheduled jobs", "needs": "cron", "item": "data ingests fresh (last success within their cadence)"},
+  {"id": "jobs.success", "area": "scheduled jobs", "needs": "cron", "item": "every scheduled job's last exit code and failure count", "owner": "nerd", "check": "prod_runtime.py cron-failures from cron_exits (every 3h)", "cadence_h": 6, "evidence": "prod_runtime.last.txt"},
+  {"id": "jobs.deadman", "area": "scheduled jobs", "needs": "cron", "item": "deadman: a job that stopped running at all is noticed", "owner": "nerd", "check": "prod-runtime pass: every installed cron in the capture with no EXIT line within 2x its schedule (the box fleet_auditor log names them) is a finding", "cadence_h": 72},
+  {"id": "jobs.ingest_freshness", "area": "scheduled jobs", "needs": "cron", "item": "data ingests fresh (last success within their cadence)", "owner": "nerd", "check": "prod_runtime.py ingest-freshness on the ingest crons (every 3h)", "cadence_h": 6, "evidence": "prod_runtime.last.txt"},
 
-    {"id": "deploy.success", "area": "deploys", "needs": "web", "item": "deploy success rate"},
-    {"id": "deploy.rollback", "area": "deploys", "needs": "web", "item": "one-command rollback exists and a bad deploy gets reverted"},
+  {"id": "deploy.success", "area": "deploys", "needs": "web", "item": "deploy success rate", "owner": "the-fixer", "check": "every pass: the last deploys' outcome from the deploy log; a failed deploy is fixed or reverted", "cadence_h": 6},
+  {"id": "deploy.rollback", "area": "deploys", "needs": "web", "item": "one-command rollback exists and a bad deploy gets reverted", "owner": "the-fixer", "check": "a deploy that breaks prod is reverted with git revert + redeploy inside the same pass", "cadence_h": 6},
 
-    {"id": "sec.owasp", "area": "security", "needs": "web", "item": "OWASP top 10 exercised against the live app"},
-    {"id": "sec.injection_lint", "area": "security", "needs": "web", "item": "injection/unsafe-SQL lint on every change"},
-    {"id": "sec.secrets_scan", "area": "security", "needs": "web", "item": "secrets scan of the product repo and deploys"},
-    {"id": "sec.dependency_cves", "area": "security", "needs": "web", "item": "dependency CVE scan"},
-    {"id": "sec.tls_expiry", "area": "security", "needs": "web", "item": "TLS certificate expiry"},
-    {"id": "sec.dns", "area": "security", "needs": "dns", "item": "DNS records drift / takeover risk"},
+  {"id": "sec.owasp", "area": "security", "needs": "web", "item": "OWASP top 10 exercised against the live app", "owner": "red", "check": "OWASP top-10 probes against the live app", "cadence_h": 24},
+  {"id": "sec.injection_lint", "area": "security", "needs": "web", "item": "injection/unsafe-SQL lint on every change", "owner": "red", "check": "grep the product repo diff since the last pass for f-string/format SQL and unparameterised execute(); each is a finding", "cadence_h": 24},
+  {"id": "sec.secrets_scan", "area": "security", "needs": "web", "item": "secrets scan of the product repo and deploys", "owner": "red", "check": "scan the product repo diff since the last pass for credential shapes (the librarian-scrub classes); the box maint_secret_scan log is read too", "cadence_h": 24},
+  {"id": "sec.dependency_cves", "area": "security", "needs": "web", "item": "dependency CVE scan", "owner": "red", "check": "gh api repos/{owner}/{repo}/dependabot/alerts?state=open: every high/critical alert older than 7 days is a finding", "cadence_h": 24},
+  {"id": "sec.tls_expiry", "area": "security", "needs": "web", "item": "TLS certificate expiry", "owner": "red", "check": "openssl s_client -connect <domain>:443 | openssl x509 -enddate: under 14 days left is a finding", "cadence_h": 24},
+  {"id": "sec.dns", "area": "security", "needs": "dns", "item": "DNS records drift / takeover risk", "owner": "red", "check": "dig NS/A/AAAA/CNAME/MX for the domain and its subdomains: a CNAME to an unclaimed host or a record change since the last pass is a finding", "cadence_h": 24},
 
-    {"id": "email.auth", "area": "email", "needs": "email", "item": "SPF / DKIM / DMARC valid"},
-    {"id": "email.bounces", "area": "email", "needs": "email", "item": "bounce and complaint rate"},
+  {"id": "email.auth", "area": "email", "needs": "email", "item": "SPF / DKIM / DMARC valid", "owner": "red", "check": "dig TXT for SPF, _dmarc and the resend DKIM selector: missing or p=none is a finding", "cadence_h": 24},
+  {"id": "email.bounces", "area": "email", "needs": "email", "item": "bounce and complaint rate", "owner": "nerd", "check": "read the email-bounces inflow (dash_events mailer bounced/complained): hard-bounce share of sends over 2% is a finding", "cadence_h": 72},
 
-    {"id": "analytics.flowing", "area": "analytics & SEO", "needs": "analytics", "item": "analytics events (GA4/PostHog) still flowing"},
-    {"id": "seo.indexation", "area": "analytics & SEO", "needs": "web", "item": "Search Console indexation / coverage"},
+  {"id": "analytics.flowing", "area": "analytics & SEO", "needs": "analytics", "item": "analytics events (GA4/PostHog) still flowing", "owner": "nerd", "check": "read the ga4/posthog/clarity inflows in the daily inflows table; a non-OK one is a finding", "cadence_h": 72},
+  {"id": "seo.indexation", "area": "analytics & SEO", "needs": "web", "item": "Search Console indexation / coverage", "owner": "nerd", "check": "read the gsc inflow (/990/api/signals/gsc coverage + gsc_performance cron): indexed pages falling week over week is a finding", "cadence_h": 72},
 
-    {"id": "pay.webhooks", "area": "payments", "needs": "payments", "item": "payment webhooks delivered and processed"},
-    {"id": "pay.failed_charges", "area": "payments", "needs": "payments", "item": "failed charges / disputes"},
+  {"id": "pay.webhooks", "area": "payments", "needs": "payments", "item": "payment webhooks delivered and processed", "owner": "nerd", "check": "read the stripe-webhooks inflow (stripe_webhook_events newest row) against Stripe's own event list", "cadence_h": 72},
+  {"id": "pay.failed_charges", "area": "payments", "needs": "payments", "item": "failed charges / disputes", "owner": "nerd", "check": "Stripe API charges?status=failed and disputes over the last 7 days; any unexplained one is a finding", "cadence_h": 72},
 
-    {"id": "cost.spend", "area": "costs & quotas", "needs": "host", "item": "infra + third-party spend vs budget"},
-    {"id": "cost.quotas", "area": "costs & quotas", "needs": "host", "item": "API quotas (GSC, PostHog, LLM accounts) vs limits"}
-  ]
+  {"id": "cost.spend", "area": "costs & quotas", "needs": "host", "item": "infra + third-party spend vs budget", "owner": "nerd", "check": "the box spend_limits_check log + DO invoice preview vs budget", "cadence_h": 72},
+  {"id": "cost.quotas", "area": "costs & quotas", "needs": "host", "item": "API quotas (GSC, PostHog, LLM accounts) vs limits", "owner": "nerd", "check": "GSC/PostHog/LLM account quota reads (posthog billing, maxx budget) vs limits", "cadence_h": 72},
+
+  {"id": "data.inflows", "area": "data inflows", "needs": "web", "item": "every data source in docs/data_inflows.json delivered within its freshness window, credential present", "owner": "librarian", "check": "coverage_map.py inflows table (first section of the daily HQ line); any non-OK inflow fails the audit", "cadence_h": 36}
+ ]
 }

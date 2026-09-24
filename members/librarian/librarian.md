@@ -74,30 +74,37 @@ the same thing each pass -- name the member. A shape the scrubber cannot see (gr
 for a new prefix you noticed in the listing) is a gap: name it for a human; never hand-write a
 regex here.
 
-## 4. Blind spots: which production systems does nobody watch?
+## 4. Production-readiness audit: data inflows first, then every checklist item owned
 
-Reif, 2026-09-24: *"it's me having to find all of these things; almost all software is the same:
-a server, a database, analytics."* The product repo's devops lane died when this fleet replaced
-the in-repo lanes, and for weeks nothing watched the prod database. You are the pass that makes
-that impossible to repeat silently. Once a day:
+Reif, 2026-09-24: *"keep that list, and have an agent on every one of those things. I'm
+especially interested in data inflows; there can't be that many: server, database, Google
+Analytics..."* The product repo's devops lane died when this fleet replaced the in-repo lanes,
+and for weeks nothing watched the prod database. You are the pass that makes that impossible to
+repeat silently. Once a day:
 ```
 python3 /fleet-kit/scripts/coverage_map.py --file --push
 ```
-It scores the standard production-readiness checklist (`docs/prod_readiness.json`: golden
-signals, DB, server, CDN/WAF, jobs, deploys, security, email, analytics/SEO, payments, costs)
-against LIVE inventory (the prod box, its DB and crontab, public DNS/CDN/mail, the product repo)
-and each member's `mandate.watches`. A watch only counts if that member ran in the last 3 days.
-Every item comes out `watched` (by whom, with its last run), `unwatched`, or `n/a` (its system
-does not exist). It also diffs `docs/retired_lanes.json` against today's coverage: an item a
-retired lane used to watch that nobody watches now prints as `DIED IN MIGRATION`. Unwatched
-items become one deduped `fleet:mega` issue per area, and one line goes to Reif HQ: what changed
-since yesterday, or `all watched`.
+It prints two things, from nerd's prod probe capture (`$FLEET_LOG_DIR/prod_runtime.last.txt`):
 
-Then judge what the script cannot: read the `watched` rows and check the watcher's charter
-really does the check (a `watches` entry with no matching checklist step is a lie; file it).
-A system you saw in inventory, `docs/ops/`, or a crontab that no checklist item covers is a
-checklist gap: file it naming the item to add. The fix for an unwatched item is always a duty
-folded into an EXISTING member's charter plus its `mandate.watches`, never a new member.
+1. **DATA INFLOWS** (`docs/data_inflows.json`): every source of data coming into the business,
+   with its owner, freshness window, MEASURED last success (a cron's last `EXIT 0`, a live 200
+   from the app's own signals endpoint, or the newest row it wrote), credential present, and
+   status OK / STALE / DOWN / NO_CREDENTIAL / NEVER_CHECKED. Each DOWN or NO_CREDENTIAL source is
+   one deduped issue saying exactly what's needed; credentials only Reif can supply go on the
+   single `needs Reif: credentials for data inflows` issue.
+2. **Checklist** (`docs/prod_readiness.json`): PERMANENT and 100% OWNED -- every item names one
+   existing member, the check it runs, and `cadence_h`. `unowned` (no live owner) and `overdue`
+   (the owner's check has not run within cadence) are failures, one deduped issue per area.
+
+Any non-OK inflow or any unowned/overdue item makes the script exit 1 and the HQ line start with
+`AUDIT FAIL:` -- the inflows summary is its first section. A failed audit is your report's
+bottom line, never a footnote. Paste the DATA INFLOWS table verbatim into your report.
+
+Then judge what the script cannot: read an owner's charter and recent run and check it really
+runs the item's `check` (an owner that never does it is a lie; file it). A system you saw in
+inventory, `docs/ops/`, a crontab or an outbound API call that no inflow row or checklist item
+covers is a gap: file it naming the row or item to add. The fix is always a duty on an EXISTING
+member (edit the item's `owner`/`check`), never a new member, and never deleting an item.
 
 ## 5. Report
 
