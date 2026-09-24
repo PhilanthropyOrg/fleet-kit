@@ -174,12 +174,19 @@ def ensure_labels(priority: str = "") -> None:
 
 
 def file_item(title: str, body: str, lane: str = "", priority: str = "") -> int:
-    """Returns the new issue NUMBER (>0) on success, 0 on failure."""
+    """Returns the issue NUMBER (>0) on success, 0 on failure -- the open twin's number when
+    issue_cluster's dedupe-at-birth turned this filing into a comment on it (2026-09-24)."""
+    import issue_cluster
     ensure_labels(priority)
-    rc, out = _run(build_file_cmd(title, body, lane, priority))
-    if rc != 0:
-        print(f"board_github: file FAILED: {out[:300]}", file=sys.stderr)
+    labels = build_file_cmd(title, body, lane, priority)[-1].split(",")
+    res = issue_cluster.file_issue(title, body, labels, who=os.environ.get("FLEET_MEMBER", ""))
+    if not res.get("ok"):
+        print(f"board_github: file FAILED: {res.get('error', '')[:300]}", file=sys.stderr)
         return 0
+    if res["action"] == "commented":
+        print(f"board_github: deduped onto open #{res['number']} (commented, not filed)")
+        return int(res["number"])
+    out = res.get("url") or ""
     print(out)  # the issue URL — callers log it as the durable id
     m = re.search(r"/issues/(\d+)\s*$", out)
     return int(m.group(1)) if m else 0

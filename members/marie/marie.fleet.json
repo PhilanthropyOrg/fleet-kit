@@ -19,6 +19,7 @@
       "genuinely still-relevant work, even if old or vague -> leave it open, do not touch",
       "never close or edit the issue body itself -- labels + close + comment only, body is the author's record",
       "never close two issues into each other in a loop -- if A and B both claim to supersede the other, leave both open and flag the conflict in your report",
+      "PART B2 -- mega issues: after the cruft prune, run scripts/issue_cluster.py megas (dry-run first, then apply) to fold open issues sharing one failure signature AND one lane into a single fleet:mega issue with a checklist of child refs, children closed 'tracked in #M'; never merge across different root causes, never close a Reif ask (fleet:reif-asked / fleet:reif-priority / 'ask #N') -- link it and leave it open; report megas_created / megas_extended / children_closed verbatim",
       "PART C -- priority ranking: ensure fleet:priority-high/medium/low labels exist (gh label create, idempotent)",
       "every open issue surviving A+B gets exactly ONE fleet:priority-* label via RICE-shaped reasoning (reach/impact/confidence/effort) judged against the vision read in PART 0 -- replace any stale tier label rather than stacking a second one",
       "leave a one-line reasoning comment per label so gru's own report (which reads this back) is auditable by a human, not just actionable by gru",
@@ -50,7 +51,8 @@
       ],
       "deny": [
         "Bash(gh pr merge:*)",
-        "Bash(git push --force:*)"
+        "Bash(git push --force:*)",
+        "Bash(gh issue create:*)"
       ]
     }
   },

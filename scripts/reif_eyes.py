@@ -37,6 +37,9 @@ import sys
 import time
 import urllib.request
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import issue_cluster  # noqa: E402  (one definition of "the same issue", fk dedupe-at-birth)
+
 HERE = pathlib.Path(__file__).resolve().parent
 LOG_DIR = pathlib.Path(os.environ.get("FLEET_LOG_DIR") or os.path.expanduser("~/Library/Logs/fleet-kit"))
 STATE = LOG_DIR / ".reif_eyes.state"
@@ -241,7 +244,9 @@ def file_findings(findings: list[dict], slug: str, state: dict, titles: list[str
         prior = state.get(f["key"])
         if prior and now - prior.get("ts", 0) < 7 * 86400:
             continue
-        if any(t.strip() == f["title"].strip() for t in titles):
+        # Signature, not exact title: "gru's reports have no plain-English words (12 of 12 ...)"
+        # and "nerd's ... (20 of 20 ...)" are one check, one root cause (2026-09-24: nine twins).
+        if any(issue_cluster.signature(t) == issue_cluster.signature(f["title"]) for t in titles):
             state[f["key"]] = {"ts": now, "url": "(already open)"}
             continue
         body = f["body"] + f"\n\n<!-- reif-eyes:{f['key']} -->\nFiled by reif_eyes.py, the pass that looks at the console the way Reif does."
@@ -250,6 +255,7 @@ def file_findings(findings: list[dict], slug: str, state: dict, titles: list[str
             url = r.stdout.strip().splitlines()[-1]
             state[f["key"]] = {"ts": now, "url": url}
             urls.append(url)
+            titles.append(f["title"])  # a later finding this same pass is a twin of this one
             log(f"filed {f['key']}: {url}")
         else:
             log(f"could not file {f['key']}: {(r.stderr or r.stdout).strip()[:200]}")

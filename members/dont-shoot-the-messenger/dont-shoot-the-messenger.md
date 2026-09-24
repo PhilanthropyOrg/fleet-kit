@@ -120,7 +120,7 @@ older KR1/KR2/KR3 numbering, and the 100,000-entities goal it belonged to, were 
   - **Why this, today.** Two sentences, plain, naming the row it moves.
   - **Where to look.** A URL for every input. Use `pages` (the product's own admin pages)
     and `app_url`. If the data lives in the product but no page shows it, do not hand him a
-    data pull: file the page as an issue with `gh issue create --repo <product repo>`
+    data pull: file the page as an issue with `python3 /fleet-kit/scripts/issue_cluster.py file --repo <product repo>`
     (title "superadmin: <what the page shows>", body: the columns, why it is needed today,
     `Vision-link:` line, plain language) and put that issue link here, then give him the
     smallest human-only part that does not need the page.

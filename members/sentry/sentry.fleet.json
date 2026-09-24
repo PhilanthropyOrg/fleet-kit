@@ -35,7 +35,8 @@
       ],
       "deny": [
         "Bash(git push:*)",
-        "Bash(gh pr merge:*)"
+        "Bash(gh pr merge:*)",
+        "Bash(gh issue create:*)"
       ]
     }
   },

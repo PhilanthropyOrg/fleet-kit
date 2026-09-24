@@ -18,14 +18,14 @@
       "report honestly per item -- gru is reading this back and needs to know which of the N issues actually closed, not just whether the PR opened"
     ],
     "limits": {
-      "timeout_s": 2400
+      "timeout_s": 5400
     },
     "escalation": "hit something the checklist doesn't cover mid-build (a conflict beyond you, a gate failing identically on sibling PRs) -- say so plainly in the PR body AND your final report and stop; an honest 'needs a human/investigation' beats a broken push. Never silently improvise past the checklist's own file-safety rules (explicit paths, never blanket add). Never claim or work an item outside the batch you were handed. One item in your batch turning out impossible/already-fixed/blocked is NOT a reason to abandon the rest -- drop that item, name why, and keep building the others; only stop the whole batch if a shared blocker (a broken gate, a conflict spanning every item) actually stops everything."
   },
   "schedule": {
     "hourly_at_minute": 0
   },
-  "timeout_s": 2400,
+  "timeout_s": 5400,
   "enabled": false,
   "llm": {
     "model": "sonnet",

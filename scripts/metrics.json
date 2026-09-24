@@ -56,6 +56,42 @@
    "history": "native"
   },
   {
+   "id": "fleet.items_per_minion_run",
+   "label": "Items / run",
+   "unit": "items",
+   "window": "median, 24h",
+   "source": "runs.jsonl minion item_id (target FLEET_MINION_TARGET_ITEMS)",
+   "lane": "fleet",
+   "history": "daily"
+  },
+  {
+   "id": "fleet.closed_per_minion_run",
+   "label": "Closed / run",
+   "unit": "issues",
+   "window": "24h",
+   "source": "merged member/minion-* PRs' closingIssuesReferences / executed minion runs",
+   "lane": "fleet",
+   "history": "daily"
+  },
+  {
+   "id": "fleet.shipped_live_per_day",
+   "label": "Shipped live",
+   "unit": "PRs",
+   "window": "per day, 14d",
+   "source": "merged PRs carried by a later successful FLEET_DEPLOY_WORKFLOW run",
+   "lane": "fleet",
+   "history": "native"
+  },
+  {
+   "id": "fleet.backlog_trend",
+   "label": "Backlog trend",
+   "unit": "issues/7d",
+   "window": "7 days",
+   "source": "fleet.backlog_open daily history",
+   "lane": "fleet",
+   "history": "daily"
+  },
+  {
    "id": "gh.actions_spend_mtd",
    "label": "GitHub Actions",
    "unit": "USD",
