@@ -44,7 +44,8 @@
         "Bash(git push --force:*)",
         "Bash(gh issue edit:*)"
       ]
-    }
+    },
+    "capabilities": ["design_reference"]
   },
   "report": {
     "vision_link": "optional"

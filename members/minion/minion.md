@@ -152,6 +152,11 @@ work done).
    `--no-sandbox` is required (root in a container). If the acceptance criteria ask for a
    rendered page, a screenshot, or "looks right" — render it and say what you saw.
    **"I could not verify visually" is now a false statement.**
+3c. **When the item touches rendered UI, call the `design_reference` tool before you build and
+   again before you call the item done.** It is design law, not optional: every UI build and
+   every UI check runs it. Paste the tool call and its output in your PR body — or, if it
+   errors, paste the exact error. A UI item with no `design_reference` call in the PR body is
+   an incomplete pass.
 
 5. **Land on CURRENT default-branch before you push.** Other concurrent minions branched from
    the same point this hour and may edit the same files you do. Whoever merges first wins;

@@ -1,0 +1,9 @@
+{
+  "_comment": "Named capability SLOTS -> MCP server config. A member declares a slot in llm.capabilities (e.g. \"design_reference\"), never a server name -- swapping the tool behind a slot means editing one line here, no charter or member-spec edit. run_member.sh resolves slot -> server -> --mcp-config entry + mcp__<server> in --allowedTools. See scripts/member_spec.py's llm.capabilities validation and scripts/run_member.sh's MCP block.",
+  "design_reference": {
+    "inspo": {
+      "type": "http",
+      "url": "https://inspomcp.dev/api/mcp"
+    }
+  }
+}
