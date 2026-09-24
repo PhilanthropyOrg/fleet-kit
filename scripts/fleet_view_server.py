@@ -641,6 +641,21 @@ def _scoreboard_deploy_runs() -> list[dict]:
     return _cached(f"scoreboard_deploys:{wf}", 1800, produce)
 
 
+def _scoreboard_issues_by_number(since_day: str) -> dict[int, dict]:
+    """Closed issues since `since_day`, keyed by number -- state/stateReason/labels/body/closedAt,
+    what scoreboard.resolved_weight needs to score a closingIssuesReferences hit. Cached 30 min,
+    same window as _scoreboard_merged_prs so every merged PR's closed refs resolve to a real row."""
+    def produce():
+        raw = _gh("issue", "list", "--state", "closed", "--search", f"closed:>={since_day}", "--limit", "1000",
+                  "--json", "number,state,stateReason,labels,body,closedAt", timeout=90)
+        try:
+            rows = json.loads(raw) if raw else []
+        except ValueError:
+            rows = []
+        return {r["number"]: r for r in rows if r.get("number") is not None}, bool(rows)
+    return _cached(f"scoreboard_issues:{since_day}", 1800, produce)
+
+
 def _fleet_prs_opened() -> list[dict]:
     """createdAt of every PR the fleet opened (head branch `member/…`), any state, cached 10 min."""
     key = "fleet_prs_opened"
@@ -847,6 +862,38 @@ def metrics_snapshot() -> dict:
             "value": trend, "bad": trend is not None and trend > 0,
             "sub": "net open-backlog change, 7 days (negative = draining)",
             "series": daily_series("fleet.backlog_trend")}
+
+        # fleet.issues_resolved_per_hour / fleet.issues_resolved_7d (2026-09-24, operator ask):
+        # the headline throughput number -- see scoreboard.resolved_events for the definition
+        # (merged PR closes an issue COMPLETED, carried live by a later successful deploy;
+        # NOT_PLANNED closes never count; a fleet:mega counts its full folded-children checklist).
+        issues_by_number = _scoreboard_issues_by_number(days[0])
+        events = scoreboard.resolved_events(merged14, deploys, issues_by_number)
+        hour_buckets = scoreboard.resolved_per_hour_buckets(events, now, hours=24)
+        resolved24 = sum(hour_buckets)
+        referenced = scoreboard.resolved_referenced_numbers(merged14)
+        closed_no_pr24 = scoreboard.closed_without_pr_count(list(issues_by_number.values()), referenced, now, hours=24)
+        # Gated on `deploys` the same way shipped_live_per_day is: with no successful deploy
+        # run read, "live" cannot be determined at all -- the honest answer is unavailable, not
+        # a real zero (a repo with no deploy driver configured never resolves anything by this
+        # definition, which is correct, but must say so rather than look like zero throughput).
+        out["fleet.issues_resolved_per_hour"] = {
+            "value": hour_buckets[-1] if deploys else None,
+            "sub": (f"{resolved24} resolved (PR + deployed), 24h · {closed_no_pr24} closed with no PR "
+                    "(busywork, doesn't count)" if deploys
+                    else f"unavailable (no successful {_deploy_workflow()} runs read)"),
+            "series": [{"day": f"-{23 - i}h", "value": v} for i, v in enumerate(hour_buckets)]}
+        day_resolved: dict[str, int] = {d: 0 for d in days}
+        for e in events:
+            d = _central_day(e["ts"])
+            if d in day_resolved:
+                day_resolved[d] += e["weight"]
+        resolved7d = sum(day_resolved[d] for d in days[-7:])
+        out["fleet.issues_resolved_7d"] = {
+            "value": day_resolved[days[-1]] if deploys else None,
+            "sub": (f"{resolved7d} resolved in 7d" if deploys
+                    else f"unavailable (no successful {_deploy_workflow()} runs read)"),
+            "series": [{"day": d, "value": day_resolved[d]} for d in days]}
         db.commit()
     finally:
         db.close()

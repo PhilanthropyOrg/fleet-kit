@@ -2,6 +2,24 @@
  "_doc": "fk#1058: the metric registry. Every console tile is a row here; the OKR file references tiles by id. A KR that names an id not in this file fails a selftest. Order = display order.",
  "metrics": [
   {
+   "id": "fleet.issues_resolved_per_hour",
+   "label": "Issues resolved / hour",
+   "unit": "issues",
+   "window": "per hour, 24h",
+   "source": "merged PR closes an issue COMPLETED, carried live by a later successful FLEET_DEPLOY_WORKFLOW run",
+   "lane": "fleet",
+   "history": "native"
+  },
+  {
+   "id": "fleet.issues_resolved_7d",
+   "label": "Resolved / day",
+   "unit": "issues",
+   "window": "per day, 7d",
+   "source": "fleet.issues_resolved_per_hour, same events bucketed daily",
+   "lane": "fleet",
+   "history": "native"
+  },
+  {
    "id": "okr.verified_claims",
    "label": "The number",
    "unit": "claims",
