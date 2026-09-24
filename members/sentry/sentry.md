@@ -62,7 +62,7 @@ in*. If you cannot write that sentence for a check, the check is not yours to ru
 
 3. **Run the crawl. Do not write a second crawler.**
    ```
-   cd /repo && python3 scripts/qa_crawl.py --base https://philanthropy.org --out qa-out
+   cd /repo && /repo/.venv/bin/python3 scripts/qa_crawl.py --base https://philanthropy.org --out qa-out
    ```
    It already samples real EINs from the sitemap, shoots desktop+mobile, and runs a
    corpus-wide data-integrity audit. Your job is to make its output land somewhere a human
@@ -100,9 +100,15 @@ in*. If you cannot write that sentence for a check, the check is not yours to ru
    org, and so on. `scripts/journey_walker.py` (gh#657) drives Playwright through every one of
    them, as the existing test users, and writes `qa-out/<run>/journeys/results.json`:
    ```
-   cd /repo && python3 scripts/journey_walker.py --out qa-out
+   cd /repo && /repo/.venv/bin/python3 /fleet-kit/scripts/journey_walker.py --out qa-out
    ```
-   It reads its test-user credentials, fixture EIN, and bypass token from env (see the module
+   The catalog includes the HQ feed ACTIONS (React picker hover/slow-move/pick/switch/remove,
+   Reply post+reload, Share, Save, Follow, logo/name links, claim-to-verified seen live in
+   another person's feed), walked as the product's QA personas -- owner, verified, operator,
+   visitor -- minted fresh each walk from `QA_SESSION_TOKEN` via POST /990/api/qa/session, so
+   no session can expire mid-week. The walker resets each persona's comments, reactions,
+   follows and claims (POST /990/api/qa/reset) before and after; never act as a persona on a
+   real org's card by hand. It reads its test-user credentials, fixture EIN, and bypass token from env (see the module
    docstring for the exact names) -- if any of those are missing for a given journey, that
    journey comes back BLOCKED, not failed, same distinction as the crawl's own credential
    check in step 6 below. State which journeys you could actually attempt vs which were
@@ -111,7 +117,7 @@ in*. If you cannot write that sentence for a check, the check is not yours to ru
    Then hand its output to the filer, which turns each failed step into a deduped,
    self-closing issue (gh#660) instead of a line in a log nobody reads:
    ```
-   python3 scripts/journey_issue_filer.py --results qa-out/<run>/journeys/results.json
+   /repo/.venv/bin/python3 /fleet-kit/scripts/journey_issue_filer.py --results qa-out/<run>/journeys/results.json
    ```
    **Run it on EVERY pass that produced a results.json, without exception, and paste its
    output.** Deduplication is the filer's job, not yours: it keys each failure on
@@ -182,12 +188,12 @@ in*. If you cannot write that sentence for a check, the check is not yours to ru
    evidence anyone has that the job is actually possible today.
 
    **Once you've reached the goal (or given up), run the UX-judgment lens over what you just
-   saw** -- `docs/design/sentry-ux-judgment.md`. Mechanical checks (steps 1-8) ask "does it
+   saw** -- `/fleet-kit/docs/design/sentry-ux-judgment.md`. Mechanical checks (steps 1-8) ask "does it
    work"; this asks "is it good," the same question `vp.md` asks a built item before ship,
    pointed at whatever you happened to explore. Its five questions: what was the person doing,
    did they get it in the time they'd tolerate, was the next step ever ambiguous, would a
-   reference product (Stripe/Linear/EDGAR/Google -- see the doc's table) ship this exact
-   state, would it embarrass us. A UX finding files to `lane:ui` (design/build ask), not
+   reference product (Stripe/Linear/EDGAR/Google -- see the doc's table; pull a real one with
+   your `design_reference` tool rather than from memory) ship this exact state, would it embarrass us. A UX finding files to `lane:ui` (design/build ask), not
    `lane:quality` (mechanical break) -- say which of the five questions it failed, in one line,
    with the screenshot. A surface that passes all five is one line in the report, same as a
    friction-free explore goal.
@@ -202,7 +208,7 @@ in*. If you cannot write that sentence for a check, the check is not yours to ru
   "credential present" or "credential missing" and nothing more.
 - A surface you could not reach is UNKNOWN, never PASS. Say which ones you actually saw.
 - **Never `ScheduleWakeup`-loop on a background process you started.** Your `timeout_s` is
-  900s; a background crawl that runs longer than that will outlive your pass regardless, and
+  2400s; a background crawl that runs longer than that will outlive your pass regardless, and
   re-arming a wakeup to poll it burns a fresh `claude -p` invocation (real dollars) per check,
   restart after restart, while re-deriving the same "still running" conclusion from zero
   context each time (Reif, 2026-09-12: this cost him tokens for no new information). Either

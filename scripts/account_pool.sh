@@ -706,6 +706,17 @@ account_pool_run() {
       _account_pool_clear_streak "$account"
       return 0
     fi
+    # rc=124 is the member's OWN timeout expiring, not anything the account said. Re-running
+    # the whole pass on the next account just spends another full timeout (2026-09-24 16:44Z:
+    # sentry burned 3 x 900s on philanthropy, gmail, tgp, then read as rc=3 budget_declined).
+    # Stop here and return 124 so run_member.sh records timed_out against the account that ran it.
+    if [ "$rc" -eq 124 ]; then
+      export ACCOUNT_POOL_SELECTED="$account" ACCOUNT_POOL_LAST_REASON="timeout"
+      [ -n "${ACCOUNT_POOL_SELECTED_FILE:-}" ] && printf '%s\n' "$account" > "$ACCOUNT_POOL_SELECTED_FILE" 2>/dev/null
+      [ -n "${ACCOUNT_POOL_REASON_FILE:-}" ] && printf '%s\n' "timeout" > "$ACCOUNT_POOL_REASON_FILE" 2>/dev/null
+      _account_pool_log "account=$account command timed out rc=124 -- member timeout, not an account failure; not failing over"
+      return 124
+    fi
     reason=$(_account_pool_classify_failure "$(cat "$capture")" "$rc")
     _account_pool_log "account=$account command failed rc=$rc reason=$reason"
     export ACCOUNT_POOL_LAST_REASON="$reason"

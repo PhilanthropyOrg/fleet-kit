@@ -267,3 +267,101 @@ journeys:
         observable_result: >
           The runs list contains at least one row whose timestamp is within the last 24
           hours -- confirming live data, not an empty or stale cache.
+
+  # --- HQ feed actions, as the product's QA personas (2026-09-24). sentry's walk only LOADED
+  # pages, so it missed HQ replies 500ing on prod (philanthropy#7726) and the React picker
+  # closing on hover-out. Every journey below DOES the action, then reloads and checks it
+  # stuck. Personas act on their own fixture org's card only; /990/api/qa/reset wipes their
+  # data before and after. Implementations: scripts/journey_hq.py.
+
+  - id: persona-roles
+    name: Every test persona signs in and sees its role
+    description: Each QA persona gets a working session and the surface its role implies.
+    preconditions: [QA_SESSION_TOKEN configured]
+    test_users: [owner, verified, operator, visitor]
+    viewport_invariant_reason: sign-in and role gating do not change with width
+    viewports: [desktop]
+    steps:
+      - action: Sign in as owner and open /network/hq.
+        observable_result: The HQ feed list (#hqf-feed-list) renders within 15s.
+      - action: Sign in as verified and open /network/hq.
+        observable_result: The HQ feed list renders within 15s.
+      - action: Sign in as operator and open /990/superadmin/verify.
+        observable_result: The claim review queue renders (not a 403 or sign-in page).
+      - action: Sign in as visitor and open /network/hq.
+        observable_result: The HQ feed list renders within 15s.
+
+  - id: hq-react-picker
+    name: React to an HQ post, switch, remove, and have it stick
+    description: A person hovers React, moves slowly to an emoji, picks it, changes their mind, then takes it back.
+    preconditions: [signed in as owner, owner's fixture org card in the feed]
+    test_users: [owner]
+    viewport_invariant_reason: hover is a desktop-pointer interaction; mobile long-press is a different gesture
+    viewports: [desktop]
+    steps:
+      - action: Sign in as owner, open /network/hq, find the owner's fixture org card.
+        observable_result: The card is visible within 15s.
+      - action: Hover the React button.
+        observable_result: The emoji picker (role=menu) opens within 3s with at least 2 emoji.
+      - action: Move the pointer slowly (30 steps) from React to the first emoji and click it.
+        observable_result: The picker stays open the whole way; the react POST answers 200.
+      - action: Read the React button.
+        observable_result: Its aria-label names the picked emoji within 5s.
+      - action: Hover again, move slowly to the second emoji, click it.
+        observable_result: The picker stays open; the button now names the second emoji.
+      - action: Reload the page.
+        observable_result: The card still shows the second emoji as the viewer's reaction.
+      - action: Pick the same emoji again to remove it, then reload.
+        observable_result: The button no longer reads "Reacted" after reload.
+
+  - id: hq-reply-post-and-reload
+    name: Reply to an HQ post and see it after reload
+    description: A person writes a reply under an org's HQ post and it is still there when they come back.
+    preconditions: [signed in as owner]
+    test_users: [owner]
+    viewports: [desktop, mobile_390]
+    steps:
+      - action: Sign in as owner, open /network/hq, click Reply on the fixture org card.
+        observable_result: The reply input is visible within 5s.
+      - action: Type a unique marker and click Post.
+        observable_result: The comments POST answers 200 and the marker appears in the thread within 5s.
+      - action: Reload, click Reply again.
+        observable_result: The marker is in the thread within 8s.
+
+  - id: hq-share-save-follow-links
+    name: Share, Save, Follow and the org links on an HQ post
+    description: A person shares a post, saves it, follows the org, and clicks through to the org.
+    preconditions: [signed in as owner]
+    test_users: [owner]
+    viewport_invariant_reason: same handlers at every width; the mobile layout is covered by hq-reply-post-and-reload
+    viewports: [desktop]
+    steps:
+      - action: Sign in as owner, open /network/hq, find the fixture org card.
+        observable_result: The card is visible within 15s.
+      - action: Click Share.
+        observable_result: The org link is handed to the share sheet or copied (button reads "Copied!") within 4s.
+      - action: Click Save, then reload.
+        observable_result: Save changes state (label or aria-pressed) and the change survives reload.
+      - action: Click Follow, reload, click again to unfollow, reload.
+        observable_result: Reads "Following" after the first reload and "Follow" after the second.
+      - action: Click the org logo plate, then (from HQ) the org name.
+        observable_result: Each lands on a page answering < 400 that shows the org's name.
+
+  - id: hq-claim-to-verified-live-feed
+    name: Claim a fixture org to verified, seen live in another person's HQ
+    description: A new visitor claims an org, staff approve it, the visitor owns it, and an open HQ feed shows it without a reload.
+    preconditions: [visitor has no claims (reset), owner has HQ open]
+    test_users: [visitor, operator, owner]
+    viewport_invariant_reason: the flow is server-driven; the claim form layout is covered by claim-org-through-verify-screen
+    viewports: [desktop]
+    steps:
+      - action: Owner opens /network/hq; visitor signs in and opens /990/claim/<visitor fixture EIN>.
+        observable_result: The owner's feed list and the visitor's #claim-form both render within 15s.
+      - action: Visitor ticks the authorization box and submits the claim.
+        observable_result: The claim POST answers < 400 and the page says pending/review/received within 15s.
+      - action: Operator approves the visitor's claim through the review queue's endpoint.
+        observable_result: POST /990/api/superadmin/verify/org-claim answers 200.
+      - action: Watch the owner's open HQ, no reload.
+        observable_result: A card for the visitor's fixture org appears live within 30s.
+      - action: Visitor reopens the claim page.
+        observable_result: The page says the org is verified / managed by them within 15s.

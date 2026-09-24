@@ -12,14 +12,14 @@
       "file ONE issue per distinct broken surface, dedup by surface+symptom so a persisting break does not refile every 3 hours -- and CLOSE the issue when the surface recovers"
     ],
     "limits": {
-      "timeout_s": 900
+      "timeout_s": 2400
     },
     "escalation": "a surface is ambiguous (challenge page, timeout, or a 5xx that could be a deploy cutover) -- re-check once after 60s before filing; a blue-green cutover returns 502 for ~10-20s and is NOT an outage. If the probe credential is missing, say so LOUDLY as a checker defect and do not report the surfaces as healthy."
   },
   "schedule": {
     "interval_s": 10800
   },
-  "timeout_s": 900,
+  "timeout_s": 2400,
   "enabled": true,
   "llm": {
     "model": "sonnet",
@@ -37,7 +37,10 @@
         "Bash(git push:*)",
         "Bash(gh pr merge:*)"
       ]
-    }
+    },
+    "capabilities": [
+      "design_reference"
+    ]
   },
   "report": {
     "vision_link": "optional"
