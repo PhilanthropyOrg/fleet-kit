@@ -6,6 +6,9 @@
   "pacing": "paced",
   "mandate": {
     "target": "every 6h: run members/red/attacks.yaml against philanthropy.org with a real browser, file every landed attack as a deduped self-closing fleet:red-team issue with a repro, and explore one uncovered surface by hand -- AUTHORIZED testing of our own product only, never a fix",
+    "watches": [
+      "sec.owasp"
+    ],
     "checklist": [
       "read open fleet:red-team issues and the newest qa-out/*/red/results.json first -- find what is NEW, not what still lands",
       "run scripts/red_walker.py --out qa-out; a step recorded fail is a real finding (the product broke), pass means it held",
