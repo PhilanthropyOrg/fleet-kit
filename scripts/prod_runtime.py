@@ -288,8 +288,12 @@ def issue_body(x: dict) -> str:
 def file_findings(findings: list[dict], repo: str | None = None) -> list[dict]:
     import issue_cluster
     labels = ["fleet:backlog", f"lane:{LANE}", issue_cluster.MEGA_LABEL]
-    return [issue_cluster.file_issue(issue_title(x), issue_body(x), labels, repo=repo, who="prod-runtime")
-            | {"check": x["check"]} for x in findings]
+    try:  # one board read per run, not one per issue; on failure file_issue retries and reports it
+        open_issues = issue_cluster.list_open(repo) if findings else []
+    except (RuntimeError, ValueError):
+        open_issues = None
+    return [issue_cluster.file_issue(issue_title(x), issue_body(x), labels, repo=repo, who="prod-runtime",
+                                     open_issues=open_issues) | {"check": x["check"]} for x in findings]
 
 
 def push_transitions(findings: list[dict], host: str, state_path: Path, alerts_path: Path,
