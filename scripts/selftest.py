@@ -8355,6 +8355,61 @@ def _nerd_invalid_lane_rejected_before_lane_work():
         "a valid canonical lane was rejected -- AC4 behavior change"
 
 
+def _mcp_capability_slots_wire_dry_run_flags():
+    """Per-member MCP servers, built as named capability SLOTS (Reif, cross-session design
+    change mid-build): a member declares llm.capabilities: ["<slot>"] in its .fleet.json, never
+    a server name -- capabilities.json maps slot -> {server_name: mcp_config}, so swapping the
+    tool behind a slot is a one-line edit there, no member-spec or charter change.
+
+    Asserts the dry-run command:
+    1. for minion (llm.capabilities: ["design_reference"], resolving to the real inspo server
+       in the repo's own capabilities.json) includes --mcp-config and mcp__inspo,
+    2. for a member with no llm.capabilities at all (nerd) includes neither -- absent means
+       exactly today's behavior, no MCP config, no behavior change for the other 16 members.
+    """
+    import os
+    import subprocess
+
+    env = dict(os.environ)
+    tmp = tempfile.mkdtemp()
+    # Own TMPDIR: run_member.sh's dispatch-lock dir (gh#3220) is ${TMPDIR:-/tmp}/fleet-kit-
+    # member-locks, keyed only on member name -- sharing the real TMPDIR would let this test
+    # collide with (or be skipped by) an actual concurrent minion/nerd pass on this box.
+    env.update({
+        "FLEET_REPO": str(ROOT),
+        "FLEET_LOG_DIR": str(Path(tmp) / "logs"),
+        "FLEET_ENV_FILE": str(Path(tmp) / "nonexistent.env"),
+        "TMPDIR": str(Path(tmp) / "tmp") + "/",
+        # minion/nerd both ship enabled=false (dial-armed by an operator, not by default) --
+        # FLEET_RUN_NOW=1 is run_member.sh's own documented override to still resolve/print the
+        # dry-run command rather than exit before ever reaching tool/MCP resolution.
+        "FLEET_RUN_NOW": "1",
+    })
+    os.makedirs(Path(tmp) / "tmp", exist_ok=True)
+
+    proc = subprocess.run(
+        ["bash", str(ROOT / "scripts" / "run_member.sh"), "minion", "--dry-run"],
+        capture_output=True, text=True, timeout=30, env=env,
+    )
+    assert proc.returncode == 0, f"minion --dry-run failed: rc={proc.returncode} stderr={proc.stderr}"
+    assert "--mcp-config" in proc.stdout, \
+        f"minion has llm.capabilities: [design_reference] but --mcp-config is missing from dry-run: {proc.stdout!r}"
+    assert "--strict-mcp-config" in proc.stdout, \
+        f"--strict-mcp-config missing from minion dry-run: {proc.stdout!r}"
+    assert "mcp__inspo" in proc.stdout, \
+        f"mcp__inspo (the design_reference slot's real server) missing from minion --allowedTools: {proc.stdout!r}"
+
+    proc2 = subprocess.run(
+        ["bash", str(ROOT / "scripts" / "run_member.sh"), "nerd", "--dry-run"],
+        capture_output=True, text=True, timeout=30, env=env,
+    )
+    assert proc2.returncode == 0, f"nerd --dry-run failed: rc={proc2.returncode} stderr={proc2.stderr}"
+    assert "--mcp-config" not in proc2.stdout, \
+        f"nerd has no llm.capabilities -- --mcp-config must not appear: {proc2.stdout!r}"
+    assert "mcp__" not in proc2.stdout, \
+        f"nerd has no llm.capabilities -- no mcp__ tool should appear: {proc2.stdout!r}"
+
+
 def _nerd_lane_validation_reads_target_own_registry():
     """gh#638: `run_member.sh`'s nerd lane-validation hardcoded fleet-kit's own seven lane
     names as THE canonical list for every `FLEET_REPO` target, not just fleet-kit's. When
@@ -15794,6 +15849,7 @@ if __name__ == "__main__":
     check("datta dispatches by coverage, nerds analyse one lane", _datta_dispatches_and_nerds_analyse)
     check("datta's structural-N/A streak has a reset path independent of ranking (gh#447)", _datta_structural_na_streak_has_a_reset_path)
     check("nerd rejects an invalid lane before any lane-specific work (gh#374)", _nerd_invalid_lane_rejected_before_lane_work)
+    check("llm.capabilities MCP slots wire --mcp-config/mcp__inspo into minion's dry-run, absent for nerd", _mcp_capability_slots_wire_dry_run_flags)
     check("nerd lane validation reads the current target's own lane registry (gh#638)", _nerd_lane_validation_reads_target_own_registry)
     check("registry_lanes() reads a list-shaped REGISTRY, e.g. philanthropy's (gh#704)", _registry_lanes_reads_list_shaped_registry_gh704)
     check("nerd's STRUCTURAL-N/A marker wires to datta's down-rank rule (gh#451)", _nerd_structural_na_marker_wires_to_datta_downrank)

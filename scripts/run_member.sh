@@ -719,12 +719,57 @@ fi
 # -- built fresh from the git-reviewed spec every run, never from a cached or hand-edited list.
 ALLOWED=$(jget "['llm']['tools'].get('allow', [])" | python3 -c "import ast,sys; print(' '.join(ast.literal_eval(sys.stdin.read())))")
 DENIED=$(jget "['llm']['tools'].get('deny', [])" | python3 -c "import ast,sys; print(' '.join(ast.literal_eval(sys.stdin.read())))")
+
+# llm.capabilities -> MCP servers. A member declares named SLOTS ("design_reference"), never a
+# server name -- capabilities.json maps slot -> {server_name: mcp_config}, so swapping the tool
+# behind a slot is a one-line edit there, no member-spec or charter change. Absent llm.capabilities
+# means no MCP config at all, so behavior for every existing member is unchanged. Built fresh
+# from the reviewed spec + capabilities.json every run, same reasoning as TOOL_ARGS above --
+# never a cached or hand-edited file.
+MCP_CONFIG_FILE=""
+CAPS=$(jget "['llm'].get('capabilities', [])" | python3 -c "import ast,sys; print(' '.join(ast.literal_eval(sys.stdin.read())))")
+if [ -n "$CAPS" ]; then
+  MCP_CONFIG_FILE=$(mktemp "${TMPDIR:-/tmp}/fleet_mcp_${MEMBER}.XXXXXX.json")
+  # One python call resolves slot(s) -> server(s) once: line 1 of stdout is the --mcp-config
+  # JSON body, line 2 is the space-joined mcp__<name> list to fold into --allowedTools.
+  MCP_RESOLVE_OUT=$(python3 - "$KIT_DIR" "$CAPS" <<'PYEOF'
+import json, sys
+kit_dir, caps_str = sys.argv[1], sys.argv[2]
+caps_path = kit_dir + "/capabilities.json"
+try:
+    with open(caps_path) as f:
+        data = json.load(f)
+except (FileNotFoundError, json.JSONDecodeError) as e:
+    print(f"FATAL: could not read {caps_path}: {e}", file=sys.stderr)
+    sys.exit(1)
+servers = {}
+for slot in caps_str.split():
+    slot_servers = data.get(slot)
+    if not isinstance(slot_servers, dict):
+        print(f"FATAL: slot '{slot}' not found in {caps_path}", file=sys.stderr)
+        sys.exit(1)
+    servers.update(slot_servers)
+print(json.dumps({"mcpServers": servers}))
+print(" ".join(f"mcp__{name}" for name in servers))
+PYEOF
+  ) || { log "FATAL: could not resolve llm.capabilities ($CAPS) against capabilities.json"; exit 2; }
+  MCP_JSON=$(printf '%s\n' "$MCP_RESOLVE_OUT" | sed -n '1p')
+  MCP_TOOLS=$(printf '%s\n' "$MCP_RESOLVE_OUT" | sed -n '2p')
+  printf '%s' "$MCP_JSON" > "$MCP_CONFIG_FILE"
+  # Folded into the SAME $ALLOWED string, not a second --allowedTools flag -- the CLI takes one
+  # allowlist; passing it twice would let the second silently clobber the first.
+  [ -n "$MCP_TOOLS" ] && ALLOWED="${ALLOWED:+$ALLOWED }$MCP_TOOLS"
+  log "$MEMBER: MCP capabilities resolved ($CAPS) -- servers: $MCP_TOOLS"
+fi
+
 TOOL_ARGS=()
 [ -n "$ALLOWED" ] && TOOL_ARGS+=(--allowedTools "$ALLOWED")
 [ -n "$DENIED" ] && TOOL_ARGS+=(--disallowedTools "$DENIED")
+[ -n "$MCP_CONFIG_FILE" ] && TOOL_ARGS+=(--mcp-config "$MCP_CONFIG_FILE" --strict-mcp-config)
 
 if [ "$DRY_RUN" -eq 1 ]; then
   echo "[dry-run] claude -p <charter:$BEHAVIOR> --model $MODEL${MAX_TURNS:+ --max-turns $MAX_TURNS}${MAX_BUDGET:+ --max-budget-usd $MAX_BUDGET} ${TOOL_ARGS[*]}"
+  [ -n "$MCP_CONFIG_FILE" ] && rm -f "$MCP_CONFIG_FILE"
   exit 0
 fi
 
@@ -883,6 +928,7 @@ claude_slot_release
 [ -s "$ACCOUNT_POOL_SELECTED_FILE" ] && ACCOUNT_POOL_SELECTED=$(cat "$ACCOUNT_POOL_SELECTED_FILE")
 [ -s "$ACCOUNT_POOL_REASON_FILE" ] && ACCOUNT_POOL_LAST_REASON=$(cat "$ACCOUNT_POOL_REASON_FILE")
 rm -f "$ACCOUNT_POOL_SELECTED_FILE" "$ACCOUNT_POOL_REASON_FILE"
+[ -n "$MCP_CONFIG_FILE" ] && rm -f "$MCP_CONFIG_FILE"
 
 RAW=$(cat "$RESULT_FILE" 2>/dev/null)
 rm -f "$RESULT_FILE"

@@ -52,6 +52,18 @@ import re
 from pathlib import Path
 
 MEMBERS_DIR = Path(__file__).resolve().parent.parent / "members"
+CAPABILITIES_FILE = Path(__file__).resolve().parent.parent / "capabilities.json"
+
+
+def _load_capabilities() -> dict:
+    """Slot -> {server_name: mcp_config}. Missing/unparseable file means NO slots known -- a
+    member declaring llm.capabilities against a repo with no capabilities.json fails loudly
+    here rather than silently getting no MCP server at run time."""
+    try:
+        data = json.loads(CAPABILITIES_FILE.read_text())
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+    return {k: v for k, v in data.items() if not k.startswith("_")}
 
 # {{TOKEN}} in a charter is either (a) a template slot nobody filled in for this product --
 # jefe.md shipped with {{VISION}}/{{NORTH_STAR_METRIC}} unfilled and ran silently as a no-op on
@@ -213,6 +225,23 @@ def validate(spec: dict, *, filename: str = "<dict>") -> dict:
     _require(isinstance(tools.get("deny", []), list), f"{where}llm.tools.deny must be a list")
     if "max_turns" in llm:
         validate_max_turns(llm["max_turns"], where=where)
+
+    # llm.capabilities: named SLOTS (e.g. "design_reference"), never a server name -- the
+    # server behind a slot lives in capabilities.json so swapping it is a one-line edit there,
+    # not a member-spec or charter change. Validated against that file here, same reasoning as
+    # _check_charter's placeholder scan: a typo'd slot must fail at load time, not silently
+    # resolve to nothing at run_member.sh time.
+    if "capabilities" in llm:
+        caps = llm["capabilities"]
+        _require(isinstance(caps, list) and caps,
+                 f"{where}llm.capabilities must be a non-empty list of slot names when set")
+        _require(all(isinstance(c, str) and c for c in caps),
+                 f"{where}llm.capabilities items must all be non-empty strings")
+        known = _load_capabilities()
+        unknown = [c for c in caps if c not in known]
+        _require(not unknown,
+                 f"{where}llm.capabilities names unknown slot(s) {unknown} -- not in "
+                 f"{CAPABILITIES_FILE.name} (known slots: {sorted(known)})")
 
     report = spec["report"]
     _require(isinstance(report, dict), f"{where}report must be an object")
