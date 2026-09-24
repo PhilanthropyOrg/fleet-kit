@@ -5,24 +5,8 @@
   "lane": "analysis",
   "mandate": {
     "target": "one lane, handed to you by gru's coverage step -> its KPI examined against real data, and at least one concrete evidence-backed finding filed to the backlog, or one line naming exactly what you examined and why nothing qualified",
-    "watches": [
-      "svc.saturation",
-      "db.slow_queries",
-      "db.indexes",
-      "db.connections",
-      "db.timeouts",
-      "db.locks",
-      "db.least_privilege",
-      "box.resources",
-      "box.error_logs",
-      "box.process_restarts",
-      "jobs.success",
-      "jobs.ingest_freshness",
-      "deploy.success",
-      "seo.indexation",
-      "analytics.flowing"
-    ],
     "checklist": [
+      "prod-readiness items you OWN (docs/prod_readiness.json, owner=nerd): run each item's `check` at least every `cadence_h` hours and file what it finds -- librarian's daily audit FAILS the day one lapses; the list is permanent, so a check you cannot run is a finding to file, never an item to drop",
       "your assigned lane arrives in the operator instruction as lane=<name>. Work ONLY that lane -- picking another defeats the coverage gru just computed",
       "read your lane's KPI, guardrail and denominator off the board. State the value and the delta before you look at anything else",
       "run your lane's OWN checklist first -- the fixed things that must be true every pass, listed per-lane in your charter. These are the known failure modes; check them before exploring",

@@ -119,4 +119,40 @@ for f in "$LOGDIR"/*.log; do   # logrotate moves history to .log.1, so read both
         }
         END { if (last) printf "%s\t%d\t%s\t%d\t%d\n", name, last, lrc, fails, ok }'
 done
+
+# ---- data inflows (docs/data_inflows.json, scored by coverage_map.py) ----------------------
+sec envkeys  # NAMES of non-empty keys in the app's env files -- never a value
+cat "$(dirname "$ENV_FILE")"/*.env 2>/dev/null | sed -n 's/^\(export \)\{0,1\}\([A-Z_][A-Z0-9_]*\)=.\{1,\}$/\2/p' | sort -u
+
+sec signals  # name, http_code, note -- the app's own token-gated read endpoints, on loopback
+for s in ga4 gsc posthog cf clarity; do
+    code=$(curl -s -m 30 -o /tmp/.fleet-probe-sig -w '%{http_code}' -H 'Host: philanthropy.org' \
+        -H 'X-Forwarded-Proto: https' -H "x-pm-token: ${PHILANTHROPY_PM_TOKEN:-}" \
+        "http://127.0.0.1:8000/990/api/signals/$s" 2>/dev/null)
+    note=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1]))
+print((d.get("credential_status") or d.get("error") or "") + " " + str(d.get("need") or d.get("detail") or "")[:160])' \
+        /tmp/.fleet-probe-sig 2>/dev/null | tr '\t\n' '  ')
+    printf '%s\t%s\t%s\n' "$s" "${code:-000}" "$note"
+done
+rm -f /tmp/.fleet-probe-sig
+
+if [ -n "$DB" ]; then
+    sec inflow_ts  # name, newest-row epoch (blank = no rows ever). Indexed or small tables only.
+    PGOPTIONS="-c default_transaction_read_only=on -c statement_timeout=10000" \
+        psql "$DB" -X -q -A -t -F $'\t' 2>/dev/null <<'SQL'
+select 'dash:' || s, extract(epoch from (select ts from dash_events where source = s order by id desc limit 1)::timestamp)::bigint
+  from unnest(array['posthog', 'clarity', 'org_claim']) s;
+select 'dash:mailer_bounce', extract(epoch from greatest(
+  (select max(ts) from dash_events where source = 'mailer' and kind = 'bounced'),
+  (select max(ts) from dash_events where source = 'mailer' and kind = 'complained'))::timestamp)::bigint;
+select 'stripe_webhook_events', extract(epoch from max(received_at)::timestamp)::bigint from stripe_webhook_events;
+select 'messages', extract(epoch from (select created_at from messages order by id desc limit 1)::timestamp)::bigint;
+select 'org_claims', extract(epoch from (select created_at from org_claims order by id desc limit 1)::timestamp)::bigint;
+select 'website_discovery', extract(epoch from max(tried_at)::timestamp)::bigint from website_discovery;
+select 'website_content', extract(epoch from max(fetched_at)::timestamp)::bigint from website_content;
+select 'org_news', extract(epoch from max(fetched_at)::timestamp)::bigint from org_news;
+select 'social_signals', extract(epoch from max(observed_at)::timestamp)::bigint from social_signals;
+select 'email_intake_processed', extract(epoch from max(processed_at)::timestamp)::bigint from email_intake_processed;
+SQL
+fi
 exit 0

@@ -6,10 +6,8 @@
   "pacing": "paced",
   "mandate": {
     "target": "every 6h: run members/red/attacks.yaml against philanthropy.org with a real browser, file every landed attack as a deduped self-closing fleet:red-team issue with a repro, and explore one uncovered surface by hand -- AUTHORIZED testing of our own product only, never a fix",
-    "watches": [
-      "sec.owasp"
-    ],
     "checklist": [
+      "prod-readiness items you OWN (docs/prod_readiness.json, owner=red): run each item's `check` at least every `cadence_h` hours and file what it finds -- librarian's daily audit FAILS the day one lapses; the list is permanent, so a check you cannot run is a finding to file, never an item to drop",
       "read open fleet:red-team issues and the newest qa-out/*/red/results.json first -- find what is NEW, not what still lands",
       "run scripts/red_walker.py --out qa-out; a step recorded fail is a real finding (the product broke), pass means it held",
       "a Cloudflare 403 is BLOCKED (checker lost its credential, fk#729), never reported as safe or broken",
