@@ -104,6 +104,15 @@ class NotifierTests(unittest.TestCase):
         text = self.got.read_text()
         self.assertEqual(text.count("STARTED cron:canary"), 1)
 
+    def test_returns_while_job_sh_background_run_continues(self):
+        # the real job.sh shape: an async `cd && setsid nohup <long run> &` that inherits stdout
+        self.jobsh.write_text(f"cat >> {self.got}; cd / && setsid nohup sleep 30 < /dev/null > /dev/null 2>&1 &\necho started\n")
+        import time
+        t0 = time.time()
+        with mock.patch.object(sys, "argv", ["x", str(self.jsonl), "--job-sh", str(self.jobsh)]):
+            self.assertEqual(nh.main(), 0)
+        self.assertLess(time.time() - t0, 10)
+
     def test_failed_handoff_is_retried(self):
         self.assertEqual(self.run_main(rc=1), 1)
         self.assertEqual(self.run_main(rc=0), 0)
