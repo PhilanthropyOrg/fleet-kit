@@ -184,7 +184,8 @@ def resolved_events(merged_prs: list[dict], deploy_runs: list[dict],
                 continue
             w = resolved_weight(issue)
             if w:
-                out.append({"ts": live_at, "weight": w, "pr": pr.get("number"), "issue": num})
+                out.append({"ts": live_at, "weight": w, "pr": pr.get("number"), "issue": num,
+                           "is_mega": bool(mega_child_numbers(issue))})
     return out
 
 

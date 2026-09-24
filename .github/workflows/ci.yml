@@ -68,6 +68,8 @@ jobs:
         run: python3 scripts/test_scoreboard.py
       - name: run test_resolved_per_hour.py
         run: python3 scripts/test_resolved_per_hour.py
+      - name: run test_issues_per_hour_chart.py
+        run: python3 scripts/test_issues_per_hour_chart.py
       - name: run test_account_pool_config_dir.py
         run: python3 scripts/test_account_pool_config_dir.py
       - name: run test_account_pool_order.py
