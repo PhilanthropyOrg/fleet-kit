@@ -1,0 +1,10 @@
+[Unit]
+Description=Wake fleetkit-hq-prod-alert.service whenever prod-alerts.jsonl grows
+
+[Path]
+# Same shape as fleetkit-reif-hq-notify.path: every append fires; the service's offset file
+# makes repeated fires idempotent.
+PathModified={{INSTANCE_DIR}}/logs/prod-alerts.jsonl
+
+[Install]
+WantedBy=multi-user.target
