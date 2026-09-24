@@ -84,6 +84,15 @@ case "${1:-cron-foreground}" in
     LOG_DIR="${FLEET_LOG_DIR:-/var/log/fleet-kit}"
     mkdir -p "$LOG_DIR"
 
+    # fk#1281: a container deploy.sh retired at a blue-green cutover must never come back as
+    # a second scheduler if it is restarted (host reboot, `podman start` by hand): no crontab,
+    # no dashboard (a second fleet.db writer), no webhook receiver. --rollback clears the flag
+    # before it restarts the container, so a real rollback still boots normally.
+    if [ -e /fleet-kit/.retired ]; then
+      echo "[entrypoint] /fleet-kit/.retired present -- this build was retired at a cutover; not scheduling anything (fk#1281)"
+      exec sleep infinity
+    fi
+
     # Start the live dashboard in the background -- this is the whole point of exposing a
     # port from the container. Without this, cron-foreground runs the loop with nothing
     # observable from outside except raw log files inside the container.

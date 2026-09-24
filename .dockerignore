@@ -12,3 +12,5 @@ __pycache__/
 *.pyc
 .DS_Store
 .git/
+# fk#1281: the per-container retired flag -- baking one into an image would make a LIVE build refuse every pass.
+.retired

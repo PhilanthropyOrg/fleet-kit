@@ -33,6 +33,7 @@ from pathlib import Path
 LOG_DIR = Path(os.environ.get("FLEET_LOG_DIR", Path.home() / "Library" / "Logs" / "fleet-kit")).expanduser()
 RUNS_FILE = LOG_DIR / "runs.jsonl"
 DB_FILE = Path(os.environ.get("FLEET_DB_PATH", LOG_DIR / "fleet.db")).expanduser()
+BUSY_TIMEOUT_S = float(os.environ.get("FLEET_DB_BUSY_TIMEOUT_S", "15"))
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs (
@@ -258,7 +259,10 @@ def _migrate(conn: sqlite3.Connection, db_path: Path) -> None:
 def connect(db_path: Path | None = None) -> sqlite3.Connection:
     p = db_path or DB_FILE
     p.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(p))
+    # fk#1281: wait out a short write burst instead of failing on the first contended lock.
+    # Several processes write this file (every member's tail sync, the dashboard's thread),
+    # and during a blue-green cutover TWO dashboards briefly share it.
+    conn = sqlite3.connect(str(p), timeout=BUSY_TIMEOUT_S)
     _migrate(conn, p)
     conn.execute("INSERT OR IGNORE INTO sync_state (id, offset) VALUES (0, 0)")
     conn.commit()
@@ -337,6 +341,25 @@ def sync(conn: sqlite3.Connection, runs_file: Path | None = None) -> int:
     rf = runs_file or RUNS_FILE
     if not rf.exists():
         return 0
+    try:
+        return _sync_locked(conn, rf)
+    except BaseException:
+        # fk#1281: an error part-way through (a `database is locked` on the offset UPDATE, a
+        # bad row) used to leave the implicit transaction OPEN on a long-lived connection.
+        # fleet_view_server's tail thread catches the exception and loops on the same
+        # connection, so it kept the RESERVED lock and a hot journal indefinitely: 2026-09-24
+        # 14:40-14:46 CDT every other reader/writer, the live container included, got
+        # `database is locked` until that process was killed. Roll back so the lock is
+        # released the moment the error surfaces; the offset did not advance, so the next
+        # tick re-reads the same lines (the upsert is idempotent).
+        try:
+            conn.rollback()
+        except sqlite3.Error:
+            pass
+        raise
+
+
+def _sync_locked(conn: sqlite3.Connection, rf: Path) -> int:
     size = rf.stat().st_size
     offset = conn.execute("SELECT offset FROM sync_state WHERE id = 0").fetchone()[0]
     if size < offset:
