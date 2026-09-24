@@ -35,14 +35,14 @@ BATCH_WINDOW_S = 60
 CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
 
-def sanitize_title(title: str) -> str:
+def sanitize_title(title: str, limit: int = 120) -> str:
     """Strip control chars and backticks (command substitution inside the pane's shell), clip
     to 120 chars -- a merged PR's title must never be able to inject a command into Reif HQ's
     input line, only ever appear as inert text inside the message."""
     cleaned = CONTROL_CHARS_RE.sub("", title or "").replace("`", "'")
     cleaned = " ".join(cleaned.split())  # collapse newlines/tabs that survived as whitespace
-    if len(cleaned) > 120:
-        cleaned = cleaned[:117] + "..."
+    if len(cleaned) > limit:
+        cleaned = cleaned[:limit - 3] + "..."
     return cleaned
 
 

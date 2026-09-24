@@ -417,6 +417,11 @@ case "${1:-cron-foreground}" in
       # this export lane_kpi.py would silently fall back to fleet_db.py's own $HOME-based
       # default and read/write a completely different, wrong fleet.db with no error at all.
       echo "14 * * * * root export FLEET_LOG_DIR=$LOG_DIR && [ -f \"\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}\" ] && { set -a; . \"\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}\"; set +a; }; python3 /fleet-kit/scripts/lane_kpi.py record >> $LOG_DIR/lane_kpi.log 2>&1"
+      # prod_runtime.py (Reif 2026-09-24): nerd's prod-runtime lane, deterministic half. Reads the
+      # LIVE prod DB/box/crons through one forced-command read-only key, files one deduped issue
+      # per failing check, START/RESOLVEs breaches to Reif HQ via prod-alerts.jsonl. Zero LLM, so
+      # a breach reaches HQ even when gru never dispatches the lane. Every 3h at :23.
+      echo "23 */3 * * * root export FLEET_LOG_DIR=$LOG_DIR GH_TOKEN=\$(cat $TOKEN_FILE) && [ -f \"\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}\" ] && { set -a; . \"\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}\"; set +a; }; python3 /fleet-kit/scripts/prod_runtime.py --file --push >> $LOG_DIR/prod_runtime.log 2>&1"
       # stash_pile_expiry.py (gh#714 Part C4): postflight_dirty_check.sh's auto-stash rescue has
       # no bound of its own -- its own POLICY log line says a human must run `git -C $REPO stash
       # list` and decide what to land or drop, and nothing before this ever did that. Hourly at

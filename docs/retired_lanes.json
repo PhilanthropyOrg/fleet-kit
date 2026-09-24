@@ -1,0 +1,15 @@
+{
+  "_comment": "Lanes that used to watch production and were retired in a migration. scripts/coverage_map.py diffs each one's `watched` against today's member mandates: an item a retired lane watched that no current member watches is 'a lane that died in a migration' (Reif 2026-09-24: the product repo's devops lane went dead when the dino fleet replaced the in-repo lanes, and nothing inherited prod runtime health). When you retire or fold a lane, add it here with what it watched -- that is the whole cost of never losing it silently again.",
+  "lanes": [
+    {"lane": "devops", "source": "philanthropy CLAUDE.md (.claude/agents/devops.md): 'atlas-serve prod system: uptime/Postgres/deploy delivery/cost'",
+     "watched": ["svc.errors", "svc.saturation", "db.slow_queries", "db.connections", "db.backups_pitr", "box.resources", "box.error_logs", "deploy.success", "cost.spend"]},
+    {"lane": "datadog", "source": "philanthropy CLAUDE.md: 'analytics/events/funnels/signal'",
+     "watched": ["analytics.flowing"]},
+    {"lane": "growth", "source": "philanthropy CLAUDE.md: 'SEO/indexation/pSEO'",
+     "watched": ["seo.indexation"]},
+    {"lane": "revenue", "source": "philanthropy CLAUDE.md: 'pricing/gating/billing'",
+     "watched": ["pay.webhooks", "pay.failed_charges"]},
+    {"lane": "searchquality", "source": "philanthropy CLAUDE.md: 'retrieval/ranking/suggest'",
+     "watched": ["svc.latency"]}
+  ]
+}

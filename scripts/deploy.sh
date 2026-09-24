@@ -190,6 +190,13 @@ run_args() {
     if [ -f "$secrets_env" ]; then
         secret_mounts+=(-v "$secrets_env:$secrets_env:ro")
     fi
+    # prod-runtime probe key (nerd's prod-runtime lane, scripts/prod_runtime.py): a forced-command
+    # key that can only run prod_runtime_probe.sh on the prod box. Optional; absent = the lane
+    # reports "no probe access" as its finding.
+    local probe_key="$INSTANCE_DIR/prod_probe_key"
+    if [ -f "$probe_key" ]; then
+        secret_mounts+=(-v "$probe_key:/fleet-kit/.prod_probe_key:ro")
+    fi
     # gh#780: the green candidate is started as `run_args "${CONTAINER}-green" ...` (below) and
     # cutover only ever renames the CONTAINER OBJECT (`podman rename "${CONTAINER}-green"
     # "$CONTAINER"`) -- it cannot rewrite an env var already baked into the running process. A
