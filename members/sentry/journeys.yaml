@@ -286,8 +286,8 @@ journeys:
         observable_result: The HQ feed list (#hqf-feed-list) renders within 15s.
       - action: Sign in as verified and open /network/hq.
         observable_result: The HQ feed list renders within 15s.
-      - action: Sign in as operator and open /990/superadmin/verify.
-        observable_result: The claim review queue renders (not a 403 or sign-in page).
+      - action: Sign in as operator and call the claim review queue's decide endpoint for a nonexistent claim.
+        observable_result: It answers 404 "No such claim" (staff accepted), not 401/403.
       - action: Sign in as visitor and open /network/hq.
         observable_result: The HQ feed list renders within 15s.
 

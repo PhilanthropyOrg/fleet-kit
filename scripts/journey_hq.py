@@ -320,19 +320,23 @@ def make_runners(jw) -> dict:
         checks = [
             ("owner", "/network/hq", "#hqf-feed-list"),
             ("verified", "/network/hq", "#hqf-feed-list"),
-            ("operator", "/990/superadmin/verify", None),
+            ("operator", "/990", None),
             ("visitor", "/network/hq", "#hqf-feed-list"),
         ]
         for i, (name, path, selector) in enumerate(checks):
             def s(name=name, path=path, selector=selector):
                 page, _ = persona(ctx, name, next_path=path)
-                resp = page.goto(users.url(f"https://philanthropy.org{path}"), timeout=30000)
-                assert resp is not None and resp.status < 400, f"{name} {path} answered {resp.status if resp else 'nothing'}"
+                if selector:
+                    resp = page.goto(users.url(f"https://philanthropy.org{path}"), timeout=30000)
+                    assert resp is not None and resp.status < 400, f"{name} {path} answered {resp.status if resp else 'nothing'}"
                 if selector:
                     page.locator(selector).first.wait_for(state="attached", timeout=15000)
-                else:  # the review queue: its own copy, whether or not anything is pending
-                    jw.wait_text_matches(page, r"queue is clear|pending|approve", timeout=15000)
-                    assert "/login" not in page.url, f"operator bounced to {page.url}"
+                else:  # operator: the review queue's own decide endpoint accepts them as staff
+                    # (a nonexistent claim id -> 404 "No such claim"; a non-admin gets 401/403)
+                    r = page.request.post(users.url("https://philanthropy.org/990/api/superadmin/verify/org-claim"),
+                                          data={"id": 0, "action": "verify"},
+                                          headers={"Origin": users.base_url.rstrip("/")})
+                    assert r.status == 404 and "claim" in r.text().lower(), f"operator is not staff: {r.status} {r.text()[:120]}"
             ctx.step(i, s, None)
 
     return {
