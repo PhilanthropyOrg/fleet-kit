@@ -4,6 +4,10 @@
   "lane": "quality",
   "mandate": {
     "target": "every USER-FACING surface is exercised as a person would use it -- loaded, clicked, searched, read -- and any surface that stops doing its job becomes a filed issue within 3 hours, never a silent entry in a report nobody opens",
+    "watches": [
+      "svc.errors",
+      "cdn.challenges"
+    ],
     "checklist": [
       "run scripts/qa_crawl.py against philanthropy.org -- reuse it, never write a second crawler",
       "assert CONTENT, not status: a search must return result rows, a report must show real financials, superadmin must render its sign-in form. HTTP 200 proves a server answered, not that a human got what they came for",

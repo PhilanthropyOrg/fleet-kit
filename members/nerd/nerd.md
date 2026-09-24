@@ -182,6 +182,7 @@ a win.** Each lane's obvious cheat is named below precisely so you do not find i
 | **ui** | `friction_per_1k_sessions` DOWN | `engaged_actions_per_1k_sessions` must not fall | remove features until there is nothing left to click and friction hits zero |
 | **datadog** | `signal_freshness_pct` UP | `tracked_metric_count` must not fall | drop the stale metrics from the registry and freshness hits 100% |
 | **devops** | `deploy_success_rate` UP | `deploy_count_7d` must not fall | ship nothing — a 100% success rate on zero deploys. Uptime with no shipping is not reliability |
+| **prod-runtime** | `prod_runtime_breaches` DOWN | every probe section reads (no `probe-error`) | raise a threshold until the breach goes away |
 | **lens** | `stale_tiles` DOWN | `tile_count` must not fall | delete tiles until none can be stale |
 | **revenue** | `paying_accounts` UP | `refund_or_churn_rate` must not rise | book conversions that refund or churn straight back out. A signup is not a payment |
 
@@ -208,6 +209,7 @@ or a transcript. Naming it is always enough.
 | datadog | PostHog — product events, funnels | `POSTHOG_PROJECT_ID`, `POSTHOG_PERSONAL_API_KEY` |
 | every lane | the repo and GitHub | `GH_TOKEN`, already present |
 | devops, lens | the app's own metrics store and logs | on-box, no external login |
+| prod-runtime | the prod box + its DB, read-only | `FLEET_PROD_PROBE_KEY` (path, forced-command key), `FLEET_PROD_PROBE_HOST` |
 
 These are SERVICE-ACCOUNT credentials, not OAuth client ids — `GSC_SA_KEY` and `GA4_SA_KEY`
 hold a PATH to a JSON key file, so a bare `[ -n "$GSC_SA_KEY" ]` is not enough; the file at
@@ -440,6 +442,39 @@ monitor's state; deploy failures BY CLASS, not count — every prod regression c
 become a deploy-time gate so it cannot recur, and one that has not is the finding; migration
 state; capacity and cost. **A red smoke check is an incident, not a finding** — hand it to
 the-fixer rather than filing it and moving on.
+
+**prod-runtime** — the LIVE production system: database, box, crons, ingest. Not the repo.
+Why this lane exists (Reif, 2026-09-24): the product repo's old devops lane watched "atlas-serve
+prod system: uptime/Postgres/deploy delivery/cost", and it died when this fleet replaced the
+in-repo lanes. Nobody inherited it, and a human found by hand what any pass could have read in
+seconds: 157/200 DB connections (141 idle), the app on the admin role, no statement_timeout, a
+178s query, a full-scan vector search at 6.3M calls, and ingests failing silently. KPI is
+`prod_runtime_breaches` DOWN; the guardrail is probe coverage: every probe section must read
+(a section that errors is a blind spot, and the script files it as a breach). The cheat is
+raising a threshold until the breach disappears. A threshold is changed only in a PR that says
+why the old one was wrong, never in a pass.
+
+1. **Run the deterministic half first:** `python3 /fleet-kit/scripts/prod_runtime.py --file`.
+   It reads the prod box through one forced-command, read-only SSH key (`FLEET_PROD_PROBE_KEY`,
+   `FLEET_PROD_PROBE_HOST`) and checks pg_stat_statements top-N by total and by max time,
+   connections vs max_connections by state, long-running and idle-in-transaction sessions,
+   locks, seq scans on big tables, statement_timeout per role, bulk writes on the primary,
+   load/memory/disk, journal errors, service restarts, cron failures and drift against the
+   repo's `scripts/box/crontab`, and ingest freshness. It files one deduped `fleet:mega` issue
+   per failing check (a check still failing comments on its own issue). Its own cron (every 3h)
+   already pushes breaches to Reif HQ, so do not push again.
+2. **No probe access is the finding.** If the summary says `no probe access`, file that once,
+   naming the two variables, and stop. Never improvise another path onto the prod box.
+3. **Then explore what the checks do not cover.** Read the raw capture
+   (`$FLEET_LOG_DIR/prod_runtime.last.txt`). Take the top statements by total time and name
+   the endpoint that issues each (grep `/repo/src` for the query text); a slow query with a
+   named page is buildable, a slow query alone is not. Look for crons that run heavy and only
+   report (their output is a digest nobody reads: cost with no value), and cron failures whose
+   job is still in the crontab. File each through `issue_cluster.py file` with the evidence.
+4. **Every finding names its standard fix**: pg_trgm GIN for `ILIKE '%x%'`, HNSW/IVFFlat for a
+   vector `ORDER BY`, a capped pool or pgbouncer for idle connections, `ALTER ROLE ... SET
+   statement_timeout` for runaway queries, a least-privilege app role, batch writes off-peak
+   or on a replica.
 
 **lens** — the operator dashboards and the wrangling behind them. KPI is stale tiles DOWN; the
 cheat is deleting tiles until none can be stale, so `tile_count` must not fall.

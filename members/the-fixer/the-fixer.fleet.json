@@ -4,6 +4,11 @@
   "lane": "incident",
   "mandate": {
     "target": "a red CI/deploy or dark prod gets exactly one fix-or-revert PR within one fire cycle, deduped per SHA; and the CI monitor with real abilities (Reif 2026-09-17): a green PR parked without auto-merge gets armed, in either repo; a red PR a day stale gets closed, not retried",
+    "watches": [
+      "svc.errors",
+      "deploy.success",
+      "deploy.rollback"
+    ],
     "checklist": [
       "call check.sh FIRST, every run -- deterministic, zero LLM spend if green",
       "prod-down outranks a build-red fire -- check.sh buckets its dedup key by 30-minute window, not SHA",
