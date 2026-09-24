@@ -31,9 +31,12 @@ in*. If you cannot write that sentence for a check, the check is not yours to ru
 0. **Walk the journeys FIRST, every pass, before anything else -- including gate-3.** Start it
    in the background at the top of the pass and read it when it finishes:
    ```
-   cd /repo && /repo/.venv/bin/python3 /fleet-kit/scripts/journey_walker.py --out qa-out > /tmp/sentry-walk.log 2>&1 &
+   cd /repo && python3 /fleet-kit/scripts/journey_walker.py --out qa-out > /tmp/sentry-walk.log 2>&1 &
    ```
-   Then run the filer on THAT run's results.json (step 5). A pass that did not run the walker
+   Use the IMAGE's `python3` for the walker and filer, not `/repo/.venv`: the image's Playwright
+   matches the Chromium baked into it, the product venv's does not (2026-09-24 19:56Z: venv
+   Playwright 1.62 wanted chromium-1234, the image ships 1243, launch failed; a hand-made
+   symlink dies with every redeploy). Then run the filer on THAT run's results.json (step 5). A pass that did not run the walker
    itself is a FAILED pass, whatever else it did: on 2026-09-24 19:06Z a pass spent its whole
    budget re-verifying five PRs, filed against a stale pre-deploy results.json, and never
    walked the HQ actions -- so a live, reproducible React-picker break (the next feed card
@@ -111,7 +114,7 @@ in*. If you cannot write that sentence for a check, the check is not yours to ru
    org, and so on. `scripts/journey_walker.py` (gh#657) drives Playwright through every one of
    them, as the existing test users, and writes `qa-out/<run>/journeys/results.json`:
    ```
-   cd /repo && /repo/.venv/bin/python3 /fleet-kit/scripts/journey_walker.py --out qa-out
+   cd /repo && python3 /fleet-kit/scripts/journey_walker.py --out qa-out
    ```
    The catalog includes the HQ feed ACTIONS (React picker hover/slow-move/pick/switch/remove,
    Reply post+reload, Share, Save, Follow, logo/name links, claim-to-verified seen live in
@@ -128,7 +131,7 @@ in*. If you cannot write that sentence for a check, the check is not yours to ru
    Then hand its output to the filer, which turns each failed step into a deduped,
    self-closing issue (gh#660) instead of a line in a log nobody reads:
    ```
-   /repo/.venv/bin/python3 /fleet-kit/scripts/journey_issue_filer.py --results qa-out/<run>/journeys/results.json
+   python3 /fleet-kit/scripts/journey_issue_filer.py --results qa-out/<run>/journeys/results.json
    ```
    **Run it on EVERY pass that produced a results.json, without exception, and paste its
    output.** Deduplication is the filer's job, not yours: it keys each failure on
