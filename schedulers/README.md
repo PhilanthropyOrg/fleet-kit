@@ -11,7 +11,8 @@ tunnel-health checks, e.g. `https://your-fleet.example.com/`), `{{VIEW_PORT}}` (
 `{{CONTAINER_NAME}}` (the podman container this instance runs as, e.g. `fleet-kit-<name>`), and `{{INSTANCE_NAME}}` (the label the member-liveness pager names in its page), and
 `{{PHILANTHROPY_CF_TEST_HEADER_VALUE}}` (prod-health's Cloudflare bypass header value — a
 secret a human provisions per philanthropy repo's `docs/ops/monitoring.md`, leave unset and
-prod-health simply skips the one probe that needs it rather than false-paging) —
+prod-health simply skips the one probe that needs it rather than false-paging), and
+`{{TMUX_SESSION}}` (the tmux session name reif-hq-notify injects into, e.g. `reif`) —
 then install per your platform's normal mechanism.
 
 | Job | Cadence | Script | Required? |
@@ -30,6 +31,7 @@ then install per your platform's normal mechanism.
 | pacing-hold | hourly | `scripts/pacing_hold_check.py` | **required** — pages when a real zero pacing ceiling (`run_member.sh` reading a genuinely empty maxx headroom gauge, or maxx's own `verdict=over`) holds the whole fleet `status=paced` for 2+ consecutive hourly ticks, distinct from the unreadable-meter case budget-read (below) already covers (gh#812) |
 | prod-health | 5 min | `scripts/prod_health_check.py` | optional, but the ONLY external vantage point on philanthropy.org today (gh#727/#4898) — probes prod's home/search/report pages (each against an 8s latency budget) plus its app-canary heartbeat from THIS host, not from the box being watched, so a dead product-side cron or box doesn't take its own pager down with it. Two consecutive failures page AND file/update one deduped incident issue on the product repo, and comment (never auto-close) on recovery. Needs `PHILANTHROPY_CF_TEST_HEADER_VALUE` (a human-provisioned secret, see philanthropy repo's `docs/ops/monitoring.md`) to probe the report page — unset simply skips that one probe rather than false-paging. `fleetkit-prod-health.service`/`.timer` (or `com.fleetkit.prod-health.plist`) |
 | view | always-on (not interval-scheduled) | `scripts/fleet_view_server.py` | optional — a live window onto `runs.jsonl` + `gh` state; kill it and the loop above is untouched. See `fleetkit-view.service` / `com.fleetkit.view.plist` (a long-running service, not a timer/interval job like the rest of this table). |
+| reif-hq-notify | event-driven (fires on write) | `scripts/notify_reif_hq.py` | optional — tells a tmux-hosted Claude Code session about every PR merged to the target repo's default branch, read from `webhook_receiver.py`'s `logs/merged-prs.jsonl`. `fleetkit-reif-hq-notify.path` watches the file, `.service` does the send; systemd-only (no launchd `.plist` — this is a host-side tmux integration, not a portable cron job) |
 
 launchd: `cp <file> ~/Library/LaunchAgents/ && launchctl load ~/Library/LaunchAgents/<file>`
 systemd: `cp <file>.service <file>.timer /etc/systemd/system/ && systemctl enable --now <file>.timer`

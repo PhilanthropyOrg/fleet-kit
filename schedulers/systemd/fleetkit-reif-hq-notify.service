@@ -1,0 +1,8 @@
+[Unit]
+Description=Tell Reif HQ (tmux 'reif') about PRs merged to PhilanthropyOrg/philanthropy's default branch
+
+[Service]
+Type=oneshot
+User={{USER}}
+Environment=PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+ExecStart=/usr/bin/env python3 {{KIT_PATH}}/scripts/notify_reif_hq.py {{INSTANCE_DIR}}/logs/merged-prs.jsonl --tmux-session {{TMUX_SESSION}}

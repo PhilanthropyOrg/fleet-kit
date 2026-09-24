@@ -1,0 +1,12 @@
+[Unit]
+Description=Wake fleetkit-reif-hq-notify.service whenever merged-prs.jsonl grows
+
+[Path]
+# PathModified, not PathChanged: fires on every write (append), not just create/rename, and
+# systemd already coalesces a burst of writes into one unit activation while the service is
+# still running -- same "a .path unit can fire more than once per burst" case
+# notify_reif_hq.py's own offset file exists to make idempotent.
+PathModified={{INSTANCE_DIR}}/logs/merged-prs.jsonl
+
+[Install]
+WantedBy=multi-user.target

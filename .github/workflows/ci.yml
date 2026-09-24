@@ -48,6 +48,10 @@ jobs:
         run: python3 members/librarian/test_librarian.py
       - name: run test_worktree_lock.py
         run: python3 scripts/test_worktree_lock.py
+      - name: run test_webhook_merged_pr.py
+        run: python3 scripts/test_webhook_merged_pr.py
+      - name: run test_notify_reif_hq.py
+        run: python3 scripts/test_notify_reif_hq.py
       - name: run test_ci_runs_every_test_file.py
         run: python3 scripts/test_ci_runs_every_test_file.py
       - name: run test_account_pool_config_dir.py
