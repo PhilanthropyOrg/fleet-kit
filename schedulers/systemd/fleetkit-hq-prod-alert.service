@@ -5,4 +5,7 @@ Description=Hand new prod alerts (START/RESOLVE from atlas-serve) to Reif HQ via
 Type=oneshot
 User={{USER}}
 Environment=PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+# Coalesce: triggers while this runs are absorbed, so alerts landing within ~60s become ONE
+# HQ job (the first deploy alone opens ~a dozen episodes as each failing cron next runs).
+ExecStartPre=/bin/sleep 60
 ExecStart=/usr/bin/env python3 {{KIT_PATH}}/scripts/notify_hq_prod_alert.py {{INSTANCE_DIR}}/logs/prod-alerts.jsonl
