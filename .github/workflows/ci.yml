@@ -68,6 +68,8 @@ jobs:
         run: python3 scripts/test_account_pool_calibrating_unbilled.py
       - name: run test_account_pool_other_gate_last_account.py
         run: python3 scripts/test_account_pool_other_gate_last_account.py
+      - name: run test_account_pool_timeout_no_failover.py
+        run: python3 scripts/test_account_pool_timeout_no_failover.py
       - name: run test_maxx_reader_calibrating_unbilled.py
         run: python3 scripts/test_maxx_reader_calibrating_unbilled.py
       - name: run test_sentry_deploy_task.py

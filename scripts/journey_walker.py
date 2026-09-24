@@ -52,7 +52,7 @@ never be renamed) -- only the results.json grouping id carries the suffix.
 
 SEQUENTIAL, NOT PARALLEL (the PRD's own UNKNOWN #1): journeys run one at a time, and each
 journey's two viewports run one at a time, inside a single browser instance. Ten journeys times
-two viewports is 20 short runs; sequential keeps this walker inside sentry's 900s pass timeout
+two viewports is 20 short runs; sequential keeps this walker inside sentry's 2400s pass timeout
 without opening enough concurrent browser contexts to make a WAF-fronted site's rate limiting
 part of the result. If a future pass needs to shorten wall-clock time, parallelizing across
 journeys (they don't share state, apart from the two message journeys which already run
@@ -189,6 +189,14 @@ class TestUsers:
             email, password = env.get(f"{name.upper()}_EMAIL"), env.get(f"{name.upper()}_PASSWORD")
             if email and (password or self.qa_session_token):
                 self.users[name] = {"name": name, "email": email, "password": password}
+        # The product's QA personas (philanthropy routes_qa_session.QA_USERS): each one is
+        # provisioned server-side on mint (owner of a fixture org, operator, a fresh visitor,
+        # a verified-badge owner), so the walker needs only the name and QA_SESSION_TOKEN.
+        # Tokens are minted per walk, so nothing here can expire mid-week.
+        if self.qa_session_token:
+            for name in env.get("FLEET_QA_PERSONAS", "owner operator visitor verified").split():
+                self.users.setdefault(name, {"name": name, "email": None, "password": None})
+        self.persona_eins = {n: env.get(f"QA_{n.upper()}_EIN") for n in ("owner", "visitor", "verified")}
 
     def require_users(self, *names) -> None:
         missing = [n for n in names if n not in self.users]
@@ -298,6 +306,7 @@ class JourneyCtx:
         self.results: list[dict] = []
         self._console_errors: dict[int, list[str]] = {}
         self._console_cursor: dict[int, int] = {}
+        self.cleanup: list = []  # callables run on close(), e.g. journey_hq's QA-data reset
 
     def page(self, user: str | None = None):
         key = user or "_anon"
@@ -337,6 +346,12 @@ class JourneyCtx:
         return self._contexts[key][1]
 
     def close(self):
+        for undo in self.cleanup:
+            try:
+                undo()
+            except Exception:  # noqa: BLE001 -- a failed cleanup must not cost the verdict
+                traceback.print_exc()
+        self.cleanup.clear()
         for context, _ in self._contexts.values():
             context.close()
         self._contexts.clear()
@@ -838,6 +853,8 @@ JOURNEY_RUNNERS = {
     "sign-out": run_sign_out,
     "fleet-console-loads-with-runs": run_fleet_console_loads_with_runs,
 }
+import journey_hq  # noqa: E402 -- HQ feed actions as the QA personas; see its docstring
+JOURNEY_RUNNERS.update(journey_hq.make_runners(sys.modules[__name__]))
 
 
 # --- orchestration ---------------------------------------------------------------------------
