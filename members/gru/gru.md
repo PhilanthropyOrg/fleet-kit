@@ -311,6 +311,9 @@ spawns exactly one). Your job, in order:
 
    Collect each candidate's `fleet:complexity-<1-10>` label with its number — marie's size
    estimate, what makes packing possible. No label means treat it as a 5 (median), never free.
+   Also collect its `lane:*` label as `"area"` (none -> `""`); step 5 batches same-area items
+   together so one minion's worktree, tests and context cover related files. A `fleet:mega`
+   item is ONE item here (its children are already closed into it) — pass it like any other.
 
    **Then give complexity-1/2 candidates a bounded head start — gh#5211.** Age-order plus the
    plan-bet preference above still leaves a cheap, high-value fix stuck behind every older item
@@ -373,6 +376,16 @@ spawns exactly one). Your job, in order:
    reorders by size, because shipping the most important work beats shipping the most work. It
    skips an item too big for the remaining room and keeps going, so a cheap high-priority item
    can still land behind an expensive one that didn't fit.
+
+   **Items-per-run floor — FLEET_MINION_TARGET_ITEMS (2026-09-24).** A minion run is almost all
+   fixed overhead (real dino runs: 1 item $2.75/794s, 3 items $3.41/1312s), so an hour that
+   packs 2 items pays that overhead for 2. When step 1's `maxx_reader.py` read is a usable
+   verdict (not `over`, not unreadable) AND `week_bank_pct >= 0` (the week is at or under its
+   share so far), add
+   `--min-items ${FLEET_MINION_TARGET_ITEMS:-8}` to the call above. `min_items` pulls from the
+   front of `skipped` (marie's order), and the result's `forced_over_floor`/`over_allowance`
+   say out loud when the floor spent past this hour's slice — quote both. Bank negative, or maxx
+   unreadable, pack without the floor: the target never outranks the weekly wall.
 
    **Quote the returned JSON verbatim in your report.** `n`, `chosen`, `skipped`,
    `est_spend_pct`, `utilization`, `unit_pct`, `binding` — that object IS your reasoning made
@@ -471,10 +484,16 @@ spawns exactly one). Your job, in order:
 
    ```
    python3 /fleet-kit/scripts/fanout.py batches \
-     --turn-budget <minion's timeout_s from members/minion/minion.fleet.json, read fresh each pass> \
+     --turn-budget 0 --target-items ${FLEET_MINION_TARGET_ITEMS:-8} \
      --observed "$BATCH_OBSERVED" \
-     --items '[{"number":3253,"complexity":3},{"number":3252,"complexity":5}, ...]'  # `chosen`, marie's order, never re-sorted
+     --items '[{"number":3253,"complexity":3,"area":"lane:ui"},{"number":3252,"complexity":5,"area":"lane:devops"}, ...]'  # `chosen`, marie's order
    ```
+   `--turn-budget 0 --target-items N` (2026-09-24) makes each batch's budget `unit_turns * N` —
+   N median items at the turn cost real batch runs actually paid, not minion's `timeout_s`
+   misread as turns. `pack_batches` groups items by `area` (areas in priority order of their
+   top item, marie's order inside each) and closes a batch only on budget, so a small area tops
+   up the batch before it instead of spawning its own 1-item run. Quote `median_batch_size`,
+   `n_areas` and `effective_turn_budget` with the rest.
    **Quote the returned JSON verbatim in your report**, same as step 3's `fanout.py` call —
    `n_items`, `n_batches`, `batches` (each with its own `est_turns`), `unit_turns`,
    `avg_batch_size`. This IS your batching reasoning made visible; a human reading your report

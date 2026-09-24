@@ -60,13 +60,19 @@ def to_observed(runs: list[dict], allowance_pct: float,
     total_cost = sum(r["cost_usd"] for r in usable)
     if not usable or allowance_pct <= 0 or total_cost <= 0:
         return []
-    return [
-        {
-            "pct": allowance_pct * (r["cost_usd"] / total_cost),
-            "complexity": complexity_by_item.get(str(r.get("item_id")), fanout.DEFAULT_COMPLEXITY),
-        }
-        for r in usable
-    ]
+    # 2026-09-24: a batched run's item_id is underscore-joined ("7473_7474_7475", same as
+    # to_batch_observed below). Booking it as ONE median item made the calibrated unit a
+    # per-RUN cost, so gru's hour pack chose ~one item per recent run -- a fixed point at the
+    # current batch size (median 2). Split each run's share over its items by complexity weight.
+    out = []
+    for r in usable:
+        run_pct = allowance_pct * (r["cost_usd"] / total_cost)
+        ids = [n for n in str(r.get("item_id") or "").split("_") if n] or [""]
+        cx = [complexity_by_item.get(n, fanout.DEFAULT_COMPLEXITY) for n in ids]
+        weights = [fanout.complexity_multiplier(c) for c in cx]
+        total_w = sum(weights)
+        out += [{"pct": run_pct * w / total_w, "complexity": c} for c, w in zip(cx, weights)]
+    return out
 
 
 def recent_minion_costs(conn, member: str = "minion", hours: float = 2.0) -> list[dict]:

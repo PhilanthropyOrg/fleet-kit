@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 
 # marie's ladder. Base and anchor must match members/marie/marie.md's Part C2 table exactly --
@@ -151,9 +152,26 @@ def calibrate_batch_turns(observed: list[dict], base: float = COMPLEXITY_BASE) -
     return (sum(per_item_units) / len(per_item_units)) if per_item_units else None
 
 
+def cluster_by_area(items: list[dict]) -> list[dict]:
+    """Stable-group `items` by their "area" key (issue_cluster.area: the lane label), areas
+    ordered by their highest-priority member, marie's order kept inside each area. Items with
+    no area form one group of their own. Pure reordering of an ALREADY-CHOSEN set: every item
+    still ships this pass, so this never trades priority for volume -- it only decides which
+    items share a worktree."""
+    order: list[str] = []
+    groups: dict[str, list[dict]] = {}
+    for it in items:
+        key = str(it.get("area") or "")
+        if key not in groups:
+            order.append(key)
+            groups[key] = []
+        groups[key].append(it)
+    return [it for key in order for it in groups[key]]
+
+
 def pack_batches(items: list[dict], turn_budget: float, unit_turns: float,
                  base: float = COMPLEXITY_BASE, safety_margin: float = 0.7,
-                 solo_complexity_floor: int = 8) -> dict:
+                 solo_complexity_floor: int = 8, target_items: int = 0) -> dict:
     """Group an already-chosen, priority-ordered item list into minion batches, sized by real
     complexity-weighted turn cost against `turn_budget` -- NOT a fixed item count.
 
@@ -177,26 +195,39 @@ def pack_batches(items: list[dict], turn_budget: float, unit_turns: float,
 
     unit_turns must come from calibrate_batch_turns() against real history, or be explicitly
     supplied -- never guessed inline; same refusal-to-invent law as pack().
+
+    2026-09-24 (median 2 items per run over gru's last 40 dispatches; real dino runs: 1 item
+    $2.75/794s, 3 items $3.41/1312s -- the run is almost all fixed overhead):
+      * AREA CLUSTERING. Items are grouped by `area` (cluster_by_area) before packing, so a
+        batch is one lane's worth of related files/tests, not whatever priority order threw
+        together. Budget alone closes a batch: a small area tops up the room left by the one
+        before it rather than spawning its own 1-item run (that would re-create the overhead
+        this exists to amortize).
+      * TARGET ITEMS. `target_items` (dial FLEET_MINION_TARGET_ITEMS) raises the per-batch
+        budget to what `target_items` median items cost at the CALIBRATED unit_turns --
+        `max(turn_budget * safety_margin, unit_turns * target_items)`. turn_budget=0 means
+        "no separate ceiling, the calibrated target IS the budget".
     """
     if unit_turns <= 0:
         raise ValueError(f"unit_turns must be > 0, got {unit_turns!r}")
     if not (0 < safety_margin <= 1):
         raise ValueError(f"safety_margin must be in (0, 1], got {safety_margin!r}")
 
-    effective_budget = turn_budget * safety_margin
+    effective_budget = max(turn_budget * safety_margin, unit_turns * max(0, int(target_items)))
+    if effective_budget <= 0:
+        raise ValueError("turn_budget and target_items are both 0; nothing to size a batch against")
     batches: list[list[dict]] = []
     current: list[dict] = []
     current_turns = 0.0
 
-    for it in items:
+    for it in cluster_by_area(items):
         c = it.get("complexity")
         c_int = max(1, min(10, int(c))) if c is not None else DEFAULT_COMPLEXITY
         cost = unit_turns * complexity_multiplier(c, base)
 
         if c_int >= solo_complexity_floor:
-            if current:
-                batches.append(current)
-                current, current_turns = [], 0.0
+            # Set aside, not a flush: closing the open batch here split one area's small items
+            # across two runs around the big one (2026-09-24), paying the overhead twice.
             batches.append([{**it, "est_turns": round(cost, 2)}])
             continue
 
@@ -219,8 +250,12 @@ def pack_batches(items: list[dict], turn_budget: float, unit_turns: float,
         ],
         "unit_turns": round(unit_turns, 3),
         "turn_budget": turn_budget,
+        "effective_turn_budget": round(effective_budget, 2),
+        "target_items": int(target_items),
+        "n_areas": len({str(it.get("area") or "") for it in items}),
         "safety_margin": safety_margin,
         "avg_batch_size": round(len(items) / len(batches), 2) if batches else 0,
+        "median_batch_size": (sorted(len(b) for b in batches)[len(batches) // 2] if batches else 0),
     }
 
 
@@ -264,7 +299,8 @@ def _run_pack_batches(a) -> int:
     try:
         result = pack_batches(items, a.turn_budget, unit, base=a.base,
                               safety_margin=a.safety_margin,
-                              solo_complexity_floor=a.solo_complexity_floor)
+                              solo_complexity_floor=a.solo_complexity_floor,
+                              target_items=a.target_items)
     except ValueError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
@@ -308,6 +344,10 @@ def main(argv=None) -> int:
     batches_p.add_argument("--safety-margin", type=float, default=0.7,
                            help="fraction of turn-budget to actually pack against, leaving "
                                 "headroom for shared batch overhead (default 0.7)")
+    batches_p.add_argument("--target-items", type=int,
+                           default=int(os.environ.get("FLEET_MINION_TARGET_ITEMS") or 8),
+                           help="raise each batch's budget to this many median items at the "
+                                "calibrated unit (default: $FLEET_MINION_TARGET_ITEMS, else 8; 0 = off)")
     batches_p.add_argument("--solo-complexity-floor", type=int, default=8,
                            help="an item at or above this complexity is always its own batch (default 8)")
 

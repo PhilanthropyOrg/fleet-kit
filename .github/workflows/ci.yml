@@ -54,6 +54,12 @@ jobs:
         run: python3 scripts/test_notify_reif_hq.py
       - name: run test_ci_runs_every_test_file.py
         run: python3 scripts/test_ci_runs_every_test_file.py
+      - name: run test_pack_batches_area.py
+        run: python3 scripts/test_pack_batches_area.py
+      - name: run test_issue_cluster.py
+        run: python3 scripts/test_issue_cluster.py
+      - name: run test_scoreboard.py
+        run: python3 scripts/test_scoreboard.py
       - name: run test_account_pool_config_dir.py
         run: python3 scripts/test_account_pool_config_dir.py
       - name: run test_account_pool_order.py

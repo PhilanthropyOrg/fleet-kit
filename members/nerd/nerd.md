@@ -417,8 +417,8 @@ checklist above, this lane also reads the product's own datafeed:
    clicking the claim CTA), `okr.conversion` (click to filed), `okr.verified_claims` (the
    objective).
 3. File at most three, same evidence-and-`Vision-link:` bar as any other finding in this lane.
-   First check `gh issue list --repo <slug> --state open --search "<the step> in:title"`; if an
-   open issue already covers the step, comment the new numbers there instead of filing a twin.
+   File through `python3 /fleet-kit/scripts/issue_cluster.py file --repo <slug> --title ... --body-file ... --label ...` (raw
+   `gh issue create` is denied): it comments the new numbers on an open twin instead of filing one.
 4. Write `$FLEET_LOG_DIR/SIGNALS.md`, 20 lines or fewer, plain language a non-programmer reads
    on a phone: what the funnel did, the one thing that changed, what you filed (issue numbers).
    `handoff.py` prepends this file to every member's prompt — keep writing it even on a pass

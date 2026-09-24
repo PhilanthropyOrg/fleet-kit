@@ -38,8 +38,9 @@ title pairs. Now the judgment, per dir, with Edit/Write inside that memory dir o
 - **Drop** a resolved entry whose issue is closed and whose lesson now lives in code or a
   charter. If the lesson is still general, fold it into a sibling file and drop the standalone.
 - **Promote**: a lesson recurring across several members is a charter bug, not a memory note.
-  Do not edit the charter (you cannot); file it as a backlog issue (`gh issue create --label
-  "fleet:backlog,lane:hygiene"`) so it reaches a builder instead of sitting in a report nobody
+  Do not edit the charter (you cannot); file it as a backlog issue (`python3 /fleet-kit/scripts/issue_cluster.py file --title "..." --body-file <f>
+  --label "fleet:backlog,lane:hygiene"` -- raw `gh issue create` is denied; the helper comments
+  on an open twin instead of filing a new one) so it reaches a builder instead of sitting in a report nobody
   re-reads (dumbledore, who used to own this class of fix, is retired as of fk#1195).
 - **Orphans**: index the ones worth keeping with one line each; delete the rest.
 - **Bring MEMORY.md under cap** before you finish. Never raise the cap to fit.

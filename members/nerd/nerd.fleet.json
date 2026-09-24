@@ -41,7 +41,8 @@
       ],
       "deny": [
         "Bash(gh pr merge:*)",
-        "Bash(git push --force:*)"
+        "Bash(git push --force:*)",
+        "Bash(gh issue create:*)"
       ]
     }
   },

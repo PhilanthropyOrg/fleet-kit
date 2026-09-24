@@ -74,6 +74,16 @@ work done).
    pass ships something confidently wrong.
 
    No `fleet:prd` label? The body is your spec, as before.
+
+   **A `fleet:mega` item expands to its checklist (2026-09-24).** marie folds open issues that
+   share one failure signature and lane into a mega issue whose body lists every child as
+   `- [ ] #N <title>`; the children are already closed "tracked in #M". It is ONE item in your
+   batch but N instances of one root cause: fix the cause once, then check each child against
+   the fix (`gh issue view <child>` for its specifics) and tick its box in your PR body with the
+   evidence that covers it. `Closes #M` only when every box is ticked; otherwise `Part of #M`
+   plus a `Remaining:` line naming the unticked children. The "Linked Reif asks" section is
+   read-only context: never `Closes` one of those on the mega's evidence — each keeps its own
+   acceptance criteria.
 1c. **Confirm you're in YOUR worktree, not `/repo`, before your first `Edit`/`Write` or
    git-mutating command — `pwd` and `git worktree list`.** `/repo` is the shared checkout other
    concurrent sessions use; editing it directly (or running `git commit`/`git checkout --`

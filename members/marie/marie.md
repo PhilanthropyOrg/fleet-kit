@@ -36,7 +36,7 @@ early steps and never reached the report at all — landed as `reported_nothing`
 work done).
 
 1. Part A — claim hygiene (below)
-2. Part B — cruft prune (below), including the off-vision test
+2. Part B — cruft prune (below), including the off-vision test, then Part B2 — mega issues
 3. Part C0 — retriage queue, issues escalated since their last triage (below)
 4. Part C + C2 — priority ranking and complexity score (below)
 5. Part C2c — blast-radius label, same comment as priority/complexity (below)
@@ -169,6 +169,38 @@ says "superseded by B," B says "superseded by A") — flag the conflict in your 
 
 Never touch an issue's body text. Labels, closing, and comments only — the body is the
 author's own record.
+
+## Part B2 — mega issues (one root cause, one build item)
+
+Measured 2026-09-24: ~130 issues/day filed against ~50 PRs/day merged, 334 open, and most closes
+were twins, not fixes — seven open `prod alert [pg_lock:<pid>:pg_toast_16627]`, nine
+"`<member>`'s reports have no plain-English words". Each twin costs a minion its own slot. Every
+pass, after Part B, fold same-cause twins into ONE mega issue:
+```
+python3 /fleet-kit/scripts/issue_cluster.py megas --repo <product repo> --dry-run   # read the plan
+python3 /fleet-kit/scripts/issue_cluster.py megas --repo <product repo>             # apply it
+```
+The script decides mechanically, on one key: two issues cluster only when their titles are
+equal after dropping numbers, parentheticals and a leading "`<member>`'s" AND they share a
+`lane:*` label. That key is deliberately narrow — **never merge across different root causes**:
+a lock on a different relation, a different page, a different component is a different
+signature and stays its own item. If the dry run shows a plan whose children you can see are
+different causes anyway (same words, different bug), do not apply it — say so in your report.
+
+What apply does, in this order: creates the mega (`fleet:mega`, `fleet:backlog`, the lane, the
+highest child priority, the largest child complexity; body = a `- [ ] #N` checklist plus the
+`mega-signature:`/`mega-lane:` markers the dedupe helper matches on), THEN closes each child
+"not planned" with "Tracked in #M". A child is never closed unless its mega exists. An existing
+open mega for the same key absorbs new twins (its checklist is extended — the mega is the
+fleet's own record, the one body you may edit). A new mega needs 3+ foldable children.
+
+**Reif's asks are never folded.** `fleet:reif-asked` / `fleet:reif-priority` items and `ask #N`
+titles are linked from the mega and get a pointer comment, but stay open as their own items.
+Claimed, `fleet:epic`, and `fleet:fold-into-pr` items are skipped (work already in flight).
+
+Report `megas_created`, `megas_extended` and `children_closed` from apply's JSON verbatim. A mega
+then goes through Part C/C2/C4 like any item — rank it, and write its PRD against the shared
+cause.
 
 ## Part C0 — retriage queue (issues escalated since their last triage)
 
@@ -388,7 +420,8 @@ build path, and later passes end up narrowing it piecemeal anyway. Do it on purp
 2. **If the pieces have a dependency order** (one can't be built or reviewed before another
    merges), say so in each child issue's body — sequencing is information a reporter/builder
    needs, not something to hide by filing them all as equally-ready.
-3. **File each sub-issue** with `gh issue create`, referencing the parent issue number in its
+3. **File each sub-issue** with `python3 /fleet-kit/scripts/issue_cluster.py file` (raw `gh issue create` is denied -- the
+   helper dedupes against the open board first), referencing the parent issue number in its
    body, then score (Part C/C2 format) and PRD (Part C4 format) it exactly like any other
    backlog item — a sub-issue is not a special case once it exists.
 4. **The parent issue is relabeled, not closed.** It was never buildable as filed and closing
@@ -409,7 +442,7 @@ build path, and later passes end up narrowing it piecemeal anyway. Do it on purp
    this pass (parent + child issue numbers), and any item you judged >10 but chose NOT to split
    yet — name it and why. Leaving one for a later pass is fine; skipping it silently is not.
 
-UNKNOWN — whether step 3's `gh issue create` calls happen live in this same pass (e.g. folded
+UNKNOWN — whether step 3's filing calls happen live in this same pass (e.g. folded
 into the Part C4 PRD-writing step) or are deferred to a separate, later pass is not resolved
 here. File as many children as this pass's turn budget affords and name any you judged but
 did not yet file as pending in your report; do not read this section as requiring same-pass

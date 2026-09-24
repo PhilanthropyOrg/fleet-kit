@@ -44,6 +44,8 @@ sys.path.insert(0, str(KIT_DIR / "scripts"))
 import fleet_db          # noqa: E402  (sqlite mirror -- search/spend queries over runs.jsonl)
 import fleet_kpi         # noqa: E402  (per-member headline-count extraction from outcome prose)
 import fleet_stats       # noqa: E402  (Stats page aggregation: run timeline, tokens, backlog history)
+import fleet_metrics     # noqa: E402  (named run-derived metrics; items_per_run for the scoreboard)
+import scoreboard        # noqa: E402  (2026-09-24 throughput scoreboard: items/run, closed/run, live, trend)
 import member_spec       # noqa: E402
 import overrides as ov   # noqa: E402  ('overrides' shadows nothing here; keep the module name clear)
 
@@ -304,6 +306,7 @@ DIAL_FIELDS = [
     "FLEET_CADENCE_BUILD", "FLEET_CADENCE_REVIEW", "FLEET_CADENCE_GITPULL",
     "FLEET_BUILDER_MODEL", "FLEET_CODE_REVIEW_MODEL",
     "FLEET_QUEUE_CAP", "FLEET_MAX_BUDGET_USD", "FLEET_DATTA_MAX_NERDS_PER_PASS",
+    "FLEET_MINION_TARGET_ITEMS",
 ]
 
 # gh#233: /api/fleet_settings wrote any DIAL_FIELDS value straight to fleet.env with zero
@@ -345,7 +348,7 @@ _CRON_HOUR_FIELDS = {"FLEET_GRU_CADENCE", "FLEET_DATTA_CADENCE", "FLEET_MARIE_CA
 # 40h; here an hour-shaped validator would refuse every legitimate minute value.
 _CRON_MINUTE_FIELDS = {"FLEET_VP_DUE_CADENCE"}
 _NONNEG_INT_FIELDS = {
-    "FLEET_QUEUE_CAP", "FLEET_DATTA_MAX_NERDS_PER_PASS",
+    "FLEET_QUEUE_CAP", "FLEET_DATTA_MAX_NERDS_PER_PASS", "FLEET_MINION_TARGET_ITEMS",
     "FLEET_CADENCE_BUILD", "FLEET_CADENCE_REVIEW", "FLEET_CADENCE_GITPULL",
 }
 _FRACTION_FIELDS = {"FLEET_SHARE_FRACTION", "FLEET_GRU_ALLOWANCE_FRACTION"}
@@ -605,6 +608,39 @@ def _gh_dates(kind: str, *extra: str) -> list[dict]:
     return rows
 
 
+def _deploy_workflow() -> str:
+    return read_env_values().get("FLEET_DEPLOY_WORKFLOW") or os.environ.get("FLEET_DEPLOY_WORKFLOW") or "DEPLOY"
+
+
+def _scoreboard_merged_prs(since_day: str) -> list[dict]:
+    """Merged PRs since `since_day` with their closing refs and head branch, cached 30 min.
+    A failed read is not cached (an empty list would pin a false zero for the whole TTL)."""
+    def produce():
+        raw = _gh("pr", "list", "--state", "merged", "--search", f"merged:>={since_day}", "--limit", "1000",
+                  "--json", "number,headRefName,mergedAt,closingIssuesReferences", timeout=90)
+        try:
+            rows = json.loads(raw) if raw else []
+        except ValueError:
+            rows = []
+        return rows, bool(rows)
+    return _cached(f"scoreboard_merged:{since_day}", 1800, produce)
+
+
+def _scoreboard_deploy_runs() -> list[dict]:
+    """Successful runs of the product's deploy workflow (FLEET_DEPLOY_WORKFLOW, default DEPLOY)."""
+    wf = _deploy_workflow()
+
+    def produce():
+        raw = _gh("run", "list", "--workflow", wf, "--status", "success", "--limit", "300",
+                  "--json", "createdAt,conclusion,headSha", timeout=60)
+        try:
+            rows = json.loads(raw) if raw else []
+        except ValueError:
+            rows = []
+        return rows, bool(rows)
+    return _cached(f"scoreboard_deploys:{wf}", 1800, produce)
+
+
 def _fleet_prs_opened() -> list[dict]:
     """createdAt of every PR the fleet opened (head branch `member/…`), any state, cached 10 min."""
     key = "fleet_prs_opened"
@@ -778,6 +814,39 @@ def metrics_snapshot() -> dict:
         out["fleet.prs_opened_per_hour"] = {
             "value": opened24, "sub": f"member/ branches opened, 24h · {spawns24} spawns",
             "series": [{"day": f"-{23 - i}h", "value": v} for i, v in enumerate(opened)]}
+
+        # 2026-09-24 scoreboard (scoreboard.py): the four numbers that say whether the throughput
+        # levers work. items/run and closed/run need a full day of runs -- STATE keeps only the
+        # newest MAX_RUNS rows across ALL members, fewer than 24h on a busy day -- so read runs.jsonl.
+        all_runs = _cached("scoreboard_runs", 600, lambda: (fleet_metrics.load_runs(), True))
+        ipr = scoreboard.items_per_run(all_runs, now)
+        upsert("fleet.items_per_minion_run", ipr)
+        target = read_env_values().get("FLEET_MINION_TARGET_ITEMS") or "8"
+        out["fleet.items_per_minion_run"] = {
+            "value": ipr, "bad": ipr is not None and target.isdigit() and ipr < int(target),
+            "sub": f"median, executed minion runs, 24h · target {target}",
+            "series": daily_series("fleet.items_per_minion_run")}
+        merged14 = _scoreboard_merged_prs(days[0])
+        cpr = scoreboard.closed_per_run(merged14, all_runs, now)
+        upsert("fleet.closed_per_minion_run", cpr)
+        out["fleet.closed_per_minion_run"] = {
+            "value": None if cpr is None else round(cpr, 2),
+            "sub": "issues closed by merged minion PRs / minion runs, 24h" if merged14 else "unavailable (merged PR read failed)",
+            "series": daily_series("fleet.closed_per_minion_run")}
+        deploys = _scoreboard_deploy_runs()
+        live = scoreboard.shipped_live_per_day(merged14, deploys, days, _central_day)
+        live24 = sum(1 for t in scoreboard.live_merges(merged14, deploys) if now - t < 86400)
+        out["fleet.shipped_live_per_day"] = {
+            "value": live24 if deploys else None,
+            "sub": (f"merged + deployed, 24h · {sum(live.values())} in 14d" if deploys
+                    else f"unavailable (no successful {_deploy_workflow()} runs read)"),
+            "series": [{"day": d, "value": live[d]} for d in days]}
+        trend = scoreboard.backlog_trend(daily_series("fleet.backlog_open"))
+        upsert("fleet.backlog_trend", trend)
+        out["fleet.backlog_trend"] = {
+            "value": trend, "bad": trend is not None and trend > 0,
+            "sub": "net open-backlog change, 7 days (negative = draining)",
+            "series": daily_series("fleet.backlog_trend")}
         db.commit()
     finally:
         db.close()

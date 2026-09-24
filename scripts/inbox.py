@@ -317,8 +317,11 @@ def answer_asks(answers: list[dict], run=None) -> list[str]:
     return out
 
 
-def open_issue_titled(slug: str, title: str, run) -> dict | None:
+def open_issue_titled(slug: str, title: str, run, by_signature: bool = False) -> dict | None:
     """The one open board item whose title equals `title` (case-insensitive), or None.
+    `by_signature` compares issue_cluster.signature() instead -- numbers and parentheticals
+    dropped -- for pagers whose title carries a per-firing id (`pg_lock:<pid>:...`, 2026-09-24:
+    seven open twins that exact-title matching never saw). Email asks keep exact matching.
 
     REST list, never the search flag: the search API is a separate, much smaller rate-limit
     bucket (30/min per token, shared with every other member's searches) and its index lags
@@ -335,8 +338,12 @@ def open_issue_titled(slug: str, title: str, run) -> dict | None:
         log(f"dedupe lookup failed (rc={r.returncode}): {(r.stderr or r.stdout or '').strip()[:200]}")
         return None
     try:
+        import issue_cluster
+        want = issue_cluster.signature(title) if by_signature else title.strip().lower()
         for it in json.loads(r.stdout or "[]"):
-            if (it.get("title") or "").strip().lower() == title.strip().lower():
+            got = (it.get("title") or "")
+            got = issue_cluster.signature(got) if by_signature else got.strip().lower()
+            if got == want:
                 it.setdefault("url", f"https://github.com/{slug}/issues/{it['number']}")
                 return it
     except (json.JSONDecodeError, KeyError, TypeError) as exc:
@@ -505,7 +512,7 @@ def file_or_comment_alert(row: dict, run=None) -> tuple[str, bool]:
     title = alert_title(row["check"])
     first_line = (row.get("text") or row.get("subject") or "").strip().splitlines()[0:1]
     first_line = first_line[0] if first_line else row.get("subject") or ""
-    it = open_issue_titled(slug, title, run)
+    it = open_issue_titled(slug, title, run, by_signature=True)
     if it:
         run(["gh", "issue", "comment", "--repo", slug, str(it["number"]),
              "--body", f"Fired again: {first_line}"[:1500]])

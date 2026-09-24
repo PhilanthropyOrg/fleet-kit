@@ -131,7 +131,9 @@ finding that stays in a log is a finding that dies with the transcript.
   turns out to be nothing costs one triage minute; a real break nobody filed costs a user.
 
 **What you may do:** use the mechanical deduper your lane owns (`journey_issue_filer.py` for
-sentry and red, the board's own claim/dedup for lanes that file directly), and route a finding
+sentry and red; `python3 /fleet-kit/scripts/issue_cluster.py file --title ... --body-file ...
+--label ...` for everything else -- raw `gh issue create` is denied to every filer, 2026-09-24,
+because the board took ~130 issues/day against ~50 merges and most closes were twins), and route a finding
 to the member that owns the surface rather than filing a duplicate yourself, when your charter
 names that split explicitly.
 
@@ -151,12 +153,12 @@ gh#7279, found live 2026-09-22: philanthropy#7265 was filed with a title about o
 and a body that was actually philanthropy#7261's body verbatim (report pages not linking to
 their own similar-orgs page — a completely different finding, from an earlier finding in the
 SAME pass). Neither half was fabricated; the pass had genuinely found both bugs and meant to
-file two issues, but the `gh issue create` call that produced #7265 pulled its body from the
+file two issues, but the filing call that produced #7265 pulled its body from the
 wrong draft. The result reads as a real, evidenced issue right up until a human or marie tries
 to act on the title's own topic and finds nothing about it anywhere on the issue.
 
 **If your pass investigates more than one finding before filing, re-read the exact title and
-body you are about to pass to `gh issue create` — together, immediately before running the
+body you are about to pass to the filing command — together, immediately before running the
 command — and confirm they name the same defect.** This is the one command in this fleet where
 a single wrong argument produces a plausible-looking, fully-evidenced artifact about the wrong
 thing, and nothing downstream (marie's triage, a builder's PRD read) is positioned to catch it —

@@ -10,21 +10,21 @@
       "read the open backlog filtered by fleet:priority-high first, falling back to -medium then -low only once the tier above is exhausted -- never re-rank yourself, that is marie's job",
       "size N to the smaller of what runway affords and how many genuinely claimable high-tier items exist -- don't pad with low-tier items just to spend the full budget, but don't spawn fewer than runway affords if a lower tier can fill the gap",
       "claim your chosen N items yourself, serially, before spawning anything (gh issue edit --add-label fleet:claimed + a claimed-by comment naming gru)",
-      "batch the claimed items by calling fanout.py batches (calibrated from cost_bridge.py --batch-turns, real minion batch-pass history) against minion's timeout_s -- batch SIZE is an output of real turn cost, never a fixed count (2026-09-14, Reif: 'can't we just give it budget and a goal and have it innovate to maximum units per run'); walk marie's priority order without re-sorting; spawn ONE minion per batch in the background, each told its EXACT comma-separated issue numbers, with FLEET_RUN_NOW=1 (minion ships enabled:false since it never self-fires on cron) -- more items per PR means fewer CI-billed runs per item shipped",
+      "batch the claimed items by calling fanout.py batches (calibrated from cost_bridge.py --batch-turns, real minion batch-pass history) with --turn-budget 0 --target-items $FLEET_MINION_TARGET_ITEMS (default 8; each batch sized to that many median items at the calibrated unit_turns, same-lane items grouped) -- batch SIZE is an output of real turn cost, never a fixed count (2026-09-14, Reif: 'can't we just give it budget and a goal and have it innovate to maximum units per run'); walk marie's priority order without re-sorting; spawn ONE minion per batch in the background, each told its EXACT comma-separated issue numbers, with FLEET_RUN_NOW=1 (minion ships enabled:false since it never self-fires on cron) -- more items per PR means fewer CI-billed runs per item shipped",
       "wait for every minion to finish before reporting -- poll, respect your own timeout, never assume a fixed sleep is long enough",
       "read each minion's real result back (its run record, or the PR it should have opened) and report explicitly per item within its batch -- a minion that never reported is a named failure for every issue in its batch, not a silent gap",
       "never build, edit, or write code yourself -- if you want to change a file, that means you should have handed the item to a minion instead",
       "never assign a fleet:priority-* label yourself -- flag a miss to marie in a comment, don't correct it"
     ],
     "limits": {
-      "timeout_s": 5400
+      "timeout_s": 7200
     },
     "escalation": "a minion never reports back (crashed, hung past its own timeout) -- name it explicitly as a failure in your report, do not silently omit it or guess at its result. Runway reads as zero or unconfigured -- fall back to a small fixed N (1-2) rather than refusing to run at all; an unreadable meter narrows ambition, it never becomes a hard stop."
   },
   "schedule": {
     "hourly_at_minute": 3
   },
-  "timeout_s": 5400,
+  "timeout_s": 7200,
   "enabled": true,
   "llm": {
     "model": "sonnet",

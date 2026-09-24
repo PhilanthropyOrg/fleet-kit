@@ -886,9 +886,13 @@ def _fanout_batches_by_real_turn_cost_not_a_fixed_count():
     r = fanout.pack_batches(items, turn_budget=60, unit_turns=10, safety_margin=0.7,
                             solo_complexity_floor=8)
 
-    # Priority order preserved across batches -- never reordered by size, same law as pack().
-    flat = [it["number"] for b in r["batches"] for it in b["items"]]
-    assert flat == [1, 2, 3, 4, 5], flat
+    # Priority order preserved INSIDE every batch -- never reordered by size, same law as pack().
+    # (2026-09-24: a solo item is set aside instead of flushing the open batch, so 1,2,4,5 share
+    # one run instead of two; batches run concurrently, so order BETWEEN them carries nothing.)
+    for b in r["batches"]:
+        nums = [it["number"] for it in b["items"]]
+        assert nums == sorted(nums), nums
+    assert sorted(it["number"] for b in r["batches"] for it in b["items"]) == [1, 2, 3, 4, 5]
 
     # The complexity-9 item is ALWAYS its own batch, regardless of room in the batch before it
     # or after it -- a struggling big item must not risk small items sharing its pass.
@@ -5290,7 +5294,7 @@ def _messenger_brief_restates_the_strategy_and_points_at_pages():
             _os.environ["FLEET_INSTANCE_NAME"] = old_instance
     charter = (ROOT / "members" / "dont-shoot-the-messenger" / "dont-shoot-the-messenger.md").read_text()
     assert "## Where we are against the plan" in charter and "Where to look" in charter and "Done looks like" in charter
-    assert "Words you may not use" in charter and "gh issue create" in charter
+    assert "Words you may not use" in charter and "issue_cluster.py file" in charter  # 2026-09-24: filing goes through the dedupe helper
     # Reif, 2026-09-07: "I need to have the urls to actually see what you mean."
     assert "**See it: <live URL>**" in charter, "landed lines must carry the live URL"
     law = (ROOT / "agents" / "persona_law.md").read_text()

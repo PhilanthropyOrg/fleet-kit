@@ -45,6 +45,8 @@ SIGNAL_DENOM = {"ok", "quiet", "reported_nothing"}
 PROVISIONAL = {"started"}
 
 CATALOG = {
+    # 2026-09-24 lever 1: the real per-run batch size (target: FLEET_MINION_TARGET_ITEMS).
+    "items_per_run": "median items per executed run for <member> (item_id is underscore-joined)",
     "signal_rate": "ok / (ok + quiet + reported_nothing) for <member>",
     "quiet_rate": "(quiet + reported_nothing) / executed for <member>",
     "reported_nothing_per_day": "reported_nothing rows per day for <member>",
@@ -78,6 +80,7 @@ DIRECTION = {
     "avg_cost_usd": "lower",
     "avg_duration_s": "lower",
     "rework_pct": "lower",
+    "items_per_run": "higher",
 }
 
 
@@ -204,6 +207,14 @@ def compute(name: str, rows: list[dict], at: float | None = None, hours: float =
             if sc and not sc.startswith("none"):
                 real += 1
         return real / len(rs)
+    if base == "items_per_run":
+        rs = [r for r in _for_member(win, args[0] if args else None) if r.get("status") in EXECUTED]
+        sizes = sorted(len([n for n in str(r.get("item_id") or "").split("_") if n]) for r in rs
+                       if r.get("item_id"))
+        if not sizes:
+            return None
+        mid = len(sizes) // 2
+        return float(sizes[mid]) if len(sizes) % 2 else (sizes[mid - 1] + sizes[mid]) / 2.0
     if base == "runs_per_day":
         rs = [r for r in _for_member(win, args[0] if args else None) if r.get("status") in EXECUTED]
         return len(rs) / days if rs else None

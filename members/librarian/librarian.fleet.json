@@ -47,7 +47,8 @@
         "Bash(gh pr create:*)",
         "Bash(gh pr merge:*)",
         "Bash(gh issue edit:*)",
-        "Bash(rm -rf:*)"
+        "Bash(rm -rf:*)",
+        "Bash(gh issue create:*)"
       ]
     }
   },
