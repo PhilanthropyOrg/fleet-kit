@@ -44,17 +44,18 @@ class Charter(unittest.TestCase):
     def test_step_zero_dispatches_fixers_from_the_detector(self):
         step0 = GRU[GRU.index("0. **Your own red PRs first"):GRU.index("1. **Read this hour's allowance")]
         self.assertIn("python3 /fleet-kit/scripts/red_prs.py due", step0)
-        self.assertIn("run_member.sh the-fixer --item <PR number>", step0)
-        self.assertIn("run_in_background: true", step0)
+        self.assertIn("bash /fleet-kit/scripts/dispatch_fixer.sh <PR> <PR> ...", step0)
+        self.assertIn("DETACHED", step0)
         self.assertIn("even when step 1 ends the pass early", step0)
         self.assertIn("Review findings are included", step0)
 
     def test_reif_priority_never_outranks_step_zero(self):
         self.assertIn("never step 0", GRU[GRU.index("2a. **First"):GRU.index("2a-bis.")])
 
-    def test_step_zero_fixers_are_waited_for(self):
-        self.assertIn("every step-0 fixer", GRU)
-        self.assertIn("each `task_id` from steps 0 and 5", GRU)
+    def test_step_zero_fixers_are_detached_not_waited_for(self):
+        # 20:26 UTC 2026-09-25: backgrounded fixers died (exit 143) when gru's turn ended.
+        self.assertIn("step-0 fixers are detached and\n   are NOT waited for", GRU)
+        self.assertNotIn("each `task_id` from steps 0 and 5", GRU)
 
     def test_todo_count_matches_steps(self):
         self.assertIn("exactly these 11 items (steps 0-10)", GRU)
@@ -62,7 +63,7 @@ class Charter(unittest.TestCase):
     def test_manifest_checklist_leads_with_it(self):
         first = SPEC["mandate"]["checklist"][0]
         self.assertIn("red_prs.py due", first)
-        self.assertIn("the-fixer --item", first)
+        self.assertIn("dispatch_fixer.sh", first)
         self.assertIn("red_prs.py due", SPEC["mandate"]["target"])
 
     def test_the_fixer_knows_what_a_dispatched_sub_pass_is(self):
@@ -82,6 +83,34 @@ def _pr(number, branch, failed, real_mins_ago):
             "statusCheckRollup": [{"__typename": "CheckRun", "name": n, "status": "COMPLETED",
                                    "conclusion": "FAILURE" if n in failed else "SUCCESS",
                                    "completedAt": t, "detailsUrl": ""} for n in ("lint", "test")]}
+
+
+class DetachedDispatch(unittest.TestCase):
+    """A dispatched fixer must outlive the pass that dispatched it. Reproduces the 20:26 kill:
+    the dispatcher's whole process group is SIGKILLed right after dispatching, and the fixer
+    (a stub run_member.sh that sleeps, then writes a marker) must still finish."""
+
+    def test_fixer_survives_its_dispatcher(self):
+        import signal
+        import subprocess
+        import time
+        d = tempfile.mkdtemp()
+        stub = Path(d, "run_member.sh")
+        stub.write_text(f'sleep 2; echo "$@" > {d}/done\n')
+        env = dict(os.environ, FLEET_RUN_MEMBER=str(stub), FLEET_LOG_DIR=d)
+        parent = subprocess.Popen(
+            ["bash", "-c", f"bash {HERE / 'dispatch_fixer.sh'} 7982 '#7975' nope; sleep 30"],
+            env=env, start_new_session=True, stdout=subprocess.PIPE, text=True)
+        time.sleep(0.8)
+        os.killpg(parent.pid, signal.SIGKILL)  # the dispatcher's pass ends, taking its group
+        parent.wait()
+        deadline = time.time() + 10
+        while not Path(d, "done").exists() and time.time() < deadline:
+            time.sleep(0.2)
+        self.assertTrue(Path(d, "done").exists(), "the fixer died with its dispatcher")
+        self.assertIn("the-fixer --item", Path(d, "done").read_text())
+        self.assertTrue(Path(d, "the-fixer-item7982.dispatch.log").exists())
+        self.assertTrue(Path(d, "the-fixer-item7975.dispatch.log").exists(), "'#7975' is a PR too")
 
 
 class DueEndToEnd(unittest.TestCase):

@@ -46,21 +46,22 @@ spawns exactly one). Your job, in order:
    `due` is already ordered and capped (`FLEET_GRU_MAX_FIXERS`, default 6): every red or
    review-BLOCKed PR of a fleet:reif-priority item as soon as it is red, then any other fleet
    PR red with no real push for 60+ minutes (the red half of the merge-stall alarm, which only
-   sees green PRs). For EACH entry, spawn one fixer with `Bash(run_in_background: true)`, the
-   whole `command` being:
+   sees green PRs). Dispatch a fixer to EVERY entry in ONE call, which returns at once:
    ```
-   bash /fleet-kit/scripts/run_member.sh the-fixer --item <PR number>
+   bash /fleet-kit/scripts/dispatch_fixer.sh <PR> <PR> ...
    ```
-   Review findings are included: the fixer reads judge-judy's BLOCK comment through
-   `pr_ci_wait.py`. Record each task id with its PR number; wait for them in step 6 alongside
-   your minions and report each PR's state after (`python3 /fleet-kit/scripts/pr_ci_wait.py <N>
-   --no-wait`). Do not claim or re-batch into a new minion this pass any issue number in a
-   `due` PR's `items` — its fix lands first; next pass sees what is still open. `held` already
+   Each fixer runs DETACHED in its own session: do not wrap it in `run_in_background`, do not
+   wait for it, and never call `run_member.sh the-fixer --item` directly. On 2026-09-25 gru
+   ended its turn at 20:25:57 and every fixer it had backgrounded was killed at 20:26:06
+   (exit 143), #7982's with its fix half done: a background task dies with the pass that
+   started it, and a fix cycle outlives any gru turn. Review findings are included: the fixer
+   reads judge-judy's BLOCK comment through `pr_ci_wait.py`. Before you report, read each
+   dispatched PR's state (`python3 /fleet-kit/scripts/pr_ci_wait.py <N> --no-wait`) and say
+   whether its fixer is still running. Do not claim or re-batch into a new minion this pass
+   any issue number in a `due` PR's `items` — its fix lands first; next pass sees what is still open. `held` already
    has a fixer on that exact content (dedup; do not re-send). `exhausted` had 3 fixer passes on
    unchanged content: name each in your report as needing a look, never re-send it. `red_prs.py`
-   printing an `error` is a blind step, not an empty one: say so and go on to step 1. If a
-   later step ends the pass early (the step-1 drought, `ready=0`), still wait for these fixers
-   the step-6 way before you report: a background task dies with the pass that spawned it.
+   printing an `error` is a blind step, not an empty one: say so and go on to step 1.
 
 1. **Read this hour's allowance, in PERCENT OF WEEK.** Dollars are not the constraint; never
    reason in them. maxx is the authority and has already applied both buffers (`weekly_max`
@@ -561,8 +562,9 @@ spawns exactly one). Your job, in order:
    returned `task_id`, and which issue numbers went into that `task_id`'s batch — step 7 needs
    both to attribute a result back to each individual item.
 
-6. **Wait for every minion (and every step-0 fixer) to finish** before you report: call
-   `TaskOutput(task_id, block: true, timeout: 600000)` for each `task_id` from steps 0 and 5 — a minion can legitimately take many
+6. **Wait for every minion to finish** before you report (step-0 fixers are detached and
+   are NOT waited for): call `TaskOutput(task_id, block: true, timeout: 600000)` for each
+   `task_id` from step 5 — a minion can legitimately take many
    minutes. Never `wait $PID` instead (gh#152: 7+ datta passes, ~$6-8 and ~300 turns each, where
    `wait` on a manually-backgrounded PID lost the child and landed `reported_nothing` with every
    field null). **Do not end your turn to "wait for the notification" either** — you're a

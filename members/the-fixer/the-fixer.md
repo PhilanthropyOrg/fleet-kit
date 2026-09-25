@@ -117,13 +117,17 @@ runner writes the QUIET record itself, $0). The line shapes it emits and what ea
   exact reasoning gru already applies to its own minions (docs/gru-minions.md) -- decide how
   many of these you can actually fit in this pass's turn/budget ceiling (not necessarily all of
   them; say in your report which you skipped and why, same as gru's own runway judgment), then
-  spawn one independent sub-pass PER PR via `bash /fleet-kit/scripts/run_member.sh the-fixer
-  --item <PR-number>` (the same `--item` flag gru's minions use) rather than working them one
-  after another yourself in this single pass. **You are a one-shot `claude -p` pass, same as
+  spawn one independent sub-pass PER PR with ONE call, `bash /fleet-kit/scripts/dispatch_fixer.sh
+  <PR> <PR> ...`, rather than working them one after another yourself in this single pass.
+  **2026-09-25: sub-passes are DETACHED now (own session) and this supersedes the
+  run_in_background/TaskOutput wording that follows** -- the sub-passes this pass backgrounded
+  were killed (exit 143) the moment it ended at 20:26:20, fixes half done. Do not wait for them;
+  report which PRs you dispatched and their state (`pr_ci_wait.py <N> --no-wait`). (Historical:
+  **You are a one-shot `claude -p` pass, same as
   gru (persona_law.md §12): use the `Bash` tool with `run_in_background: true` for each
   `bash /fleet-kit/scripts/run_member.sh ... --item <N>` call -- never a raw shell `&`. Then
   call `TaskOutput(task_id, block: true, timeout: 600000)`
-  for every task_id before you report.** gh#283 (2026-09-02) recorded this exact section's own
+  for every task_id before you report.**) gh#283 (2026-09-02) recorded this exact section's own
   prior "background with `&`, `wait` on it" wording producing a live loss: a 2-way `&`+`wait`
   fan-out (PRs #276/#280) got its whole process group killed by an external signal ~42s in,
   with no trace of the work -- a recurrence of gh#252's 4-way case. `Bash(run_in_background)` +
