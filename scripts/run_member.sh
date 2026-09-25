@@ -276,6 +276,14 @@ jget() { echo "$SPEC" | python3 -c "import json,sys; d=json.load(sys.stdin); pri
 
 ENABLED=$(jget "['enabled']")
 TIMEOUT_S=$(jget "['mandate']['limits'].get('timeout_s', $(jget "['timeout_s']"))")
+# 2026-09-25: a the-fixer --item sub-pass is a whole fix cycle on one PR -- read the red, fix it
+# (often splitting a file the size ratchet caught), verified_test.sh, push, then WAIT for CI in
+# the foreground (pr_ci_wait.py, pr_done_hook.py). The hourly pass's 1800s is sized for triage:
+# #7975's and #7982's first dispatched fixers both died at rc=124 with a fix committed and
+# unpushed. Only ever raises the ceiling, never lowers it.
+if [ "$MEMBER" = "the-fixer" ] && [ -n "$ITEM" ] && [ "${FLEET_FIXER_ITEM_TIMEOUT_S:-3600}" -gt "$TIMEOUT_S" ] 2>/dev/null; then
+  TIMEOUT_S="${FLEET_FIXER_ITEM_TIMEOUT_S:-3600}"
+fi
 VISION=$(jget "['report']['vision_link']")
 VISION_FLAG=""; [ "$VISION" = "required" ] && VISION_FLAG="--vision-required"
 # persona_law.md #6 (worktree isolation) is LAW for any unit of work that CHANGES repo files

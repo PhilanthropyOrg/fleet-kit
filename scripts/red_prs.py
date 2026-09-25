@@ -178,14 +178,14 @@ def _open_prs(repo: str | None, gh=pr_ci_wait._gh) -> list[dict] | None:
         light = json.loads(out)
     except json.JSONDecodeError:
         return None
-    full = []
-    for p in light:
-        if p.get("isDraft") or not FLEET_BRANCH.match(p.get("headRefName") or ""):
-            continue
-        pr = pr_ci_wait.fetch(int(p["number"]), repo, gh)
-        if pr is not None:
-            full.append(pr)
-    return full
+    wanted = [int(p["number"]) for p in light
+              if not p.get("isDraft") and FLEET_BRANCH.match(p.get("headRefName") or "")]
+    # In parallel: one `gh pr view` per fleet PR serially took >120s in the container on
+    # 2026-09-25 and gru's Bash call was backgrounded mid-step.
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        got = list(ex.map(lambda n: pr_ci_wait.fetch(n, repo, gh), wanted))
+    return [p for p in got if p is not None]
 
 
 def _priority_issues(repo: str | None, gh=pr_ci_wait._gh) -> set[int]:

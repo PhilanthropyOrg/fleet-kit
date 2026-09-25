@@ -132,7 +132,11 @@ work done).
    `ruff format --check`, then the repo's cheap CI gates (`repo_health.py --check`,
    `docs_freshness.py`, ...). The autofix rewrites files — re-read your diff after it. A red
    preflight is a red receipt and the push hook blocks: fix what it printed (a ratchet means
-   split or shrink the file you grew, never raise the baseline). Then it runs the repo's
+   split or shrink the file you grew, never raise the baseline). It runs the tests with the
+   repo's cached test env (`scripts/test_python.sh`; the container's own python3 has none of the
+   product's dependencies and `/repo/.venv` points at a host-only interpreter, so never build
+   your own venv; for a targeted run use `$(bash /fleet-kit/scripts/test_python.sh) -m pytest
+   <files>` with `PYTHONPATH=src`). Then it runs the repo's
    diff-scoped tests where the repo ships a runner
    (philanthropy's `scripts/tests_for_diff.py`), falls back to the suite only when the diff is
    too wide to scope, and writes the receipt the push hook checks. A raw whole-tree
