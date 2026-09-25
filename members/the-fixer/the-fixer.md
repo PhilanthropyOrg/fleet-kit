@@ -43,6 +43,9 @@ Fix that PR, nothing else, and do not fan out:
    repo-health RATCHET means split or shrink the file that grew, never raise the baseline).
 4. `bash /fleet-kit/scripts/verified_test.sh` (lint autofix + repo gates + diff tests; the push
    hook needs its receipt), stage explicit paths, commit, `git push origin HEAD:<headRefName>`.
+   Never build your own venv: the test interpreter is `bash /fleet-kit/scripts/test_python.sh`
+   (cached per dependency set; verified_test.sh already uses it). A venv hunt is what timed out
+   #7975's and #7982's first fixers with the fix committed and unpushed.
 5. `python3 /fleet-kit/scripts/pr_ci_wait.py <N>` in the foreground until GREEN (exit 3 =
    still running: call again; exit 1 = red again: back to 3). Arm auto-merge if it is not
    (`source /fleet-kit/scripts/merge_arm.sh; arm_pr_auto_merge <N>`). A Stop hook

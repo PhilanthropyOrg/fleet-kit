@@ -249,6 +249,56 @@ class StopHook(unittest.TestCase):
         self.assertTrue(stops[0]["hooks"][0]["command"].endswith("pr_done_hook.py"))
 
 
+class TestInterpreter(unittest.TestCase):
+    """2026-09-25: #7975's and #7982's fixers each spent most of a 30-minute pass building a
+    venv by hand and timed out with the fix unpushed. test_python.sh builds ONE cached env per
+    dependency set and every later pass reuses it."""
+
+    SH = str(HERE / "test_python.sh")
+
+    def _fake_uv(self, d):
+        uv = Path(d, "uv")
+        uv.write_text(f"""#!/bin/bash
+echo "$@" >> {d}/uv-calls
+if [ "$1" = venv ]; then v="${{@: -1}}"; mkdir -p "$v/bin"; printf '#!/bin/sh\nexit 0\n' > "$v/bin/python"; chmod +x "$v/bin/python"; fi
+exit 0
+""")
+        uv.chmod(0o755)
+        return d
+
+    def _run(self, wt, **env):
+        e = {k: v for k, v in os.environ.items() if k != "FLEET_TEST_PYTHON"}
+        e.update(env)
+        return subprocess.run(["bash", self.SH, wt], capture_output=True, text=True, env=e)
+
+    def test_repo_without_project_deps_gets_python3(self):
+        d = repo(pyproject=False)
+        self.assertEqual(self._run(d).stdout.strip(), shutil.which("python3"))
+
+    def test_builds_once_then_reuses(self):
+        d = repo(pyproject=False)
+        Path(d, "pyproject.toml").write_text("[project]\nname='x'\ndependencies=['jinja2']\n"
+                                             "[project.optional-dependencies]\ndev = ['pytest']\n")
+        root, bindir = tempfile.mkdtemp(), self._fake_uv(tempfile.mkdtemp())
+        env = {"FLEET_TEST_VENV_ROOT": root, "PATH": f"{bindir}:{os.environ['PATH']}"}
+        first = self._run(d, **env)
+        self.assertTrue(first.stdout.strip().startswith(root), first.stderr)
+        self.assertIn("--extra dev", Path(bindir, "uv-calls").read_text())
+        calls = Path(bindir, "uv-calls").read_text()
+        self.assertEqual(self._run(d, **env).stdout.strip(), first.stdout.strip())
+        self.assertEqual(Path(bindir, "uv-calls").read_text(), calls, "second call must not rebuild")
+
+    def test_override_wins(self):
+        self.assertEqual(self._run(repo(), FLEET_TEST_PYTHON="/x/py").stdout.strip(), "/x/py")
+
+    def test_verified_test_and_fixer_timeout_use_it(self):
+        self.assertIn("test_python.sh", (HERE / "verified_test.sh").read_text())
+        rm = (HERE / "run_member.sh").read_text()
+        self.assertIn('FLEET_FIXER_ITEM_TIMEOUT_S:-3600', rm)
+        self.assertLess(rm.index("TIMEOUT_S=$(jget"), rm.index("FLEET_FIXER_ITEM_TIMEOUT_S"))
+        self.assertIn("pip3 install --no-cache-dir uv", (KIT / "Dockerfile").read_text())
+
+
 class CharterSaysTheSame(unittest.TestCase):
     def test_minion_charter_and_manifest(self):
         md = (KIT / "members" / "minion" / "minion.md").read_text()

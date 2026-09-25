@@ -64,6 +64,11 @@ RUN pip3 install --no-cache-dir requests google-auth playwright pyyaml
 ARG FLEET_RUFF_VERSION=0.16.7
 RUN pip3 install --no-cache-dir --target /opt/fleet-ruff/${FLEET_RUFF_VERSION} ruff==${FLEET_RUFF_VERSION}
 
+# uv, so scripts/test_python.sh can build the product's test env (its dependencies, cached per
+# pyproject hash under $FLEET_LOG_DIR/.test-venvs) in about a minute instead of every builder
+# pip-installing uv and a venv by hand inside its own 30-minute pass (2026-09-25).
+RUN pip3 install --no-cache-dir uv
+
 # A real browser, because some numbers exist ONLY in a rendered page. Google's Page Indexing
 # report -- the one holding "3.7M discovered, currently not indexed" and "1.68M excluded by
 # noindex" -- has NO API at all (its sitemaps.list `indexed` field has reported ~0% since it

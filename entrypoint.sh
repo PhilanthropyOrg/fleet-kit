@@ -71,6 +71,14 @@ if ! python3 /fleet-kit/scripts/worktree_guard_hook_install.py "${guard_targets[
   echo "[entrypoint] WARNING: worktree_guard_hook_install.py failed -- gh#592's mechanical worktree guard is NOT registered this boot"
 fi
 
+# Warm the product's test env once per boot (a no-op when the cached venv for this pyproject
+# already exists), so the first builder after a deploy or a dependency change does not pay the
+# build inside its own pass. Background: boot must not wait on pip.
+if [ -n "${FLEET_REPO:-}" ] && [ -d "${FLEET_REPO}" ]; then
+  ( export FLEET_LOG_DIR="${FLEET_LOG_DIR:-/var/log/fleet-kit}"
+    bash /fleet-kit/scripts/test_python.sh "$FLEET_REPO" >/dev/null 2>>"$FLEET_LOG_DIR/test_python.log" & )
+fi
+
 case "${1:-cron-foreground}" in
   once:*)
     script="${1#once:}"

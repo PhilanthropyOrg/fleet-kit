@@ -20,6 +20,17 @@ HOOK="$(dirname "$(readlink -f "$0")")/pretest_push_hook.py"
 RECEIPT="$(python3 "$HOOK" --receipt-path "$WT")"
 WORKERS="${PYTEST_WORKERS:-auto}"
 
+# The interpreter that can import the repo's dependencies (scripts/test_python.sh: a cached
+# venv per pyproject hash). The container's own python3 has none of them, and hunting for one
+# ate most of a 30-minute fixer pass twice on 2026-09-25 (#7975, #7982). The worktree's src/
+# goes first on PYTHONPATH so tests run the code in THIS worktree.
+TEST_PY="$(bash "$(dirname "$(readlink -f "$0")")/test_python.sh" "$WT")"
+if [ -n "$TEST_PY" ] && [ "$TEST_PY" != "$(command -v python3)" ]; then
+  export PATH="$(dirname "$TEST_PY"):$PATH"
+  echo "verified_test: test interpreter $TEST_PY"
+fi
+[ -d "$WT/src" ] && export PYTHONPATH="$WT/src${PYTHONPATH:+:$PYTHONPATH}"
+
 # Receipt is written AFTER the run, against the content as it stands THEN -- computing it up
 # front would certify a tree the suite never saw if a test writes into the worktree.
 rm -f "$RECEIPT"
