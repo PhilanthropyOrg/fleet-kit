@@ -127,7 +127,13 @@ work done).
    building it, drop it (see step 11) and continue with the rest of the batch — one bad item
    does not sink the others.
 3. **Test locally** before you push — the command is `bash /fleet-kit/scripts/verified_test.sh`
-   with NO arguments: it runs the repo's diff-scoped tests where the repo ships a runner
+   with NO arguments. It runs `preflight_gate.py` FIRST: `ruff check --fix` + `ruff format` on
+   the files you changed (at the ruff version the repo's CI pins), then `ruff check` /
+   `ruff format --check`, then the repo's cheap CI gates (`repo_health.py --check`,
+   `docs_freshness.py`, ...). The autofix rewrites files — re-read your diff after it. A red
+   preflight is a red receipt and the push hook blocks: fix what it printed (a ratchet means
+   split or shrink the file you grew, never raise the baseline). Then it runs the repo's
+   diff-scoped tests where the repo ships a runner
    (philanthropy's `scripts/tests_for_diff.py`), falls back to the suite only when the diff is
    too wide to scope, and writes the receipt the push hook checks. A raw whole-tree
    `pytest tests/` is blocked by that hook: it cannot produce a receipt, and it was the #1 way
@@ -199,11 +205,9 @@ work done).
    PR). A batch PR that closes 2 of 3 items and states plainly what's left on the third is a
    normal, successful result — not a defect to hide.
 8. **Review your own diff** before pushing, if you have a review tool available.
-9. **Arm auto-merge, always**, before you finish — this fleet merges on green gates with no
-   human or orchestrator in the loop by design: GitHub's own auto-merge waits for every
-   required check (CI, the reviewer's status), then merges itself the moment they're all
-   green. You do not merge directly (a check might still be running), and you do not wait for
-   a human to drive it through — arming auto-merge IS finishing the job.
+9. **Arm auto-merge, always** — this fleet merges on green gates with no human in the loop:
+   GitHub's auto-merge waits for every required check, then merges itself. You never merge
+   directly and never wait for a human. Arming is NOT finishing the job; step 9b is.
 
    **Use `scripts/merge_arm.sh`'s `arm_pr_auto_merge` rather than a raw `gh pr merge` call —
    it already picks the right strategy flag for you.** fleet-kit has no merge queue any more
@@ -220,6 +224,19 @@ work done).
    fully-green PRs stuck for hours with no human or orchestrator any the wiser. A non-zero
    exit here is not a quiet detail; say so in your report the same way you would any other
    failed step.
+9b. **Drive your PR to green before you report — in the foreground.** (2026-09-25: #7975,
+   #7982, #7986 each ended their pass at "auto-merge armed", then sat red 1-3h on ruff I001 /
+   format, the repo-health ratchet and a review BLOCK, with nobody owning them.) Loop:
+   ```
+   python3 /fleet-kit/scripts/pr_ci_wait.py <your PR #>    # blocks <= 9 min, one Bash call
+   ```
+   exit 0 GREEN/MERGED -> report. exit 3 PENDING -> run it again. exit 1 RED/BLOCK -> it prints
+   each failing check's failing log lines and judge-judy's findings: fix ALL of them in your
+   worktree (review findings are part of the job, not a follow-up), `verified_test.sh`, commit,
+   push, and loop. Never background it, never end your turn "waiting for CI": a Stop hook
+   (`pr_done_hook.py`) refuses to let your pass end while the PR is RED/BLOCK/PENDING and hands
+   you the same output. If your budget runs out mid-loop, say so in the report with the PR's
+   exact state; `red_prs.py` then routes it to gru's next pass, which sends a fixer.
 10. **Systemic-failure rule**: if a gate fails you with the SAME error line other open PRs are
     also showing (check 2-3 sibling PRs' statuses), that's a broken GATE, not a broken PR.
     Say so in one line of your PR body ("gate <name> failing identically on #N #M —

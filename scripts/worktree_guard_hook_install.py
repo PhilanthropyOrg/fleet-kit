@@ -39,10 +39,22 @@ def _hook_commands() -> list[str]:
             ("worktree_guard_hook.py", "pretest_push_hook.py")]
 
 
-def merge_one(path: Path, hook_cmds: list[str] | str) -> bool:
+def _stop_hook_commands() -> list[str]:
+    """Stop hooks (2026-09-25): pr_done_hook.py refuses to let a minion / the-fixer --item pass
+    end its turn while its PR is red or still running CI. It is inert outside a fleet worktree
+    pass ($WT_PATH unset), so registering it in every account's settings is safe."""
+    scripts = Path(__file__).resolve().parent
+    return [f"python3 {scripts / 'pr_done_hook.py'}"]
+
+
+STOP_TIMEOUT_S = 180  # pr_done_hook reads the PR and, when red, the failing job logs
+
+
+def merge_one(path: Path, hook_cmds: list[str] | str, stop_cmds: list[str] | None = None) -> bool:
     """Registers every hook command in path's settings.json. True iff the file changed."""
     if isinstance(hook_cmds, str):
         hook_cmds = [hook_cmds]
+    stop_cmds = list(stop_cmds or [])
     if path.exists():
         try:
             settings = json.loads(path.read_text())
@@ -55,13 +67,22 @@ def merge_one(path: Path, hook_cmds: list[str] | str) -> bool:
 
     pre_list = settings.setdefault("hooks", {}).setdefault("PreToolUse", [])
     present = {h.get("command") for entry in pre_list for h in entry.get("hooks", [])}
-
     missing = [c for c in hook_cmds if c not in present]
-    if not missing:
+
+    stop_missing: list[str] = []
+    if stop_cmds:
+        stop_list = settings["hooks"].setdefault("Stop", [])
+        stop_present = {h.get("command") for entry in stop_list for h in entry.get("hooks", [])}
+        stop_missing = [c for c in stop_cmds if c not in stop_present]
+
+    if not missing and not stop_missing:
         return False  # already registered, nothing to do
 
     for cmd in missing:
         pre_list.append({"matcher": MATCHER, "hooks": [{"type": "command", "command": cmd}]})
+    for cmd in stop_missing:
+        settings["hooks"]["Stop"].append(
+            {"hooks": [{"type": "command", "command": cmd, "timeout": STOP_TIMEOUT_S}]})
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(settings, indent=2) + "\n")
     return True
@@ -85,8 +106,8 @@ def main(argv: list[str]) -> int:
         if p.suffix != ".json":
             p = p / "settings.json"
         try:
-            if merge_one(p, hook_cmds):
-                print(f"worktree_guard_hook_install: registered PreToolUse guards in {p}")
+            if merge_one(p, hook_cmds, _stop_hook_commands()):
+                print(f"worktree_guard_hook_install: registered PreToolUse guards + Stop hook in {p}")
             else:
                 print(f"worktree_guard_hook_install: {p} already up to date")
         except OSError as exc:

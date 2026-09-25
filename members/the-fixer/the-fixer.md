@@ -28,6 +28,28 @@ work done).
 2. If FIRE: fix or revert, PR-backed only (Step 2 below); if green, skip straight to step 3
 3. Write the report (Report section below), literal Outcome:/Evidence: lines included
 
+## Dispatched sub-pass: `$FLEET_PREGATE_OUTPUT` reads `FIRE assigned-pr #<N> ...`
+
+Your prompt names ONE pull request. Someone already decided it needs fixing (your own stale-PR
+fan-out below, or gru's red-PR step 0), so run_member.sh skipped check.sh for you (#8002: the
+pregate used to run here too, answer `already-fighting`, and silently no-op every sub-pass).
+Fix that PR, nothing else, and do not fan out:
+
+1. `python3 /fleet-kit/scripts/pr_ci_wait.py <N> --no-wait` -- the PR's state, each failing
+   check's failing log lines, and judge-judy's BLOCK findings if a review block stands.
+2. In your worktree: `gh pr checkout <N>`. If it conflicts with main, `git merge origin/main`
+   and resolve (both sides read, file still parses).
+3. Fix EVERY failing check AND every review finding (a BLOCK is as red as a failing test; a
+   repo-health RATCHET means split or shrink the file that grew, never raise the baseline).
+4. `bash /fleet-kit/scripts/verified_test.sh` (lint autofix + repo gates + diff tests; the push
+   hook needs its receipt), stage explicit paths, commit, `git push origin HEAD:<headRefName>`.
+5. `python3 /fleet-kit/scripts/pr_ci_wait.py <N>` in the foreground until GREEN (exit 3 =
+   still running: call again; exit 1 = red again: back to 3). Arm auto-merge if it is not
+   (`source /fleet-kit/scripts/merge_arm.sh; arm_pr_auto_merge <N>`). A Stop hook
+   (`pr_done_hook.py`) refuses to end this pass while the PR is RED/BLOCK/PENDING.
+6. If it cannot be fixed in this budget, comment on the PR naming the exact blocker and say so
+   in your report; red_prs.py re-routes it (at most 3 fixer passes per unchanged content).
+
 ## Step 1, every run, no exceptions: read what your checker already said
 
 `/fleet-kit/members/the-fixer/check.sh` has ALREADY run, in shell, before you were spawned
@@ -104,7 +126,9 @@ runner writes the QUIET record itself, $0). The line shapes it emits and what ea
   with no trace of the work -- a recurrence of gh#252's 4-way case. `Bash(run_in_background)` +
   `TaskOutput(block: true)` (gh#152's confirmed-working replacement, already load-bearing in
   datta.md/gru.md) survives independently of the calling shell instead of tying a sub-pass's
-  fate to one process tree. If you cannot afford to wait for all of them in this pass's own
+  fate to one process tree. Each sub-pass passes `red_prs.py claim` inside run_member.sh first:
+  a sub-pass that exits `QUIET -- red_prs: SKIP PR #N -- recent/exhausted` was deduplicated
+  (another fixer already has that exact content), not lost -- check its PR, not its output. If you cannot afford to wait for all of them in this pass's own
   budget, only dispatch as many as you CAN wait for and say in your report which PRs you left
   for next pass and why, rather than firing off ones you will never confirm. Each sub-pass
   reads its own `reason` and handles it differently -- a stuck PR is not always a code problem:
