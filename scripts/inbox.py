@@ -110,6 +110,44 @@ def bare_address(addr: str) -> str:
     return (m.group(1) if m else (addr or "")).strip().lower()
 
 
+# Resend webhooks are account-wide: in.philanthropy.org is the product's support inbox, handled
+# on prod, but its email.received events hit dino's /webhook/inbox too. hello@ copies arrive by
+# a Microsoft 365 mail-flow BCC, so To stays hello@philanthropy.org and only the envelope
+# recipient (Resend's `received_for`) shows in.philanthropy.org -- and hello@ is in
+# FLEET_INBOX_FROM, so without this a stranger's support mail would read as Reif steering.
+IGNORE_TO_DOMAINS_DEFAULT = "in.philanthropy.org"
+
+
+def _addrs(v) -> list[str]:
+    if isinstance(v, str):
+        v = [v]
+    if not isinstance(v, (list, tuple)):
+        return []
+    return [bare_address(x) for x in v if isinstance(x, str) and x.strip()]
+
+
+def ignored_recipient(data: dict, domains: str | None = None, email: dict | None = None) -> bool:
+    """True when the mail was delivered only to ignored domains, so /webhook/inbox drops it
+    without storing it or waking the messenger. `data` is the webhook event's data, `email` the
+    fetched receiving object (may be None if the fetch failed). received_for (envelope
+    recipients; fetched email first, else webhook data) decides when present; otherwise
+    to + cc + bcc from both. Every address must be at an ignored domain (case-insensitive,
+    exact domain); no recipients at all -> False (keep handling)."""
+    domains = IGNORE_TO_DOMAINS_DEFAULT if domains is None else domains
+    ignore = {d.strip().lower().lstrip("@") for d in (domains or "").split(",") if d.strip()}
+    srcs = [x for x in (email, data) if isinstance(x, dict)]
+    rcpts: list[str] = []
+    for src in srcs:
+        rcpts = _addrs(src.get("received_for"))
+        if rcpts:
+            break
+    if not rcpts:
+        rcpts = [a for src in srcs for k in ("to", "cc", "bcc") for a in _addrs(src.get(k))]
+    if not rcpts or not ignore:
+        return False
+    return all(a.rpartition("@")[2] in ignore for a in rcpts)
+
+
 def intake_allowed(addr: str, allow: str | None = None) -> bool:
     """FLEET_INTAKE_FROM (default INTAKE_FROM_DEFAULT): accepted and stored, but never treated
     as a steering reply -- no ask-answer parsing, no free-text-to-steering path."""
