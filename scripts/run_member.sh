@@ -397,6 +397,16 @@ try:
 except Exception:
     print('')
 " 2>>"$LOG")
+  # gru_allowance.py needs to know WHY the gauge reads what it reads: calibrating_unbilled is
+  # 1.0 for account-pool ordering, but as a %-of-week ceiling it is 60 (2026-09-25).
+  FLEET_MAXX_LABEL=$(printf '%s' "$HEADROOM_JSON" | python3 -c "
+import json, sys
+try:
+    print(json.load(sys.stdin).get('label') or '')
+except Exception:
+    print('')
+" 2>>"$LOG")
+  export FLEET_MAXX_LABEL
   if [ -n "$HEADROOM_FRACTION" ]; then
     # gh#1222: the previous one-liner nested single-quoted float('$VAR') calls INSIDE an
     # f-string's {...} expression delimited by the same quote character -- a SyntaxError

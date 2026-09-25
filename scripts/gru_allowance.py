@@ -46,9 +46,42 @@ import sys
 
 DEFAULT_FRACTION = 0.70
 
+# UNCALIBRATED METER (2026-09-25). maxx_reader answers a never-billed account with
+# headroom_fraction=1.0 / label calibrating_unbilled -- right for ranking the account pool, but
+# run_member.sh turns it into FLEET_SHARE_CEILING_PCT = 1.0 * 0.6 * 100 = 60, and this printed
+# 36.0000: a third of a week in one hour. That is no reading, not a real one. Fall back to a
+# conservative FIXED allowance instead: the even-pace hour (100% of the week / 168 hours) times
+# the same two nested fractions -- 0.2143 at 0.6 x 0.6. Operator override:
+# FLEET_UNCALIBRATED_ALLOWANCE_PCT. Priced by cost_bridge's unit, that still packs several items.
+UNCALIBRATED_LABELS = {"calibrating_unbilled"}
+EVEN_PACE_HOURLY_PCT = 100.0 / 168.0
 
-def compute(ceiling_pct: str | None, fraction_raw: str | None) -> str:
+
+def _fraction(raw, default: float) -> float:
+    try:
+        f = float(raw) if str(raw or "").strip() else default
+    except ValueError:
+        f = default
+    return max(0.0, min(f, 1.0))
+
+
+def uncalibrated_allowance(share_raw: str | None, fraction_raw: str | None,
+                           override_raw: str | None = None) -> str:
+    """The fixed allowance for an uncalibrated meter, formatted like compute()."""
+    try:
+        if str(override_raw or "").strip() and float(override_raw) >= 0:
+            return f"{float(override_raw):.4f}"
+    except ValueError:
+        pass
+    pct = EVEN_PACE_HOURLY_PCT * _fraction(share_raw, 1.0) * _fraction(fraction_raw, DEFAULT_FRACTION)
+    return f"{pct:.4f}"
+
+
+def compute(ceiling_pct: str | None, fraction_raw: str | None, label: str | None = None,
+            share_raw: str | None = None, override_raw: str | None = None) -> str:
     """Return the allowance as a formatted string, or "" when there is no trustworthy input."""
+    if (label or "").strip() in UNCALIBRATED_LABELS:
+        return uncalibrated_allowance(share_raw, fraction_raw, override_raw)
     if ceiling_pct is None or str(ceiling_pct).strip() == "":
         return ""   # fail open: no ceiling => caller keeps its own fallback
     try:
@@ -58,14 +91,10 @@ def compute(ceiling_pct: str | None, fraction_raw: str | None) -> str:
     if ceiling < 0:
         return ""
 
-    try:
-        fraction = float(fraction_raw) if str(fraction_raw or "").strip() else DEFAULT_FRACTION
-    except ValueError:
-        fraction = DEFAULT_FRACTION
     # An operator typo (1.5, or a negative) must never hand gru more than the instance's own
     # slice, nor a negative allowance. Clamp rather than fail: the ceiling is still a real,
     # safe number and refusing it entirely would idle the fleet over a config slip.
-    fraction = max(0.0, min(fraction, 1.0))
+    fraction = _fraction(fraction_raw, DEFAULT_FRACTION)
 
     return f"{ceiling * fraction:.4f}"
 
@@ -73,7 +102,12 @@ def compute(ceiling_pct: str | None, fraction_raw: str | None) -> str:
 def main(argv: list[str]) -> int:
     ceiling = argv[1] if len(argv) > 1 else os.environ.get("FLEET_SHARE_CEILING_PCT")
     fraction = os.environ.get("FLEET_GRU_ALLOWANCE_FRACTION")
-    print(compute(ceiling, fraction))
+    label = os.environ.get("FLEET_MAXX_LABEL")
+    print(compute(ceiling, fraction, label, os.environ.get("FLEET_SHARE_FRACTION"),
+                  os.environ.get("FLEET_UNCALIBRATED_ALLOWANCE_PCT")))
+    if (label or "").strip() in UNCALIBRATED_LABELS:
+        print(f"gru_allowance: maxx meter uncalibrated ({label}); fixed even-pace allowance, "
+              f"not the {ceiling} ceiling", file=sys.stderr)
     return 0
 
 

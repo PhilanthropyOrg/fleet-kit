@@ -37,6 +37,17 @@ sys.path.insert(0, str(HERE))
 import fanout  # noqa: E402
 import fleet_db  # noqa: E402
 
+# 2026-09-25 COLD START. to_observed() books the window's whole spend as exactly one allowance,
+# so its unit is allowance / items-in-the-window. One recent run made the whole allowance ONE
+# item's cost and fanout.py packed n=1 whatever the headroom (live gru pass 12:48 UTC: OBS=
+# [{"pct": 36.0}], 9 eligible fleet:reif-priority items, 1 built). A thin window measures how
+# idle the fleet was, not what an item costs -- and it is a fixed point: n=1 this hour leaves one
+# run in the window for the next. So a thin window falls back to 30 days of real minion passes.
+WARM_MIN_RUNS = 5            # fewer usable runs than this in the window => cold start
+HISTORY_HOURS = 30 * 24      # the cold-start reference window
+BUSY_HOUR_PERCENTILE = 0.9   # "a full hour" = what minions spent in the fleet's p90 hour
+MIN_ITEMS_PER_HOUR = 4       # on EVERY path, a median item costs at most allowance / this
+
 
 def to_observed(runs: list[dict], allowance_pct: float,
                 complexity_by_item: dict[str, int] | None = None) -> list[dict]:
@@ -73,6 +84,79 @@ def to_observed(runs: list[dict], allowance_pct: float,
         total_w = sum(weights)
         out += [{"pct": run_pct * w / total_w, "complexity": c} for c, w in zip(cx, weights)]
     return out
+
+
+def _unit_usd_per_item(run: dict, complexity_by_item: dict[str, int]) -> list[float]:
+    """One run's cost, as the $ cost of a median item, once per item it built (a batched run's
+    item_id is underscore-joined; its cost splits by complexity weight, same as to_observed)."""
+    ids = [n for n in str(run.get("item_id") or "").split("_") if n] or [""]
+    total_w = sum(fanout.complexity_multiplier(complexity_by_item.get(n, fanout.DEFAULT_COMPLEXITY))
+                  for n in ids)
+    return [run["cost_usd"] / total_w] * len(ids)
+
+
+def cold_start_observed(history_runs: list[dict], allowance_pct: float,
+                        complexity_by_item: dict[str, int] | None = None) -> list[dict]:
+    """--observed for a thin window, from the last HISTORY_HOURS of real minion passes
+    ([{"item_id", "cost_usd", "recorded_at"}, ...], one per run).
+
+    unit_pct = allowance_pct * median_item_usd / busy_hour_usd: the median item's real $ cost
+    over what minions spent in the fleet's p90 hour -- i.e. a full allowance buys what a busy
+    hour really bought (dino 2026-09-25: $0.91 / $19.87, ~22 median items). Always capped at
+    allowance_pct / MIN_ITEMS_PER_HOUR, which is also the answer when there is no history at
+    all: a cold start must still move several items, never pack one item as the whole hour.
+
+    Returns one median-complexity entry (fanout.calibrate() reads it back as exactly that
+    unit), tagged "source": "cold_start" so gru's report can say which path priced the hour.
+    """
+    if allowance_pct <= 0:
+        return []
+    complexity_by_item = complexity_by_item or {}
+    usable = [r for r in history_runs
+              if isinstance(r.get("cost_usd"), (int, float)) and r["cost_usd"] > 0]
+    per_item = sorted(u for r in usable for u in _unit_usd_per_item(r, complexity_by_item))
+    hours: dict[int, float] = {}
+    for r in usable:
+        if isinstance(r.get("recorded_at"), (int, float)):
+            h = int(r["recorded_at"] // 3600)
+            hours[h] = hours.get(h, 0.0) + r["cost_usd"]
+    cap = allowance_pct / MIN_ITEMS_PER_HOUR
+    unit = cap
+    if per_item and hours:
+        busy = sorted(hours.values())
+        busy_hour_usd = busy[min(len(busy) - 1, int(BUSY_HOUR_PERCENTILE * len(busy)))]
+        median_item_usd = per_item[len(per_item) // 2]
+        unit = min(cap, allowance_pct * median_item_usd / busy_hour_usd)
+    return [{"pct": unit, "complexity": fanout.DEFAULT_COMPLEXITY, "source": "cold_start"}]
+
+
+def observe(window_runs: list[dict], history_runs: list[dict], allowance_pct: float,
+            complexity_by_item: dict[str, int] | None = None) -> list[dict]:
+    """The --observed gru packs against: to_observed() over the recent window when it holds at
+    least WARM_MIN_RUNS real runs, else cold_start_observed(). Either way the implied median-item
+    unit never exceeds allowance_pct / MIN_ITEMS_PER_HOUR (entries are scaled down to it)."""
+    usable = [r for r in window_runs
+              if isinstance(r.get("cost_usd"), (int, float)) and r["cost_usd"] > 0]
+    if len(usable) < WARM_MIN_RUNS:
+        return cold_start_observed(history_runs, allowance_pct, complexity_by_item)
+    observed = to_observed(usable, allowance_pct, complexity_by_item)
+    unit = fanout.calibrate(observed)
+    cap = allowance_pct / MIN_ITEMS_PER_HOUR
+    if unit and unit > cap:
+        observed = [{**o, "pct": o["pct"] * cap / unit} for o in observed]
+    return observed
+
+
+def minion_cost_history(conn, member: str = "minion", hours: float = HISTORY_HOURS) -> list[dict]:
+    """One (item_id, cost_usd, recorded_at) per real run over `hours` -- DISTINCT on run_id, so
+    the started/terminal row pair every run leaves counts once."""
+    since = time.time() - hours * 3600
+    cur = conn.execute(
+        "SELECT MAX(item_id), MAX(cost_usd), MIN(recorded_at) FROM runs "
+        "WHERE member = ? AND recorded_at >= ? AND cost_usd IS NOT NULL GROUP BY run_id",
+        (member, since),
+    )
+    return [{"item_id": i, "cost_usd": c, "recorded_at": t} for i, c, t in cur.fetchall()]
 
 
 def recent_minion_costs(conn, member: str = "minion", hours: float = 2.0) -> list[dict]:
@@ -180,7 +264,13 @@ def main(argv=None) -> int:
         print("ERROR: --allowance-pct is required unless --batch-turns is set", file=sys.stderr)
         return 2
     runs = recent_minion_costs(conn, member=a.member, hours=a.hours or 2.0)
-    observed = to_observed(runs, a.allowance_pct, complexity_by_item)
+    history = minion_cost_history(conn, member=a.member)
+    observed = observe(runs, history, a.allowance_pct, complexity_by_item)
+    if observed and observed[0].get("source") == "cold_start":
+        print(f"cost_bridge: cold start ({len(runs)} run(s) in the last {a.hours or 2.0:g}h < "
+              f"{WARM_MIN_RUNS}); unit from {len(history)} minion runs over "
+              f"{HISTORY_HOURS // 24} days, capped at allowance/{MIN_ITEMS_PER_HOUR}",
+              file=sys.stderr)
     print(json.dumps(observed))
     return 0
 

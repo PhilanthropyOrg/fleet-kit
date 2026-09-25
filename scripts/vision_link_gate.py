@@ -40,6 +40,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import run_report  # noqa: E402
+from items_arg import HELP as ITEMS_HELP, load_items  # noqa: E402
 
 STATUS_LINKED = "linked"
 STATUS_MAINTENANCE = "maintenance"
@@ -141,10 +142,10 @@ def main(argv=None) -> int:
                      "Reads --items JSON (same candidates gru.md step 2b/2c already pulled, "
                      "each with number/body/comments), writes {eligible, dropped} to stdout.")
     ap.add_argument("--items", required=True,
-                     help="JSON list: [{\"number\":n,\"body\":\"...\",\"comments\":[...]}, ...]")
+                     help="[{number, body, comments}, ...]: " + ITEMS_HELP)
     a = ap.parse_args(argv)
 
-    candidates = json.loads(a.items)
+    candidates = load_items(a.items)
     print(json.dumps(gate_candidates(candidates)))
     return 0
 

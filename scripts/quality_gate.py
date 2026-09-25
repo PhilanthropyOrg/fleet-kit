@@ -42,6 +42,10 @@ import argparse
 import json
 import re
 import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from items_arg import HELP as ITEMS_HELP, load_items  # noqa: E402
 
 QUALITY_LABELS = ("quality:ship-it", "quality:solid", "quality:world-class")
 WORLD_CLASS = "quality:world-class"
@@ -130,9 +134,10 @@ def gate_candidates(items: list[dict]) -> dict:
 
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    p.add_argument("--items", required=True, help="JSON list of {number, labels, body, comments}")
+    p.add_argument("--items", required=True,
+                   help="{number, labels, body, comments} list: " + ITEMS_HELP)
     a = p.parse_args(argv)
-    print(json.dumps(gate_candidates(json.loads(a.items))))
+    print(json.dumps(gate_candidates(load_items(a.items))))
     return 0
 
 

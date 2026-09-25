@@ -52,6 +52,7 @@ MEMBER=test-member
 FLEET_SHARE_FRACTION={share}
 {self.block}
 echo "FLEET_SHARE_CEILING_PCT=$FLEET_SHARE_CEILING_PCT"
+echo "FLEET_MAXX_LABEL=$FLEET_MAXX_LABEL"
 rm -rf "$KIT_DIR"
 """
         proc = subprocess.run(["bash", "-c", with_stub_reader], capture_output=True, text=True, timeout=10)
@@ -71,6 +72,12 @@ rm -rf "$KIT_DIR"
     def test_full_headroom_computes_the_correct_slice(self):
         result = self._run_block('{"headroom_fraction": 1.0, "label": "calibrating_unbilled"}', "0.6")
         self.assertEqual(result.get("FLEET_SHARE_CEILING_PCT"), "60.0000")
+
+    def test_label_is_exported_for_gru_allowance(self):
+        """gru_allowance.py swaps the 60.0000 ceiling of an uncalibrated meter for a fixed
+        allowance -- it can only do that if run_member.sh tells it the label (2026-09-25)."""
+        result = self._run_block('{"headroom_fraction": 1.0, "label": "calibrating_unbilled"}', "0.6")
+        self.assertEqual(result.get("FLEET_MAXX_LABEL"), "calibrating_unbilled")
 
     def test_partial_headroom_computes_correctly(self):
         result = self._run_block('{"headroom_fraction": 0.5, "label": "ok"}', "0.6")
