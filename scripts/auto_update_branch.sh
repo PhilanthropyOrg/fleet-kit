@@ -149,6 +149,20 @@ for pr in $(gh pr list --state open --json number,isDraft,mergeable,mergeStateSt
   CHECKED=$((CHECKED+1))
   head_ref=$(gh pr view "$pr" --json headRefName -q '.headRefName' 2>/dev/null)
   [ -z "$head_ref" ] && continue
+  # 2026-09-25: never sync a RED fleet PR. Its fixer (red_prs.py -> dispatch_fixer.sh ->
+  # the-fixer --item) merges main itself as part of the fix. Syncing under it only (a) re-runs a
+  # CI that is already known red, and (b) moves the branch while the fixer works: #7982's fixer
+  # checked the branch out at 22:04, this loop merged main into it at 22:07, and the fix push was
+  # rejected at 22:44 with the pass's budget nearly spent. The same churn made #7975/#7982 read
+  # PENDING at 18:05 exactly when gru's step 0 looked, so neither got a fixer that hour.
+  if [[ "$head_ref" =~ ^(member|minion)/ ]]; then
+    red_n=$(gh pr view "$pr" --json statusCheckRollup \
+      -q '[.statusCheckRollup[]? | select(.conclusion=="FAILURE" or .conclusion=="TIMED_OUT" or .state=="FAILURE" or .state=="ERROR")] | length' 2>/dev/null || echo 0)
+    if [ "${red_n:-0}" -gt 0 ] 2>/dev/null; then
+      log "PR #$pr: not syncing -- red ($red_n failed check(s)); its fixer merges main as part of the fix"
+      continue
+    fi
+  fi
   behind_by=$(timeout 25s gh api "repos/${REPO_SLUG}/compare/main...${head_ref}" --jq '.behind_by' 2>/dev/null || echo 0)
   [ "${behind_by:-0}" -le 0 ] && continue
   if timeout 25s gh api -X PUT "repos/${REPO_SLUG}/pulls/${pr}/update-branch" >/dev/null 2>&1; then

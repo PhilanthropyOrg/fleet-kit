@@ -260,5 +260,46 @@ class RunMemberPregate(unittest.TestCase):
         self.assertIn('Your assigned PULL REQUEST for this run is #$ITEM', text)
 
 
+class AutoUpdateBranchLeavesRedPrsToTheirFixer(unittest.TestCase):
+    """2026-09-25: auto_update_branch.sh merged main into #7982 at 22:07 while its fixer (checked
+    out 22:04) was mid-fix; the fix push was rejected at 22:44 with the budget nearly spent.
+    Run the real script against a fake `gh`: a red fleet PR is not synced, a green one is."""
+
+    def test_red_fleet_pr_is_not_synced_green_one_is(self):
+        d = tempfile.mkdtemp()
+        calls = Path(d, "calls")
+        gh = Path(d, "gh")
+        gh.write_text(f"""#!/bin/bash
+echo "$*" >> {calls}
+case "$*" in
+  "repo view"*) echo o/r ;;
+  "pr list --state open --json number,isDraft,headRefName,createdAt"*) ;;
+  "pr list --state open --json number,isDraft,mergeable,mergeStateStatus"*) printf '7982\n7990\n7991\n' ;;
+  "pr list --state open --json number,isDraft,autoMergeRequest"*) ;;
+  "pr view 7982 --json headRefName"*) echo member/minion-item7942-1-2 ;;
+  "pr view 7990 --json headRefName"*) echo member/minion-item7800-1-2 ;;
+  "pr view 7991 --json headRefName"*) echo fix/human-branch ;;
+  "pr view 7982 --json statusCheckRollup"*) echo 2 ;;
+  "pr view 7990 --json statusCheckRollup"*) echo 0 ;;
+  "pr view 7991 --json statusCheckRollup"*) echo 3 ;;
+  "api repos/o/r/compare/"*) echo 3 ;;
+  *) ;;
+esac
+""")
+        gh.chmod(0o755)
+        repo_dir = Path(d, "repo")
+        repo_dir.mkdir()
+        env = dict(os.environ, PATH=f"{d}:{os.environ['PATH']}", FLEET_REPO=str(repo_dir),
+                   FLEET_LOG_DIR=d, FLEET_ENV_FILE="/nonexistent", FLEET_ENABLED="true")
+        r = subprocess.run(["bash", str(HERE / "auto_update_branch.sh")], env=env,
+                           capture_output=True, text=True, timeout=60)
+        log = Path(d, "auto_update_branch.log").read_text()
+        puts = [ln for ln in calls.read_text().splitlines() if "update-branch" in ln]
+        self.assertIn("PR #7982: not syncing -- red", log, r.stderr)
+        self.assertFalse(any("/pulls/7982/" in c for c in puts), puts)
+        self.assertTrue(any("/pulls/7990/" in c for c in puts), "a green fleet PR still syncs")
+        self.assertTrue(any("/pulls/7991/" in c for c in puts), "a human branch is not ours to hold")
+
+
 if __name__ == "__main__":
     unittest.main()
