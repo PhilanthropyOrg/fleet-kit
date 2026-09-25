@@ -150,6 +150,12 @@ jobs:
         run: python3 scripts/test_dispatch_lock.py
       - name: run test_charter_bloat_check.py
         run: python3 scripts/test_charter_bloat_check.py
+      - name: run test_red_prs.py
+        run: python3 scripts/test_red_prs.py
+      - name: run test_preflight_gate.py
+        run: python3 scripts/test_preflight_gate.py
+      - name: run test_gru_red_prs_first.py
+        run: python3 scripts/test_gru_red_prs_first.py
       - name: run test_deploy_health_and_retire.py
         run: python3 scripts/test_deploy_health_and_retire.py
       - name: run test_kpi_calendar_day_gh265.py

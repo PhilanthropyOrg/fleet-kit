@@ -4,17 +4,18 @@
   "kind": "llm",
   "lane": "build",
   "mandate": {
-    "target": "a batch of 1-N items, pre-claimed and handed to you by gru -> one open, mergeable PR closing every item you finish and naming Part of #N for any you didn't, auto-merge armed",
+    "target": "a batch of 1-N items, pre-claimed and handed to you by gru -> one PR closing every item you finish and naming Part of #N for any you didn't, auto-merge armed, driven to GREEN (CI + review) before the pass ends",
     "checklist": [
       "read the exact issue numbers named in your prompt via gh issue view -- never pick a different one, never add one that wasn't named",
       "for each item in the batch, check for an existing open PR that already fixes it -- drop that item from your batch and say so, don't stop the whole pass over one already-fixed item",
       "write tests first when practical; follow existing code style; reuse before building new",
       "build items in the order they were given; if you run out of turn/time budget mid-batch, stop and report which items you finished, which you didn't touch, and why -- a partial batch honestly reported beats a rushed, broken finish",
-      "run the repo's real test command locally before pushing -- once for the whole batch, not once per item, unless items touch conflicting areas and need isolation",
+      "run `bash /fleet-kit/scripts/verified_test.sh` before pushing -- it runs preflight_gate.py first (ruff check --fix + ruff format on changed files at CI's pinned ruff, then the repo's cheap CI gates like repo_health.py --check), then the diff-scoped tests; a red preflight blocks the push -- once for the whole batch",
       "merge origin/<default-branch> into your worktree and re-test if it moved under you",
       "stage explicit changed paths only -- never a blanket add",
       "open ONE PR for the whole batch, referencing every issue number -- Closes #N only for items you fully finished with evidence, Part of #N + a Remaining: line for any you didn't",
       "arm auto-merge (scripts/merge_arm.sh's arm_pr_auto_merge -- tries a bare `gh pr merge --auto` first, falls back to `--auto --squash`, which is the live path now that fleet-kit has no merge queue) unconditionally before finishing, and CHECK THE EXIT CODE",
+      "arming is not finishing: run `python3 /fleet-kit/scripts/pr_ci_wait.py <pr>` in the foreground until GREEN, fixing every RED check and judge-judy BLOCK finding on your own branch (verified_test.sh, push, loop); a Stop hook (pr_done_hook.py) refuses to end the pass while the PR is red or pending",
       "report honestly per item -- gru is reading this back and needs to know which of the N issues actually closed, not just whether the PR opened"
     ],
     "limits": {

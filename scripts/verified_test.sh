@@ -30,6 +30,21 @@ rm -f "$RECEIPT"
 # build never pushed. Where the repo ships its own diff-scoped runner (philanthropy's
 # scripts/tests_for_diff.py, its documented pre-push law), run THAT: minutes, not twelve. It
 # exits 3 when the diff is too wide to scope, and then the full suite is the honest run.
+# 2026-09-25: lint and the repo's cheap CI gates first (preflight_gate.py). #7975/#7982/#7986
+# went red on ruff I001/format, the repo-health ratchet and docs freshness -- all checkable in
+# seconds here, none of them run before. The autofix half rewrites files BEFORE the content hash
+# below is taken, so the receipt certifies the fixed tree. A red preflight is a red receipt: the
+# push hook then blocks exactly as it does for a failing test. No skip switch, on purpose.
+if python3 "$(dirname "$(readlink -f "$0")")/preflight_gate.py" "$WT"; then
+  PREFLIGHT="pass"
+else
+  HASH="$(python3 "$HOOK" --content-hash "$WT")"
+  printf '{"status":"fail","content":"%s","args":"preflight","exit":1,"preflight":"fail","ts":%d}\n' \
+    "$HASH" "$(date +%s)" > "$RECEIPT"
+  echo "verified_test: preflight (lint / repo gates) FAILED -- fix what it printed; the push hook will block until it is green" >&2
+  exit 1
+fi
+
 ARGS="${*:-full}"
 if [ $# -eq 0 ] && [ -f scripts/tests_for_diff.py ]; then
   echo "verified_test: diff-scoped -- python3 scripts/tests_for_diff.py --run in $WT"
@@ -50,8 +65,8 @@ fi
 
 HASH="$(python3 "$HOOK" --content-hash "$WT")"
 if [ "$code" -eq 0 ]; then STATUS=pass; else STATUS=fail; fi
-printf '{"status":"%s","content":"%s","args":"%s","exit":%d,"ts":%d}\n' \
-  "$STATUS" "$HASH" "$ARGS" "$code" "$(date +%s)" > "$RECEIPT"
+printf '{"status":"%s","content":"%s","args":"%s","exit":%d,"preflight":"%s","ts":%d}\n' \
+  "$STATUS" "$HASH" "$ARGS" "$code" "$PREFLIGHT" "$(date +%s)" > "$RECEIPT"
 
 if [ "$code" -ne 0 ]; then
   echo "verified_test: suite FAILED (exit $code) -- the push hook will block until it is green" >&2

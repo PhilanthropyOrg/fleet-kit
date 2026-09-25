@@ -299,7 +299,34 @@ fi
 # record and exits. The charter must NOT re-run the check: check.sh dedups per SHA, so a second
 # call on a fire answers "green (already-fighting)" and mutes the fire the pass was spawned for.
 PREGATE=$(jget "['llm'].get('pregate', '')")
-if [ -n "$PREGATE" ] && [ "$DRY_RUN" -ne 1 ]; then
+# #8002 (2026-09-25): an --item pass is a DISPATCH -- someone (the-fixer's own fan-out, gru's
+# red-PR step) already decided there is work, and named it. Running the pregate here anyway
+# muted every one of them: the parent's check.sh had just recorded the stale-PR batch, so the
+# sub-pass's check.sh answered `green (already-fighting ...)` and exited $0 with no model -- 4 of
+# 4 sub-passes at 14:5x, and #7986 again at 15:48, "exit 0, empty output, no fix". The
+# per-item FIXER_STATE_FILE override further down was meant to prevent exactly this but is set
+# AFTER this block, so it never reached the pregate. The dispatch replaces the pregate instead.
+if [ -n "$PREGATE" ] && [ -n "$ITEM" ] && [ "$DRY_RUN" -ne 1 ]; then
+  export FLEET_PREGATE_OUTPUT="FIRE assigned-pr #$ITEM (dispatched --item sub-pass; pregate skipped)"
+  printf '%s\n' "$FLEET_PREGATE_OUTPUT" > "$LOG_DIR/$MEMBER-item$ITEM.pregate"
+  log "$MEMBER: --item $ITEM is a dispatch -- pregate skipped, proceeding to the model"
+  # One gate for every red-PR dispatch, whoever sent it (the-fixer's fan-out or gru's step 0):
+  # red_prs.py dedups on the PR's last real commit, so the same unfixed content is not handed
+  # to a fresh fixer every hour by two dispatchers. Fails open on any read error.
+  if [ "$MEMBER" = "the-fixer" ]; then
+    CLAIM_OUT="$(cd "$REPO" 2>/dev/null && python3 "$KIT_DIR/scripts/red_prs.py" claim "$ITEM" 2>>"$LOG")"
+    CLAIM_RC=$?
+    log "$MEMBER: $CLAIM_OUT"
+    if [ "$CLAIM_RC" -eq 1 ]; then
+      printf 'Outcome: QUIET -- %s\nEvidence: scripts/red_prs.py claim %s (dispatch dedup, keyed on the PR'"'"'s last real commit)\nSelf-critique: none -- deterministic dedup, nothing to critique\n' \
+          "$CLAIM_OUT" "$ITEM" \
+        | python3 "$KIT_DIR/scripts/run_report.py" \
+            --member "$MEMBER" --run-id "${MEMBER}-item${ITEM}-dedup-$$-$(date +%s)" --kind shell --exit-code 0 \
+            --pass-file - --item-id "$ITEM" $LANE_FLAG >> "$LOG_DIR/runs.jsonl" 2>>"$LOG"
+      exit 0
+    fi
+  fi
+elif [ -n "$PREGATE" ] && [ "$DRY_RUN" -ne 1 ]; then
   PREGATE_OUT="$(bash "$KIT_DIR/$PREGATE" 2>>"$LOG")"
   printf '%s\n' "$PREGATE_OUT" > "$LOG_DIR/$MEMBER.pregate"
   export FLEET_PREGATE_OUTPUT="$PREGATE_OUT"
@@ -643,6 +670,13 @@ fi
 if [ -n "${ITEM_LIST:-}" ]; then
   PROMPT="Your assigned issue numbers for this run are: $ITEM_LIST. Build each one in this
 order, in one PR covering all of them. Do not work any issue outside this list.
+
+$PROMPT"
+elif [ -n "$ITEM" ] && [ "$MEMBER" = "the-fixer" ]; then
+  # the-fixer's --item is a PULL REQUEST number (its stale-PR fan-out and gru's red-PR step
+  # both dispatch this way) -- saying "issue" sent sub-passes looking for an issue #N.
+  PROMPT="Your assigned PULL REQUEST for this run is #$ITEM. You are a dispatched sub-pass: fix
+THIS PR only (the-fixer.md, 'Dispatched sub-pass'), do not fan out, do not touch other PRs.
 
 $PROMPT"
 elif [ -n "$ITEM" ]; then

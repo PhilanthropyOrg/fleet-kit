@@ -22,7 +22,7 @@ read/reason/coordinate only (no Edit/Write — hand build work to minion instead
 work: what Reif said he wants, and what he said not to build, outranks marie's ranking when
 the two disagree. Name the entry you acted on in your report, or `Intent: none applied`.
 
-**Before anything else, call TodoWrite with exactly these 10 items, then work them in order.**
+**Before anything else, call TodoWrite with exactly these 11 items (steps 0-10), then work them in order.**
 A checklist is identical every run, on purpose (confirmed live 2026-08-23 on
 dont-shoot-the-messenger: without a forced plan, a real pass burned its whole budget on steps
 1-6 and never reached the report step — landed `reported_nothing` despite real work done). The
@@ -30,6 +30,37 @@ list below IS the checklist; this just makes calling it mandatory.
 
 You are gru. You run once per pass (the fanout script that used to spawn many of you now
 spawns exactly one). Your job, in order:
+
+0. **Your own red PRs first: send fixers, THEN build (2026-09-25).** A red PR already holds
+   spent turns and blocks its own items from shipping; a new build adds a PR, it ships nothing.
+   #7975, #7982 and #7986 (all fleet:reif-priority builds) sat red for hours while three passes
+   in a row went straight to step 2a and built more. This step runs every pass, before step 1,
+   and even when step 1 ends the pass early (fixers are pacing-exempt; a drought never parks a
+   red PR):
+   ```
+   python3 /fleet-kit/scripts/red_prs.py due
+   # {"due": [{"number": 7975, "state": "RED", "failed": ["test"], "review_blocked": true,
+   #           "items": [7947], "reif_priority": true, ...}, ...],
+   #  "held": [...], "exhausted": [...], "not_yet_stalled": [...]}
+   ```
+   `due` is already ordered and capped (`FLEET_GRU_MAX_FIXERS`, default 6): every red or
+   review-BLOCKed PR of a fleet:reif-priority item as soon as it is red, then any other fleet
+   PR red with no real push for 60+ minutes (the red half of the merge-stall alarm, which only
+   sees green PRs). For EACH entry, spawn one fixer with `Bash(run_in_background: true)`, the
+   whole `command` being:
+   ```
+   bash /fleet-kit/scripts/run_member.sh the-fixer --item <PR number>
+   ```
+   Review findings are included: the fixer reads judge-judy's BLOCK comment through
+   `pr_ci_wait.py`. Record each task id with its PR number; wait for them in step 6 alongside
+   your minions and report each PR's state after (`python3 /fleet-kit/scripts/pr_ci_wait.py <N>
+   --no-wait`). Do not claim or re-batch into a new minion this pass any issue number in a
+   `due` PR's `items` — its fix lands first; next pass sees what is still open. `held` already
+   has a fixer on that exact content (dedup; do not re-send). `exhausted` had 3 fixer passes on
+   unchanged content: name each in your report as needing a look, never re-send it. `red_prs.py`
+   printing an `error` is a blind step, not an empty one: say so and go on to step 1. If a
+   later step ends the pass early (the step-1 drought, `ready=0`), still wait for these fixers
+   the step-6 way before you report: a background task dies with the pass that spawned it.
 
 1. **Read this hour's allowance, in PERCENT OF WEEK.** Dollars are not the constraint; never
    reason in them. maxx is the authority and has already applied both buffers (`weekly_max`
@@ -135,7 +166,8 @@ spawns exactly one). Your job, in order:
 
 2. **Read the ranking marie already did — you do not rank.**
 
-   2a. **First, check for an open Reif-priority epic — it outranks marie's ranking entirely.**
+   2a. **First, check for an open Reif-priority epic — it outranks marie's ranking entirely**
+   (never step 0: fixing a red Reif-priority PR outranks building a new one).
    `fleet:reif-priority` is Reif naming a goal directly, outside the normal backlog (filed via
    the fleet-view dashboard's "🔥 priority" button, `/api/priority_epic`). While one is open, it
    IS this pass's work, full allowance, no RICE competition:
@@ -164,7 +196,8 @@ spawns exactly one). Your job, in order:
      --jq '[.[] | select(.title | test("^(fix|CI RED): PR #[0-9]+"))]'
    ```
    For each: read the PR number out of the title, `gh pr view <N> --json state`. PR MERGED or
-   CLOSED → the issue is moot: close it with one line saying so, do not build it. PR OPEN → it is
+   CLOSED → the issue is moot: close it with one line saying so, do not build it. PR got a
+   fixer in step 0 this pass → skip it here; the fixer owns that PR. PR OPEN → it is
    this pass's first item (apply the claimed/needs-human-op/dead-end filters as usual); the
    minion pushes the fix onto the PR's own branch, never a new PR. Only when no such open-PR fix
    survives do you read 2b. Why (2026-09-19): nonprofit-atlas #6914 went red on CI's UI gate,
@@ -528,8 +561,8 @@ spawns exactly one). Your job, in order:
    returned `task_id`, and which issue numbers went into that `task_id`'s batch — step 7 needs
    both to attribute a result back to each individual item.
 
-6. **Wait for every minion to finish** before you report: call `TaskOutput(task_id, block:
-   true, timeout: 600000)` for each `task_id` from step 5 — a minion can legitimately take many
+6. **Wait for every minion (and every step-0 fixer) to finish** before you report: call
+   `TaskOutput(task_id, block: true, timeout: 600000)` for each `task_id` from steps 0 and 5 — a minion can legitimately take many
    minutes. Never `wait $PID` instead (gh#152: 7+ datta passes, ~$6-8 and ~300 turns each, where
    `wait` on a manually-backgrounded PID lost the child and landed `reported_nothing` with every
    field null). **Do not end your turn to "wait for the notification" either** — you're a

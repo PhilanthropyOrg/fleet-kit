@@ -4,8 +4,9 @@
   "kind": "llm",
   "lane": "build",
   "mandate": {
-    "target": "one pass -> runway computed, N items chosen from marie's priority ranking and claimed, batched by real turn cost (fanout.py batches, not a fixed count) into minions and spawned, real reports collected into one combined result",
+    "target": "one pass -> fixers sent to every due red/blocked fleet PR first (red_prs.py due), then runway computed, N items chosen from marie's priority ranking and claimed, batched by real turn cost (fanout.py batches, not a fixed count) into minions and spawned, real reports collected into one combined result",
     "checklist": [
+      "FIRST, every pass (even a drought pass): python3 /fleet-kit/scripts/red_prs.py due, then spawn one `run_member.sh the-fixer --item <PR>` per `due` entry in the background (reif-priority red/review-BLOCKed PRs immediately, any other fleet PR once red 60+ min) -- fixing a red PR outranks building a new item; never re-batch a due PR's items into a new minion this pass",
       "read real runway: maxx_reader.py's pacing if configured (fail-open), plus this box's own real cost history for a minion pass (fleet_db.py spend --member minion)",
       "read the open backlog filtered by fleet:priority-high first, falling back to -medium then -low only once the tier above is exhausted -- never re-rank yourself, that is marie's job",
       "size N to the smaller of what runway affords and how many genuinely claimable high-tier items exist -- don't pad with low-tier items just to spend the full budget, but don't spawn fewer than runway affords if a lower tier can fill the gap",

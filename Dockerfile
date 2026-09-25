@@ -56,6 +56,14 @@ RUN apt-get update -qq && apt-get install -y -qq \
 #                   each journey. Nothing else in this image reads YAML today.
 RUN pip3 install --no-cache-dir requests google-auth playwright pyyaml
 
+# ruff, at the version the product repo's CI pins (`pip install ruff==X` in its ci.yml), in its
+# own --target dir so scripts/preflight_gate.py can pick the exact version CI lints with. There
+# was NO ruff in this image before 2026-09-25, so no builder could lint before pushing, and ruff
+# I001/format failures reached CI on PR after PR (#7982, #7986). A repo that moves its pin still
+# works: preflight_gate.py installs the new pin on first use under $TMPDIR/fleet-ruff.
+ARG FLEET_RUFF_VERSION=0.16.7
+RUN pip3 install --no-cache-dir --target /opt/fleet-ruff/${FLEET_RUFF_VERSION} ruff==${FLEET_RUFF_VERSION}
+
 # A real browser, because some numbers exist ONLY in a rendered page. Google's Page Indexing
 # report -- the one holding "3.7M discovered, currently not indexed" and "1.68M excluded by
 # noindex" -- has NO API at all (its sitemaps.list `indexed` field has reported ~0% since it
