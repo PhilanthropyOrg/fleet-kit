@@ -182,6 +182,24 @@ class Dedup(unittest.TestCase):
         self.assertEqual(red_prs.verdict(ledger["1"], "def", NOW), "go")
         self.assertEqual(red_prs.record(ledger, 1, "def", NOW)["attempts"], 1)
 
+    def test_killed_passes_are_refunded(self):
+        # #7982: 3 attempts on one content, two of them killed when the dispatcher ended.
+        entry = {"content": "c", "attempts": 3, "last": NOW - 60, "since": NOW - 7200}
+        self.assertEqual(red_prs.verdict(entry, "c", NOW), "exhausted")
+        eff = red_prs.effective(entry, [NOW - 5000, NOW - 30])
+        self.assertEqual(eff["attempts"], 1)
+        self.assertEqual(red_prs.verdict(eff, "c", NOW), "go", "newest dispatch was killed: resend now")
+        self.assertEqual(red_prs.effective(entry, [NOW - 9000])["attempts"], 3, "kills before `since` don't count")
+
+    def test_killed_runs_are_read_from_runs_jsonl(self):
+        with tempfile.TemporaryDirectory() as d:
+            rows = [{"run_id": "the-fixer-item7982-1833-1790365236", "status": "killed", "ts": 5.0},
+                    {"run_id": "the-fixer-item7982-2861-1790372839", "status": "timed_out", "ts": 6.0},
+                    {"run_id": "the-fixer-item7982-skiplock-47572-1790376597", "status": "killed", "ts": 7.0},
+                    {"run_id": "the-fixer-item7975-1862-1790365240", "status": "ok", "ts": 8.0}]
+            Path(d, "runs.jsonl").write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+            self.assertEqual(red_prs.killed_fixer_runs(Path(d)), {7982: [5.0]})
+
     def test_plan_holds_and_exhausts(self):
         row = red_prs.describe(pr(checks=Detector.RED_LINT, commits=[commit("w", 10, "c" * 40)]),
                                {7942}, NOW)

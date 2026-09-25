@@ -127,6 +127,51 @@ def _locked_ledger(path: Path):
         tmp.replace(path)
 
 
+KILLED_RUN = re.compile(r"^the-fixer-item(\d+)-\d+-\d+$")
+
+
+def killed_fixer_runs(log_dir: Path) -> dict[int, list[float]]:
+    """{pr: [ts, ...]} of the-fixer --item passes that were KILLED (exit 143) -- ended by the
+    infrastructure (their dispatcher's pass ending, a deploy cutover), not by failing to fix.
+
+    2026-09-25: #7982 reached 3 attempts, i.e. `exhausted`, on content no fixer had ever been
+    allowed to finish: two passes were killed when their dispatcher's turn ended (fixed by
+    dispatch_fixer.sh) and the third lost its push to an auto_update_branch sync. An attempt
+    the fleet itself cut short must not count against the PR."""
+    out: dict[int, list[float]] = {}
+    path = log_dir / "runs.jsonl"
+    try:
+        fh = open(path, errors="replace")
+    except OSError:
+        return out
+    with fh:
+        for line in fh:
+            if '"the-fixer-item' not in line or '"killed"' not in line:
+                continue
+            try:
+                d = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            m = KILLED_RUN.match(d.get("run_id") or "")
+            if m and d.get("status") == "killed":
+                out.setdefault(int(m.group(1)), []).append(float(d.get("ts") or 0))
+    return out
+
+
+def effective(entry: dict | None, killed: list[float]) -> dict | None:
+    """The entry with killed passes refunded: they neither count as attempts nor hold the
+    re-dispatch window. Pure."""
+    if not entry:
+        return entry
+    since = float(entry.get("since", 0))
+    mine = [t for t in killed if t >= since]
+    e = dict(entry)
+    e["attempts"] = max(0, int(entry.get("attempts", 0)) - len(mine))
+    if mine and max(mine) >= float(entry.get("last", 0)):
+        e["last"] = 0.0  # the newest dispatch was cut short: re-send now
+    return e
+
+
 def verdict(entry: dict | None, content: str, now: float) -> str:
     """'go', 'recent' or 'exhausted' for sending one more fixer at this content. Pure."""
     if not entry or entry.get("content") != content:
@@ -138,23 +183,28 @@ def verdict(entry: dict | None, content: str, now: float) -> str:
     return "go"
 
 
-def record(ledger: dict, pr: int, content: str, now: float) -> dict:
+def record(ledger: dict, pr: int, content: str, now: float, killed: list[float] = ()) -> dict:
     entry = ledger.get(str(pr))
     if not entry or entry.get("content") != content:
-        entry = {"content": content, "attempts": 0}
+        entry = {"content": content, "attempts": 0, "since": now}
+    else:
+        entry = effective(entry, list(killed)) or entry
+        entry["since"] = now  # refunded kills are folded into attempts; count only newer ones
     entry["attempts"] = int(entry.get("attempts", 0)) + 1
     entry["last"] = now
     ledger[str(pr)] = entry
     return entry
 
 
-def plan(rows: list[dict], ledger: dict, now: float, limit: int) -> dict:
+def plan(rows: list[dict], ledger: dict, now: float, limit: int,
+         killed: dict[int, list[float]] | None = None) -> dict:
     """Which red PRs get a fixer this pass. Reif-priority first, then oldest quiet. Pure."""
     due, held, exhausted = [], [], []
     wanted = [r for r in rows if r["reif_priority"] or r["stalled"]]
     wanted.sort(key=lambda r: (0 if r["reif_priority"] else 1, -r["minutes_since_real_push"]))
     for r in wanted:
-        v = verdict(ledger.get(str(r["number"])), r["content"], now)
+        v = verdict(effective(ledger.get(str(r["number"])), (killed or {}).get(r["number"], [])),
+                    r["content"], now)
         if v == "go" and len(due) < limit:
             due.append(r)
         elif v == "exhausted":
@@ -232,13 +282,14 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         content = info["last_real_commit"] or info["head"]
         with _locked_ledger(ledger_path()) as box:
-            v = verdict(box["data"].get(str(a.pr)), content, now)
+            kills = killed_fixer_runs(ledger_path().parent).get(a.pr, [])
+            v = verdict(effective(box["data"].get(str(a.pr)), kills), content, now)
             if v != "go":
-                e = box["data"].get(str(a.pr), {})
+                e = effective(box["data"].get(str(a.pr)), kills) or {}
                 print(f"red_prs: SKIP PR #{a.pr} -- {v}: {e.get('attempts')} fixer pass(es) already "
                       f"sent for content {content[:12]}, last {int((now - e.get('last', now)) // 60)} min ago")
                 return 1
-            e = record(box["data"], a.pr, content, now)
+            e = record(box["data"], a.pr, content, now, kills)
         print(f"red_prs: dispatch PR #{a.pr} ({info['state']}), attempt {e['attempts']}/{MAX_ATTEMPTS} "
               f"at content {content[:12]}")
         return 0
@@ -254,7 +305,7 @@ def main(argv: list[str] | None = None) -> int:
                         f"{' review-BLOCK' if r['review_blocked'] else ''}" for r in rows) or "none")
         return 0
     with _locked_ledger(ledger_path()) as box:
-        out = plan(rows, box["data"], now, max(0, a.limit))
+        out = plan(rows, box["data"], now, max(0, a.limit), killed_fixer_runs(ledger_path().parent))
     out["due"] = [{k: r[k] for k in ("number", "state", "failed", "review_blocked", "items",
                                      "reif_priority", "minutes_since_real_push")} for r in out["due"]]
     print(json.dumps(out, indent=1))
