@@ -58,6 +58,8 @@ jobs:
         run: python3 scripts/test_coverage_map.py
       - name: run test_webhook_prod_alert.py
         run: python3 scripts/test_webhook_prod_alert.py
+      - name: run test_webhook_inbox_ignore.py
+        run: python3 scripts/test_webhook_inbox_ignore.py
       - name: run test_ci_runs_every_test_file.py
         run: python3 scripts/test_ci_runs_every_test_file.py
       - name: run test_pack_batches_area.py

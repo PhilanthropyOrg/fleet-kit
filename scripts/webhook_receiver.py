@@ -210,6 +210,24 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(204); self.end_headers(); return
         data = event.get("data") or {}
         sender = data.get("from") or ""
+        # Support-inbox mail (in.philanthropy.org, prod's) is not for the fleet: drop it before
+        # the trusted/budget decision and before anything is stored. Checked on the webhook data
+        # first (no fetch needed), then again on the fetched message, whose received_for carries
+        # the envelope recipient a BCC'd copy only shows there.
+        ignore = env_value("FLEET_INBOX_IGNORE_TO_DOMAINS") or inbox_mod.IGNORE_TO_DOMAINS_DEFAULT
+        if inbox_mod.ignored_recipient(data, ignore):
+            log(f"inbox IGNORED: addressed to {ignore}")
+            self.send_response(200); self.end_headers(); self.wfile.write(b"ignored"); return
+        try:
+            email = inbox_mod.fetch_received(data.get("email_id") or "")
+        except Exception as exc:  # noqa: BLE001
+            log(f"inbox: fetch of {data.get('email_id')} failed: {exc} -- storing metadata only")
+            email = None
+        if email is not None and inbox_mod.ignored_recipient(data, ignore, email):
+            log(f"inbox IGNORED: addressed to {ignore}")
+            self.send_response(200); self.end_headers(); self.wfile.write(b"ignored"); return
+        if email is None:
+            email = {"id": data.get("email_id"), "from": sender, "subject": data.get("subject"), "text": ""}
         trusted = inbox_mod.allowed_sender(sender, env_value("FLEET_INBOX_FROM"))
         # Reif 2026-09-16: "Make it open - fleet can decide if something is garbage or not."
         # An unknown sender is stored UNTRUSTED: it can never answer an ask or auto-file (that
@@ -218,11 +236,6 @@ class Handler(BaseHTTPRequestHandler):
         if not trusted and not inbox_mod.untrusted_budget_ok():
             log(f"inbox DROPPED: untrusted sender {sender!r} over the hourly cap")
             self.send_response(200); self.end_headers(); self.wfile.write(b"dropped"); return
-        try:
-            email = inbox_mod.fetch_received(data.get("email_id") or "")
-        except Exception as exc:  # noqa: BLE001
-            log(f"inbox: fetch of {data.get('email_id')} failed: {exc} -- storing metadata only")
-            email = {"id": data.get("email_id"), "from": sender, "subject": data.get("subject"), "text": ""}
         row = inbox_mod.store(email, data, trusted=trusted)
         # fk#1056: ask answers and `backlog:` mails need no model; do them here, reply, and
         # only hand leftover free text to the messenger. A failure inside apply() must not
