@@ -41,6 +41,10 @@ import argparse
 import json
 import os
 import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from items_arg import load_items  # noqa: E402
 
 # marie's ladder. Base and anchor must match members/marie/marie.md's Part C2 table exactly --
 # if one moves without the other, gru silently mis-sizes every item it schedules.
@@ -260,7 +264,7 @@ def pack_batches(items: list[dict], turn_budget: float, unit_turns: float,
 
 
 def _run_pack(a) -> int:
-    items = json.loads(sys.stdin.read() if a.items == "-" else a.items)
+    items = load_items(a.items)
     unit = a.unit_pct
     if unit is None:
         if not a.observed:
@@ -283,7 +287,7 @@ def _run_pack(a) -> int:
 
 
 def _run_pack_batches(a) -> int:
-    items = json.loads(sys.stdin.read() if a.items == "-" else a.items)
+    items = load_items(a.items)
     unit = a.unit_turns
     if unit is None:
         if not a.observed:
@@ -320,7 +324,7 @@ def main(argv=None) -> int:
     pack_p.add_argument("--unit-pct", type=float,
                         help="cost of one complexity-5 item as %% of week; omit to derive from --observed")
     pack_p.add_argument("--items", required=True,
-                        help='JSON list in priority order: [{"number":123,"complexity":4}, ...] or "-" for stdin')
+                        help='JSON list in priority order: [{"number":123,"complexity":4}, ...], "-" for stdin, or a file path')
     pack_p.add_argument("--observed",
                         help='JSON list of real past passes to calibrate from: [{"pct":0.08,"complexity":5}, ...]')
     pack_p.add_argument("--min-items", type=int, default=0)
@@ -336,7 +340,7 @@ def main(argv=None) -> int:
                            help="turns for one complexity-5 item inside a batch pass; omit to derive from --observed")
     batches_p.add_argument("--items", required=True,
                            help='JSON list, ALREADY chosen and in priority order: '
-                                '[{"number":123,"complexity":4}, ...] or "-" for stdin')
+                                '[{"number":123,"complexity":4}, ...], "-" for stdin, or a file path')
     batches_p.add_argument("--observed",
                            help='JSON list of real past BATCH passes to calibrate from: '
                                 '[{"turns":38,"items":[{"complexity":4},{"complexity":3}]}, ...]')

@@ -52,6 +52,11 @@ spawns exactly one). Your job, in order:
    # 0.0106      <- percent-of-week units, this is your allowance_pct
    # (empty)     <- no trustworthy reading: fall back to a small N and SAY you were blind
    ```
+   On an uncalibrated meter (`maxx_reader.py` label `calibrating_unbilled`, a never-billed
+   account) it prints a FIXED even-pace allowance instead of slicing the meaningless 1.0 gauge
+   (2026-09-25: that printed 36.0000, a third of a week in one hour): 100/168 x
+   FLEET_SHARE_FRACTION x FLEET_GRU_ALLOWANCE_FRACTION, or `FLEET_UNCALIBRATED_ALLOWANCE_PCT`.
+   It says so on stderr; quote that line and pack against the number as usual.
 
    Two nested percentages, and they MULTIPLY:
    ```
@@ -237,11 +242,15 @@ spawns exactly one). Your job, in order:
    missing the line after that sweep is a genuine gap to flag, not the gate working as designed.
    Run on survivors from ALL tiers queried so far:
    ```
-   python3 /fleet-kit/scripts/vision_link_gate.py --items '[{"number":..,"body":..,"comments":..}, ...]'
+   python3 /fleet-kit/scripts/vision_link_gate.py --items /tmp/gru_items.json   # or --items - (stdin)
    # {"eligible": [<numbers, same relative order as --items>],
    #  "dropped": [{"number":.., "reason":"no Vision-link line..." | "none (maintenance), but a
    #               linked-KR candidate is open: #.."}]}
    ```
+   `--items` takes a JSON file path, `-` for stdin, or inline JSON. Write the candidates
+   (`[{"number","labels","body","comments"}, ...]`) to a file once and pass that path to both
+   gates: full issue bodies overflow inline argv, so don't paste them into the command line
+   and don't hand-roll a workaround.
    Same "never silently drop" rule applies to every `dropped` entry. Only `eligible` continues
    to step 3's pack.
 
@@ -254,7 +263,7 @@ spawns exactly one). Your job, in order:
    research pass (criteria carry a `References:` line) or after a `Design approved (VP review):`
    comment — never the build before the design review has passed. Run on `eligible`, same shape:
    ```
-   python3 /fleet-kit/scripts/quality_gate.py --items '[{"number":..,"labels":..,"body":..,"comments":..}, ...]'
+   python3 /fleet-kit/scripts/quality_gate.py --items /tmp/gru_items.json   # same file, or --items -
    # {"eligible": [...], "dropped": [{"number":.., "reason":"no quality: label ..." | "no Given/When/Then ..." | "world-class with no Design approved ..."}]}
    ```
 
@@ -366,11 +375,12 @@ spawns exactly one). Your job, in order:
    ```
    `cost_bridge.py` distributes this pass's own `allowance_pct` across the last 2h of real
    `minion` `cost_usd` rows in `fleet.db`, proportional to each run's share of spend, into the
-   `{"pct":..., "complexity":...}` shape `--observed` expects. If it prints `[]` (cold start, or
-   a long quiet stretch with no recent minion runs), `fanout.py` correctly refuses to invent a
-   unit cost (`ERROR`, exit 2) rather than pack blind — only in that specific documented case,
-   fall back to `--unit-pct 0.05` explicitly and say so. Never fall back silently, or just
-   because the derived number looks surprising.
+   `{"pct":..., "complexity":...}` shape `--observed` expects. With fewer than 5 runs in that
+   window (cold start, quiet stretch) it prices a median item from the last 30 days of minion
+   passes instead (median item $ / p90 busy-hour $, times the allowance) and says so on stderr;
+   quote that line. On every path a median item costs at most `allowance_pct / 4`, so a thin
+   window can never price one item as the whole hour (2026-09-25: one recent run did exactly
+   that and a pass with 9 eligible items built 1). It prints `[]` only for a zero allowance.
 
    `--items` must be in **marie's priority order** — the packer walks that order and never
    reorders by size, because shipping the most important work beats shipping the most work. It

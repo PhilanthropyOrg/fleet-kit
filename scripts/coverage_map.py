@@ -153,10 +153,11 @@ def _counts(m: dict) -> str:
     return ", ".join(f"{v} {k}" for k, v in sorted(c.items()))
 
 
-def hq_line(prev: dict | None, cur: dict, inflow_rows: list[dict] | None = None) -> str:
+def hq_line(prev: dict | None, cur: dict, inflow_rows: list[dict] | None = None,
+            now: float | None = None) -> str:
     """Inflows first (Reif's ask), then checklist ownership. Leads with AUDIT FAIL when failing."""
     import inflows
-    first = inflows.hq_section(inflow_rows) + " || " if inflow_rows else ""
+    first = inflows.hq_section(inflow_rows, now) + " || " if inflow_rows else ""
     verdict = "AUDIT FAIL: " if failed(cur, inflow_rows) else ""
     bad = [f"{it['id']} {it['status']}" for it in cur["items"] if it["status"] in FAILING]
     unsys = [s["id"] for s in cur["systems"] if s["status"] == "unwatched"]

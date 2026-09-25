@@ -127,7 +127,7 @@ class Inflows(unittest.TestCase):
         stale = inflows.score(SOURCES[:2], _capture(bmf_ok=NOW - 40 * 86400), now=NOW)
         self.assertEqual(stale[0]["status"], "STALE")
         self.assertTrue(cm.failed(ok_map, stale))
-        line = cm.hq_line(ok_map, ok_map, stale)
+        line = cm.hq_line(ok_map, ok_map, stale, now=NOW)
         self.assertTrue(line.startswith("AUDIT FAIL: inflows 1/2 OK | STALE: irs-bmf 40d ago || "), line)
 
     def test_source_with_no_rows_ever_is_down(self):
