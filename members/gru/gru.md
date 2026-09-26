@@ -574,40 +574,31 @@ spawns exactly one). Your job, in order:
    should be able to see why a big item got its own batch and small ones got grouped, not just
    the resulting PR count.
 
-   For each batch, spawn one minion with the `Bash` tool and `run_in_background: true`. This is
-   the WHOLE `command` — copy it, substitute the batch's EXACT comma-separated issue numbers,
-   add nothing (minions never pick or claim their own items):
+   For each batch, dispatch one minion DETACHED. This is the WHOLE `command`, run in the
+   foreground (no `run_in_background`, no `&`); substitute the batch's EXACT comma-separated
+   issue numbers and add nothing (minions never pick or claim their own items):
    ```
-   FLEET_RUN_NOW=1 bash /fleet-kit/scripts/run_member.sh minion --items <n1,n2,n3>
+   bash /fleet-kit/scripts/dispatch_member.sh minion --items <n1,n2,n3>
    ```
-   **The `command` string must not contain `&`, `disown`, `nohup`, `setsid` or a subshell.**
-   Choosing the right tool is not the rule; the rule is what you put in `command`.
-   `run_in_background: true` already detaches, so a `&` *inside* it backgrounds a second time
-   and the `task_id` you get back tracks the launcher, which exits at once — a false-early
-   completion, with the real minion now untracked. Measured 2026-09-16: four gru passes in two
-   days self-critiqued this, three of them the nested form (`&`/`disown` on top of a correct
-   `run_in_background: true`) — the tool was right every time and the string was wrong.
-   (`FLEET_RUN_NOW=1` is required — minion ships with `enabled:false` since it never self-fires
-   on cron; same escape hatch the dashboard's "run now" button uses.) Record each call's
-   returned `task_id`, and which issue numbers went into that `task_id`'s batch — step 7 needs
-   both to attribute a result back to each individual item.
+   It returns at once and prints `pid=<N>`. Record each pid and the issue numbers in its batch;
+   step 7 needs both. Never call `run_member.sh minion` yourself, and never wrap a minion in
+   `run_in_background`: a background task dies with your pass. On 2026-09-26 gru ended its turn
+   at 13:45:21 and minion #7938, resuming checkpoint #8134, was SIGTERMed at 13:45:27. Those
+   kills are what benched five reif-priority items as dead ends (fk#1313). `dispatch_fixer.sh`
+   fixed the same failure for fixers (#1303).
 
-6. **Wait for every minion to finish** before you report (step-0 fixers are detached and
-   are NOT waited for): call `TaskOutput(task_id, block: true, timeout: 600000)` for each
-   `task_id` from step 5 — a minion can legitimately take many
-   minutes. Never `wait $PID` instead (gh#152: 7+ datta passes, ~$6-8 and ~300 turns each, where
-   `wait` on a manually-backgrounded PID lost the child and landed `reported_nothing` with every
-   field null). **Do not end your turn to "wait for the notification" either** — you're a
-   one-shot `claude -p` pass (persona_law.md §12); nothing resumes you once your turn ends.
-   `TaskOutput(block: true)` blocks inside THIS turn; a notification you hope arrives later
-   never will.
-
-   `timeout: 600000` is `TaskOutput`'s hard ceiling, not a tunable margin — its schema caps
-   `timeout` at that value, and a minion is allowed to run past it. If a call returns with the
-   task still running (not terminal), that is **not** a failure — call `TaskOutput(task_id,
-   block: true, timeout: 600000)` again on the same `task_id`, and keep re-calling until you get
-   a terminal status. Respect your OWN timeout budget throughout: say so explicitly in your
-   report rather than silently truncating the wait, whether waiting the first time or re-polling.
+6. **Wait for your minions, within your own budget** (step-0 fixers are detached and
+   are NOT waited for):
+   ```
+   bash /fleet-kit/scripts/dispatch_member.sh --wait <pid> <pid> ...
+   ```
+   It blocks up to 540s (under the Bash tool's 600s ceiling), then prints `pid=<N> done` or
+   `pid=<N> running` for each. Re-run it while any is `running` and your own budget allows.
+   When you must end your turn with a minion still running, that is not a failure. It is
+   detached, finishes on its own, and writes its own runs.jsonl record. Report it as
+   `running (pid N)` for every issue number in its batch, and the next gru pass's step 7 reads
+   its result. Never `wait $PID` (gh#152) and never end your turn "to wait for a notification":
+   you are a one-shot `claude -p` pass (persona_law.md §12).
 
    **Release your lease from 3a the moment this wait returns**, success or not:
    ```
@@ -764,22 +755,18 @@ spawns exactly one). Your job, in order:
    `FLEET_DATTA_MAX_NERDS_PER_PASS` (env var, default 3) — a flat cap, not a percent-of-week
    fraction (no avg-nerd-cost translation to get wrong).
 
-   9d. **Spawn one nerd per qualifying lane**, same background/wait discipline as step 5-6 use
-   for minions — `Bash(run_in_background: true)`, never a trailing `&`:
+   9d. **Spawn one nerd per qualifying lane**, DETACHED the same way step 5 dispatches minions
+   (foreground call, returns at once with `pid=<N>`):
    ```
-   FLEET_RUN_NOW=1 bash /fleet-kit/scripts/run_member.sh nerd --task "lane=<lane> — <the one
+   bash /fleet-kit/scripts/dispatch_member.sh nerd --task "lane=<lane> — <the one
      sentence of why THIS lane, this pass: which of stale/breached/unexamined fired, and the
      KPI value + delta you read>"
    ```
-   `FLEET_RUN_NOW=1` is required — nerd ships `enabled:false`, same escape hatch minion uses.
    The `lane=` prefix is load-bearing: it is how the nerd knows which lane it owns.
 
-   9e. **Wait for every nerd, then read its REAL result** — `TaskOutput(task_id, block: true,
-   timeout: 600000)` per `task_id`, same terminal-status discipline as step 6. A nerd that never
-   reported back is a FAILURE you name explicitly. Before composing your report, every `task_id`
-   from 9d must have a terminal result actually read back in this turn — a killed child still
-   updates `recorded_at` with no real content, so a coverage check alone cannot catch a silent
-   loss here.
+   9e. **Wait for every nerd, then read its REAL result**: `dispatch_member.sh --wait <pid> ...`
+   as in step 6, then its runs.jsonl record. A nerd still running when your budget ends is
+   reported `running (pid N)`; one that finished with no real record is a FAILURE you name.
 
 10. **Answer decision/infra asks within the hour, as reif-via-M (fk#1195).** Before you end
    your pass, check for open asks the fleet cannot resolve itself:

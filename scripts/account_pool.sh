@@ -717,6 +717,16 @@ account_pool_run() {
       _account_pool_log "account=$account command timed out rc=124 -- member timeout, not an account failure; not failing over"
       return 124
     fi
+    # rc=143/137: the pass was killed by a signal (its dispatcher's session ended, a deploy
+    # drain). Nothing the account said either, so no failover and no account gate: on
+    # 2026-09-26 13:29:40 a SIGTERM marked philanthropy `unauthenticated` and re-ran gru on tgp.
+    if [ "$rc" -eq 143 ] || [ "$rc" -eq 137 ]; then
+      export ACCOUNT_POOL_SELECTED="$account" ACCOUNT_POOL_LAST_REASON="killed"
+      [ -n "${ACCOUNT_POOL_SELECTED_FILE:-}" ] && printf '%s\n' "$account" > "$ACCOUNT_POOL_SELECTED_FILE" 2>/dev/null
+      [ -n "${ACCOUNT_POOL_REASON_FILE:-}" ] && printf '%s\n' "killed" > "$ACCOUNT_POOL_REASON_FILE" 2>/dev/null
+      _account_pool_log "account=$account command killed rc=$rc -- a signal, not an account failure; not failing over"
+      return "$rc"
+    fi
     reason=$(_account_pool_classify_failure "$(cat "$capture")" "$rc")
     _account_pool_log "account=$account command failed rc=$rc reason=$reason"
     export ACCOUNT_POOL_LAST_REASON="$reason"
