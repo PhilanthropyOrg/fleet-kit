@@ -295,6 +295,11 @@ def connect(db_path: Path | None = None) -> sqlite3.Connection:
     # Several processes write this file (every member's tail sync, the dashboard's thread),
     # and during a blue-green cutover TWO dashboards briefly share it.
     conn = sqlite3.connect(str(p), timeout=BUSY_TIMEOUT_S)
+    # WAL: readers never wait on a writer and vice versa. In the default rollback journal a
+    # member's write locked every reader out, and the dashboard's /api/metrics waited 17s then
+    # failed "database is locked" (dino, 2026-09-26). The mode is stored in the file, so this
+    # is a no-op after the first connect; `PRAGMA journal_mode=DELETE` reverts it.
+    conn.execute("PRAGMA journal_mode=WAL")
     _migrate(conn, p)
     conn.execute("INSERT OR IGNORE INTO sync_state (id, offset) VALUES (0, 0)")
     conn.commit()
