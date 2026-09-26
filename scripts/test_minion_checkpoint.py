@@ -319,6 +319,21 @@ def test_merge_arm_and_judge_judy_never_arm_a_checkpoint() -> None:
     print("ok  merge_arm.sh refuses (rc 3) and judge-judy skips arming a checkpoint PR")
 
 
+def test_resumable_lists_minion_drafts_not_human_or_ready_prs() -> None:
+    prs = [{"number": 8135, "isDraft": True, "headRefName": "member/minion-item7939-14417-1790417543"},
+           {"number": 8133, "isDraft": True, "headRefName": "member/minion-item7950-16486-1790417673"},
+           {"number": 8157, "isDraft": True, "headRefName": "member/minion-item7917_7942-4777-1790433743"},
+           {"number": 8152, "isDraft": False, "headRefName": "member/minion-item7937-123018-1790425867"},
+           {"number": 8001, "isDraft": True, "headRefName": "fix/a-human-branch"}]
+    got = mc.resumable_from(prs)
+    assert [r["pr"] for r in got] == [8133, 8135, 8157], got
+    assert got[2]["items"] == [7917, 7942], got
+    gru = (HERE.parent / "members/gru/gru.md").read_text()
+    two_a = gru[gru.index("2a. **First"):gru.index("2a-bis.")]
+    assert "minion_checkpoint.py resumable" in two_a and "RESUMABLE, not owned" in two_a
+    print("ok  resumable: minion drafts are resumable work, human/ready PRs are not; gru 2a reads it")
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_") and callable(fn):
