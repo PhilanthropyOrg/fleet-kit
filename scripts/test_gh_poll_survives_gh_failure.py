@@ -46,5 +46,12 @@ class GhPollSurvivesGhFailure(unittest.TestCase):
         self.assertIs(state.gh["ok"], True, "a real empty result is not an outage")
 
 
+class GhPollFitsTheSharedBudget(unittest.TestCase):
+    def test_default_poll_stays_under_a_tenth_of_the_hourly_graphql_budget(self):
+        """One poll measured at up to 18 GraphQL points (2026-09-26). Every member shares the
+        account's 5,000/hr; at the old 20s default the dashboard spent half of it alone."""
+        self.assertLessEqual(3600 / srv.GH_POLL_S * 18, 500)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -114,7 +114,10 @@ def _resolve_siblings() -> list[dict]:
 SIBLINGS = _resolve_siblings()
 RUNS_FILE = LOG_DIR / "runs.jsonl"
 PORT = int(os.environ.get("FLEET_VIEW_PORT", "8420"))
-GH_POLL_S = int(os.environ.get("FLEET_VIEW_GH_POLL_S", "20"))
+# One poll is ~12-18 GitHub GraphQL points (8 `gh` calls, the backlog list paginates to 500).
+# At 20s that was 2,200-3,200 of the account's 5,000/hr -- the dashboard alone ran the shared
+# bucket dry and every member's `gh` failed until the reset (dino, 2026-09-26). 180s is at most 360/hr.
+GH_POLL_S = int(os.environ.get("FLEET_VIEW_GH_POLL_S", "180"))
 # Per-call ceiling for the background poll. _gh's 15s default is sized for request-time calls; on
 # a loaded host (dino, 2026-09-26: load 30 on 7 cores) every poll call took 70-85s, all timed out,
 # and the dashboard read "nothing merged" through a day the fleet merged 23 PRs. The poll runs on
