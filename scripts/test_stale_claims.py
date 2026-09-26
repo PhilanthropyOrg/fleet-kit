@@ -101,6 +101,29 @@ class Assess(unittest.TestCase):
         reclaim = {"createdAt": "2026-09-25T16:06:43Z", "body": "claimed-by: gru (orchestrator pass gru-123939)"}
         self.assertTrue(sc.assess(issue(7937, extra=[note, reclaim]), [], [], set(), NOW)["release"])
 
+    def test_an_idle_checkpoint_draft_releases_inside_the_lease(self):
+        # 2026-09-26 14:17 UTC: #7937/#7938/#7941 claimed behind checkpoint drafts
+        # #8152/#8134/#8136, no minion running, held as pr-activity/inside-lease.
+        now = sc._ts("2026-09-26T14:17:00Z")
+        ckpt = {"number": 8152, "title": "WIP (minion checkpoint): #7937",
+                "headRefName": "member/minion-item7937-123018-1790425867",
+                "body": "<!-- fleet-checkpoint -->", "createdAt": "2026-09-26T13:29:19Z",
+                "last_real_at": now - 48 * 60}
+        r = sc.assess(issue(7937, claimed_at="2026-09-26T13:55:00Z"), [ckpt], [], set(), now)
+        self.assertTrue(r["release"], r)
+        self.assertEqual(r["kind"], "checkpoint-idle")
+        self.assertIn("#8152", sc.release_note(r))
+        # A live minion resuming it holds the claim.
+        self.assertFalse(sc.assess(issue(7937, claimed_at="2026-09-26T13:55:00Z"), [ckpt], [],
+                                   {7937}, now)["release"])
+        # Inside the claim-to-spawn grace it holds.
+        self.assertFalse(sc.assess(issue(7937, claimed_at="2026-09-26T14:12:00Z"), [ckpt], [],
+                                   set(), now)["release"])
+        # A non-checkpoint PR with a fresh real commit still holds.
+        plain = dict(ckpt, title="Part of #7937", body="", last_real_at=now - 5 * 60)
+        self.assertEqual(sc.assess(issue(7937, claimed_at="2026-09-26T13:00:00Z"), [plain], [],
+                                   set(), now)["kind"], "pr-activity")
+
     def test_close_verify_is_held(self):
         lb = REIF + [{"name": "fleet:needs-close-verify"}]
         self.assertEqual(sc.assess(issue(7937, labels=lb), [], [], set(), NOW)["kind"], "close-verify")
