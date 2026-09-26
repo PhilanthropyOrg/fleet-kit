@@ -19,6 +19,18 @@ THREE SAVES, all pushing the pass's own branch and opening (once) a DRAFT PR:
 The first two run while the model is still working, so they never touch the index; only the
 last one (the model is dead by then) commits.
 
+A CHECKPOINT PR NEVER MERGES AS A CHECKPOINT (2026-09-26 08:32 UTC, #8110). The green save
+opened #8110 as a draft; two minutes later the same pass hit "Pull request is a draft" arming
+auto-merge, ran `gh pr ready` (minion.md step 7 said to), re-armed, and the partial slice of
+#7942 merged 12s later with its "WIP" title and "Part of #7942" body intact. The rule, in code:
+  * `ready` is the ONLY way a checkpoint PR leaves draft. It runs from the pass whose worktree
+    is on the PR's branch, and only when every item on the branch is `Closes #N`, nothing says
+    `Part of` / `Remaining:`, the title is no longer WIP, and the pushed HEAD has a passing
+    verified_test receipt. Otherwise it prints the gaps and leaves the PR a draft.
+  * merge_arm.sh and judge-judy refuse to arm auto-merge on a checkpoint PR, and
+    checkpoint_pr_hook.py blocks a raw `gh pr ready` / `gh pr merge` on one.
+`ready` strips MARKER on its way out, so a finished PR is an ordinary PR again.
+
 RESUME. `find` returns the newest pushed minion branch whose items are all in this pass's
 items, so run_member.sh can build the worktree ON that branch (same name, same draft PR)
 instead of fresh off main. A branch carrying an item this pass was NOT handed is never picked:
@@ -28,6 +40,7 @@ Usage:
   minion_checkpoint.py save --wt DIR --branch B --items 1,2 --reason green|pre-timeout|timed-out
   minion_checkpoint.py find --items 1,2 [--repo DIR]      # prints a branch name, or nothing
   minion_checkpoint.py watch --wt DIR --branch B --items 1,2 --deadline EPOCH --pid PID
+  minion_checkpoint.py ready [--wt DIR] [--pr N]           # the only way out of draft
 """
 from __future__ import annotations
 
@@ -44,6 +57,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from pretest_push_hook import receipt_path  # noqa: E402 -- one definition of the receipt
 
 MARKER = "<!-- fleet-checkpoint -->"
+TITLE_PREFIX = "WIP (minion checkpoint)"
+CLOSES_RE = re.compile(r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)\b", re.I)
 BRANCH_RE = re.compile(r"^member/minion-item(\d+(?:_\d+)*)-(\d+)-(\d+)$")
 WIP_MAX_BYTES = 1_000_000  # an untracked file bigger than this is a screenshot or a dump, not work
 
@@ -174,7 +189,7 @@ def save(wt: str, branch: str, items: list[int], reason: str) -> dict:
     if pr is None:
         refs = ", ".join(f"#{n}" for n in items)
         rc, out = _gh(["pr", "create", "--draft", "--head", branch,
-                       "--title", f"WIP (minion checkpoint): {refs}",
+                       "--title", f"{TITLE_PREFIX}: {refs}",
                        "--body", pr_body(items, reason, branch)], cwd=wt, timeout=120)
         m = re.search(r"/pull/(\d+)", out or "")
         pr = int(m.group(1)) if rc == 0 and m else None
@@ -183,6 +198,77 @@ def save(wt: str, branch: str, items: list[int], reason: str) -> dict:
             res["why"] = f"push ok, draft PR not created: {(out or '')[-300:]}"
     res["pr"] = pr
     res["saved"] = True
+    return res
+
+
+# --- ready: the only way out of draft ------------------------------------------------------
+
+def is_checkpoint_pr(title: str | None, body: str | None) -> bool:
+    return MARKER in (body or "") or (title or "").startswith(TITLE_PREFIX)
+
+
+def branch_items(branch: str) -> list[int]:
+    m = BRANCH_RE.match(branch or "")
+    return [int(n) for n in m.group(1).split("_")] if m else []
+
+
+def done_gaps(title: str, body: str, items: list[int]) -> list[str]:
+    """What still stands between this PR and "done". Pure, so the rule is testable."""
+    gaps = []
+    if not items:
+        gaps.append("no items: not a minion checkpoint branch")
+    if re.match(r"\s*\[?wip\b", title or "", re.I):
+        gaps.append("title still says WIP: `gh pr edit --title` with what the PR does")
+    closed = {int(n) for n in CLOSES_RE.findall(body or "")}
+    for n in items:
+        if n not in closed:
+            gaps.append(f"#{n} is not `Closes #{n}` in the body: finish it (its done-criteria "
+                        "are in the issue) or leave the PR a draft for the next pass")
+    if re.search(r"(?i)\bpart of #\d+", body or ""):
+        gaps.append("body still says `Part of #N`: unfinished work stays in draft")
+    if re.search(r"(?im)^\W*remaining\s*:", body or ""):
+        gaps.append("body still has a `Remaining:` line: unfinished work stays in draft")
+    return gaps
+
+
+def ready(wt: str, pr: int | None = None) -> dict:
+    """Mark this pass's checkpoint PR ready, only if its done-criteria are met."""
+    rc, branch = _git(wt, "rev-parse", "--abbrev-ref", "HEAD")
+    res: dict = {"ready": False, "branch": branch if rc == 0 else ""}
+    rc, out = _gh(["pr", "view", str(pr) if pr else res["branch"], "--json",
+                   "number,title,body,headRefName,headRefOid,isDraft,state"], cwd=wt)
+    try:
+        v = json.loads(out) if rc == 0 else None
+    except ValueError:
+        v = None
+    if not v:
+        res["gaps"] = [f"could not read the PR: {(out or '')[-200:]}"]
+        return res
+    res["pr"] = v["number"]
+    if v.get("headRefName") != res["branch"]:
+        res["gaps"] = [f"PR #{v['number']} is on {v.get('headRefName')!r}, this worktree is on "
+                       f"{res['branch']!r}: only the pass building that branch may mark it ready"]
+        return res
+    gaps = done_gaps(v.get("title") or "", v.get("body") or "", branch_items(res["branch"]))
+    rc, head = _git(wt, "rev-parse", "HEAD")
+    if rc != 0 or head != v.get("headRefOid"):
+        gaps.append("local HEAD is not the PR's head: push first")
+    elif not head_is_green(wt):
+        gaps.append("HEAD has no passing verified_test.sh receipt: run it")
+    if gaps:
+        res["gaps"] = gaps
+        return res
+    body = (v.get("body") or "").replace(MARKER, "").lstrip()
+    rc, out = _gh(["pr", "edit", str(v["number"]), "--body", body], cwd=wt)
+    if rc != 0:
+        res["gaps"] = [f"could not drop the checkpoint marker: {out[-200:]}"]
+        return res
+    if v.get("isDraft"):
+        rc, out = _gh(["pr", "ready", str(v["number"])], cwd=wt)
+        if rc != 0:
+            res["gaps"] = [f"gh pr ready failed: {out[-200:]}"]
+            return res
+    res["ready"] = True
     return res
 
 
@@ -233,7 +319,17 @@ def main(argv: list[str] | None = None) -> int:
     w.add_argument("--pid", type=int, required=True)
     w.add_argument("--lead-s", type=int, default=int(os.environ.get("FLEET_CHECKPOINT_LEAD_S") or 600))
     w.add_argument("--poll-s", type=int, default=int(os.environ.get("FLEET_CHECKPOINT_POLL_S") or 60))
+    r = sub.add_parser("ready")
+    r.add_argument("--wt", default=os.environ.get("WT_PATH") or ".")
+    r.add_argument("--pr", type=int)
     a = ap.parse_args(argv)
+    if a.cmd == "ready":
+        res = ready(a.wt, a.pr)
+        print(json.dumps(res))
+        if not res["ready"]:
+            print("NOT READY -- the PR stays a draft:\n" + "\n".join(f"  - {g}" for g in res["gaps"]),
+                  file=sys.stderr)
+        return 0 if res["ready"] else 3
     items = parse_items(a.items)
     if a.cmd == "find":
         b = find(a.repo, items)

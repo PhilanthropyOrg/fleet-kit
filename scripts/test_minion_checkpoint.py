@@ -182,6 +182,143 @@ def test_run_member_refuses_a_batch_over_target_items() -> None:
     print("ok  run_member.sh refuses a 4-item minion when FLEET_MINION_TARGET_ITEMS=3")
 
 
+# --- a checkpoint PR never merges as a checkpoint (2026-09-26 #8110) ----------------------
+
+PR_8110_TITLE = "WIP (minion checkpoint): #7942"
+PR_8110_BODY = mc.pr_body([7942], "green", "member/minion-item7942-17359-1790410182")
+DONE_TITLE = "Posting an org update records saved or not-saved events"
+DONE_BODY = mc.MARKER + "\nWhat it does...\n\nCloses #7942\n\nVerified live: screenshot"
+
+FAKE_GH_PR = r"""#!/usr/bin/env python3
+import json, os, sys
+state = os.environ["FAKE_GH_STATE"]
+calls = json.load(open(state)) if os.path.exists(state) else []
+calls.append(sys.argv[1:])
+json.dump(calls, open(state, "w"))
+a = sys.argv[1:]
+pr = json.load(open(os.environ["FAKE_PR"]))
+if a[:2] == ["pr", "view"]:
+    print(json.dumps(pr))
+elif a[:2] == ["pr", "edit"]:
+    pr["body"] = a[a.index("--body") + 1]
+    json.dump(pr, open(os.environ["FAKE_PR"], "w"))
+elif a[:2] == ["pr", "ready"]:
+    pr["isDraft"] = False
+    json.dump(pr, open(os.environ["FAKE_PR"], "w"))
+"""
+
+
+def _pr_sandbox(title: str, body: str, green: bool = True, branch: str | None = None):
+    sb = Sandbox()
+    sb.gh.write_text(FAKE_GH_PR)
+    br = "member/minion-item7942-17359-1790410182"
+    wt = sb.worktree(br)
+    (Path(wt) / "a.py").write_text("x = 7942\n")
+    sh(wt, "git", "commit", "-qam", "emit comment events")
+    sh(wt, "git", "push", "-q", "origin", f"HEAD:{br}")
+    if green:
+        tree = sh(wt, "git", "rev-parse", "HEAD^{tree}")
+        receipt_path(wt).write_text(json.dumps({"status": "pass", "content": tree}))
+    pr_file = sb.tmp / "pr.json"
+    pr_file.write_text(json.dumps({"number": 8110, "title": title, "body": body, "isDraft": True,
+                                   "state": "OPEN", "headRefName": branch or br,
+                                   "headRefOid": sh(wt, "git", "rev-parse", "HEAD")}))
+    os.environ["FAKE_PR"] = str(pr_file)
+    return sb, wt, pr_file
+
+
+def test_8110_as_merged_is_not_done() -> None:
+    gaps = mc.done_gaps(PR_8110_TITLE, PR_8110_BODY, [7942])
+    joined = "\n".join(gaps)
+    assert "WIP" in joined and "Closes #7942" in joined and "Part of" in joined \
+        and "Remaining" in joined, gaps
+    assert mc.is_checkpoint_pr(PR_8110_TITLE, PR_8110_BODY)
+    assert mc.done_gaps(DONE_TITLE, DONE_BODY, [7942]) == []
+    # a batch: every item must close, not just one
+    assert mc.done_gaps(DONE_TITLE, "Closes #1\nPart of #2\nRemaining: x", [1, 2])
+    assert mc.branch_items("member/minion-item7942_7950-1-2") == [7942, 7950]
+    print("ok  #8110's title/body (WIP, Part of, Remaining, no Closes) is not done")
+
+
+def test_ready_refuses_8110_and_never_undrafts_it() -> None:
+    sb, wt, pr_file = _pr_sandbox(PR_8110_TITLE, PR_8110_BODY)
+    r = mc.ready(wt)
+    assert not r["ready"] and r["gaps"], r
+    assert not [c for c in sb.calls() if c[:2] in (["pr", "ready"], ["pr", "edit"], ["pr", "merge"])]
+    assert json.loads(pr_file.read_text())["isDraft"] is True
+    assert mc.main(["ready", "--wt", wt]) == 3
+    print("ok  ready: #8110 as it was stays a draft, gh pr ready is never called")
+
+
+def test_ready_finishes_a_done_pr_and_drops_the_marker() -> None:
+    sb, wt, pr_file = _pr_sandbox(DONE_TITLE, DONE_BODY)
+    r = mc.ready(wt)
+    assert r["ready"] and r["pr"] == 8110, r
+    pr = json.loads(pr_file.read_text())
+    assert pr["isDraft"] is False and mc.MARKER not in pr["body"] and "Closes #7942" in pr["body"]
+    assert not mc.is_checkpoint_pr(pr["title"], pr["body"])  # now arms like any PR
+    print("ok  ready: a done PR (Closes every item, green, pushed) is readied, marker dropped")
+
+
+def test_ready_refuses_untested_unpushed_or_someone_elses_pr() -> None:
+    _, wt, _ = _pr_sandbox(DONE_TITLE, DONE_BODY, green=False)
+    assert "receipt" in " ".join(mc.ready(wt)["gaps"])
+    _, wt, _ = _pr_sandbox(DONE_TITLE, DONE_BODY)
+    (Path(wt) / "a.py").write_text("x = 1\n")
+    sh(wt, "git", "commit", "-qam", "unpushed")
+    assert "push first" in " ".join(mc.ready(wt)["gaps"])
+    _, wt, _ = _pr_sandbox(DONE_TITLE, DONE_BODY, branch="member/minion-item7942-1-999")
+    assert "only the pass building that branch" in " ".join(mc.ready(wt)["gaps"])
+    print("ok  ready: refuses without a green receipt, with unpushed HEAD, or on another branch")
+
+
+def test_hook_blocks_raw_ready_and_merge_on_a_checkpoint_only() -> None:
+    import checkpoint_pr_hook as hook
+    prs = {"8110": {"number": 8110, "title": PR_8110_TITLE, "body": PR_8110_BODY},
+           "8200": {"number": 8200, "title": "Fix thing", "body": "Closes #1"},
+           None: {"number": 8110, "title": PR_8110_TITLE, "body": PR_8110_BODY}}
+    view = lambda t, cwd: prs.get(t)  # noqa: E731
+    blocked = ["gh pr ready 8110",   # the exact 08:32 command
+               "cd /tmp/wt; gh pr ready 8110; source merge_arm.sh; arm_pr_auto_merge 8110",
+               "gh pr merge 8110 --auto --squash", "gh pr merge --squash", "gh pr ready",
+               "gh api graphql -f query='mutation{markPullRequestReadyForReview(input:{})}'"]
+    for c in blocked:
+        assert hook.decide(c, ".", view), c
+    allowed = ["gh pr ready 8200", "gh pr merge 8200 --auto --squash", "gh pr ready --undo 8110",
+               "gh pr merge 8110 --disable-auto", "gh pr view 8110",
+               "python3 /fleet-kit/scripts/minion_checkpoint.py ready", "git push"]
+    for c in allowed:
+        assert hook.decide(c, ".", view) is None, c
+    # end to end: stdin payload, exit 2, fake gh via FLEET_GH_BIN
+    _, wt, _ = _pr_sandbox(PR_8110_TITLE, PR_8110_BODY)
+    p = subprocess.run([sys.executable, str(HERE / "checkpoint_pr_hook.py")], input=json.dumps(
+        {"tool_name": "Bash", "cwd": wt, "tool_input": {"command": "gh pr ready 8110"}}),
+        capture_output=True, text=True, timeout=60)
+    assert p.returncode == 2 and "minion_checkpoint.py ready" in p.stderr, (p.returncode, p.stderr)
+    import worktree_guard_hook_install as inst
+    assert any("checkpoint_pr_hook.py" in c for c in inst._hook_commands())
+    print("ok  hook: raw gh pr ready/merge on a checkpoint PR is blocked; other PRs untouched")
+
+
+def test_merge_arm_and_judge_judy_never_arm_a_checkpoint() -> None:
+    tmp = Path(tempfile.mkdtemp(prefix="arm-"))
+    (tmp / "gh").write_text('#!/bin/sh\necho "$@" >> "$ARM_LOG"\n'
+                            'case "$*" in *"pr view"*) echo "$FAKE_CKPT";; esac\nexit 0\n')
+    (tmp / "gh").chmod(0o755)
+    for ckpt, rc_want, merged in (("true", 3, False), ("false", 0, True)):
+        log = tmp / f"log-{ckpt}"
+        env = {**os.environ, "PATH": f"{tmp}:{os.environ['PATH']}", "ARM_LOG": str(log),
+               "FAKE_CKPT": ckpt}
+        p = subprocess.run(["bash", "-c", f". {HERE / 'merge_arm.sh'}; arm_pr_auto_merge 8110"],
+                           env=env, capture_output=True, text=True, timeout=30)
+        assert p.returncode == rc_want, (ckpt, p.returncode, p.stdout, p.stderr)
+        assert ("pr merge 8110" in log.read_text()) is merged, log.read_text()
+    jj = (HERE.parent / "members/judge-judy/judge-judy.sh").read_text()
+    arm = jj.index('gh pr merge "$PR" --auto')
+    assert "pr_is_checkpoint" in jj[arm - 400:arm] and "scripts/merge_arm.sh" in jj
+    print("ok  merge_arm.sh refuses (rc 3) and judge-judy skips arming a checkpoint PR")
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_") and callable(fn):
