@@ -46,6 +46,7 @@ import fleet_kpi         # noqa: E402  (per-member headline-count extraction fro
 import fleet_stats       # noqa: E402  (Stats page aggregation: run timeline, tokens, backlog history)
 import fleet_metrics     # noqa: E402  (named run-derived metrics; items_per_run for the scoreboard)
 import gate_drops        # noqa: E402  (philanthropy#8215: gru gate drops, 6h tile)
+import fleet_msg         # noqa: E402  (philanthropy#8215: member-to-member messages tile)
 import scoreboard        # noqa: E402  (2026-09-24 throughput scoreboard: items/run, closed/run, live, trend)
 import issues_per_hour_chart  # noqa: E402  (full-width 7d graph on top of scoreboard.resolved_events)
 import member_spec       # noqa: E402
@@ -874,6 +875,28 @@ def metrics_snapshot() -> dict:
             "sub": (f"{gd.get('needs-spec', 0)} need a spec (labeled {gate_drops.NEEDS_SPEC}) · "
                     f"{gd.get('fixed', 0)} auto-fixed · {gd.get('by-design', 0)} by design"),
             "series": []}
+
+        # philanthropy#8215 amendment: members message each other (fleet_msg.py). Open messages
+        # by member and the oldest unacked one; red once anything has escalated past its owner.
+        try:
+            mconn = fleet_db.connect()
+            try:
+                ms = fleet_msg.summary(mconn)
+            finally:
+                mconn.close()
+        except Exception:  # noqa: BLE001 -- a tile never takes the page down
+            ms = None
+        if ms is not None:
+            o = ms["oldest"]
+            who = ", ".join(f"{m} {n}" for m, n in ms["by_member"].items()) or "none open"
+            oldest = (f" · oldest #{o['id']} to {o['to']} ({o['kind']}), "
+                      f"{o['age_s'] // 3600}h{(o['age_s'] % 3600) // 60:02d}m"
+                      + (f", escalated to {o['escalated_to']}" if o["escalated_to"] else "")
+                      if o else "")
+            out["fleet.msgs_open"] = {
+                "value": ms["open"], "bad": ms["escalated"] > 0,
+                "sub": f"{who}{oldest} · {ms['closed_24h']} answered in 24h",
+                "series": []}
 
         # fleet.issues_resolved_per_hour / fleet.issues_resolved_7d (2026-09-24, operator ask):
         # the headline throughput number -- see scoreboard.resolved_events for the definition

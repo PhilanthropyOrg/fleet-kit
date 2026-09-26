@@ -507,6 +507,31 @@ def process(results_path: Path, state_path: Path = DEFAULT_STATE_PATH, runner=_r
     return summary
 
 
+def message_fixer(summary: dict, send=None) -> "list | None":
+    """philanthropy#8215 amendment: sentry -> the-fixer on a failing prod journey. One message
+    per distinct set of failing issues (fleet_msg dedupes the same set for 6h), sent whether the
+    issue was just filed or was already open and failed again. Best-effort: never fails the run."""
+    failing = sorted({e["issue"] for e in summary.get("filed", []) + summary.get("commented", [])
+                      if e.get("issue")})
+    if not failing:
+        return None
+    body = ("sentry's journey walk on prod found failing step(s), filed or re-confirmed as "
+            + ", ".join(f"#{n}" for n in failing)
+            + ". A broken journey is a prod incident: open a fix-or-revert PR, or reply with why "
+              "it is not yours (flaky walker, a data issue, a missing credential).")
+    try:
+        if send is None:
+            import fleet_db
+            import fleet_msg
+            conn = fleet_db.connect()
+            send = lambda *a: fleet_msg.send(conn, *a)  # noqa: E731
+        return send("sentry", ["the-fixer"], "journey-failing",
+                    "journeys:" + ",".join(map(str, failing)), body, failing)
+    except Exception as exc:  # noqa: BLE001
+        print(f"journey_issue_filer: message to the-fixer not sent: {exc}", file=sys.stderr)
+        return None
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--results", required=True, type=Path, help="path to a walker results.json")
@@ -517,6 +542,8 @@ def main() -> int:
     args = ap.parse_args()
 
     summary = process(args.results, args.state, dry_run=args.dry_run, profile=PROFILES[args.profile], repo=args.repo)
+    if args.profile == "sentry" and not args.dry_run:
+        summary["message"] = message_fixer(summary)
     print(json.dumps(summary, indent=2))
     if summary.get("skipped"):
         # gh#914 AC7: a reader of the pass report must be able to see the run was degraded

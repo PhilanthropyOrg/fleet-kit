@@ -73,6 +73,15 @@ judge-judy.md and librarian.md for the specifics); that is a stated deviation, n
 | dont-shoot-the-messenger | daily 06:30 CT (+12:30, 17:30) | the one voice to the human: the brief |
 | librarian | daily 05:15 | tends memory dirs; writes INTENT.md |
 | librarian-scrub | hourly :06 | the shell credential scrub (kept as its own dispatch target — see fk#1195 note above) |
+| jefe | hourly :21, only when its inbox has mail | escalation desk for member-to-member messages (`scripts/fleet_msg.py`): gru's gate-drop cc, permission denials, and anything a member left unacked for 2 of its cadences. Back from the fk#1195 archive by Reif's #8215 amendment (he named jefe as the recipient); its `llm.pregate` makes an empty inbox cost $0, so it adds no spend to a quiet hour |
+
+**Member-to-member messages (philanthropy#8215).** `fleet_msg.py send` → `msgs` in fleet.db →
+the recipient's next pass opens with an INBOX block (run_member.sh) → `ack`/`reply`. The
+watchdog (cron :04/:19/:34/:49) escalates an unacked message to jefe after 2 of the recipient's
+cadences, then folds jefe's unacked ones into ONE ask for Reif. Senders today: gru → marie+jefe
+(>3 gate drops, `gate_drops.py`), any member → jefe (gh denial, `denial_asks.py`), the-fixer →
+owner (PR idle >4h, `check.sh`), sentry → the-fixer (failing journey, `journey_issue_filer.py`).
+Inspect: `podman exec -e FLEET_LOG_DIR=/var/log/fleet-kit philanthropy python3 /fleet-kit/scripts/fleet_msg.py summary`.
 
 `entrypoint.sh` renders these into `/etc/cron.d/fleet-kit` at container start; the manifest's
 `cadence` is documentation of that line, not the source of it. `FLEET_CRON_MEMBERS` in

@@ -102,6 +102,16 @@ def main(argv=None) -> int:
         import ask as ask_mod
         import fleet_db
         conn = fleet_db.connect(Path(a.db_path) if a.db_path else None)
+        # philanthropy#8215 amendment: any member -> jefe on a permission denial, deduped per
+        # (verbs) for 6h by fleet_msg itself. Sent even when the ask already exists: the ask is
+        # Reif's, the message is jefe's to answer (keep the deny, or allow it).
+        if not a.dry_run:
+            import fleet_msg
+            verbs = sorted({d["verb"] for d in denials})
+            fleet_msg.send(conn, a.member, ["jefe"], "permission-denial",
+                           f"{a.member}:{','.join(verbs)}",
+                           f"{a.member}'s sandbox refused {', '.join(verbs)} in pass {a.run_id}. "
+                           f"First refused command: {denials[0]['command'][:240]}")
         p = plan_ask(a.member, a.run_id, denials, ask_mod.list_asks(conn, status="open", limit=500))
         if not p:
             print(f"denial_asks: {len(denials)} gh denial(s), already asked")

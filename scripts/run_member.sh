@@ -832,6 +832,21 @@ if [ "${FLEET_NORTH:-1}" = "1" ] && FLEET_LOG_DIR="$LOG_DIR" python3 "$KIT_DIR/s
 
 $PROMPT"
 fi
+# INBOX (philanthropy#8215): messages other members sent this one (fleet_msg.py). Prepended
+# LAST so it is the FIRST thing read: a member handles its mail before its charter, acks or
+# replies to each one, and the watchdog escalates what it leaves. Marked read on delivery.
+# A dispatched --item/--items sub-pass is not the member's desk and does not take its mail.
+if [ -z "$ITEM" ] && [ -z "${ITEM_LIST:-}" ]; then
+  INBOX_BLOCK=$(FLEET_LOG_DIR="$LOG_DIR" python3 "$KIT_DIR/scripts/fleet_msg.py" inbox --me "$MEMBER" --render $([ "$DRY_RUN" -eq 1 ] || echo --mark-read) 2>>"$LOG" || true)
+  if [ -n "$INBOX_BLOCK" ]; then
+    log "$MEMBER: inbox has mail -- $(printf '%s' "$INBOX_BLOCK" | head -1)"
+    PROMPT="$INBOX_BLOCK
+
+---
+
+$PROMPT"
+  fi
+fi
 
 REPORT_CONTRACT=$(awk '/^## 10b\./{f=1} f{print} /^## 11\./{exit}' "$KIT_DIR/agents/persona_law.md" | sed '$d')
 if [ -n "$REPORT_CONTRACT" ]; then

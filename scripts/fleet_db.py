@@ -143,6 +143,31 @@ CREATE TABLE IF NOT EXISTS asks (
 );
 CREATE INDEX IF NOT EXISTS idx_asks_status ON asks(status);
 CREATE INDEX IF NOT EXISTS idx_asks_member ON asks(member);
+-- philanthropy#8215: member-to-member messages (gru -> marie + jefe on gate drops, a denial ->
+-- jefe, ...). asks are for Reif; msgs are for each other. scripts/fleet_msg.py is the only
+-- reader/writer. status: open -> acked (did it) | replied (didn't, ack_note says why).
+-- escalated_to: NULL, 'jefe' (watchdog sent jefe a pointer), or 'reif' (folded into ask_id).
+-- Like asks, NOT rebuilt from runs.jsonl: this is state, not an index.
+CREATE TABLE IF NOT EXISTS msgs (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  sender       TEXT NOT NULL,
+  recipient    TEXT NOT NULL,
+  kind         TEXT NOT NULL,
+  key          TEXT NOT NULL,
+  body         TEXT NOT NULL,
+  items        TEXT,
+  status       TEXT NOT NULL DEFAULT 'open',
+  sent_at      REAL NOT NULL,
+  read_at      REAL,
+  acked_at     REAL,
+  ack_note     TEXT,
+  escalated_to TEXT,
+  escalated_at REAL,
+  parent_id    INTEGER,
+  ask_id       INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_msgs_inbox ON msgs(recipient, status);
+CREATE INDEX IF NOT EXISTS idx_msgs_dedupe ON msgs(recipient, kind, key, sent_at);
 """
 
 

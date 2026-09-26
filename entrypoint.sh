@@ -169,7 +169,7 @@ case "${1:-cron-foreground}" in
     # `FLEET_CRON_MEMBERS=judge-judy`) to schedule only those. dont-shoot-the-messenger is
     # excluded from ALL_CRON_MEMBERS because its own cron line is already commented out
     # (archived 2026-09-04, see below) -- re-enabling it is a separate step from this mechanism.
-    ALL_CRON_MEMBERS=(the-fixer judge-judy gru marie sentry librarian librarian-scrub red dont-shoot-the-messenger)
+    ALL_CRON_MEMBERS=(the-fixer judge-judy gru marie sentry librarian librarian-scrub red dont-shoot-the-messenger jefe)
     if [ -n "${FLEET_CRON_MEMBERS:-}" ]; then
       IFS=', ' read -ra RESOLVED_CRON_MEMBERS <<< "$FLEET_CRON_MEMBERS"
       for m in "${RESOLVED_CRON_MEMBERS[@]}"; do
@@ -293,7 +293,8 @@ case "${1:-cron-foreground}" in
         echo "3 ${FLEET_GRU_CADENCE:-*} * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_gru_fanout.sh >> $LOG_DIR/gru.log 2>&1"
       fi
       # jefe, roomba, custodian, signals, datta, dumbledore: folded into other members and
-      # removed from cron entirely (fk#1195). jefe and dumbledore were already enabled=false
+      # removed from cron entirely (fk#1195; jefe is back as the inbox desk, philanthropy#8215,
+      # below). jefe and dumbledore were already enabled=false
       # since 2026-09-17 and archived with nothing moved; roomba's worktree sweep and
       # custodian's surface-debt duty are now marie's Part E/F (marie.md); signals' funnel read
       # and "doubt the number" rule are now nerd's datadog lane (nerd.md); datta's coverage
@@ -320,6 +321,16 @@ case "${1:-cron-foreground}" in
       if cron_member_enabled marie; then
         echo "33 ${FLEET_MARIE_CADENCE:-*} * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh marie >> $LOG_DIR/marie.log 2>&1"
       fi
+      # jefe (philanthropy#8215): back as the escalation desk -- member-to-member messages
+      # (fleet_msg.py) that are cc'd to it or that another member left unacked. Its llm.pregate
+      # is `fleet_msg.py pregate --me jefe`, so an empty inbox spawns no model. The watchdog
+      # (every 15 min, shell) escalates unacked messages: recipient -> jefe -> one ask for Reif.
+      if cron_member_enabled jefe; then
+        echo "21 * * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh jefe >> $LOG_DIR/jefe.log 2>&1"
+      fi
+      # Sources fleet.env like vp_due's line: FLEET_MARIE_CADENCE=*/4 is what makes "2 of
+      # marie's cadences" 8h, not 2h.
+      echo "4,19,34,49 * * * * root export FLEET_LOG_DIR=$LOG_DIR && [ -f \"\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}\" ] && { set -a; . \"\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}\"; set +a; }; python3 /fleet-kit/scripts/fleet_msg.py watchdog >> $LOG_DIR/fleet_msg.log 2>&1"
       # sentry: every 3h, the USER-FACING surfaces (990 search/report, superadmin, this
       # dashboard). Explicit hours, not `*/3` (cron's step operator restarts its pattern each
       # day, which would break the even 3h spacing across midnight). :17 is unclaimed
