@@ -1025,13 +1025,16 @@ PASS_PID=$!
 # first green commit and again FLEET_CHECKPOINT_LEAD_S before the timeout, so a pass the
 # timeout kills still leaves its work where the next pass resumes it.
 CHECKPOINT_PID=""
+# The watcher's save results, kept so the run record can name the draft PR it opened:
+# claim_history.py never counts a pass that checkpointed as a dead end (2026-09-26).
+CHECKPOINT_OUT=$(mktemp "${TMPDIR:-/tmp}/fleet_checkpoint.XXXXXX")
 if [ "$MEMBER" = "minion" ] && [ -n "$WT_PATH" ] && [ -n "$ITEM" ] && [ "${FLEET_MINION_CHECKPOINT:-1}" = "1" ]; then
   # Own subshell with the slot (7) and dispatch (9) lock fds closed: the watcher must never
   # hold either past the pass it watches.
   ( exec 7>&- 9>&-
     python3 "$KIT_DIR/scripts/minion_checkpoint.py" watch --wt "$WT_PATH" --branch "$WT_BRANCH" \
       --items "$ITEM" --pid "$PASS_PID" --deadline "$(( $(date +%s) + TIMEOUT_S ))" 2>&1 \
-      | while IFS= read -r line; do log "checkpoint: $line"; done ) &
+      | while IFS= read -r line; do log "checkpoint: $line"; printf '%s\n' "$line" >> "$CHECKPOINT_OUT"; done ) &
   CHECKPOINT_PID=$!
 fi
 wait "$PASS_PID"
@@ -1066,9 +1069,12 @@ TRAILING_LOSS_FLAG=""
 [ -s "$TRAILING_LOSS_FILE" ] && TRAILING_LOSS_FLAG="--trailing-loss"
 rm -f "$TRAILING_LOSS_FILE"
 
+CHECKPOINT_PR=$(grep '"saved": true' "$CHECKPOINT_OUT" 2>/dev/null | grep -o '"pr": [0-9][0-9]*' | tail -1 | grep -o '[0-9][0-9]*$')
+rm -f "$CHECKPOINT_OUT"
+
 echo "$OUT" | python3 "$KIT_DIR/scripts/run_report.py" \
   --member "$MEMBER" --run-id "$RUN_ID" --kind llm --exit-code "$RC" \
-  --pass-file - --usage-file "$USAGE_FILE" ${ITEM:+--item-id "$ITEM"} $VISION_FLAG $LANE_FLAG $TRAILING_LOSS_FLAG $FIRED_FLAG $REASON_FLAG >> "$LOG_DIR/runs.jsonl" 2>>"$LOG"
+  --pass-file - --usage-file "$USAGE_FILE" ${ITEM:+--item-id "$ITEM"} ${CHECKPOINT_PR:+--checkpoint-pr "$CHECKPOINT_PR"} $VISION_FLAG $LANE_FLAG $TRAILING_LOSS_FLAG $FIRED_FLAG $REASON_FLAG >> "$LOG_DIR/runs.jsonl" 2>>"$LOG"
 rm -f "$USAGE_FILE"
 
 SUMMARY=$(tail -c 400 <<<"$OUT" | tr '\n' ' ' | tail -c 300)

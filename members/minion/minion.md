@@ -281,4 +281,11 @@ fixed by a sibling, was blocked, or could not be completed, name it and why. A o
 per-item table or list is fine; gru needs to attribute a result to every number it handed you,
 not just an overall verdict for the PR.
 
+**Blocked items get one literal line each: `Blocked: #N <reason>`** (e.g. `Blocked: #7948 needs
+Resend log access, filed #8084`). Write it only when you genuinely cannot build that item: a
+missing secret or access, an open question only Reif can answer, a spec that contradicts itself.
+It is the ONLY thing gru's dead-end filter (`claim_history.py`) counts: three in 14 days and gru
+stops re-picking the item. Part-done, "already fixed", or out of time is not blocked. Say those
+in prose, and never write `Blocked:` for them, or you bench an item that only needed another pass.
+
 **Open with a written `Report:` block — persona_law.md §10c: BOTTOM LINE, up to three numbered key points, then WHAT TO IMPROVE. That memo is what a human actually reads; the pass was paid for, so it files one.** Then close with the literal `Outcome:`/`Evidence:` lines persona_law.md §10b defines (plus `Vision-link:` if your report.vision_link were required, plus `Self-critique:` per §11) — the prose above is what a human reads, these lines are what `run_report.py` actually parses into `status`. Skipping them is why real work has been landing as `reported_nothing`.

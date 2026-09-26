@@ -7,13 +7,19 @@ times" -- the same chronically-blocked item gets reclaimed and respawned every h
 full claim/spawn/clear cycle each time, because nothing upstream of the claim step counts prior
 attempts.
 
-WHY COUNTING RUN_IDS IS ENOUGH, WITHOUT ALSO CHECKING FOR A MERGE. gru.md step 2b's candidate
-list is read straight from `gh issue list --state open`. An item a prior minion pass actually
-fixed is already gone from that list -- a merged PR referencing it (`Fixes #N`) autocloses the
-issue. So every prior minion run against a candidate that is STILL in this list is, by
-construction, a claim that did not resolve it -- checking run history is enough; this
-deliberately does not also call `gh pr view` per candidate to reconfirm "no merge", which would
-add one API round-trip per candidate to every single gru pass.
+WHAT COUNTS AS A DEAD END (Reif, 2026-09-26). Only a minion saying so. A run counts
+against item N only when its report carried an explicit `Blocked: #N <reason>` line
+(run_report.py stores those lines in the run's `blocked` field). Nothing else counts:
+  - a kill, timeout or other infra status (killed/rc=143, timed_out/rc=124, budget_declined,
+    paced, dispatch_skipped, report_lost, ...). The minion never got to decide anything.
+  - a run that pushed a checkpoint draft PR (`checkpoint_pr`, run_member.sh). That is
+    progress the next pass resumes, not a blocker.
+  - an `ok`/`quiet` run that shipped a Part-of PR and left the item open. Partial progress is
+    not a dead end.
+Before this, every minion run against a still-open item counted, whatever its status. On
+2026-09-26 five fleet:reif-priority items (philanthropy#7939/7940/7942/7948/7950) went
+fleet:dead-end-blocked at count 3-4. Their "dead ends" were deploy-drain SIGTERMs, 5400s
+timeouts from before the checkpoint fix (fk#1310), and Part-of PRs that had shipped real work.
 
 Pure core (`dead_end_claim_count`/`is_dead_end_blocked`), thin DB seam
 (`minion_runs_for_item`), CLI (`main`) -- same split as cost_bridge.py.
@@ -21,6 +27,7 @@ Pure core (`dead_end_claim_count`/`is_dead_end_blocked`), thin DB seam
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 import time
 from pathlib import Path
@@ -41,6 +48,48 @@ import fleet_db  # noqa: E402
 #     months back.
 DEFAULT_DEAD_END_THRESHOLD = 3
 DEFAULT_WINDOW_DAYS = 14.0
+
+
+# Terminal statuses that mean the runner, not the minion, ended the pass. Never a dead end,
+# even if a Blocked: line somehow made it into the record. `started` is gh#145's provisional
+# row and never a terminal verdict.
+INFRA_STATUSES = frozenset({
+    "started", "killed", "timed_out", "budget_declined", "paced", "dispatch_skipped",
+    "heartbeat", "report_lost", "incomplete_fanout",
+})
+
+_ITEM_REF = re.compile(r"#(\d+)\b")
+
+
+def blocked_applies_to(blocked: str | None, item_number: int) -> bool:
+    """Does a run's `blocked` field (newline-joined `Blocked:` line bodies) block `item_number`?
+
+    A line that names issue numbers (`#7939 needs Resend log access`) blocks exactly those.
+    A line that names none (`Blocked: prod env var FOO is unset`) blocks the whole run's
+    batch -- the minion said it could not go on, and didn't narrow it. Empty reason = no
+    block: `Blocked:` alone is not an explanation."""
+    for line in (blocked or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        refs = {int(n) for n in _ITEM_REF.findall(line)}
+        if not refs:
+            return True
+        if item_number in refs and _ITEM_REF.sub("", line).strip(" -:;,.\u2013\u2014"):
+            return True
+    return False
+
+
+def is_dead_end_run(status: str | None, exit_code: int | None, blocked: str | None,
+                    checkpoint_pr, item_number: int) -> bool:
+    """One terminal run row: did it end with the minion explicitly blocked on this item?"""
+    if (status or "") in INFRA_STATUSES:
+        return False
+    if exit_code not in (None, 0):
+        return False
+    if checkpoint_pr not in (None, "", 0, "0"):
+        return False
+    return blocked_applies_to(blocked, item_number)
 
 
 def dead_end_claim_count(run_ids: list[str], item_number: int) -> int:
@@ -66,9 +115,9 @@ def is_dead_end_blocked(run_ids: list[str], item_number: int,
 
 def minion_runs_for_item(conn, item_number: int,
                          window_days: float = DEFAULT_WINDOW_DAYS) -> list[str]:
-    """Real DISTINCT run_ids from fleet.db: every minion run against `item_number` in the last
-    `window_days`, regardless of that run's own reported status -- see the module docstring for
-    why status doesn't matter here (the issue still being open is the proof of no merge).
+    """DISTINCT run_ids from fleet.db: minion runs against `item_number` in the last
+    `window_days` that ended as a dead end per `is_dead_end_run` (an explicit `Blocked:` for
+    this item, no infra status, no checkpoint draft). See the module docstring.
 
     gh#4966: `runs` has a composite (run_id, recorded_at) primary key, so a single real run
     (started + terminal-status rows) is two rows sharing one `run_id`. Grepped every caller of
@@ -86,13 +135,31 @@ def minion_runs_for_item(conn, item_number: int,
     are literal. Verified: item 6 against item_ids ("64","64_99","6_164","164") matches only
     "6_164"; item 64 matches only "64" and "64_99".
     """
+    out: list[str] = []
+    for run_id, status, exit_code, blocked, checkpoint_pr in _terminal_rows(
+            conn, item_number, window_days):
+        if run_id not in out and is_dead_end_run(status, exit_code, blocked, checkpoint_pr,
+                                                 item_number):
+            out.append(run_id)
+    return out
+
+
+def minion_attempts_for_item(conn, item_number: int,
+                             window_days: float = DEFAULT_WINDOW_DAYS) -> int:
+    """Every DISTINCT minion run against the item in the window, dead end or not -- printed
+    beside the count so a reader sees "7 attempts, 0 blocked" instead of guessing."""
+    return len({r[0] for r in _terminal_rows(conn, item_number, window_days)})
+
+
+def _terminal_rows(conn, item_number: int, window_days: float):
     since = time.time() - window_days * 86400
-    cur = conn.execute(
-        "SELECT DISTINCT run_id FROM runs WHERE member = 'minion' AND recorded_at >= ?"
-        " AND ('_' || item_id || '_') GLOB ('*_' || ? || '_*')",
+    return conn.execute(
+        "SELECT run_id, status, exit_code, blocked, checkpoint_pr FROM runs"
+        " WHERE member = 'minion' AND recorded_at >= ? AND COALESCE(status, '') != 'started'"
+        " AND ('_' || item_id || '_') GLOB ('*_' || ? || '_*')"
+        " ORDER BY recorded_at",
         (since, str(item_number)),
-    )
-    return [row[0] for row in cur.fetchall()]
+    ).fetchall()
 
 
 def main(argv=None) -> int:
@@ -119,7 +186,9 @@ def main(argv=None) -> int:
         return 0
     count = dead_end_claim_count(run_ids, a.item)
     blocked = is_dead_end_blocked(run_ids, a.item, threshold=a.threshold)
-    print(f"{'BLOCKED' if blocked else 'ok'} count={count} threshold={a.threshold}")
+    attempts = minion_attempts_for_item(conn, a.item, window_days=a.window_days)
+    print(f"{'BLOCKED' if blocked else 'ok'} count={count} threshold={a.threshold} "
+          f"attempts={attempts}")
     return 1 if blocked else 0
 
 

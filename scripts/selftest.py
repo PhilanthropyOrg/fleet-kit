@@ -1108,10 +1108,9 @@ def _claim_history_blocks_an_item_that_keeps_dead_ending():
     assert claim_history.is_dead_end_blocked(
         run_ids + ["minion-item64-444-4"], 64, threshold=3)
 
-    # Real integration, through fleet.db like the other fleet_db-backed checks in this file --
-    # a run's own reported `status` must NOT matter (a prior "ok" minion run against an item
-    # that is STILL in gru's open-candidate list is still a dead end; only the issue closing
-    # would prove otherwise, and a closed issue would never reach this check at all).
+    # Real integration, through fleet.db like the other fleet_db-backed checks in this file.
+    # 2026-09-26: only a run whose report said `Blocked: #N <reason>` is a dead end (see
+    # test_claim_history_infra.py for kills/timeouts/checkpoints never counting).
     import fleet_db
     with tempfile.TemporaryDirectory() as d:
         d = Path(d)
@@ -1119,14 +1118,17 @@ def _claim_history_blocks_an_item_that_keeps_dead_ending():
         now = time.time()
         recs = [
             {"run_id": "minion-item64-100-1", "member": "minion", "item_id": "64",
+             "blocked": "#64 needs a prod secret", 
              "status": "ok", "_recorded_at": now - 3 * 86400},
             {"run_id": "minion-item64-100-2", "member": "minion", "item_id": "64",
+             "blocked": "#64 needs a prod secret", 
              "status": "reported_nothing", "_recorded_at": now - 2 * 86400},
             # a different item's claim must not count against #64.
             {"run_id": "minion-item99-100-3", "member": "minion", "item_id": "99",
-             "status": "ok", "_recorded_at": now - 1 * 86400},
+             "blocked": "#99 spec contradicts itself", "status": "ok", "_recorded_at": now - 1 * 86400},
             # outside the 14-day window: must not count.
             {"run_id": "minion-item64-100-4", "member": "minion", "item_id": "64",
+             "blocked": "#64 needs a prod secret", 
              "status": "ok", "_recorded_at": now - 20 * 86400},
         ]
         runs_file.write_text("\n".join(json.dumps(r) for r in recs) + "\n")
@@ -1140,6 +1142,7 @@ def _claim_history_blocks_an_item_that_keeps_dead_ending():
         # A third dead end inside the window tips it over the default threshold.
         runs_file.write_text(runs_file.read_text() + json.dumps(
             {"run_id": "minion-item64-100-5", "member": "minion", "item_id": "64",
+             "blocked": "#64 needs a prod secret", 
              "status": "reported_nothing", "_recorded_at": now}) + "\n")
         fleet_db.sync(conn, runs_file=runs_file)
         run_ids_64 = claim_history.minion_runs_for_item(conn, 64, window_days=14.0)
@@ -1200,11 +1203,11 @@ def _claim_history_does_not_double_count_a_runs_started_and_terminal_rows():
             {"run_id": "minion-item4761-141190-1788808104", "member": "minion", "item_id": "4761",
              "status": "started", "_recorded_at": now - 3 * 86400},
             {"run_id": "minion-item4761-141190-1788808104", "member": "minion", "item_id": "4761",
-             "status": "budget_declined", "_recorded_at": now - 3 * 86400 + 60},
+             "status": "ok", "blocked": "#4761 needs Reif's call", "_recorded_at": now - 3 * 86400 + 60},
             {"run_id": "minion-item4761-12091-1788818817", "member": "minion", "item_id": "4761",
              "status": "started", "_recorded_at": now - 2 * 86400},
             {"run_id": "minion-item4761-12091-1788818817", "member": "minion", "item_id": "4761",
-             "status": "budget_declined", "_recorded_at": now - 2 * 86400 + 60},
+             "status": "ok", "blocked": "#4761 needs Reif's call", "_recorded_at": now - 2 * 86400 + 60},
         ]
         runs_file.write_text("\n".join(json.dumps(r) for r in recs) + "\n")
         conn = fleet_db.connect(d / "fleet.db")
@@ -1248,12 +1251,12 @@ def _minion_runs_for_item_finds_a_batched_minions_claim_history():
         recs = [
             # a real batch: one minion pass built items 64, 99, and 143 in one PR.
             {"run_id": "minion-item64_99_143-500-1", "member": "minion", "item_id": "64_99_143",
-             "status": "ok", "_recorded_at": now - 1 * 86400},
+             "status": "ok", "blocked": "prod DB unreadable", "_recorded_at": now - 1 * 86400},
             # substring traps: must NOT count toward item 6's history.
             {"run_id": "minion-item6_164-500-2", "member": "minion", "item_id": "6_164",
-             "status": "ok", "_recorded_at": now - 1 * 86400},
+             "status": "ok", "blocked": "prod DB unreadable", "_recorded_at": now - 1 * 86400},
             {"run_id": "minion-item164-500-3", "member": "minion", "item_id": "164",
-             "status": "ok", "_recorded_at": now - 1 * 86400},
+             "status": "ok", "blocked": "#164 needs a prod secret", "_recorded_at": now - 1 * 86400},
         ]
         runs_file.write_text("\n".join(json.dumps(r) for r in recs) + "\n")
         conn = fleet_db.connect(d / "fleet.db")
