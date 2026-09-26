@@ -4303,6 +4303,18 @@ def _run_member_rejects_a_non_numeric_item():
             "no clear FATAL message on a rejected --item"
 
 
+def _worktree_callers_delete_their_local_branch():
+    """A pass's local branch goes when its worktree does. Left behind, they piled up to 9,645
+    on philanthropy (2026-09-26): every git call in every worktree parsed an 880KB .git/config
+    and `git remote` took 44s. Checked per cleanup function, after the worktree is removed."""
+    for script, fn in (("run_member.sh", "cleanup_run_worktree"), ("worktree_builder.sh", "cleanup")):
+        src = (ROOT / "scripts" / script).read_text()
+        body = src[src.index(f"{fn}() {{"):src.index(f"trap {fn} EXIT")]
+        removed = body.find("worktree remove")
+        deleted = body.find('branch -D "$WT_BRANCH"')
+        assert removed != -1 and deleted > removed, f"{script}: cleanup must delete $WT_BRANCH after removing the worktree"
+
+
 def _run_member_and_builder_check_repo_before_removing_the_worktree():
     """Both isolated-worktree callers (the generic member path and the dedicated builder path)
     must wire the postflight check in, and check $REPO BEFORE its worktree is torn down --
@@ -15789,6 +15801,7 @@ if __name__ == "__main__":
     check("run_member.sh logs CRITICAL when postflight_dirty_check.sh fails to source", _run_member_logs_critical_when_postflight_dirty_check_fails_to_source)
     check("run_member.sh rejects a non-numeric --item", _run_member_rejects_a_non_numeric_item)
     check("both worktree callers check $REPO before tearing the worktree down", _run_member_and_builder_check_repo_before_removing_the_worktree)
+    check("both worktree callers delete their local branch at cleanup (2026-09-26: 9,645 leaked)", _worktree_callers_delete_their_local_branch)
     check("deploy drains in-flight passes before cutover", _deploy_drains_inflight_passes)
     check("deploys never stack, and the drain can count to zero", _one_deploy_at_a_time_and_a_countable_drain)
     check("auto_deploy.sh self-heals a content-identical diverged HEAD only when opted in", _auto_deploy_sh_self_heals_a_content_identical_diverged_head_when_opted_in)

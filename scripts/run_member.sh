@@ -682,6 +682,11 @@ if [ "$WORKTREE_ENABLED" = "True" ] && [ "$DRY_RUN" -ne 1 ]; then
     worktree_lock_acquire 30
     git -C "$REPO" worktree remove --force "$WT_PATH" >/dev/null 2>&1 || true
     worktree_prune_own_container "$REPO" 2>>"$LOG" || true
+    # The pass's local branch goes with its worktree: anything worth keeping was pushed (PR or
+    # checkpoint draft), and resume rebuilds from origin/<branch>. Left behind, they piled up
+    # to 9,645 branches on philanthropy (2026-09-26); every git call in every worktree then
+    # parsed an 880KB .git/config, and `git remote` took 44s.
+    git -C "$REPO" branch -D "$WT_BRANCH" >/dev/null 2>&1 || true
     worktree_lock_release
   }
   trap cleanup_run_worktree EXIT
