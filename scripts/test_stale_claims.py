@@ -112,10 +112,12 @@ class Assess(unittest.TestCase):
         self.assertFalse(sc.is_eligible(issue(1, labels=REIF + [{"name": "fleet:needs-human-op"}])))
 
 
-def fake_gh(issues, light_prs, full_prs, pr_rc=0):
+def fake_gh(issues, light_prs, full_prs, pr_rc=0, merged=()):
     def gh(args, timeout=60):
         if args[:2] == ["issue", "list"]:
             return 0, json.dumps(issues)
+        if args[:2] == ["pr", "list"] and "merged" in args:
+            return 0, json.dumps(merged)
         if args[:2] == ["pr", "list"]:
             return pr_rc, json.dumps(light_prs) if pr_rc == 0 else "HTTP 502"
         if args[:2] == ["pr", "view"]:
@@ -140,7 +142,9 @@ class Sweep(unittest.TestCase):
             {"messageHeadline": "Merge branch 'main' into member/minion-item7942", "committedDate": "2026-09-26T01:30:00Z"},
         ]}}
         issues = [issue(n) for n in BATCH] + [issue(9001, labels=[{"name": "fleet:claimed"}])]
-        self.gh = fake_gh(issues, light, full)
+        merged = [{"number": 7986, "title": "profile bio", "headRefName": "member/ui-lane",
+                   "body": "Part of #7942. Remaining: live prod check.\nNot built: #7937 -- untouched."}]
+        self.gh = fake_gh(issues, light, full, merged=merged)
         self.issues, self.light, self.full = issues, light, full
         self.cmds = []
 
@@ -165,6 +169,10 @@ class Sweep(unittest.TestCase):
         note = next(c for c in self.cmds if c[:3] == ["gh", "issue", "comment"])[5]
         self.assertIn("lease expired", note)
         self.assertIn("#7982", note)
+        notes = {c[3]: c[5] for c in self.cmds if c[:3] == ["gh", "issue", "comment"]}
+        self.assertIn("Merged PR(s) #7986", notes["7942"])
+        self.assertIn("`Remaining:`", notes["7942"])
+        self.assertNotIn("Merged PR", notes["7950"])
         log = (Path(self.tmp.name) / "claim_leases.jsonl").read_text().splitlines()
         self.assertEqual(len(log), 7)
         self.assertEqual(json.loads(log[0])["event"], "released")

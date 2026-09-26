@@ -180,8 +180,7 @@ def assess(issue: dict, prs: list[dict], branches: list[dict], live: set[int], n
     if claimed_at and now - claimed_at < lease:
         return hold("inside-lease", f"claimed {int((now - claimed_at) // 60)} min ago (inside the lease)")
 
-    mine = [p for p in prs if n in items_of(p.get("headRefName") or "")
-            or mentions(f"{p.get('title') or ''}\n{p.get('body') or ''}", n)]
+    mine = [p for p in prs if _refs(p, n)]
     ev["open_prs"] = [p["number"] for p in mine]
     if n in live:
         return hold("live-runner", "a live runner process names this item")
@@ -206,8 +205,14 @@ def assess(issue: dict, prs: list[dict], branches: list[dict], live: set[int], n
 
 def release_note(row: dict) -> str:
     prs = row["evidence"].get("open_prs") or []
+    merged = row["evidence"].get("merged_prs") or []
     tail = (f" Open PR(s) {', '.join('#%d' % p for p in prs)} still reference it -- the next build "
             "should read them first and build on, not beside, them.") if prs else ""
+    if merged:
+        # A batch minion writes "Part of #N. Remaining: ..." for what it did not finish (#7982
+        # built part of #7940 and #7948, merged, and left both open on purpose).
+        tail += (f" Merged PR(s) {', '.join('#%d' % p for p in merged)} reference it -- read their "
+                 "`Remaining:` line and build only what remains, or close it if nothing does.")
     return (f"stale_claims: released fleet:claimed -- lease expired: {row['why']}. "
             f"Re-claimable by the next gru pass.{tail}")
 
@@ -251,6 +256,24 @@ def open_prs(repo: str | None, claimed: set[int], gh=pr_ci_wait._gh) -> list[dic
         return list(ex.map(real, wanted))
 
 
+def merged_prs(repo: str | None, claimed: set[int], gh=pr_ci_wait._gh) -> list[dict]:
+    """Recently merged PRs that reference a claimed item. Informational only (named in the
+    release comment), so a failed read is just an empty list."""
+    rc, out = gh(["pr", "list", "--state", "merged", "--limit", "100", "--json",
+                  "number,headRefName,title,body", *_repo_args(repo)], timeout=120)
+    try:
+        light = json.loads(out) if rc == 0 else []
+    except json.JSONDecodeError:
+        return []
+    return [p for p in light if items_of(p.get("headRefName") or "") & claimed
+            or any(mentions(f"{p.get('title') or ''}\n{p.get('body') or ''}", n) for n in claimed)]
+
+
+def _refs(p: dict, n: int) -> bool:
+    return n in items_of(p.get("headRefName") or "") or \
+        mentions(f"{p.get('title') or ''}\n{p.get('body') or ''}", n)
+
+
 def pushed_branches(repo: str | None, skip: set[str], gh=pr_ci_wait._gh) -> list[dict]:
     owner, _, name = (repo or "").partition("/")
     if not name:
@@ -279,6 +302,9 @@ def sweep(repo: str | None, dry_run: bool, gh=pr_ci_wait._gh, now: float | None 
     if issues is None:
         return {"error": "gh issue list failed -- stale claims unknown this pass", "ts": _iso(now)}
     nums = {int(i["number"]) for i in issues}
+    from concurrent.futures import ThreadPoolExecutor
+    pool = ThreadPoolExecutor(max_workers=4)  # gh in the container: ~30-50s per list call
+    merged_f = pool.submit(merged_prs, repo, nums, gh)
     prs = open_prs(repo, nums, gh)
     if prs is None:
         # Without the PR list a live PR looks like no activity: releasing blind could hand a
@@ -287,23 +313,32 @@ def sweep(repo: str | None, dry_run: bool, gh=pr_ci_wait._gh, now: float | None 
     branches = pushed_branches(repo, {p["headRefName"] for p in prs}, gh)
     live = live_numbers() if live is None else live
     rows = [assess(i, prs, branches, live, now) for i in issues]
+    merged = merged_f.result()
     by_num = {int(i["number"]): i for i in issues}
     released, failed = [], []
-    for r in rows:
-        if not r["release"]:
-            continue
-        if dry_run:
-            released.append(r["number"])
-            continue
+
+    def release(r: dict) -> bool:
         ok = True
         for cmd in board_github.build_release_cmds(r["number"], release_note(r)):
             rc, out = (run or _run)(cmd + _repo_args(repo))
             if rc != 0:
                 ok = False
                 print(f"stale_claims: release #{r['number']} step FAILED: {out[:200]}", file=sys.stderr)
-        (released if ok else failed).append(r["number"])
-        _log({"ts": _iso(now), "event": "released" if ok else "release_failed",
+        _log({"ts": _iso(time.time()), "event": "released" if ok else "release_failed",
               "number": r["number"], "why": r["why"], "evidence": r["evidence"]})
+        return ok
+
+    due = [r for r in rows if r["release"]]
+    for r in due:
+        r["evidence"]["merged_prs"] = [p["number"] for p in merged if _refs(p, r["number"])]
+    if dry_run:
+        released = [r["number"] for r in due]
+    else:
+        # In parallel: serially, 17 releases at ~15s of gh each ran the first live sweep
+        # (2026-09-26 02:15 UTC) past run_gru_fanout.sh's timeout after 5.
+        for r, ok in zip(due, pool.map(release, due)):
+            (released if ok else failed).append(r["number"])
+    pool.shutdown(wait=False)
     held = [r for r in rows if not r["release"] or r["number"] in failed]
     eligible_held = [r for r in held if is_eligible(by_num[r["number"]])]
     by_kind: dict[str, list[int]] = {}
