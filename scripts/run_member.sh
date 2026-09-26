@@ -910,7 +910,7 @@ log "pass start (kind=llm charter=$BEHAVIOR model=$MODEL max_turns=${MAX_TURNS:-
 # rows sharing the same run_id and flags any with no match past a grace window. Best-effort:
 # a failure here must not block the pass itself, only lose the extra visibility this adds.
 python3 "$KIT_DIR/scripts/run_report.py" --started \
-  --member "$MEMBER" --run-id "$RUN_ID" --kind llm \
+  --member "$MEMBER" --run-id "$RUN_ID" --kind llm ${TIMEOUT_S:+--timeout-s "$TIMEOUT_S"} \
   ${ITEM:+--item-id "$ITEM"} $LANE_FLAG $FIRED_FLAG $REASON_FLAG >> "$LOG_DIR/runs.jsonl" 2>>"$LOG" \
   || log "WARNING: failed to write started row for run_id=$RUN_ID"
 

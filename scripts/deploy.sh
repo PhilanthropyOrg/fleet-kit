@@ -298,6 +298,15 @@ RETIRED_PORTS_FILE="$INSTANCE_DIR/retired_ports"
 RETIRE_MAX_S="${FLEET_RETIRE_MAX_S:-900}"
 # After SIGTERM, how long the terminated passes get to write their status=killed rows.
 RETIRE_KILL_GRACE_S="${FLEET_RETIRE_KILL_GRACE_S:-60}"
+# gh#8197: a minion pass is not a median pass. Its timeout is 5400s and its real runs take
+# 30-70 min, so the 900s drain above SIGTERMed every minion a deploy caught: 2026-09-26 the
+# reaper killed #7939 and #7941 at 16:57 and again at 19:02 UTC (rc=143, "drain hit
+# FLEET_RETIRE_MAX_S=900s with 30 / 16 pass(es) still in flight"), each ~15 min after a
+# cutover, and their kill-time checkpoints saved nothing. Past RETIRE_MAX_S only the NON-minion
+# passes are terminated; minion passes finish (or checkpoint on their own timeout) for up to
+# RETIRE_MINION_MAX_S -- minion timeout_s 5400 + 300s for the timeout checkpoint. Deploys
+# coalesce to one per FLEET_DEPLOY_MIN_INTERVAL_S (7200s), so a normal deploy never waits on it.
+RETIRE_MINION_MAX_S="${FLEET_RETIRE_MINION_MAX_S:-5700}"
 
 live_ports() {
     # "<view> <webhook>" of the container that is live NOW. Before the first proxy-mode deploy
@@ -364,10 +373,28 @@ retire_services_in() {
 # Every script that is a pass (or dispatches one). Used to count what is still in flight in a
 # retired build and, once RETIRE_MAX_S is up, to terminate exactly those.
 PASS_PATTERN='bash .*(run_member|worktree_builder|judge-judy)[.]sh'
+# gh#8197: the minion passes among them (dispatch_member.sh / gru's `run_member.sh minion ...`).
+MINION_PATTERN='bash .*run_member[.]sh minion( |$)'
 inflight_in() {
     local n
-    n="$(podman exec "$1" pgrep -c -f "$PASS_PATTERN" 2>/dev/null 9>&- | head -1 | tr -cd '0-9' || true)"
+    n="$(podman exec "$1" pgrep -c -f "${2:-$PASS_PATTERN}" 2>/dev/null 9>&- | head -1 | tr -cd '0-9' || true)"
     echo "${n:-0}"
+}
+minions_in() { inflight_in "$1" "$MINION_PATTERN"; }
+
+# gh#8197: SIGTERM every in-flight pass EXCEPT a minion's (their record_killed_pass trap writes
+# the status=killed row, same as terminate_and_stop). Leaves the container running.
+terminate_non_minions() {
+    podman exec "$1" sh -c 'm="$(pgrep -f "$1")"
+        for p in $(pgrep -f "$0"); do
+            printf "%s\n" "$m" | grep -qx "$p" || kill -TERM "$p" 2>/dev/null
+        done; true' "$PASS_PATTERN" "$MINION_PATTERN" >/dev/null 2>&1 9>&- || true
+}
+
+# gh#8197: how long a retired build may drain right now -- RETIRE_MINION_MAX_S while a minion
+# pass is still in flight in it, RETIRE_MAX_S otherwise.
+drain_budget_s() {
+    if [ "$(minions_in "$1")" -gt 0 ]; then echo "$RETIRE_MINION_MAX_S"; else echo "$RETIRE_MAX_S"; fi
 }
 
 # Bounded end of a retired build's drain. Only minion passes checkpoint (their SIGTERM trap
@@ -413,6 +440,7 @@ spawn_reaper() {
         for f in /proc/$$/fd/*; do f=${f##*/}; [ "$f" -gt 2 ] 2>/dev/null && eval "exec $f>&-"; done
         eval "$6"
         name="$1"; RETIRE_MAX_S="$2"; log="$3"; RETIRE_KILL_GRACE_S="$4"; PASS_PATTERN="$5"; waited=0
+        MINION_PATTERN="$7"; RETIRE_MINION_MAX_S="$8"; said=0
         rlog() { echo "[deploy $(date "+%Y-%m-%d %H:%M:%S %Z")] reaper: $*" >> "$log"; }
         while :; do
             state="$(podman inspect "$name" --format "{{.State.Running}}" 2>/dev/null || echo gone)"
@@ -424,13 +452,22 @@ spawn_reaper() {
                 exit 0
             fi
             if [ "$waited" -ge "$RETIRE_MAX_S" ]; then
-                left="$(terminate_and_stop "$name")"
-                rlog "drain hit FLEET_RETIRE_MAX_S=${RETIRE_MAX_S}s with $n pass(es) still in flight -- sent them SIGTERM (status=killed, safe to re-run), $left still alive after ${RETIRE_KILL_GRACE_S}s grace; stopped $name (fk#1281)"
-                exit 0
+                m="$(minions_in "$name")"
+                if [ "$m" -gt 0 ] && [ "$waited" -lt "$RETIRE_MINION_MAX_S" ]; then
+                    # gh#8197: past the short budget, end everything but the minions.
+                    terminate_non_minions "$name"
+                    [ "$said" = 1 ] || rlog "drain hit FLEET_RETIRE_MAX_S=${RETIRE_MAX_S}s -- SIGTERMed the non-minion passes; $m minion process(es) keep running up to FLEET_RETIRE_MINION_MAX_S=${RETIRE_MINION_MAX_S}s (gh#8197)"
+                    said=1
+                else
+                    left="$(terminate_and_stop "$name")"
+                    rlog "drain hit its budget (FLEET_RETIRE_MAX_S=${RETIRE_MAX_S}s, minions FLEET_RETIRE_MINION_MAX_S=${RETIRE_MINION_MAX_S}s) after ${waited}s with $n pass(es) still in flight -- sent them SIGTERM (status=killed, safe to re-run), $left still alive after ${RETIRE_KILL_GRACE_S}s grace; stopped $name (fk#1281)"
+                    exit 0
+                fi
             fi
             sleep 30; waited=$((waited + 30))
         done' _ "$name" "$RETIRE_MAX_S" "$DEPLOY_LOG" "$RETIRE_KILL_GRACE_S" "$PASS_PATTERN" \
-        "$(declare -f inflight_in terminate_and_stop)" >/dev/null 2>&1 9>&- &
+        "$(declare -f inflight_in terminate_and_stop minions_in terminate_non_minions)" \
+        "$MINION_PATTERN" "$RETIRE_MINION_MAX_S" >/dev/null 2>&1 9>&- &
 }
 
 proxy_deploy() {
@@ -457,10 +494,13 @@ proxy_deploy() {
     # forever. Age unknown (no retired_ports file) is treated as over budget: nothing this
     # deploy wrote can vouch for it.
     if exists "$RETIRED_MARKER" && running "$RETIRED_MARKER"; then
-        local age
+        local age budget
         age="$(retired_age_s)"
-        if [ -n "$age" ] && [ "$age" -lt "$RETIRE_MAX_S" ]; then
-            log "ABANDONED: previous retired build ($RETIRED_MARKER) still running on $nv/$nw -- $(inflight_in "$RETIRED_MARKER") pass(es) finishing, retired ${age}s ago (max ${RETIRE_MAX_S}s) -- not stopping its in-flight passes to force this deploy through; will retry next tick"
+        # gh#8197: a minion still finishing gets the minion budget here too, or the next deploy
+        # would SIGTERM exactly what the reaper is waiting on.
+        budget="$(drain_budget_s "$RETIRED_MARKER")"
+        if [ -n "$age" ] && [ "$age" -lt "$budget" ]; then
+            log "ABANDONED: previous retired build ($RETIRED_MARKER) still running on $nv/$nw -- $(inflight_in "$RETIRED_MARKER") pass(es) finishing, retired ${age}s ago (max ${budget}s) -- not stopping its in-flight passes to force this deploy through; will retry next tick"
             return 1
         fi
         # Older builds never had retire_services_in -- close its doors first so nothing new
@@ -470,7 +510,7 @@ proxy_deploy() {
         local was left
         was="$(inflight_in "$RETIRED_MARKER")"
         left="$(terminate_and_stop "$RETIRED_MARKER")"
-        log "retired build ($RETIRED_MARKER) past FLEET_RETIRE_MAX_S=${RETIRE_MAX_S}s (retired ${age:-unknown}s ago) with $was pass(es) in flight -- sent them SIGTERM (status=killed, safe to re-run), $left still alive after ${RETIRE_KILL_GRACE_S}s grace; stopped it, proceeding with this deploy (fk#1281)"
+        log "retired build ($RETIRED_MARKER) past its drain budget ${budget}s (retired ${age:-unknown}s ago) with $was pass(es) in flight -- sent them SIGTERM (status=killed, safe to re-run), $left still alive after ${RETIRE_KILL_GRACE_S}s grace; stopped it, proceeding with this deploy (fk#1281)"
     fi
     exists "${CONTAINER}-green" && podman rm -f "${CONTAINER}-green" >/dev/null 2>&1 || true
 

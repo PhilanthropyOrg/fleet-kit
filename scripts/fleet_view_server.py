@@ -1056,11 +1056,25 @@ def minion_runs_payload(rows: list[dict], gh: dict, limit: int = 50) -> list[dic
     rather than from the run row: a run records the PR it opened, never what became of it.
     pr_state is one of merged / open (with the open PR's _rollup: green, failing, blocked,
     pending, none) / closed (a PR number the run wrote that is in neither feed -- closed
-    unmerged, or merged longer ago than the 30-PR merged feed reaches) / none (no PR)."""
+    unmerged, or merged longer ago than the 30-PR merged feed reaches) / none (no PR).
+
+    gh#8197: ONE row per run_id -- its newest. A run writes a `started` row and later its ending;
+    listing both showed every finished run as a second, never-ending `started` run (#7988 and
+    #7817 on 2026-09-26 read as "never recorded an outcome" beside their own `quiet` rows). A
+    `started` row here now means the run is still in flight, or open_runs.py close-lost has not
+    swept it yet. `rows` must be newest first (fleet_db.query_runs' order)."""
     merged_by_no = {int(pr["number"]): pr for pr in (gh.get("merged") or []) if pr.get("number")}
     open_by_no = {int(pr["number"]): pr for pr in (gh.get("prs") or []) if pr.get("number")}
+    seen: set = set()
+    newest = []
+    for r in rows:
+        rid = r.get("run_id")
+        if rid in seen:
+            continue
+        seen.add(rid)
+        newest.append(r)
     out = []
-    for r in rows[:limit]:
+    for r in newest[:limit]:
         pr_no = None
         try:
             pr_no = int(str(r.get("pr") or "").lstrip("#")) or None
@@ -1913,7 +1927,8 @@ class Handler(BaseHTTPRequestHandler):
             limit = int(qs.get("limit", ["50"])[0])
             db = fleet_db.connect()
             fleet_db.sync(db)
-            rows = fleet_db.query_runs(db, member="minion", limit=limit)
+            # x2: most runs have a started row and an ending row, collapsed to one (gh#8197).
+            rows = fleet_db.query_runs(db, member="minion", limit=limit * 2)
             self._json({"runs": minion_runs_payload(rows, STATE.snapshot()["gh"], limit)})
             return
         if path == "/api/query":
