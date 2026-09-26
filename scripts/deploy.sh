@@ -373,9 +373,9 @@ retire_services_in() {
 # Every script that is a pass (or dispatches one). Used to count what is still in flight in a
 # retired build and, once RETIRE_MAX_S is up, to terminate exactly those.
 # Anchored to argv[0]=bash + argv[1]=the script (gh#8197): unanchored, it also matched every
-# `timeout claude -p <prompt>` and `claude` process whose PROMPT mentions run_member.sh --
+# `timeout` wrapper and model CLI process whose PROMPT argv mentions run_member.sh --
 # measured live 2026-09-26 21:12 UTC, terminate_non_minions SIGTERMed three minions' own
-# `timeout claude` children (pass end rc=143) while sparing their bash wrappers.
+# model-CLI children (pass end rc=143) while sparing their bash wrappers.
 PASS_PATTERN='^(/usr)?(/bin/)?bash [^ ]*(run_member|worktree_builder|judge-judy)[.]sh'
 # gh#8197: the minion passes among them (dispatch_member.sh / gru's `run_member.sh minion ...`).
 MINION_PATTERN='^(/usr)?(/bin/)?bash [^ ]*run_member[.]sh minion( |$)'
