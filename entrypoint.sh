@@ -328,6 +328,10 @@ case "${1:-cron-foreground}" in
       if cron_member_enabled jefe; then
         echo "21 * * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh jefe >> $LOG_DIR/jefe.log 2>&1"
       fi
+      # the-fixer -> the owning member when a fleet PR sits idle > 4h (philanthropy#8215). Its
+      # own shell line at the-fixer's minute, not inside check.sh: a 30-50s gh list must never
+      # delay an incident pregate.
+      echo "47 * * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) FLEET_LOG_DIR=$LOG_DIR && cd $FLEET_REPO && python3 /fleet-kit/scripts/fleet_msg.py idle-prs --from the-fixer >> $LOG_DIR/fleet_msg.log 2>&1"
       # Sources fleet.env like vp_due's line: FLEET_MARIE_CADENCE=*/4 is what makes "2 of
       # marie's cadences" 8h, not 2h.
       echo "4,19,34,49 * * * * root export FLEET_LOG_DIR=$LOG_DIR && [ -f \"\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}\" ] && { set -a; . \"\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}\"; set +a; }; python3 /fleet-kit/scripts/fleet_msg.py watchdog >> $LOG_DIR/fleet_msg.log 2>&1"

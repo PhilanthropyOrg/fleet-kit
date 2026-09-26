@@ -196,6 +196,30 @@ class OtherSenders(Base):
         self.assertIsNone(journey_issue_filer.message_fixer({"filed": [], "commented": []}, send=lambda *a: 1/0))
 
 
+class MetricsNeverHoldTheWriteLock(Base):
+    """2026-09-26 22:21-23:07 UTC: metrics_snapshot() held fleet.db's write lock across every
+    tile's network reads, so gru's gate-drop message (and every tail sync) hit `database is
+    locked`. A metric write must be committed before the next tile starts."""
+
+    def test_backfill_commits_before_returning(self):
+        import fleet_view_server as fvs
+        n = fvs._backfill_daily(self.conn, "x.metric", ["2026-09-25", "2026-09-26"],
+                                lambda: [{"createdAt": "2026-09-01T00:00:00Z", "closedAt": None}])
+        self.assertEqual(n, 1)
+        self.assertFalse(self.conn.in_transaction)
+        other = fleet_db.connect(self.db)  # a second writer is not blocked
+        fleet_msg.send(other, "gru", ["marie"], "x", "k", "b")
+        other.close()
+
+    def test_every_metric_upsert_commits_and_the_tile_reuses_the_connection(self):
+        src = (HERE / "fleet_view_server.py").read_text()
+        body = src[src.index("def metrics_snapshot"):src.index("def _central_fmt")]
+        up = body[body.index("def upsert"):body.index("def daily_series")]
+        self.assertIn("db.commit()", up)
+        self.assertIn("fleet_msg.summary(db)", body)
+        self.assertNotIn("fleet_db.connect()", body[body.index("fleet.msgs_open") - 800:])
+
+
 class Wiring(unittest.TestCase):
     def test_run_member_puts_the_inbox_first(self):
         sh = (HERE / "run_member.sh").read_text()
