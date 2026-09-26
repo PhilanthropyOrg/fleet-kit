@@ -202,6 +202,17 @@ spawns exactly one). Your job, in order:
    Never close a `fleet:reif-priority` issue yourself — that's marie's call (marie.md Part C),
    once no child work remains.
 
+   **A minion's draft PR is RESUMABLE, not owned** (here and in 2b). Before you drop any item for
+   having an open PR, run:
+   ```
+   python3 /fleet-kit/scripts/minion_checkpoint.py resumable
+   ```
+   Every item it lists sits behind a DRAFT PR on a `member/minion-item*` branch: a checkpoint, or
+   part-done work a minion left. Keep it as a candidate and dispatch it like any other item;
+   `run_member.sh` resumes that branch and PR instead of starting over. Only a non-draft PR, or
+   a draft on a non-minion branch, owns its item. On 2026-09-26 gru dropped #7939 and #7950 as
+   "owned by open draft PRs #8135/#8133", so their work sat unresumed.
+
    2a-bis. **Then, a fix for one of the fleet's OWN red PRs — finish before starting.** judge-judy
    and CI file `fix: PR #<N> ...` / `CI RED: PR #<N> ...` issues when a fleet-authored PR goes red.
    That PR already holds spent turns and blocks its own item from shipping, so its fix outranks

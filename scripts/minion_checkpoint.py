@@ -115,6 +115,33 @@ def find(repo: str, items: list[int]) -> str | None:
     return pick_resume_branch(remote_minion_branches(repo), items)
 
 
+def resumable_from(prs: list[dict]) -> list[dict]:
+    """Open DRAFT PRs on a minion branch -> [{"pr", "branch", "items"}]. Pure.
+
+    Checkpoint drafts, and drafts a minion opened for part-done work, both mean "a minion's
+    unfinished work, waiting for the next minion", never "someone else owns this item". On
+    2026-09-26 gru dropped #7939 and #7950 as "owned by open draft PRs #8135/#8133", so neither
+    was resumed. gru.md step 2a reads this list."""
+    out = []
+    for p in prs:
+        m = BRANCH_RE.match(p.get("headRefName") or "")
+        if m and p.get("isDraft"):
+            out.append({"pr": int(p["number"]), "branch": p["headRefName"],
+                        "items": [int(n) for n in m.group(1).split("_")]})
+    return sorted(out, key=lambda r: r["pr"])
+
+
+def resumable(repo: str) -> list[dict] | None:
+    rc, out = _gh(["pr", "list", "--state", "open", "--draft", "--limit", "200",
+                   "--json", "number,isDraft,headRefName"], cwd=repo, timeout=120)
+    if rc != 0:
+        return None
+    try:
+        return resumable_from(json.loads(out))
+    except json.JSONDecodeError:
+        return None
+
+
 # --- save ----------------------------------------------------------------------------------
 
 def commits_ahead(wt: str, base: str = "origin/main") -> int:
@@ -319,6 +346,8 @@ def main(argv: list[str] | None = None) -> int:
     w.add_argument("--pid", type=int, required=True)
     w.add_argument("--lead-s", type=int, default=int(os.environ.get("FLEET_CHECKPOINT_LEAD_S") or 600))
     w.add_argument("--poll-s", type=int, default=int(os.environ.get("FLEET_CHECKPOINT_POLL_S") or 60))
+    rs = sub.add_parser("resumable", help="open minion draft PRs whose items the next minion resumes")
+    rs.add_argument("--repo", default=".")
     r = sub.add_parser("ready")
     r.add_argument("--wt", default=os.environ.get("WT_PATH") or ".")
     r.add_argument("--pr", type=int)
@@ -330,6 +359,13 @@ def main(argv: list[str] | None = None) -> int:
             print("NOT READY -- the PR stays a draft:\n" + "\n".join(f"  - {g}" for g in res["gaps"]),
                   file=sys.stderr)
         return 0 if res["ready"] else 3
+    if a.cmd == "resumable":
+        res = resumable(a.repo)
+        if res is None:
+            print("error: gh pr list failed", file=sys.stderr)
+            return 1
+        print(json.dumps(res))
+        return 0
     items = parse_items(a.items)
     if a.cmd == "find":
         b = find(a.repo, items)
