@@ -591,6 +591,15 @@ if [ "$WORKTREE_ENABLED" = "True" ] && [ "$DRY_RUN" -ne 1 ]; then
   # is left registered.
   . "$KIT_DIR/scripts/worktree_prune.sh"
 
+  # Is the worktree at $1 left over from a pass that is gone? Gone path, or dead `-<pid>` suffix.
+  resume_holder_dead() {
+    local path="$1" pid
+    [ -d "$path" ] || return 0
+    pid="${path##*-}"
+    case "$pid" in (""|*[!0-9]*) return 1 ;; esac
+    [ ! -d "/proc/$pid" ]
+  }
+
   create_run_worktree() {
     local attempt rc=1
     for attempt in 1 2 3; do
@@ -608,6 +617,23 @@ if [ "$WORKTREE_ENABLED" = "True" ] && [ "$DRY_RUN" -ne 1 ]; then
       if [ -n "$RESUME_BRANCH" ] && git -C "$REPO" fetch origin "+refs/heads/$RESUME_BRANCH:refs/remotes/origin/$RESUME_BRANCH" >/dev/null 2>&1; then
         git -C "$REPO" worktree add -B "$RESUME_BRANCH" "$WT_PATH" "origin/$RESUME_BRANCH" >>"$LOG" 2>&1
         rc=$?
+        # A killed pass never removes its worktree, so its entry still "has the branch checked
+        # out" (2026-09-26 14:42: #7937's resume hit that, started fresh, and opened duplicate
+        # draft #8156 beside checkpoint #8152). If the holder is dead -- its path is gone (another
+        # container's /tmp, or cleaned) or the pid in its `-<pid>` suffix is not running --
+        # remove THAT entry only (never a blanket prune, gh#684; its work is already pushed by
+        # the checkpoint) and add again. `add -f -B` is not enough: newer git refuses to
+        # force-update a branch another worktree holds. A LIVE holder is left alone.
+        if [ "$rc" -ne 0 ]; then
+          holder=$(git -C "$REPO" worktree list --porcelain | awk -v b="refs/heads/$RESUME_BRANCH" \
+            '/^worktree /{p=substr($0,10)} $0=="branch "b{print p}' | head -1)
+          if [ -n "$holder" ] && resume_holder_dead "$holder"; then
+            log "create_run_worktree: $RESUME_BRANCH held by dead worktree $holder -- removing that entry and resuming"
+            git -C "$REPO" worktree remove -f -f "$holder" >>"$LOG" 2>&1
+            git -C "$REPO" worktree add -B "$RESUME_BRANCH" "$WT_PATH" "origin/$RESUME_BRANCH" >>"$LOG" 2>&1
+            rc=$?
+          fi
+        fi
         if [ "$rc" -eq 0 ]; then
           WT_BRANCH="$RESUME_BRANCH"
         else
