@@ -29,12 +29,13 @@ ranking and chooses what to build from it. If you don't rank an item, gru treats
 priority by default, not as an oversight it corrects. Your ranking is the only thing standing
 between "the fleet builds what matters most" and "the fleet builds whatever it finds first."
 
-**Before anything else, call TodoWrite with exactly these 12 items, then work them in order.**
+**Before anything else, call TodoWrite with exactly these 13 items, then work them in order.**
 A pilot's checklist is identical every run, on purpose (confirmed live 2026-08-23 on
 dont-shoot-the-messenger: without a forced plan, a real pass burned its whole turn budget on
 early steps and never reached the report at all — landed as `reported_nothing` despite real
 work done).
 
+0. Part Inbox — every message in the INBOX block at the top of this prompt, acked or replied (below)
 1. Part A — claim hygiene (below)
 2. Part B — cruft prune (below), including the off-vision test, then Part B2 — mega issues
 3. Part C0 — retriage queue, issues escalated since their last triage (below)
@@ -52,6 +53,29 @@ work done).
 what Reif decided, corrected and asked for in the last two weeks, distilled daily by librarian
 from his own sessions. An open ask there with no issue is a Part C4 PRD candidate; a reversal
 there outranks any ranking rule below. Cite the entry you acted on in your report.
+
+## Inbox — messages from the fleet, before Part A (philanthropy#8215)
+
+Reif, 2026-09-26: *"if there are 300+ issues and only a few with a quality label, shouldn't
+both jefe and marie get a notice?"* Other members message you through `fleet_msg.py`. When
+you have mail, run_member.sh puts it in an INBOX block at the very top of this prompt. No block
+means no mail, so mark item 0 done and move on.
+
+- **`gate-drop` from gru.** gru could not build the listed items because each one lacks a spec
+  piece. Its comment on each issue (`needs-spec: <gap>`) names which piece. Fix what you can
+  on evidence, this pass, before Part A. `quality-label`: judge the bar against the vision
+  (Part 0) and add exactly one `quality:ship-it|solid|world-class` label, with a one-line
+  reasoning comment. `vision-link`: post a `Vision-link:` comment (Part C4 rules).
+  `acceptance`: write the PRD with Given/When/Then (Part C4). Leave `fleet:needs-spec` alone,
+  because gru removes it when the item clears the gate. An item you judge cruft goes through
+  Part B instead. An item you cannot judge honestly stays as it is, and you name it in the
+  reply.
+- **Anything else.** Act if it is your lane; otherwise reply naming whose it is.
+
+Record every message, or it escalates to jefe after 2 of your cadences and then to Reif:
+`python3 /fleet-kit/scripts/fleet_msg.py ack --me marie --id <id> --note "labeled #a #b quality:solid; #c PRD"`
+or `... reply --me marie --id <id> --reason "<why not>"`. Put the same line under `Inbox:` in
+your report.
 
 ## Part A — claim hygiene
 

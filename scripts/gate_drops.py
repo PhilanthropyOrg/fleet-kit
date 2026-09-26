@@ -51,6 +51,10 @@ DEFAULT_QUALITY = "quality:solid"
 MARKER = "needs-spec:"
 LOG_DIR = Path(os.environ.get("FLEET_LOG_DIR", Path.home() / "Library" / "Logs" / "fleet-kit")).expanduser()
 DROP_LOG = LOG_DIR / "gate_drops.jsonl"
+# philanthropy#8215 amendment: more than this many needs-spec drops in one pass messages
+# marie (who fixes specs) and jefe (who watches why they keep arriving unspecced).
+MSG_THRESHOLD = int(os.environ.get("FLEET_GATE_DROP_MSG_THRESHOLD", "3"))
+MSG_TO = ("marie", "jefe")
 
 # What each gate's drop reason means for the person who has to fix it.
 GAPS = (
@@ -153,7 +157,27 @@ def plan(items: list[dict], run_id: str) -> dict:
             "unblocks": "those items become buildable on the next gru pass",
             "proposed": "marie adds the missing piece in her next pass; reply only to override",
         }
-    return {"eligible": eligible, "dropped": records, "actions": actions, "ask": ask}
+    return {"eligible": eligible, "dropped": records, "actions": actions, "ask": ask,
+            "message": message(records, len(items), run_id)}
+
+
+def message(records: list[dict], candidates: int, run_id: str) -> dict | None:
+    """The fleet_msg.py message gru sends marie + jefe when more than MSG_THRESHOLD items
+    still need a spec after this pass (Reif's spec amendment on #8215: "shouldn't both jefe
+    and marie get a notice?"). Pure; None at or under the threshold."""
+    needs = [r for r in records if r.get("action") == "needs-spec"]
+    if len(needs) <= MSG_THRESHOLD:
+        return None
+    by_gap: dict[str, list[int]] = {}
+    for r in needs:
+        by_gap.setdefault(r.get("gap") or "other", []).append(r["number"])
+    lines = [f"gru's build gates dropped {len(needs)} of {candidates} candidates in pass "
+             f"{run_id} for a missing spec piece; each carries `{NEEDS_SPEC}` and a "
+             f"`{MARKER} <gap>` comment. Fix them so gru can build them:"]
+    for gap, nums in sorted(by_gap.items(), key=lambda kv: -len(kv[1])):
+        lines.append(f"- {gap} ({len(nums)}): " + ", ".join(f"#{n}" for n in nums))
+    return {"to": MSG_TO, "kind": "gate-drop", "key": "gate-drops",
+            "body": "\n".join(lines), "items": [r["number"] for r in needs]}
 
 
 def _gh(cmd: list[str]) -> subprocess.CompletedProcess:
@@ -194,7 +218,18 @@ def apply(p: dict, repo: str | None, run_id: str, run=_gh, db_path: str | None =
         ask_id = ask_mod.file_ask(conn, "gru", p["ask"]["why"], p["ask"]["unblocks"],
                                   p["ask"]["proposed"], ask_class="decision",
                                   summary=p["ask"]["summary"])
-    return {"results": results, "ask_id": ask_id}
+    sent = None
+    if p.get("message"):
+        try:
+            import fleet_db
+            import fleet_msg
+            conn = fleet_db.connect(Path(db_path) if db_path else None)
+            m = p["message"]
+            sent = fleet_msg.send(conn, "gru", list(m["to"]), m["kind"], m["key"], m["body"],
+                                  m["items"])
+        except Exception as exc:  # noqa: BLE001 -- the gates' result must still reach gru
+            print(f"gate_drops: message not sent: {exc}", file=sys.stderr)
+    return {"results": results, "ask_id": ask_id, "sent": sent}
 
 
 def count(hours: float = 6.0, now: float | None = None, path: Path | None = None) -> dict:

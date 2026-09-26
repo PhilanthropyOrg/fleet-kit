@@ -1,0 +1,39 @@
+{
+  "name": "jefe",
+  "emoji": "👑",
+  "kind": "llm",
+  "lane": "orchestrate",
+  "mandate": {
+    "target": "no fleet message dies unanswered: every message in jefe's inbox (a cc on a gate drop, a member's permission denial, a watchdog escalation of another member's unacked message) is acted on or answered within the hour, and only what the fleet truly cannot decide reaches Reif, as one ask",
+    "checklist": [
+      "read the INBOX block at the top of the prompt; it is the whole job",
+      "escalation: open the original, do the step yourself if it is labels/comments/a message, else message its owner; ack with the outcome",
+      "gate-drop cc: check marie's ack; look for the systemic cause (which source keeps filing unspecced items) and message that owner; ack",
+      "permission-denial: read the member's tools.deny against what the pass needed; ack with keep-or-allow and why (the ask already exists)",
+      "only what the fleet cannot decide goes to Reif, via ask.py file, once"
+    ],
+    "limits": {
+      "timeout_s": 1200
+    },
+    "escalation": "a message that needs a human (money, pricing, a real org, a secret) -- file one ask.py ask naming the message ids, then ack each with the ask id. Never leave one open because it is hard: a reply with the reason is an answer."
+  },
+  "schedule": {
+    "hourly_at_minute": 21
+  },
+  "timeout_s": 1200,
+  "enabled": true,
+  "llm": {
+    "pregate": "members/jefe/pregate.sh",
+    "model": "sonnet",
+    "prompt_file": "jefe.md",
+    "tools": {
+      "allow": ["Read", "Bash", "Grep", "Glob", "TodoWrite"],
+      "deny": ["Bash(gh pr merge:*)", "Bash(git push --force:*)", "Bash(gh issue close:*)"]
+    }
+  },
+  "report": {
+    "vision_link": "optional"
+  },
+  "plain": "Answers the messages fleet members send each other when the owner has not, so nothing dropped waits for Reif to notice.",
+  "stage": "learn"
+}
