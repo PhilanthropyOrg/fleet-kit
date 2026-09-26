@@ -126,6 +126,14 @@ class DrainSparesMinions(unittest.TestCase):
                      "bash /fleet-kit/scripts/run_member.sh minion-watch"):
             self.assertNotRegex(args, self.MINION)
 
+    def test_a_prompt_that_mentions_a_pass_is_not_a_pass(self):
+        # Live 2026-09-26 21:12 UTC: these matched the unanchored pattern and got SIGTERM.
+        for args in ("timeout 5400 claude -p You are minion. Run bash /fleet-kit/scripts/run_member.sh minion --items 1",
+                     "claude -p see bash /fleet-kit/scripts/worktree_builder.sh --item 7",
+                     "sh -c pgrep -f bash .*run_member[.]sh"):
+            self.assertNotRegex(args, self.PASS)
+            self.assertNotRegex(args, self.MINION)
+
     def test_terminate_non_minions_spares_the_minion(self):
         # Real processes, but patterns scoped to this temp dir: pgrep on dino also sees the
         # fleet's own containers, and this test must never signal a real pass.
@@ -135,11 +143,14 @@ class DrainSparesMinions(unittest.TestCase):
         stub = Path(d, "podman")
         stub.write_text('#!/bin/bash\n[ "$1" = exec ] && { shift 2; exec "$@"; }\n')
         stub.chmod(0o755)
-        procs = {name: subprocess.Popen(["bash", str(script), *args])
-                 for name, args in (("minion", ["minion", "--items", "1"]), ("gru", ["gru"]))}
+        procs = {name: subprocess.Popen(argv) for name, argv in (
+            ("minion", ["bash", str(script), "minion", "--items", "1"]),
+            ("gru", ["bash", str(script), "gru"]),
+            # a minion's own `timeout claude -p <prompt>` child: its prompt names run_member.sh
+            ("minion_child", ["timeout", "60", "bash", "-c", f"sleep 60 # bash {script} gru", "x"]))}
         try:
             time.sleep(0.3)
-            scoped = lambda pat: pat.replace("bash .*", f"bash {re.escape(d)}/.*", 1)  # noqa: E731
+            scoped = lambda pat: pat.replace("bash [^ ]*", f"bash {re.escape(d)}/[^ ]*", 1)  # noqa: E731
             body = "\n".join([f"PASS_PATTERN='{scoped(self.PASS)}'", f"MINION_PATTERN='{scoped(self.MINION)}'",
                               _fn(DEPLOY, "inflight_in"), _fn(DEPLOY, "minions_in"),
                               _fn(DEPLOY, "terminate_non_minions"), _fn(DEPLOY, "drain_budget_s"),
@@ -153,6 +164,7 @@ class DrainSparesMinions(unittest.TestCase):
             self.assertIn("minions=1 all=1", p.stdout)
             self.assertIsNotNone(procs["gru"].poll(), "the non-minion pass must get SIGTERM")
             self.assertIsNone(procs["minion"].poll(), "the minion must keep running")
+            self.assertIsNone(procs["minion_child"].poll(), "a process whose argv merely names a pass is not one")
         finally:
             for pr in procs.values():
                 pr.kill()
