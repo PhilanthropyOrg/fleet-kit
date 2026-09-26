@@ -158,6 +158,8 @@ jobs:
         run: python3 scripts/test_preflight_gate.py
       - name: run test_gru_red_prs_first.py
         run: python3 scripts/test_gru_red_prs_first.py
+      - name: run test_stale_claims.py
+        run: python3 scripts/test_stale_claims.py
       - name: run test_deploy_health_and_retire.py
         run: python3 scripts/test_deploy_health_and_retire.py
       - name: run test_kpi_calendar_day_gh265.py

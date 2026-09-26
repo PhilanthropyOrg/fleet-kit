@@ -15,4 +15,14 @@ set -uo pipefail
 [ -f "${FLEET_ENV_FILE:-./fleet.env}" ] && { set -a; . "${FLEET_ENV_FILE:-./fleet.env}"; set +a; }
 KIT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
+# Claims are leases (2026-09-26). Before gru's model starts, release every fleet:claimed item
+# nobody is working (no live runner, no PR/branch activity for FLEET_CLAIM_LEASE_MIN=60 min).
+# 12 hours of gru passes skipped 8 Reif-priority items a dead minion batch still "held", until
+# a human removed the label. Deterministic, fail-open (a failed sweep never blocks the pass);
+# gru step 0 reads the result with `stale_claims.py last`. Runs from the product checkout so gh
+# resolves the repo from its remote, the same way gru's own gh calls do.
+( cd "${FLEET_REPO:-/repo}" 2>/dev/null || true
+  timeout 300 python3 "$KIT_DIR/scripts/stale_claims.py" release ) \
+  || echo "[run_gru_fanout] stale_claims sweep failed (exit $?) -- continuing without it"
+
 exec bash "$KIT_DIR/scripts/run_member.sh" gru "$@"
