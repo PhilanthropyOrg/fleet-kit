@@ -370,7 +370,8 @@ inflight_in() {
     echo "${n:-0}"
 }
 
-# Bounded end of a retired build's drain. No pass checkpoint exists in this kit, so: SIGTERM
+# Bounded end of a retired build's drain. Only minion passes checkpoint (their SIGTERM trap
+# WIP-commits and pushes the branch, minion_checkpoint.py, 2026-09-26), so: SIGTERM
 # every in-flight pass -- run_member.sh's record_killed_pass trap writes a status=killed row,
 # which fleet_stats counts as interrupted and safe to re-run -- give them RETIRE_KILL_GRACE_S
 # to land those rows, then stop the container. SIGTERM goes to the passes directly because

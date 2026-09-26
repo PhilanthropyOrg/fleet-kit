@@ -21,7 +21,7 @@ single log again.
 |---|---|
 | `DEAD container` | `bash ~/fleet-kit/scripts/refresh_container.sh philanthropy` (podman restart with the rootlessport retry) |
 | `DEAD cron` (no tick >20 min) | Same command. A fresh container is the ONLY thing that has revived a wedged cron (fk#1171). Restarting the cron process inside does nothing; the watchdog already tried 24 times. |
-| `WAIT deploy` for >2h after a merge | `tail ~/fleet-kit-logs/auto_deploy.log`. `ABORT: working tree dirty` = an untracked file in `~/fleet-kit`; commit or delete it. Force: `cd ~/fleet-kit && FLEET_INSTANCE_DIR=$PWD/instances/nonprofit-atlas FLEET_CONTAINER_NAME=philanthropy bash scripts/deploy.sh` |
+| `WAIT deploy` for >2h after a merge | `tail ~/fleet-kit-logs/auto_deploy.log`. `ABORT: working tree dirty` = an untracked file in `~/fleet-kit`; commit or delete it. Force: `cd ~/fleet-kit && FLEET_HEALTH_TIMEOUT_S=300 FLEET_INSTANCE_DIR=$PWD/instances/nonprofit-atlas FLEET_CONTAINER_NAME=philanthropy bash scripts/deploy.sh && git rev-parse HEAD > ~/.cache/fleet-kit/auto_deploy.last_sha.philanthropy && date +%s > ~/.cache/fleet-kit/auto_deploy.last_sha.philanthropy.deployed_at`. Both tails matter: the 120s default health check false-fails, and without recording the sha auto_deploy redeploys the same build 5 min later, retiring (and at 15 min SIGTERMing) every pass the forced build started (2026-09-26 06:42, 10 passes). |
 | Roll back a bad deploy | `bash ~/fleet-kit/scripts/deploy.sh --rollback` (previous build is kept stopped as `philanthropy-retired`) |
 | Stop everything | `FLEET_ENABLED=false` in `~/fleet-kit/instances/nonprofit-atlas/fleet.env` (read per run, no restart needed). `FLEET_BUILDER_ENABLED` / `FLEET_REVIEWER_ENABLED` for one lane. |
 

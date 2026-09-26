@@ -917,6 +917,12 @@ record_killed_pass() {
   # does not run until `claude -p` exits on its own, which under a deploy cutover is never.
   pkill -TERM -P $$ 2>/dev/null || true
   log "pass KILLED by signal -- recording an interrupted run rather than vanishing"
+  # Save the minion's work before the container goes (deploy.sh allows 60s after SIGTERM):
+  # WIP commit + push first, draft PR if time allows; the next pass resumes the branch.
+  if [ "$MEMBER" = "minion" ] && [ -n "$WT_PATH" ] && [ -n "$ITEM" ] && [ "${FLEET_MINION_CHECKPOINT:-1}" = "1" ]; then
+    log "checkpoint: $(timeout "${FLEET_CHECKPOINT_KILL_BUDGET_S:-45}" python3 "$KIT_DIR/scripts/minion_checkpoint.py" save \
+      --wt "$WT_PATH" --branch "$WT_BRANCH" --items "$ITEM" --reason killed 2>&1 | tail -c 1500)"
+  fi
   # No FLEET-REPORT block exists (the pass never finished), so feed empty text and let
   # exit_code alone classify it. --usage-file is omitted deliberately: the real token spend
   # lives in the CLI's unread stream, and inventing a number here would be worse than null.
