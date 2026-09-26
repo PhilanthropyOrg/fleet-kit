@@ -159,7 +159,7 @@ def labels(issue: dict) -> set[str]:
 def is_eligible(issue: dict) -> bool:
     """Would gru's step 2a/2b pick this up if it were not claimed?"""
     lb = labels(issue)
-    if HUMAN_BLOCKED in lb:
+    if lb & set(board_github.NOT_FOR_MINIONS):
         return False
     return PRIORITY_LABEL in lb or (f"{PREFIX}backlog" in lb and bool(lb & TIER_LABELS))
 

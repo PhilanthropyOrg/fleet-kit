@@ -47,7 +47,9 @@ class Base(unittest.TestCase):
 
 class GateDropMessage(Base):
     def _run(self, n_unspecced):
-        items = [_item(100 + i, labels=("fleet:priority-high",)) for i in range(n_unspecced)]
+        # No Given/When/Then: a missing quality label is fixed mechanically since philanthropy#8218.
+        items = [_item(100 + i, labels=("fleet:priority-high", "quality:solid"),
+                       body="Vision-link: none (maintenance)") for i in range(n_unspecced)]
         items.append(_item(900, labels=("fleet:priority-high", "quality:solid")))
         p = gate_drops.plan(items, "gru-test")
         old = gate_drops.DROP_LOG
@@ -68,7 +70,7 @@ class GateDropMessage(Base):
             self.assertEqual(box[0]["kind"], "gate-drop")
             self.assertEqual(box[0]["items"], [100, 101, 102, 103])
             self.assertIn("4 of 5 candidates", box[0]["body"])
-            self.assertIn("quality-label (4): #100, #101, #102, #103", box[0]["body"])
+            self.assertIn("acceptance (4): #100, #101, #102, #103", box[0]["body"])
 
     def test_three_or_fewer_drops_send_nothing(self):
         p, res = self._run(3)

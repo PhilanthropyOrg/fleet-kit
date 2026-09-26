@@ -238,7 +238,8 @@ spawns exactly one). Your job, in order:
      --json number,title,body,labels,createdAt,comments --limit 200 --jq 'sort_by(.createdAt)'
    ```
    (`comments` needed for the Vision-link gate below — free in the same call.) Filter out
-   anything already `fleet:claimed` **or carrying `fleet:needs-human-op`** (a prior pass already
+   anything already `fleet:claimed` **or carrying `fleet:needs-human-op`** or
+   `fleet:needs-prod-access` (HQ's: prod DB, secrets, Cloudflare; philanthropy#8218) (a prior pass already
    confirmed the item is blocked on something no fleet member holds; re-claiming only
    re-confirms the block — gh#3920 found #2195 re-claimed and re-spawned 15+ times because this
    filter was missing). Fall back to `fleet:priority-medium` only once high is exhausted, then
@@ -314,7 +315,7 @@ spawns exactly one). Your job, in order:
    **Never silent — philanthropy#8215.** Reif, 2026-09-26: *"so gru passes on something with
    no quality label and then never alerts anyone?"* 26 of 30 priority-high items were dropped
    that day into gru.log alone. `gate_drops.py` makes every drop land somewhere: a
-   `fleet:reif-priority`/`fleet:reif-asked` item with no `quality:` label gets `quality:solid`
+   non-epic item with no `quality:` label gets `quality:solid`
    and is re-gated at once (`fixed`, and it is in `eligible`); a spec gap gets `fleet:needs-spec`
    plus one comment naming the missing piece, and the pass files ONE ask listing the items newly
    labeled (it reaches Reif in the next brief; `ask_id`); an epic or a world-class item awaiting
@@ -393,7 +394,7 @@ spawns exactly one). Your job, in order:
 
    Collect each candidate's `fleet:complexity-<1-10>` label with its number — marie's size
    estimate, what makes packing possible. No label means treat it as a 5 (median), never free.
-   Also collect its `lane:*` label as `"area"` (none -> `""`); step 5 batches same-area items
+   Also collect its `area:*` label as `"area"`, else its `lane:*` label (none -> `""`); step 5 batches same-area items
    together so one minion's worktree, tests and context cover related files. A `fleet:mega`
    item is ONE item here (its children are already closed into it) — pass it like any other.
 
@@ -577,7 +578,9 @@ spawns exactly one). Your job, in order:
    same as 09-25 09:19). The packer reads `$FLEET_MINION_TARGET_ITEMS` as a hard cap on items
    per batch, sends every complexity >= 5 item to its own minion (they run in PARALLEL), and
    keeps each batch's summed complexity inside minion's own `timeout_s`. Spawn exactly the
-   batches it returns; `run_member.sh` refuses a minion with more items than the cap. An item in
+   batches it returns; `run_member.sh` refuses a minion with more items than the cap. An `area:`
+   module gets ONE batch a pass (philanthropy#8218): remove `fleet:claimed` from each item in
+   `deferred` and name it in your report with its `why`; it goes next pass. An item in
    `over_timeout` still runs solo: name it in your report as likely to need a second pass.
    A minion that times out now leaves a pushed branch + DRAFT PR (minion_checkpoint.py), and
    the next minion handed those items resumes that branch automatically — so re-claim and

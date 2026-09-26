@@ -36,16 +36,18 @@ def _item(n, labels=(), body="", comments=()):
             "comments": [{"body": c} for c in comments]}
 
 
-def test_reif_item_with_no_quality_label_is_fixed_and_built_this_pass() -> None:
-    p = gd.plan([_item(1, ["fleet:reif-priority"], f"{VL}\n\n{GWT}")], "r1")
-    assert p["eligible"] == [1], p
-    assert {"number": 1, "op": "add_label", "label": "quality:solid"} in p["actions"], p["actions"]
-    assert p["dropped"][0]["action"] == "fixed" and p["ask"] is None, p
-    print("ok  reif item missing quality: label -> quality:solid, eligible now, no ask")
+def test_item_with_no_quality_label_is_fixed_and_built_this_pass() -> None:
+    # philanthropy#8218 widened this from Reif's items to every non-epic item.
+    for labels in (["fleet:reif-priority"], ["fleet:priority-high"]):
+        p = gd.plan([_item(1, labels, f"{VL}\n\n{GWT}")], "r1")
+        assert p["eligible"] == [1], p
+        assert {"number": 1, "op": "add_label", "label": "quality:solid"} in p["actions"], p["actions"]
+        assert p["dropped"][0]["action"] == "fixed" and p["ask"] is None, p
+    print("ok  any item missing quality: label -> quality:solid, eligible now, no ask")
 
 
 def test_spec_gap_gets_label_comment_and_one_ask() -> None:
-    items = [_item(2, ["fleet:priority-high"], f"{VL}\n\n{GWT}"),          # no quality label
+    items = [_item(2, ["quality:solid", "quality:ship-it"], f"{VL}\n\n{GWT}"),  # two quality labels
              _item(3, ["quality:solid"], VL),                                # no GWT
              _item(4, ["quality:solid"], GWT),                               # no Vision-link
              _item(5, ["quality:solid"], f"{VL}\n\n{GWT}")]                  # fine
@@ -86,7 +88,7 @@ def test_apply_labels_comments_logs_and_files_the_ask() -> None:
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     db = Path(tempfile.mkdtemp()) / "fleet.db"
-    p = gd.plan([_item(8, ["fleet:priority-high"], f"{VL}\n\n{GWT}")], "r5")
+    p = gd.plan([_item(8, ["fleet:priority-high", "quality:solid"], VL)], "r5")
     out = gd.apply(p, "o/r", "r5", run=run, db_path=str(db))
     assert ["gh", "issue", "edit", "8", "--repo", "o/r", "--add-label", gd.NEEDS_SPEC] in calls, calls
     assert any(c[:4] == ["gh", "issue", "comment", "8"] for c in calls), calls

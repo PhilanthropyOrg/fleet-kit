@@ -51,6 +51,8 @@ from items_arg import load_items  # noqa: E402
 COMPLEXITY_BASE = 1.35
 COMPLEXITY_ANCHOR = 5  # the median real item; cost multiplier here is exactly 1.0
 DEFAULT_COMPLEXITY = COMPLEXITY_ANCHOR  # an unlabelled item is assumed median, never free
+# philanthropy#8218: an area key with this prefix (a module label) gets at most one batch a pass.
+EXCLUSIVE_PREFIX = "area:"
 
 
 def complexity_multiplier(c: int | None, base: float = COMPLEXITY_BASE) -> float:
@@ -157,7 +159,7 @@ def calibrate_batch_turns(observed: list[dict], base: float = COMPLEXITY_BASE) -
 
 
 def cluster_by_area(items: list[dict]) -> list[dict]:
-    """Stable-group `items` by their "area" key (issue_cluster.area: the lane label), areas
+    """Stable-group `items` by their "area" key (issue_cluster.area: area:/lane label), areas
     ordered by their highest-priority member, marie's order kept inside each area. Items with
     no area form one group of their own. Pure reordering of an ALREADY-CHOSEN set: every item
     still ships this pass, so this never trades priority for volume -- it only decides which
@@ -224,6 +226,14 @@ def pack_batches(items: list[dict], turn_budget: float, unit_turns: float,
         item), a batch's summed complexity weight never exceeds
         `timeout_s * safety_margin / unit_seconds`. A lone item over it still ships solo, flagged
         `over_timeout` so gru can say so -- it is never merged with anything else.
+
+    2026-09-26 (philanthropy#8218: "Given two open issues touching the same module, When gru
+    dispatches, Then they go out as one batch run, not two parallel minions"). An EXCLUSIVE area
+    (an `area:` module label, see issue_cluster.area) appears in at most ONE batch per pass: two
+    minions on one module collide in the same files. An item whose area already has a batch it
+    cannot join (a cap closed it, or one side is a solo item) is returned in `deferred` with the
+    reason and goes out next pass, never silently dropped. Lane-only and "" areas are
+    unconstrained, as before: a lane is too coarse to serialize.
     """
     if unit_turns <= 0:
         raise ValueError(f"unit_turns must be > 0, got {unit_turns!r}")
@@ -239,6 +249,11 @@ def pack_batches(items: list[dict], turn_budget: float, unit_turns: float,
     current: list[dict] = []
     current_turns = 0.0
     current_weight = 0.0
+    area_home: dict[str, list[dict]] = {}   # exclusive area -> the one batch it lives in
+    deferred: list[dict] = []
+
+    def _defer(entry: dict, why: str) -> None:
+        deferred.append({**entry, "why": why})
 
     for it in cluster_by_area(items):
         c = it.get("complexity")
@@ -248,22 +263,39 @@ def pack_batches(items: list[dict], turn_budget: float, unit_turns: float,
         entry = {**it, "est_turns": round(cost, 2)}
         if max_weight and weight > max_weight:
             entry["over_timeout"] = True
+        key = str(it.get("area") or "")
+        exclusive = key.startswith(EXCLUSIVE_PREFIX)
+        home = area_home.get(key) if exclusive else None
 
         if c_int >= solo_complexity_floor or entry.get("over_timeout"):
+            if home is not None:
+                _defer(entry, f"{key} already has a batch this pass; a solo item would be a "
+                              "second minion in the same files")
+                continue
             # Set aside, not a flush: closing the open batch here split one area's small items
             # across two runs around the big one (2026-09-24), paying the overhead twice.
             batches.append([entry])
+            if exclusive:
+                area_home[key] = batches[-1]
             continue
 
-        if current and (current_turns + cost > effective_budget
-                        or (max_items and len(current) >= max_items)
-                        or (max_weight and current_weight + weight > max_weight)):
+        full = bool(current) and (current_turns + cost > effective_budget
+                                  or (max_items and len(current) >= max_items)
+                                  or (max_weight and current_weight + weight > max_weight))
+        if home is not None and (home is not current or full):
+            _defer(entry, f"{key}'s batch this pass is " +
+                   ("full (budget/count/timeout cap)" if home is current else
+                    "a solo item or already closed") + "; a second batch would collide in its files")
+            continue
+        if full:
             batches.append(current)
             current, current_turns, current_weight = [], 0.0, 0.0
 
         current.append(entry)
         current_turns += cost
         current_weight += weight
+        if exclusive:
+            area_home[key] = current
 
     if current:
         batches.append(current)
@@ -285,8 +317,10 @@ def pack_batches(items: list[dict], turn_budget: float, unit_turns: float,
         "max_batch_weight": round(max_weight, 2) if max_weight else None,
         "over_timeout": [it.get("number") for b in batches for it in b if it.get("over_timeout")],
         "n_areas": len({str(it.get("area") or "") for it in items}),
+        "deferred": deferred,
+        "n_deferred": len(deferred),
         "safety_margin": safety_margin,
-        "avg_batch_size": round(len(items) / len(batches), 2) if batches else 0,
+        "avg_batch_size": round(sum(len(b) for b in batches) / len(batches), 2) if batches else 0,
         "median_batch_size": (sorted(len(b) for b in batches)[len(batches) // 2] if batches else 0),
     }
 

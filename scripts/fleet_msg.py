@@ -27,7 +27,7 @@ escalation closes the message it points at too.
 
 Usage:
   fleet_msg.py send --from gru --to marie,jefe --kind gate-drop --key gate-drops --body TEXT [--items 1,2]
-  fleet_msg.py inbox --me marie [--render] [--mark-read] [--json]
+  fleet_msg.py inbox --me marie [--render] [--mark-read] [--json]   (--me hq: HQ on the host)
   fleet_msg.py ack   --me marie --id 12 --note "labeled #1 #2 quality:solid"
   fleet_msg.py reply --me marie --id 12 --reason "#3 is an epic; nothing to label"
   fleet_msg.py watchdog [--dry-run]
@@ -52,6 +52,10 @@ DEDUPE_S = float(os.environ.get("FLEET_MSG_DEDUPE_S", 6 * 3600))
 ESCALATE_AFTER_CADENCES = 2
 DEFAULT_CADENCE_S = 3600
 JEFE = "jefe"
+# Recipients with no members/<name>/ spec. `hq` is the Claude session on the host (not in the
+# container) that ticks every 30 min, merges finished checkpoint drafts and takes
+# fleet:needs-prod-access items (philanthropy#8218). It reads with `inbox --me hq`.
+HOST_MEMBERS_CADENCE_S = {"hq": 1800.0}
 REIF_TAG = "unacked member messages:"
 MSG_COLUMNS = ("id", "sender", "recipient", "kind", "key", "body", "items", "status", "sent_at",
                "read_at", "acked_at", "ack_note", "escalated_to", "escalated_at", "parent_id",
@@ -163,6 +167,8 @@ def cadence_s(member: str, specs: dict | None = None, env=os.environ) -> float:
         s = _hour_field_s(env[f"FLEET_{envname}_CADENCE"])
         if s:
             return s
+    if member in HOST_MEMBERS_CADENCE_S:
+        return HOST_MEMBERS_CADENCE_S[member]
     if specs is None:
         specs = _specs()
     sched = (specs.get(member) or {}).get("schedule") or {}

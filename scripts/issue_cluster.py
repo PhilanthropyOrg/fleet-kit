@@ -86,10 +86,21 @@ def lane(issue: dict) -> str:
     return ""
 
 
+AREA_PREFIX = "area:"
+
+
 def area(issue: dict) -> str:
-    """The batching key for fanout.pack_batches: the lane label (same module/owner family), or
-    "" when the item has none. Coarser than signature on purpose -- items that merely share a
-    lane still share worktree context, tests and reviewers, which is what amortizes."""
+    """The batching key for fanout.pack_batches: the item's `area:<slug>` label (the code module
+    it touches, e.g. `area:philanthropy:api/hq`) when it has one, else the lane label (same
+    owner family), else "". Coarser than signature on purpose -- items that merely share a
+    module still share worktree context, tests and reviewers, which is what amortizes.
+
+    philanthropy#8218: the lane is too coarse to stop two minions editing the same files in
+    parallel, so HQ labels every backlog item with its module and that label wins. Only an
+    `area:` key makes pack_batches hold the area to ONE batch per pass (fanout.EXCLUSIVE_PREFIX)."""
+    for name in sorted(_labels(issue)):
+        if name.startswith(AREA_PREFIX):
+            return name
     return lane(issue)
 
 

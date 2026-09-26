@@ -83,6 +83,15 @@ cadences, then folds jefe's unacked ones into ONE ask for Reif. Senders today: g
 owner (PR idle >4h, `check.sh`), sentry → the-fixer (failing journey, `journey_issue_filer.py`).
 Inspect: `podman exec -e FLEET_LOG_DIR=/var/log/fleet-kit philanthropy python3 /fleet-kit/scripts/fleet_msg.py summary`.
 
+**hq is a member on the bus (philanthropy#8218)**, but not a container member: it is the Claude
+session on the dino host, ticking every 30 min (its cadence for the watchdog). Before each gru
+pass, run_gru_fanout.sh sends it `prod-access` (open `fleet:needs-prod-access` items: prod DB,
+secrets, Cloudflare, which gru and minions skip) and `merge-ready` (minion drafts that are done
+and green: `minion_checkpoint.py ready --pr N --ci`, then `gh pr merge N --auto --squash`).
+It reads with `podman exec -e FLEET_LOG_DIR=/var/log/fleet-kit philanthropy python3 /fleet-kit/scripts/fleet_msg.py inbox --me hq --render`
+and acks/replies like any member. The same pre-gru step runs `gate_drops.py intake` over the
+whole backlog (quality:solid default; needs-spec + comment + one message to marie/jefe).
+
 `entrypoint.sh` renders these into `/etc/cron.d/fleet-kit` at container start; the manifest's
 `cadence` is documentation of that line, not the source of it. `FLEET_CRON_MEMBERS` in
 fleet.env narrows the set. One invalid crontab field silently discards the whole file

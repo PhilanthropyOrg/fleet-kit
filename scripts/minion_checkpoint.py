@@ -31,6 +31,13 @@ auto-merge, ran `gh pr ready` (minion.md step 7 said to), re-armed, and the part
     checkpoint_pr_hook.py blocks a raw `gh pr ready` / `gh pr merge` on one.
 `ready` strips MARKER on its way out, so a finished PR is an ordinary PR again.
 
+HQ FINISHES THE GREEN ONES (philanthropy#8218 step 4). A minion that finished its items but
+died before `ready` leaves a draft nobody readies. `complete` lists open minion drafts whose
+title/body pass done_gaps and whose CI is all green on the head; `ready --pr N --ci` readies one
+from anywhere (HQ on the host has no worktree on the branch), taking green CI on the PR's head in
+place of the local receipt. Same done-criteria, so #8110 still stays a draft. `complete
+--notify` also messages `hq` (kind merge-ready) on the fleet_msg bus.
+
 RESUME. `find` returns the newest pushed minion branch whose items are all in this pass's
 items, so run_member.sh can build the worktree ON that branch (same name, same draft PR)
 instead of fresh off main. A branch carrying an item this pass was NOT handed is never picked:
@@ -41,6 +48,8 @@ Usage:
   minion_checkpoint.py find --items 1,2 [--repo DIR]      # prints a branch name, or nothing
   minion_checkpoint.py watch --wt DIR --branch B --items 1,2 --deadline EPOCH --pid PID
   minion_checkpoint.py ready [--wt DIR] [--pr N]           # the only way out of draft
+  minion_checkpoint.py ready --pr N --ci                    # no worktree: green CI on the head
+  minion_checkpoint.py complete [--repo DIR] [--notify]     # drafts `ready --ci` would accept
 """
 from __future__ import annotations
 
@@ -55,6 +64,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from pretest_push_hook import receipt_path  # noqa: E402 -- one definition of the receipt
+import pr_ci_wait  # noqa: E402 -- one definition of "the newest attempt of each check"
 
 MARKER = "<!-- fleet-checkpoint -->"
 TITLE_PREFIX = "WIP (minion checkpoint)"
@@ -258,12 +268,24 @@ def done_gaps(title: str, body: str, items: list[int]) -> list[str]:
     return gaps
 
 
-def ready(wt: str, pr: int | None = None) -> dict:
-    """Mark this pass's checkpoint PR ready, only if its done-criteria are met."""
-    rc, branch = _git(wt, "rev-parse", "--abbrev-ref", "HEAD")
+def ci_green(rollup: list[dict] | None) -> bool:
+    """Every check's newest attempt finished OK, and there is at least one. Pure."""
+    checks = pr_ci_wait.latest_checks(rollup or [])
+    return bool(checks) and all(
+        (c.get("conclusion") or c.get("state") or "").upper() in pr_ci_wait.DONE_OK
+        for c in checks.values())
+
+
+def ready(wt: str, pr: int | None = None, ci: bool = False) -> dict:
+    """Mark this pass's checkpoint PR ready, only if its done-criteria are met. With `ci`
+    (HQ, no worktree on the branch): green CI on the PR's head stands in for the receipt."""
+    if ci and not pr:
+        return {"ready": False, "branch": "", "gaps": ["--ci needs --pr N"]}
+    rc, branch = (0, "") if ci else _git(wt, "rev-parse", "--abbrev-ref", "HEAD")
     res: dict = {"ready": False, "branch": branch if rc == 0 else ""}
     rc, out = _gh(["pr", "view", str(pr) if pr else res["branch"], "--json",
-                   "number,title,body,headRefName,headRefOid,isDraft,state"], cwd=wt)
+                   "number,title,body,headRefName,headRefOid,isDraft,state"
+                   + (",statusCheckRollup" if ci else "")], cwd=wt)
     try:
         v = json.loads(out) if rc == 0 else None
     except ValueError:
@@ -272,16 +294,22 @@ def ready(wt: str, pr: int | None = None) -> dict:
         res["gaps"] = [f"could not read the PR: {(out or '')[-200:]}"]
         return res
     res["pr"] = v["number"]
-    if v.get("headRefName") != res["branch"]:
+    if ci:
+        res["branch"] = v.get("headRefName") or ""
+    elif v.get("headRefName") != res["branch"]:
         res["gaps"] = [f"PR #{v['number']} is on {v.get('headRefName')!r}, this worktree is on "
                        f"{res['branch']!r}: only the pass building that branch may mark it ready"]
         return res
     gaps = done_gaps(v.get("title") or "", v.get("body") or "", branch_items(res["branch"]))
-    rc, head = _git(wt, "rev-parse", "HEAD")
-    if rc != 0 or head != v.get("headRefOid"):
-        gaps.append("local HEAD is not the PR's head: push first")
-    elif not head_is_green(wt):
-        gaps.append("HEAD has no passing verified_test.sh receipt: run it")
+    if ci:
+        if not ci_green(v.get("statusCheckRollup")):
+            gaps.append("CI on the PR's head is not all green: wait for it")
+    else:
+        rc, head = _git(wt, "rev-parse", "HEAD")
+        if rc != 0 or head != v.get("headRefOid"):
+            gaps.append("local HEAD is not the PR's head: push first")
+        elif not head_is_green(wt):
+            gaps.append("HEAD has no passing verified_test.sh receipt: run it")
     if gaps:
         res["gaps"] = gaps
         return res
@@ -297,6 +325,52 @@ def ready(wt: str, pr: int | None = None) -> dict:
             return res
     res["ready"] = True
     return res
+
+
+# --- complete: green drafts HQ can finish (philanthropy#8218) -----------------------------
+
+COMPLETE_FIELDS = "number,title,body,isDraft,headRefName,headRefOid,statusCheckRollup"
+
+
+def complete_from(prs: list[dict]) -> list[dict]:
+    """Open minion DRAFT PRs that are done (done_gaps empty) and green on their head. Pure."""
+    out = []
+    for p in prs:
+        items = branch_items(p.get("headRefName") or "")
+        if not (p.get("isDraft") and items):
+            continue
+        if done_gaps(p.get("title") or "", p.get("body") or "", items):
+            continue
+        if not ci_green(p.get("statusCheckRollup")):
+            continue
+        out.append({"pr": int(p["number"]), "branch": p["headRefName"], "items": items,
+                    "head": p.get("headRefOid"), "title": p.get("title") or ""})
+    return sorted(out, key=lambda r: r["pr"])
+
+
+def complete(repo: str) -> list[dict] | None:
+    rc, out = _gh(["pr", "list", "--state", "open", "--draft", "--limit", "200",
+                   "--json", COMPLETE_FIELDS], cwd=repo, timeout=120)
+    if rc != 0:
+        return None
+    try:
+        return complete_from(json.loads(out))
+    except json.JSONDecodeError:
+        return None
+
+
+def merge_ready_message(done: list[dict]) -> dict | None:
+    """ONE bus message to hq naming the drafts to finish. Pure; keyed on the PR set."""
+    if not done:
+        return None
+    lines = [f"{len(done)} minion draft(s) are done and green. For each: "
+             "`minion_checkpoint.py ready --pr N --ci`, then `gh pr merge N --auto --squash "
+             "--match-head-commit <head>`."]
+    lines += [f"- PR #{d['pr']} ({d['head'][:10] if d.get('head') else '?'}): {d['title']}"
+              for d in done]
+    return {"to": ["hq"], "kind": "merge-ready",
+            "key": "merge-ready:" + ",".join(str(d["pr"]) for d in done),
+            "body": "\n".join(lines), "items": [d["pr"] for d in done]}
 
 
 # --- watch ---------------------------------------------------------------------------------
@@ -351,9 +425,30 @@ def main(argv: list[str] | None = None) -> int:
     r = sub.add_parser("ready")
     r.add_argument("--wt", default=os.environ.get("WT_PATH") or ".")
     r.add_argument("--pr", type=int)
+    r.add_argument("--ci", action="store_true",
+                   help="no worktree on the branch (HQ): green CI on the PR head replaces the receipt")
+    cp = sub.add_parser("complete", help="read-only: done + green minion drafts, as JSON")
+    cp.add_argument("--repo", default=".")
+    cp.add_argument("--notify", action="store_true", help="also message hq (kind merge-ready)")
     a = ap.parse_args(argv)
+    if a.cmd == "complete":
+        res = complete(a.repo)
+        if res is None:
+            print("error: gh pr list failed", file=sys.stderr)
+            return 1
+        m = merge_ready_message(res) if a.notify else None
+        if m:
+            try:
+                import fleet_db
+                import fleet_msg
+                fleet_msg.send(fleet_db.connect(), "gru", m["to"], m["kind"], m["key"], m["body"],
+                               m["items"])
+            except Exception as exc:  # noqa: BLE001 -- the list itself must still print
+                print(f"minion_checkpoint: merge-ready message not sent: {exc}", file=sys.stderr)
+        print(json.dumps(res))
+        return 0
     if a.cmd == "ready":
-        res = ready(a.wt, a.pr)
+        res = ready(a.wt, a.pr, ci=a.ci)
         print(json.dumps(res))
         if not res["ready"]:
             print("NOT READY -- the PR stays a draft:\n" + "\n".join(f"  - {g}" for g in res["gaps"]),
