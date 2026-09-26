@@ -101,6 +101,18 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# 2026-09-26: gru handed ONE minion #7938,#7939,#7941,#7950 (four complexity-5 items) on an
+# instance set to FLEET_MINION_TARGET_ITEMS=3; it ran its full timeout and left nothing. The
+# packer (fanout.py batches) now enforces the cap; this is the backstop for a dispatch that
+# skipped it. Refuse in one second, not ninety minutes -- gru sees the failure and splits.
+if [ "$MEMBER" = "minion" ] && [ -n "${RAW_ITEMS:-}" ] && [ "${FLEET_MINION_TARGET_ITEMS:-0}" -gt 0 ] 2>/dev/null; then
+  N_ITEMS=$(printf '%s' "$RAW_ITEMS" | tr ',' '\n' | grep -c .)
+  if [ "$N_ITEMS" -gt "$FLEET_MINION_TARGET_ITEMS" ]; then
+    echo "FATAL: minion --items has $N_ITEMS items; FLEET_MINION_TARGET_ITEMS=$FLEET_MINION_TARGET_ITEMS. Re-pack with fanout.py batches and spawn one minion per batch." >&2
+    exit 2
+  fi
+fi
+
 # Structured mirror of a dispatcher's `lane=<name>` --task prefix (nerd.md's contract with
 # datta). Extracted here, once, rather than left for every consumer to re-parse free text --
 # datta's own self-critique flagged repeated turns lost to fragile keyword-matching of
@@ -564,6 +576,13 @@ if [ "$WORKTREE_ENABLED" = "True" ] && [ "$DRY_RUN" -ne 1 ]; then
   DEFAULT_BRANCH="${DEFAULT_BRANCH:-main}"
   WT_PATH="${TMPDIR:-/tmp}/fleet-run-${MEMBER}${ITEM:+-item$ITEM}-$$"
   WT_BRANCH="member/${MEMBER}${ITEM:+-item$ITEM}-$$-$(date +%s)"
+  # A minion item whose last pass timed out left a pushed branch + draft PR behind
+  # (minion_checkpoint.py). Resume ON it -- same branch, same PR -- instead of from zero.
+  RESUME_BRANCH=""
+  if [ "$MEMBER" = "minion" ] && [ -n "$ITEM" ] && [ "${FLEET_MINION_RESUME:-1}" = "1" ]; then
+    RESUME_BRANCH=$(python3 "$KIT_DIR/scripts/minion_checkpoint.py" find --items "$ITEM" --repo "$REPO" 2>>"$LOG" || true)
+    [ -n "$RESUME_BRANCH" ] && log "$MEMBER: resuming checkpoint branch $RESUME_BRANCH"
+  fi
   . "$KIT_DIR/scripts/worktree_lock.sh"
   # gh#684: a blanket `git worktree prune` deletes a SIBLING container's still-live worktree
   # entry during a rolling cutover (#626) -- $REPO/.git/worktrees is a shared mount, but the
@@ -585,8 +604,21 @@ if [ "$WORKTREE_ENABLED" = "True" ] && [ "$DRY_RUN" -ne 1 ]; then
       if git -C "$REPO" rev-parse --verify --quiet "refs/heads/$WT_BRANCH" >/dev/null 2>&1; then
         git -C "$REPO" branch -D "$WT_BRANCH" >/dev/null 2>&1
       fi
-      git -C "$REPO" worktree add "$WT_PATH" -b "$WT_BRANCH" "origin/$DEFAULT_BRANCH"
-      rc=$?
+      rc=1
+      if [ -n "$RESUME_BRANCH" ] && git -C "$REPO" fetch origin "+refs/heads/$RESUME_BRANCH:refs/remotes/origin/$RESUME_BRANCH" >/dev/null 2>&1; then
+        git -C "$REPO" worktree add -B "$RESUME_BRANCH" "$WT_PATH" "origin/$RESUME_BRANCH" >>"$LOG" 2>&1
+        rc=$?
+        if [ "$rc" -eq 0 ]; then
+          WT_BRANCH="$RESUME_BRANCH"
+        else
+          log "create_run_worktree: could not resume $RESUME_BRANCH (rc=$rc) -- starting fresh"
+          RESUME_BRANCH=""
+        fi
+      fi
+      if [ "$rc" -ne 0 ]; then
+        git -C "$REPO" worktree add "$WT_PATH" -b "$WT_BRANCH" "origin/$DEFAULT_BRANCH"
+        rc=$?
+      fi
       # Stamp BEFORE releasing the lock: a concurrent prune (this container or another)
       # must never observe a registered-but-unstamped entry.
       [ "$rc" -eq 0 ] && worktree_stamp_container_id "$REPO" "$WT_PATH" 2>>"$LOG"
@@ -675,6 +707,15 @@ fi
 # ITEM_LIST (only set by --items, the human-readable "#1, #2, #3" form) takes priority over
 # ITEM's underscore-joined RUN_ID form -- #123_456 read literally as a prompt would look like
 # one mangled issue number instead of three separate ones (2026-09-14, batching for minion.md).
+if [ -n "${RESUME_BRANCH:-}" ]; then
+  PROMPT="RESUMING: a previous pass on these items ran out of time. Your worktree is ON its branch
+\`$RESUME_BRANCH\` (git log origin/main..HEAD shows what it built; a 'wip(checkpoint)' commit is
+untested work saved at the timeout). Its open DRAFT PR for this branch is YOURS, not a
+sibling's fix: continue from it, push to this same branch, update that PR's body and run
+\`gh pr ready\` when done -- do not open a second PR and do not restart from main.
+
+$PROMPT"
+fi
 if [ -n "${ITEM_LIST:-}" ]; then
   PROMPT="Your assigned issue numbers for this run are: $ITEM_LIST. Build each one in this
 order, in one PR covering all of them. Do not work any issue outside this list.
@@ -971,9 +1012,31 @@ log "pass start: acquired concurrency slot (ceiling=$CLAUDE_CONCURRENCY_N)"
     | while IFS= read -r line; do log "$line"; done
   exit "${PIPESTATUS[0]}" ) &
 PASS_PID=$!
+# Checkpointing (2026-09-26): beside a minion pass, push its branch + open a DRAFT PR on the
+# first green commit and again FLEET_CHECKPOINT_LEAD_S before the timeout, so a pass the
+# timeout kills still leaves its work where the next pass resumes it.
+CHECKPOINT_PID=""
+if [ "$MEMBER" = "minion" ] && [ -n "$WT_PATH" ] && [ -n "$ITEM" ] && [ "${FLEET_MINION_CHECKPOINT:-1}" = "1" ]; then
+  # Own subshell with the slot (7) and dispatch (9) lock fds closed: the watcher must never
+  # hold either past the pass it watches.
+  ( exec 7>&- 9>&-
+    python3 "$KIT_DIR/scripts/minion_checkpoint.py" watch --wt "$WT_PATH" --branch "$WT_BRANCH" \
+      --items "$ITEM" --pid "$PASS_PID" --deadline "$(( $(date +%s) + TIMEOUT_S ))" 2>&1 \
+      | while IFS= read -r line; do log "checkpoint: $line"; done ) &
+  CHECKPOINT_PID=$!
+fi
 wait "$PASS_PID"
 RC=$?
 claude_slot_release
+if [ -n "$CHECKPOINT_PID" ]; then
+  pkill -TERM -P "$CHECKPOINT_PID" 2>/dev/null; kill "$CHECKPOINT_PID" 2>/dev/null; wait "$CHECKPOINT_PID" 2>/dev/null
+fi
+# Timed out: the model is dead, so commit what it left uncommitted too, push, draft PR --
+# before cleanup_run_worktree removes the worktree on EXIT.
+if [ "$RC" -eq 124 ] && [ "$MEMBER" = "minion" ] && [ -n "$WT_PATH" ] && [ -n "$ITEM" ] && [ "${FLEET_MINION_CHECKPOINT:-1}" = "1" ]; then
+  log "checkpoint: $(timeout 300 python3 "$KIT_DIR/scripts/minion_checkpoint.py" save --wt "$WT_PATH" \
+    --branch "$WT_BRANCH" --items "$ITEM" --reason timed-out 2>&1 | tail -c 1500)"
+fi
 
 # Recover what the subshell selected. Fall back to the (empty) exported vars if the pool
 # never wrote -- e.g. the account_pool_run shim on line 235 when the pool is absent.

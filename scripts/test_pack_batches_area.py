@@ -34,10 +34,10 @@ def _ids(batch):
 
 
 def test_pack_batches_clusters_by_area() -> None:
-    items = [{"number": n, "complexity": 5, "area": a} for n, a in
+    items = [{"number": n, "complexity": 4, "area": a} for n, a in
              [(1, "lane:ui"), (2, "lane:devops"), (3, "lane:ui"), (4, "lane:devops"),
               (5, "lane:ui"), (6, "lane:devops")]]
-    r = fanout.pack_batches(items, turn_budget=30 * 3 / 0.7, unit_turns=30)
+    r = fanout.pack_batches(items, turn_budget=0, unit_turns=30, target_items=3)
     got = [_ids(b) for b in r["batches"]]
     assert got == [[1, 3, 5], [2, 4, 6]], f"batches mix areas: {got}"
     assert r["n_areas"] == 2, r
@@ -45,9 +45,10 @@ def test_pack_batches_clusters_by_area() -> None:
 
 
 def test_pack_batches_target_items_raises_budget_from_calibration() -> None:
-    items = [{"number": n, "complexity": 5, "area": "lane:fleet"} for n in range(10)]
-    # Old shape: the budget only fits one median item per batch -> 10 runs for 10 items.
-    r = fanout.pack_batches(items, turn_budget=60, unit_turns=30, target_items=8)
+    # complexity 3 (0.55 of a median item): complexity >= 5 goes solo since 2026-09-26.
+    items = [{"number": n, "complexity": 3, "area": "lane:fleet"} for n in range(10)]
+    # Old shape: the budget only fits a couple of items per batch -> many runs for 10 items.
+    r = fanout.pack_batches(items, turn_budget=30, unit_turns=30, target_items=8)
     sizes = [len(b["items"]) for b in r["batches"]]
     assert sizes == [8, 2], f"target_items=8 should size batches to 8 median items, got {sizes}"
     assert r["effective_turn_budget"] == 240, r
@@ -63,7 +64,7 @@ def test_pack_batches_big_item_still_solo_and_priority_kept_inside_area() -> Non
              {"number": 3, "complexity": 2, "area": "lane:ui"}]
     r = fanout.pack_batches(items, turn_budget=0, unit_turns=20, target_items=8)
     assert [_ids(b) for b in r["batches"]] == [[1], [2, 3]], r["batches"]
-    print("ok  pack_batches: a complexity>=8 item stays solo; order inside an area is marie's")
+    print("ok  pack_batches: a complexity>=5 item stays solo; order inside an area is marie's")
 
 
 def test_cost_bridge_splits_a_batch_run_across_its_items() -> None:

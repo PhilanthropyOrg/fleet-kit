@@ -107,6 +107,9 @@ work done).
    ```
    Run this per item, `gh pr diff <n>` anything naming that issue or touching its files, then
    state which case you're in for EACH item before writing any code:
+   A DRAFT PR titled `WIP (minion checkpoint)` on YOUR current branch is not a sibling's fix:
+   it is an earlier pass's checkpoint that you are resuming (your prompt says RESUMING). Build
+   on it; do not drop the item over it.
    - **already fixed** (merged, or an open mergeable PR) — drop this item from your batch, say
      so and name the PR that beat you, and move to your next item. Do not stop the whole batch
      over one item that's already fixed — that is a successful outcome for that item, not a
@@ -203,7 +206,15 @@ work done).
    ```
    A diff that's mostly deletions, or much larger than your actual work, means your branch is
    stale and reverting someone else's work — merge the default branch and re-check.
-7. **Open ONE PR for the whole batch**, referencing every issue number in the body — `Closes
+6b. **Checkpoint early: push and open a DRAFT PR after your first green commit** (2026-09-26:
+   two 5400s batches timed out with nothing pushed and the next pass restarted from zero).
+   Once `verified_test.sh` is green on your first real commit: `git push -u origin HEAD`, then
+   `gh pr create --draft` naming every item as `Part of #N`. run_member.sh also does this for
+   you (on the first green commit, again ~10 min before your timeout, and with a WIP commit if
+   the timeout kills you), so a draft PR may already exist for your branch — then step 7 edits
+   that PR instead of opening a new one.
+7. **Open ONE PR for the whole batch** (or, if a draft already exists for your branch, `gh pr
+   edit` its title/body and `gh pr ready` it), referencing every issue number in the body — `Closes
    #N` for each item you fully finished with evidence, `Part of #N` + a `Remaining:` line for
    each you didn't (see step 1's Closes/Fixes rule, applied per item, not once for the whole
    PR). A batch PR that closes 2 of 3 items and states plainly what's left on the third is a

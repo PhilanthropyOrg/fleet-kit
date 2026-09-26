@@ -542,11 +542,23 @@ spawns exactly one). Your job, in order:
 
    ```
    python3 /fleet-kit/scripts/fanout.py batches \
-     --turn-budget 0 --target-items ${FLEET_MINION_TARGET_ITEMS:-8} \
+     --turn-budget 0 \
      --observed "$BATCH_OBSERVED" \
      --items '[{"number":3253,"complexity":3,"area":"lane:ui"},{"number":3252,"complexity":5,"area":"lane:devops"}, ...]'  # `chosen`, marie's order
    ```
-   `--turn-budget 0 --target-items N` (2026-09-24) makes each batch's budget `unit_turns * N` —
+   **Never type `--target-items`, `--solo-complexity-floor` or `--timeout-s` yourself** (2026-09-26:
+   a pass typed `--target-items 8` on an instance set to 3 and packed #7938 #7939 #7941 #7950,
+   four complexity-5 items, into ONE minion; it hit its 5400s timeout with no PR, ~90 min lost,
+   same as 09-25 09:19). The packer reads `$FLEET_MINION_TARGET_ITEMS` as a hard cap on items
+   per batch, sends every complexity >= 5 item to its own minion (they run in PARALLEL), and
+   keeps each batch's summed complexity inside minion's own `timeout_s`. Spawn exactly the
+   batches it returns; `run_member.sh` refuses a minion with more items than the cap. An item in
+   `over_timeout` still runs solo: name it in your report as likely to need a second pass.
+   A minion that times out now leaves a pushed branch + DRAFT PR (minion_checkpoint.py), and
+   the next minion handed those items resumes that branch automatically — so re-claim and
+   re-dispatch a timed-out item as usual; do not treat its draft PR as someone else's fix.
+
+   `--turn-budget 0` with the env target (2026-09-24) makes each batch's budget `unit_turns * N` —
    N median items at the turn cost real batch runs actually paid, not minion's `timeout_s`
    misread as turns. `pack_batches` groups items by `area` (areas in priority order of their
    top item, marie's order inside each) and closes a batch only on budget, so a small area tops

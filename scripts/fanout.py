@@ -175,7 +175,8 @@ def cluster_by_area(items: list[dict]) -> list[dict]:
 
 def pack_batches(items: list[dict], turn_budget: float, unit_turns: float,
                  base: float = COMPLEXITY_BASE, safety_margin: float = 0.7,
-                 solo_complexity_floor: int = 8, target_items: int = 0) -> dict:
+                 solo_complexity_floor: int = 5, target_items: int = 0,
+                 timeout_s: float = 0, unit_seconds: float = 0) -> dict:
     """Group an already-chosen, priority-ordered item list into minion batches, sized by real
     complexity-weighted turn cost against `turn_budget` -- NOT a fixed item count.
 
@@ -211,6 +212,18 @@ def pack_batches(items: list[dict], turn_budget: float, unit_turns: float,
         budget to what `target_items` median items cost at the CALIBRATED unit_turns --
         `max(turn_budget * safety_margin, unit_turns * target_items)`. turn_budget=0 means
         "no separate ceiling, the calibrated target IS the budget".
+
+    2026-09-26 (gru packed 7938/7939/7941/7950, four complexity-5 items, into ONE minion at
+    02:37 and again 09-25 09:19; both hit minion's 5400s timeout, rc=124, no PR, ~90 min lost
+    each). target_items only ever RAISED the budget, so it was a floor, never a cap, and the
+    solo floor sat at 8. Three hard limits now, whatever the turn budget says:
+      * COUNT CAP. A batch never holds more than `target_items` items (0 = no cap).
+      * SOLO AT 5. An item at or above `solo_complexity_floor` (default 5, the median) is its
+        own minion, so big items run in PARALLEL instead of queueing inside one timeout.
+      * TIMEOUT CEILING. With `timeout_s` and `unit_seconds` (wall-clock of one complexity-5
+        item), a batch's summed complexity weight never exceeds
+        `timeout_s * safety_margin / unit_seconds`. A lone item over it still ships solo, flagged
+        `over_timeout` so gru can say so -- it is never merged with anything else.
     """
     if unit_turns <= 0:
         raise ValueError(f"unit_turns must be > 0, got {unit_turns!r}")
@@ -220,27 +233,37 @@ def pack_batches(items: list[dict], turn_budget: float, unit_turns: float,
     effective_budget = max(turn_budget * safety_margin, unit_turns * max(0, int(target_items)))
     if effective_budget <= 0:
         raise ValueError("turn_budget and target_items are both 0; nothing to size a batch against")
+    max_items = max(0, int(target_items))
+    max_weight = (timeout_s * safety_margin / unit_seconds) if timeout_s > 0 and unit_seconds > 0 else 0.0
     batches: list[list[dict]] = []
     current: list[dict] = []
     current_turns = 0.0
+    current_weight = 0.0
 
     for it in cluster_by_area(items):
         c = it.get("complexity")
         c_int = max(1, min(10, int(c))) if c is not None else DEFAULT_COMPLEXITY
-        cost = unit_turns * complexity_multiplier(c, base)
+        weight = complexity_multiplier(c, base)
+        cost = unit_turns * weight
+        entry = {**it, "est_turns": round(cost, 2)}
+        if max_weight and weight > max_weight:
+            entry["over_timeout"] = True
 
-        if c_int >= solo_complexity_floor:
+        if c_int >= solo_complexity_floor or entry.get("over_timeout"):
             # Set aside, not a flush: closing the open batch here split one area's small items
             # across two runs around the big one (2026-09-24), paying the overhead twice.
-            batches.append([{**it, "est_turns": round(cost, 2)}])
+            batches.append([entry])
             continue
 
-        if current and current_turns + cost > effective_budget:
+        if current and (current_turns + cost > effective_budget
+                        or (max_items and len(current) >= max_items)
+                        or (max_weight and current_weight + weight > max_weight)):
             batches.append(current)
-            current, current_turns = [], 0.0
+            current, current_turns, current_weight = [], 0.0, 0.0
 
-        current.append({**it, "est_turns": round(cost, 2)})
+        current.append(entry)
         current_turns += cost
+        current_weight += weight
 
     if current:
         batches.append(current)
@@ -256,6 +279,11 @@ def pack_batches(items: list[dict], turn_budget: float, unit_turns: float,
         "turn_budget": turn_budget,
         "effective_turn_budget": round(effective_budget, 2),
         "target_items": int(target_items),
+        "solo_complexity_floor": int(solo_complexity_floor),
+        "timeout_s": timeout_s,
+        "unit_seconds": unit_seconds,
+        "max_batch_weight": round(max_weight, 2) if max_weight else None,
+        "over_timeout": [it.get("number") for b in batches for it in b if it.get("over_timeout")],
         "n_areas": len({str(it.get("area") or "") for it in items}),
         "safety_margin": safety_margin,
         "avg_batch_size": round(len(items) / len(batches), 2) if batches else 0,
@@ -286,6 +314,30 @@ def _run_pack(a) -> int:
     return 0
 
 
+def _capped_target_items(asked: int | None) -> int:
+    """$FLEET_MINION_TARGET_ITEMS is the instance's CEILING, not a suggestion: gru's 02:37
+    09-26 pass typed `--target-items 8` on an instance set to 3 and packed four complexity-5
+    items into one minion. The smaller of the two wins; either being 0/unset means the other."""
+    env = int(os.environ.get("FLEET_MINION_TARGET_ITEMS") or 0)
+    asked = int(asked or 0)
+    if env and asked:
+        return min(env, asked)
+    return env or asked or 8
+
+
+def _minion_timeout_s() -> float:
+    """minion's own timeout_s from its spec -- the wall clock a batch must fit inside."""
+    env = os.environ.get("FLEET_MINION_TIMEOUT_S")
+    if env:
+        return float(env)
+    spec = Path(__file__).resolve().parent.parent / "members" / "minion" / "minion.fleet.json"
+    try:
+        d = json.loads(spec.read_text())
+        return float((d.get("mandate") or {}).get("limits", {}).get("timeout_s") or d.get("timeout_s") or 0)
+    except (OSError, ValueError):
+        return 0.0
+
+
 def _run_pack_batches(a) -> int:
     items = load_items(a.items)
     unit = a.unit_turns
@@ -304,7 +356,8 @@ def _run_pack_batches(a) -> int:
         result = pack_batches(items, a.turn_budget, unit, base=a.base,
                               safety_margin=a.safety_margin,
                               solo_complexity_floor=a.solo_complexity_floor,
-                              target_items=a.target_items)
+                              target_items=_capped_target_items(a.target_items),
+                              timeout_s=a.timeout_s, unit_seconds=a.unit_seconds)
     except ValueError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
@@ -349,11 +402,22 @@ def main(argv=None) -> int:
                            help="fraction of turn-budget to actually pack against, leaving "
                                 "headroom for shared batch overhead (default 0.7)")
     batches_p.add_argument("--target-items", type=int,
-                           default=int(os.environ.get("FLEET_MINION_TARGET_ITEMS") or 8),
-                           help="raise each batch's budget to this many median items at the "
-                                "calibrated unit (default: $FLEET_MINION_TARGET_ITEMS, else 8; 0 = off)")
-    batches_p.add_argument("--solo-complexity-floor", type=int, default=8,
-                           help="an item at or above this complexity is always its own batch (default 8)")
+                           default=None,
+                           help="size each batch to this many median items at the calibrated unit "
+                                "AND never put more items than this in one batch; "
+                                "$FLEET_MINION_TARGET_ITEMS is a ceiling on it (default: that, else 8)")
+    batches_p.add_argument("--solo-complexity-floor", type=int,
+                           default=int(os.environ.get("FLEET_MINION_SOLO_COMPLEXITY") or 5),
+                           help="an item at or above this complexity is always its own batch "
+                                "(default $FLEET_MINION_SOLO_COMPLEXITY, else 5)")
+    batches_p.add_argument("--timeout-s", type=float, default=None,
+                           help="minion's wall-clock timeout (default $FLEET_MINION_TIMEOUT_S, "
+                                "else members/minion/minion.fleet.json timeout_s; 0 = no ceiling)")
+    batches_p.add_argument("--unit-seconds", type=float,
+                           default=float(os.environ.get("FLEET_MINION_UNIT_SECONDS") or 1800),
+                           help="wall-clock of one complexity-5 item inside a minion pass, CI "
+                                "loop included (default $FLEET_MINION_UNIT_SECONDS, else 1800: "
+                                "single c5 runs took up to ~2500s on dino, 09-19..09-26)")
 
     # Backward compatible: no subcommand and --allowance-pct present -> old `pack` behavior,
     # unchanged interface for any existing caller that predates the `pack`/`batches` split.
@@ -364,6 +428,8 @@ def main(argv=None) -> int:
     a = ap.parse_args(argv)
 
     if a.cmd == "batches":
+        if a.timeout_s is None:
+            a.timeout_s = _minion_timeout_s()
         return _run_pack_batches(a)
     return _run_pack(a)
 
