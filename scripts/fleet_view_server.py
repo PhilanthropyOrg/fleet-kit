@@ -664,7 +664,9 @@ def _gh_dates(kind: str, *extra: str) -> list[dict]:
         rows = []
     if rows:
         _TTL_CACHE[key] = (time.time(), rows)
-    return rows
+    elif hit:
+        return hit[1]  # type: ignore[return-value]  # last good read; its as-of ages it into stale
+    return rows if raw else None
 
 
 def _deploy_workflow() -> str:
@@ -715,8 +717,9 @@ def _scoreboard_issues_by_number(since_day: str) -> dict[int, dict]:
     return _cached(f"scoreboard_issues:{since_day}", 1800, produce)
 
 
-def _fleet_prs_opened() -> list[dict]:
-    """createdAt of every PR the fleet opened (head branch `member/…`), any state, cached 10 min."""
+def _fleet_prs_opened() -> list[dict] | None:
+    """createdAt of every PR the fleet opened (head branch `member/…`), any state, cached 10 min.
+    A failed read serves the last good one; None when there has never been one."""
     key = "fleet_prs_opened"
     hit = _TTL_CACHE.get(key)
     if hit and time.time() - hit[0] < 600:
@@ -808,7 +811,9 @@ def metrics_snapshot() -> dict:
             backlog_sub += f" · {'+' if trend > 0 else '−' if trend < 0 else '±'}{abs(int(trend))} in 7d"
         if gh.get("issues_truncated"):
             backlog_sub += " (500+, capped)"
-        out["fleet.backlog_open"] = {"value": len(issues), "sub": backlog_sub,
+        # Before the first good poll there is no count yet, not a count of 0 (gh#8212).
+        out["fleet.backlog_open"] = {"value": len(issues) if gh.get("issues_at") else None,
+                                     "sub": backlog_sub if gh.get("issues_at") else "waiting for the first GitHub read",
                                      "series": daily_series("fleet.backlog_open")}
         fresh["fleet.backlog_open"] = (gh.get("issues_at"), gh_cad)
 
@@ -818,7 +823,8 @@ def metrics_snapshot() -> dict:
         if gh.get("prs_at"):
             upsert("fleet.prs_open", len(prs))
         _backfill_daily(db, "fleet.prs_open", days, lambda: _gh_dates("pr"))
-        out["fleet.prs_open"] = {"value": len(prs), "sub": f"{drafts} draft · {len(prs) - drafts} ready for review",
+        out["fleet.prs_open"] = {"value": len(prs) if gh.get("prs_at") else None,
+                                 "sub": f"{drafts} draft · {len(prs) - drafts} ready for review" if gh.get("prs_at") else "waiting for the first GitHub read",
                                  "series": daily_series("fleet.prs_open")}
         fresh["fleet.prs_open"] = (gh.get("prs_at"), gh_cad)
 
@@ -829,9 +835,10 @@ def metrics_snapshot() -> dict:
         if gh.get("prs_at"):
             upsert("fleet.prs_open_over_4h", len(aged))
         out["fleet.prs_open_over_4h"] = {
-            "value": len(aged), "bad": bool(aged),
+            "value": len(aged) if gh.get("prs_at") else None, "bad": bool(aged),
             "sub": (f"oldest #{aged[0][1].get('number')}, open {_age_words(aged[0][0])}" if aged
-                    else f"none open longer than {PR_STUCK_S // 3600}h"),
+                    else f"none open longer than {PR_STUCK_S // 3600}h" if gh.get("prs_at")
+                    else "waiting for the first GitHub read"),
             "series": daily_series("fleet.prs_open_over_4h")}
         fresh["fleet.prs_open_over_4h"] = (gh.get("prs_at"), gh_cad)
 
@@ -898,7 +905,8 @@ def metrics_snapshot() -> dict:
             if 0 <= age_h < 24:
                 spawns[23 - age_h] += 1
         opened = [0] * 24
-        for row in _fleet_prs_opened():
+        opened_rows = _fleet_prs_opened()
+        for row in opened_rows or []:
             try:
                 ts = datetime.datetime.fromisoformat(str(row.get("createdAt", "")).replace("Z", "+00:00")).timestamp()
             except ValueError:
@@ -913,8 +921,11 @@ def metrics_snapshot() -> dict:
                    + (" · more spawns than PRs" if spawns24 > opened24 else ""),
             "series": [{"day": f"-{23 - i}h", "value": v} for i, v in enumerate(spawns)]}
         fresh["fleet.minion_spawns_per_hour"] = (runs_at, 60)
+        opened_ok = opened_rows is not None
         out["fleet.prs_opened_per_hour"] = {
-            "value": opened24, "sub": f"PRs from member/ branches, 24h · {spawns24} spawns",
+            "value": opened24 if opened_ok else None,
+            "sub": (f"PRs from member/ branches, 24h · {spawns24} spawns" if opened_ok
+                    else "unavailable (PR read failed)"),
             "series": [{"day": f"-{23 - i}h", "value": v} for i, v in enumerate(opened)]}
         fresh["fleet.prs_opened_per_hour"] = (_cached_at("fleet_prs_opened"), 600)
 
@@ -955,7 +966,7 @@ def metrics_snapshot() -> dict:
         cpr = scoreboard.closed_per_run(merged14, all_runs, now)
         upsert("fleet.closed_per_minion_run", cpr)
         out["fleet.closed_per_minion_run"] = {
-            "value": None if cpr is None else round(cpr, 2),
+            "value": None if cpr is None or not merged14 else round(cpr, 2),
             "sub": "issues closed by merged minion PRs per minion run, 24h" if merged14 else "unavailable (merged PR read failed)",
             "series": daily_series("fleet.closed_per_minion_run")}
         fresh["fleet.closed_per_minion_run"] = (min(sb_at, _cached_at("scoreboard_runs")), 1800)
@@ -963,8 +974,9 @@ def metrics_snapshot() -> dict:
         live = scoreboard.shipped_live_per_day(merged14, deploys, days, _central_day)
         live24 = sum(1 for t in scoreboard.live_merges(merged14, deploys) if now - t < 86400)
         out["fleet.shipped_live_per_day"] = {
-            "value": live24 if deploys else None,
-            "sub": (f"merged + deployed, 24h · {sum(live.values())} in 14d" if deploys
+            "value": live24 if deploys and merged14 else None,
+            "sub": (f"merged + deployed, 24h · {sum(live.values())} in 14d" if deploys and merged14
+                    else "unavailable (merged PR read failed)" if deploys
                     else f"unavailable (no successful {_deploy_workflow()} runs read)"),
             "series": [{"day": d, "value": live[d]} for d in days]}
         fresh["fleet.shipped_live_per_day"] = (sb_at, 1800)
@@ -1027,9 +1039,10 @@ def metrics_snapshot() -> dict:
                 day_resolved[d] += e["weight"]
         resolved7d = sum(e["weight"] for e in events if now - e["ts"] < 7 * 86400)
         out["fleet.issues_resolved_24h"] = {
-            "value": resolved24 if deploys else None,
+            "value": resolved24 if deploys and merged14 else None,
             "sub": (f"merged PR + deployed, 24h · {resolved7d} in 7d ({resolved7d / 7:.0f}/day) · "
-                    f"{closed_no_pr24} closed with no PR don't count" if deploys
+                    f"{closed_no_pr24} closed with no PR don't count" if deploys and merged14
+                    else "unavailable (merged PR read failed)" if deploys
                     else f"unavailable (no successful {_deploy_workflow()} runs read)"),
             "series": [{"day": d, "value": day_resolved[d]} for d in days]}
         fresh["fleet.issues_resolved_24h"] = (min(sb_at, _cached_at(f"scoreboard_issues:{days[0]}")), 1800)
