@@ -20,6 +20,19 @@
 
 set -u
 
+# pr_is_checkpoint PR [REPO] -- exit 0 iff the PR is a minion checkpoint (minion_checkpoint.py's
+# MARKER in the body, or its "WIP (minion checkpoint)" title). A checkpoint is a draft of partial
+# work that only `minion_checkpoint.py ready` may finish; 2026-09-26 #8110 was armed and merged
+# as one. A PR that can't be read is not called a checkpoint (the arm itself then reports why).
+pr_is_checkpoint() {
+  local pr="$1" repo="${2:-}" out
+  local -a R=()
+  [ -n "$repo" ] && R=(-R "$repo")
+  out="$(gh pr view "$pr" ${R[@]+"${R[@]}"} --json title,body \
+    -q '((.body // "") | contains("<!-- fleet-checkpoint -->")) or ((.title // "") | startswith("WIP (minion checkpoint)"))' 2>/dev/null)" || return 1
+  [ "$out" = "true" ]
+}
+
 # arm_pr_auto_merge PR_NUMBER
 #
 # On success: prints nothing, returns 0.
@@ -29,6 +42,10 @@ arm_pr_auto_merge() {
   local pr="$1" repo="${2:-}" err
   local -a R=()
   [ -n "$repo" ] && R=(-R "$repo")
+  if pr_is_checkpoint "$pr" "$repo"; then
+    printf 'refused: PR #%s is a minion checkpoint (draft WIP) and never auto-merges; only `minion_checkpoint.py ready` finishes one, when every item is done' "$pr"
+    return 3
+  fi
   if err="$(gh pr merge "$pr" ${R[@]+"${R[@]}"} --auto --squash 2>&1 >/dev/null)"; then
     return 0
   fi

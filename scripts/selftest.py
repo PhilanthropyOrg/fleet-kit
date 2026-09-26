@@ -1710,7 +1710,10 @@ exit $rc
     _os.environ["STUB_LOG"] = _log
     try:
         rc, out = run_with_stub_gh('  echo "$*" >> "$STUB_LOG"\n  exit 0\n')
-        first = open(_log).read().splitlines()[0] if _os.path.exists(_log) else ""
+        # The checkpoint guard's `pr view` (2026-09-26 #8110) reads the PR first; the first ARM
+        # call is what fk#1197 pins.
+        first = next((l for l in (open(_log).read().splitlines() if _os.path.exists(_log) else [])
+                      if l.startswith("pr merge")), "")
     finally:
         _os.environ.pop("STUB_LOG", None)
     assert rc == 0 and "--squash" in first, f"first arm call must be --auto --squash (fk#1197), got {first!r}"

@@ -86,6 +86,8 @@ fi
 
 cd "$REPO" 2>/dev/null || { log "FATAL: repo missing at $REPO"; exit 1; }
 # shellcheck source=/dev/null
+. "$KIT_DIR/scripts/merge_arm.sh"   # pr_is_checkpoint
+# shellcheck source=/dev/null
 [ -f "$KIT_DIR/scripts/account_pool.sh" ] && . "$KIT_DIR/scripts/account_pool.sh"
 if ! command -v account_pool_run >/dev/null 2>&1; then
   # No account pool sourced (single-account setups can skip it) — define a passthrough so
@@ -511,7 +513,9 @@ $ERR_VISION_LINK"
       && log "PR #$PR: APPROVED -- status posted" \
       || log "PR #$PR: WARN approved but status POST failed"
     # fleet-kit#523: the queue merges whatever is armed, so the verdict moves the arm.
-    if timeout 25s gh pr merge "$PR" --auto >/dev/null 2>&1; then log "PR #$PR: auto-merge armed"; else log "PR #$PR: WARN could not arm auto-merge"; fi
+    # 2026-09-26 #8110: an approve is not "done" for a minion checkpoint; never arm one.
+    if pr_is_checkpoint "$PR"; then log "PR #$PR: minion checkpoint -- approved, NOT arming auto-merge"
+    elif timeout 25s gh pr merge "$PR" --auto >/dev/null 2>&1; then log "PR #$PR: auto-merge armed"; else log "PR #$PR: WARN could not arm auto-merge"; fi
     report_run "$PR" "$HEAD_SHA" "$USAGE_FILE" "approved PR #$PR" "head ${HEAD_SHA:0:12}, fleet-code-review: success" "$SELF_CRITIQUE" "${FINDINGS:-approved -- no findings}"
   else
     # Findings comment first, status second: a failure status pointing at nothing is worse

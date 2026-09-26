@@ -711,8 +711,11 @@ if [ -n "${RESUME_BRANCH:-}" ]; then
   PROMPT="RESUMING: a previous pass on these items ran out of time. Your worktree is ON its branch
 \`$RESUME_BRANCH\` (git log origin/main..HEAD shows what it built; a 'wip(checkpoint)' commit is
 untested work saved at the timeout). Its open DRAFT PR for this branch is YOURS, not a
-sibling's fix: continue from it, push to this same branch, update that PR's body and run
-\`gh pr ready\` when done -- do not open a second PR and do not restart from main.
+sibling's fix: continue from it, push to this same branch -- do not open a second PR and do
+not restart from main. That PR stays a DRAFT until every item meets its done-criteria: then
+\`gh pr edit\` the title (no WIP) and body (\`Closes #N\` per item, no \`Part of\`/\`Remaining:\`)
+and run \`python3 /fleet-kit/scripts/minion_checkpoint.py ready\`. Never \`gh pr ready\` or
+\`gh pr merge\` it directly: a checkpoint must never merge half-done (#8110).
 
 $PROMPT"
 fi
