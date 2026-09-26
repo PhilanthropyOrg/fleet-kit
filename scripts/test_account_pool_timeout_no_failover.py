@@ -47,6 +47,15 @@ class TimeoutNoFailoverTest(unittest.TestCase):
         self.assertEqual(reason, "timeout")
         self.assertTrue(selected, "the account that ran the pass must be recorded, not 'none'")
 
+    def test_a_killed_pass_is_not_retried_or_gated(self):
+        """2026-09-26 13:29:40: a SIGTERM (rc=143) marked philanthropy unauthenticated and re-ran gru on tgp."""
+        for rc in (143, 137):
+            out, calls, selected, reason = run_pool(self.tmp.name, "philanthropy gmail tgp", f"exit {rc}")
+            self.assertEqual(len(calls), 1, f"killed pass re-ran on {len(calls)} accounts: {calls}")
+            self.assertIn(f"RC={rc}", out, out)
+            self.assertEqual(reason, "killed")
+            os.remove(os.path.join(self.tmp.name, "calls"))
+
     def test_a_real_other_failure_still_fails_over(self):
         """Unchanged: a non-timeout unknown failure still tries the next account."""
         out, calls, _, _ = run_pool(self.tmp.name, "philanthropy gmail", "exit 1")
