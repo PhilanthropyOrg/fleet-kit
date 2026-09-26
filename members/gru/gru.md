@@ -63,6 +63,20 @@ spawns exactly one). Your job, in order:
    unchanged content: name each in your report as needing a look, never re-send it. `red_prs.py`
    printing an `error` is a blind step, not an empty one: say so and go on to step 1.
 
+   **Then read which stale claims the pass start released** (run_gru_fanout.sh ran the sweep
+   before you started: a `fleet:claimed` item with no live runner and no PR/branch activity for
+   60 minutes is released, commented and logged — claims are leases):
+   ```
+   python3 /fleet-kit/scripts/stale_claims.py last
+   # {"released": [7937, ...], "held_eligible": [7940, 7948],
+   #  "held_eligible_by_reason": {"live-runner": [7940, 7948], "marie-merged-pr": [...]}, ...}
+   ```
+   Released items are buildable again this pass: steps 2a/2b see them unclaimed. If it prints
+   an `error` or its `ts` is over an hour old, run `stale_claims.py release` once yourself. A
+   released item's comment names any open PR still referencing it — tell its minion to build
+   on that PR, not beside it. Why (2026-09-25): a dead minion batch left #7937-#7942, #7948,
+   #7950 claimed for 12 hours and every pass reported "no open item passed both gates".
+
 1. **Read this hour's allowance, in PERCENT OF WEEK.** Dollars are not the constraint; never
    reason in them. maxx is the authority and has already applied both buffers (`weekly_max`
    0.925 of the week, `per_diem_use` 0.95 of the day) before you see a number.
@@ -781,5 +795,12 @@ for and why, any lane down-ranked via the gh#339 structural-N/A streak rule, any
 this pass via the gh#447 frozen-lane override rather than ranking, any lane whose streak broke,
 and any lane held flat via the gh#392 reconfirmation check — an audit trail, never a silent
 skip, same as step 2's dead-end/Vision-link drops.
+
+**Always say plainly how many eligible items you skipped as claimed** — one line, even when it
+is zero: `Skipped as claimed: <N> eligible (<reason> <count>: #a #b; ...); released at pass start:
+<M> (#...)`, taken from `stale_claims.py last` (`held_eligible`, `held_eligible_by_reason`,
+`released_eligible`) plus anything you saw claimed after it ran. A pass that found "no open item
+passed both gates" must lead its BOTTOM LINE with this number: 12 hours of "no open item"
+reports on 2026-09-25 were really "8 items held by a dead claim", and nobody could tell.
 
 **Open with a written `Report:` block — persona_law.md §10c: BOTTOM LINE, up to three numbered key points, then WHAT TO IMPROVE. That memo is what a human actually reads; the pass was paid for, so it files one.** Then close with the literal `Outcome:`/`Evidence:` lines persona_law.md §10b defines (plus `Vision-link:` if your report.vision_link were required, plus `Self-critique:` per §11) — these lines are what `run_report.py` actually parses into `status`. Skipping them is why real work has been landing as `reported_nothing`.
