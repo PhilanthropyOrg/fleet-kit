@@ -982,12 +982,11 @@ def metrics_snapshot() -> dict:
 
         # philanthropy#8215 amendment: members message each other (fleet_msg.py). Open messages
         # by member and the oldest unacked one; red once anything has escalated past its owner.
+        # Same connection as the upserts above (gh#8212): a second fleet_db.connect() here ran
+        # its setup INSERT against this request's own open write transaction, waited out the
+        # busy timeout (~15s per /api/metrics) and failed, so the tile always read "not computed".
         try:
-            mconn = fleet_db.connect()
-            try:
-                ms = fleet_msg.summary(mconn)
-            finally:
-                mconn.close()
+            ms = fleet_msg.summary(db)
         except Exception:  # noqa: BLE001 -- a tile never takes the page down
             ms = None
         if ms is not None:
