@@ -64,6 +64,10 @@ jobs:
         run: python3 scripts/test_ci_runs_every_test_file.py
       - name: run test_pack_batches_area.py
         run: python3 scripts/test_pack_batches_area.py
+      - name: run test_minion_packing_timeout.py
+        run: python3 scripts/test_minion_packing_timeout.py
+      - name: run test_minion_checkpoint.py
+        run: python3 scripts/test_minion_checkpoint.py
       - name: run test_issue_cluster.py
         run: python3 scripts/test_issue_cluster.py
       - name: run test_scoreboard.py
