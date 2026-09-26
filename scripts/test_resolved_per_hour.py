@@ -121,15 +121,17 @@ def test_closed_without_pr_excludes_pr_linked_issues() -> None:
 
 def test_tiles_registered_on_fleet_home() -> None:
     ids = {m["id"] for m in json.loads((HERE / "metrics.json").read_text())["metrics"]}
-    for want in ["fleet.issues_resolved_per_hour", "fleet.issues_resolved_7d"]:
+    # gh#8212: one resolved tile (24h), not a per-hour and a per-day tile that disagreed.
+    assert not ids & {"fleet.issues_resolved_per_hour", "fleet.issues_resolved_7d"}, ids
+    for want in ["fleet.issues_resolved_24h"]:
         assert want in ids, f"{want} missing from metrics.json (fleet_home renders one tile per row)"
     metrics = json.loads((HERE / "metrics.json").read_text())["metrics"]
-    assert metrics[0]["id"] == "fleet.issues_resolved_per_hour", \
+    assert metrics[0]["id"] == "fleet.issues_resolved_24h", \
         "the headline KPI must be the first row (metrics.json's own doc: order = display order)"
     src = (HERE / "fleet_view_server.py").read_text()
-    for want in ["fleet.issues_resolved_per_hour", "fleet.issues_resolved_7d"]:
+    for want in ["fleet.issues_resolved_24h"]:
         assert f'out["{want}"]' in src, f"{want} never computed in metrics_snapshot"
-    print("ok  resolved-per-hour tiles registered first and computed")
+    print("ok  the one resolved tile is registered first and computed")
 
 
 if __name__ == "__main__":

@@ -47,6 +47,7 @@ import fleet_stats       # noqa: E402  (Stats page aggregation: run timeline, to
 import fleet_metrics     # noqa: E402  (named run-derived metrics; items_per_run for the scoreboard)
 import gate_drops        # noqa: E402  (philanthropy#8215: gru gate drops, 6h tile)
 import fleet_msg         # noqa: E402  (philanthropy#8215: member-to-member messages tile)
+import open_runs         # noqa: E402  (gh#8212: runs stuck at started, same rule close-lost uses)
 import scoreboard        # noqa: E402  (2026-09-24 throughput scoreboard: items/run, closed/run, live, trend)
 import issues_per_hour_chart  # noqa: E402  (full-width 7d graph on top of scoreboard.resolved_events)
 import member_spec       # noqa: E402
@@ -77,6 +78,23 @@ def _resolve_repo_url() -> str:
 
 
 REPO_URL = _resolve_repo_url()
+_REPO_URL_TRIED = time.time()
+
+
+def repo_url() -> str:
+    """REPO_URL, re-resolved when boot found nothing. The server starts before entrypoint.sh
+    has cloned /repo on a fresh container, so the boot read came back "" and stayed "" for
+    the life of the process: every repo link rendered as plain text and the GitHub Actions
+    tile read "unavailable (no org)" (gh#8212). Retries at most once a minute; falls back to
+    the FLEET_REPO_URL up.sh passes in."""
+    global REPO_URL, _REPO_URL_TRIED
+    if not REPO_URL and time.time() - _REPO_URL_TRIED > 60:
+        _REPO_URL_TRIED = time.time()
+        url = _resolve_repo_url() or os.environ.get("FLEET_REPO_URL", "").strip()
+        if url.startswith("git@github.com:"):
+            url = "https://github.com/" + url[len("git@github.com:"):]
+        REPO_URL = url[:-4] if url.endswith(".git") else url
+    return REPO_URL
 
 
 def _brand_from_repo_url(repo_url: str) -> str:
@@ -261,6 +279,13 @@ def _cached(key: str, ttl_s: float, produce):
         if cacheable:
             _TTL_CACHE[key] = (now, value)
         return value
+
+
+def _cached_at(key: str) -> float:
+    """When the value _cached(key, ...) is serving was produced (now, if it is not stored --
+    an uncacheable result was computed on this very request)."""
+    hit = _TTL_CACHE.get(key)
+    return hit[0] if hit else time.time()
 
 
 # gh#553 VP review round 1, fix 3: this used to run only inside the request handler, on
@@ -530,13 +555,26 @@ def _last_days(n: int) -> list[str]:
     return [(today - _dt.timedelta(days=n - 1 - i)).isoformat() for i in range(n)]
 
 
-def _gh_actions_spend_series() -> tuple[float | None, list[dict], str]:
-    """Month-to-date Actions net USD per day (cumulative) from the org billing usage API.
-    Cached one hour; None when the org cannot be derived or the call fails."""
-    m = re.search(r"github\.com/([^/]+)/", REPO_URL or "")
-    if not m:
-        return None, [], "no org"
-    org = m.group(1)
+def _gh_org() -> str:
+    """The target repo's owner as GitHub knows it NOW. The remote URL can carry a pre-rename
+    owner (FLEET_REPO_URL still says The-Good-Project-Team); repo endpoints follow that
+    redirect but /orgs/{org}/settings/billing 404s, so ask gh for the canonical login."""
+    def produce():
+        login = _gh("repo", "view", "--json", "owner", "-q", ".owner.login").strip()
+        return login, bool(login)
+    login = _cached("gh_org", 6 * 3600, produce)
+    if login:
+        return login
+    m = re.search(r"github\.com/([^/]+)/", repo_url() or "")
+    return m.group(1) if m else ""
+
+
+def _gh_actions_spend_series() -> tuple[float | None, list[dict], str, float]:
+    """Month-to-date Actions net USD per day (cumulative) from the org billing usage API, and
+    when it was read. Cached one hour; None when the org cannot be derived or the call fails."""
+    org = _gh_org()
+    if not org:
+        return None, [], "no org", time.time()
     import datetime as _dt
     now = _dt.datetime.utcnow()
     key = f"gh_billing:{org}:{now.year}-{now.month}"
@@ -545,9 +583,12 @@ def _gh_actions_spend_series() -> tuple[float | None, list[dict], str]:
         return hit[1]  # type: ignore[return-value]
     raw = _gh("api", f"/orgs/{org}/settings/billing/usage?year={now.year}&month={now.month}", timeout=30)
     try:
-        items = json.loads(raw).get("usageItems", []) if raw else []
+        items = json.loads(raw).get("usageItems", []) if raw else None
     except Exception:  # noqa: BLE001
-        items = []
+        items = None
+    if items is None:
+        # Not cached: a failed read must not pin "unavailable" for the hour.
+        return None, [], "billing read failed", time.time()
     per_day: dict[str, float] = {}
     minutes = 0.0
     for u in items:
@@ -561,8 +602,9 @@ def _gh_actions_spend_series() -> tuple[float | None, list[dict], str]:
     for d in sorted(per_day):
         run += per_day[d]
         series.append({"day": d, "value": round(run, 2)})
-    out = (round(run, 2) if series else None, series, f"{minutes:,.0f} min this month")
-    _TTL_CACHE[key] = (time.time(), out)
+    # A successful read with no Actions rows yet (the 1st of the month) is a real $0.
+    out = (round(run, 2), series, f"{minutes:,.0f} min this month", time.time())
+    _TTL_CACHE[key] = (out[3], out)
     return out
 
 
@@ -696,6 +738,13 @@ def metrics_snapshot() -> dict:
     out: dict[str, dict] = {}
     snap = STATE.snapshot()
     runs, gh = snap["runs"], snap["gh"]
+    now = time.time()
+    # gh#8212 freshness: every tile carries as_of (when its SOURCE was read) and cadence_s (how
+    # often that source refreshes); the page marks a tile stale past 2x cadence. The gh poll's
+    # cadence is its sleep plus how long the last poll took (~40s of gh calls).
+    gh_cad = max(60, GH_POLL_S + int(gh.get("poll_s") or 60))
+    runs_at = getattr(STATE, "runs_at", None) or now
+    fresh: dict[str, tuple] = {}
     db = fleet_db.connect()
     try:
         def upsert(mid: str, value: float | None) -> None:
@@ -724,6 +773,9 @@ def metrics_snapshot() -> dict:
             if val is not None and n.get("delta_7d") is not None and len(days) >= 8:
                 db.execute("INSERT OR IGNORE INTO metric_points (id, day, value) VALUES (?, ?, ?)",
                            ("okr.verified_claims", days[-8], float(val) - float(n["delta_7d"])))
+            fetched = float((nr.get("payload") or {}).get("fetched_at") or 0) or None
+            for mid in ("okr.verified_claims", "okr.clicks", "okr.conversion"):
+                fresh[mid] = (fetched, NUMBER_FETCH_S)
             out["okr.verified_claims"] = {"value": val, "unit": n.get("unit") or "", "target": tgt.get("value"),
                                           "sub": (f"{n.get('name', '')}" + (f" · {'+' if (n.get('delta_7d') or 0) >= 0 else ''}{n.get('delta_7d')} 7d" if n.get("delta_7d") is not None else "")).strip(" ·"),
                                           "series": daily_series("okr.verified_claims"), "stale": bool(nr.get("stale"))}
@@ -740,49 +792,53 @@ def metrics_snapshot() -> dict:
         # fleet.backlog_open
         issues = gh.get("issues") or []
         claimed = sum(1 for i in issues if i.get("_claimed"))
-        upsert("fleet.backlog_open", len(issues))
+        # Only a real read goes into history: a failed or not-yet-run poll used to write 0 here
+        # (09-22 and 09-25 read 0 against a ~450 backlog), which then skewed the 7d trend.
+        if gh.get("issues_at"):
+            upsert("fleet.backlog_open", len(issues))
         _backfill_daily(db, "fleet.backlog_open", days, lambda: _gh_dates("issue", "--label", "fleet:backlog"))
         # poll_gh_state's own fetch is capped (currently 500); a true count at or past that cap
         # would otherwise render as a precise-looking wrong number with no indication it's a
         # floor, not the real total.
-        backlog_sub = f"{claimed} claimed · {len(issues) - claimed} free"
+        # gh#8212: the backlog trend is a caption here, not its own tile -- two tiles for one
+        # quantity read as a contradiction ("Backlog 448" beside "Backlog trend 348").
+        trend = scoreboard.backlog_trend(daily_series("fleet.backlog_open"))
+        backlog_sub = f"open fleet:backlog issues · {claimed} claimed"
+        if trend is not None:
+            backlog_sub += f" · {'+' if trend > 0 else '−' if trend < 0 else '±'}{abs(int(trend))} in 7d"
         if gh.get("issues_truncated"):
             backlog_sub += " (500+, capped)"
         out["fleet.backlog_open"] = {"value": len(issues), "sub": backlog_sub,
                                      "series": daily_series("fleet.backlog_open")}
+        fresh["fleet.backlog_open"] = (gh.get("issues_at"), gh_cad)
 
         # fleet.prs_open
         prs = gh.get("prs") or []
         drafts = sum(1 for p in prs if p.get("isDraft"))
-        upsert("fleet.prs_open", len(prs))
+        if gh.get("prs_at"):
+            upsert("fleet.prs_open", len(prs))
         _backfill_daily(db, "fleet.prs_open", days, lambda: _gh_dates("pr"))
         out["fleet.prs_open"] = {"value": len(prs), "sub": f"{drafts} draft · {len(prs) - drafts} ready for review",
                                  "series": daily_series("fleet.prs_open")}
+        fresh["fleet.prs_open"] = (gh.get("prs_at"), gh_cad)
 
-        # fleet.merged_per_day (native: the merged feed, per Central day)
-        merged = gh.get("merged") or []
-        per: dict[str, int] = {d: 0 for d in days}
-        for pr in merged:
-            ma = pr.get("mergedAt")
-            if not ma:
-                continue
-            try:
-                import datetime as _dt
-                ts = _dt.datetime.fromisoformat(str(ma).replace("Z", "+00:00")).timestamp()
-            except ValueError:
-                continue
-            d = _central_day(ts)
-            if d in per:
-                per[d] += 1
-        last24 = sum(1 for pr in merged if pr.get("mergedAt") and
-                     (time.time() - __import__("datetime").datetime.fromisoformat(str(pr["mergedAt"]).replace("Z", "+00:00")).timestamp()) < 86400)
-        out["fleet.merged_per_day"] = {"value": last24, "sub": f"last 24h · {sum(per.values())} in the window shown",
-                                       "series": [{"day": d, "value": per[d]} for d in days],
-                                       "note": "the merged feed is the newest 30 PRs, so older days can read low"}
+        # fleet.prs_open_over_4h (gh#8212): the tile that would have caught 2026-09-26's stall --
+        # PRs sitting open with nobody landing them. Age is from createdAt.
+        aged = sorted(((now - t, p) for p in prs if (t := _iso_ts(p.get("createdAt"))) is not None
+                       and now - t > PR_STUCK_S), key=lambda x: -x[0])
+        if gh.get("prs_at"):
+            upsert("fleet.prs_open_over_4h", len(aged))
+        out["fleet.prs_open_over_4h"] = {
+            "value": len(aged), "bad": bool(aged),
+            "sub": (f"oldest #{aged[0][1].get('number')}, open {_age_words(aged[0][0])}" if aged
+                    else f"none open longer than {PR_STUCK_S // 3600}h"),
+            "series": daily_series("fleet.prs_open_over_4h")}
+        fresh["fleet.prs_open_over_4h"] = (gh.get("prs_at"), gh_cad)
 
         # gh.actions_spend_mtd
-        spend, sseries, smin = _gh_actions_spend_series()
+        spend, sseries, smin, spend_at = _gh_actions_spend_series()
         out["gh.actions_spend_mtd"] = {"value": spend, "unit": "USD", "sub": smin if spend is not None else f"unavailable ({smin})", "series": sseries}
+        fresh["gh.actions_spend_mtd"] = (spend_at, 3600)
 
         # fleet.accounts_live
         pp = pool_pause()
@@ -793,9 +849,9 @@ def metrics_snapshot() -> dict:
         gsub = ", ".join(f"{a} gated to {_central_fmt(g['until'])}" for a, g in gated.items()) or "all live"
         out["fleet.accounts_live"] = {"value": live, "of": len(pool), "sub": gsub, "paused": bool(pp.get("paused")),
                                       "series": daily_series("fleet.accounts_live")}
+        fresh["fleet.accounts_live"] = (now, 60)
 
         # fleet.ok_runs_per_hour (native: runs, last 24 hours)
-        now = time.time()
         hours = [0] * 24
         newest = None
         for r in runs:
@@ -810,8 +866,21 @@ def metrics_snapshot() -> dict:
             age_h = int((now - ts) // 3600)
             if 0 <= age_h < 24:
                 hours[23 - age_h] += 1
-        out["fleet.ok_runs_per_hour"] = {"value": hours[-1], "newest_ok_ts": newest, "sub": "this hour",
+        out["fleet.ok_runs_per_hour"] = {"value": hours[-1], "newest_ok_ts": newest, "sub": "ok runs this hour",
                                          "series": [{"day": f"-{23 - i}h", "value": v} for i, v in enumerate(hours)]}
+        fresh["fleet.ok_runs_per_hour"] = (runs_at, 60)
+
+        # fleet.runs_stuck (gh#8212): runs whose newest row is still `started` past their own
+        # timeout_s -- the process is gone or wedged, and until open_runs.py close-lost sweeps
+        # it the run holds its claim. The other half of what stalled the fleet on 2026-09-26.
+        stuck, running = _stuck_runs(now)
+        out["fleet.runs_stuck"] = {
+            "value": len(stuck), "bad": bool(stuck),
+            "sub": (f"oldest {stuck[0].get('member')}, {_age_words(now - open_runs._row_ts(stuck[0]))} "
+                    f"since start · {running} running" if stuck
+                    else f"none past their timeout · {running} running"),
+            "series": []}
+        fresh["fleet.runs_stuck"] = (_cached_at("runs_stuck"), 60)
 
         # fleet.minion_spawns_per_hour + fleet.prs_opened_per_hour (native, last 24 hours).
         # Reif 2026-09-19: "PRs last 24 hours on a graph would be good. And spawns last 24 hours
@@ -841,11 +910,13 @@ def metrics_snapshot() -> dict:
         out["fleet.minion_spawns_per_hour"] = {
             "value": spawns24, "bad": spawns24 > opened24,
             "sub": f"minion passes started, 24h · {opened24} PR{'s' if opened24 != 1 else ''} opened"
-                   + (" · MORE SPAWNS THAN PRS" if spawns24 > opened24 else ""),
+                   + (" · more spawns than PRs" if spawns24 > opened24 else ""),
             "series": [{"day": f"-{23 - i}h", "value": v} for i, v in enumerate(spawns)]}
+        fresh["fleet.minion_spawns_per_hour"] = (runs_at, 60)
         out["fleet.prs_opened_per_hour"] = {
-            "value": opened24, "sub": f"member/ branches opened, 24h · {spawns24} spawns",
+            "value": opened24, "sub": f"PRs from member/ branches, 24h · {spawns24} spawns",
             "series": [{"day": f"-{23 - i}h", "value": v} for i, v in enumerate(opened)]}
+        fresh["fleet.prs_opened_per_hour"] = (_cached_at("fleet_prs_opened"), 600)
 
         # 2026-09-24 scoreboard (scoreboard.py): the four numbers that say whether the throughput
         # levers work. items/run and closed/run need a full day of runs -- STATE keeps only the
@@ -856,15 +927,38 @@ def metrics_snapshot() -> dict:
         target = read_env_values().get("FLEET_MINION_TARGET_ITEMS") or "8"
         out["fleet.items_per_minion_run"] = {
             "value": ipr, "bad": ipr is not None and target.isdigit() and ipr < int(target),
-            "sub": f"median, executed minion runs, 24h · target {target}",
+            "sub": f"median items per minion run, 24h · target {target}",
             "series": daily_series("fleet.items_per_minion_run")}
+        fresh["fleet.items_per_minion_run"] = (_cached_at("scoreboard_runs"), 600)
         merged14 = _scoreboard_merged_prs(days[0])
+        # fleet.merged_per_day (gh#8212): read from the 14-day merged list (up to 1000 rows),
+        # not the console's 30-row feed -- that feed capped "Merged" at exactly 30 on a busy day
+        # while "Shipped live" (a subset of it) said 37.
+        # The 20s-polled feed is unioned in by PR number, so a merge since the 30-min cached read
+        # still counts and the "Merged, last 24h" card (which lists that feed) never outnumbers it.
+        per: dict[str, int] = {d: 0 for d in days}
+        merged24 = 0
+        for pr in {p.get("number"): p for p in [*merged14, *(gh.get("merged") or [])]}.values():
+            ts = _iso_ts(pr.get("mergedAt"))
+            if ts is None:
+                continue
+            merged24 += now - ts < 86400
+            if _central_day(ts) in per:
+                per[_central_day(ts)] += 1
+        out["fleet.merged_per_day"] = {
+            "value": merged24 if merged14 else None,
+            "sub": (f"PRs merged, last 24h · {sum(per.values())} in 14d" if merged14
+                    else "unavailable (merged PR read failed)"),
+            "series": [{"day": d, "value": per[d]} for d in days]}
+        sb_at = min(_cached_at(f"scoreboard_merged:{days[0]}"), _cached_at(f"scoreboard_deploys:{_deploy_workflow()}"))
+        fresh["fleet.merged_per_day"] = (_cached_at(f"scoreboard_merged:{days[0]}"), 1800)
         cpr = scoreboard.closed_per_run(merged14, all_runs, now)
         upsert("fleet.closed_per_minion_run", cpr)
         out["fleet.closed_per_minion_run"] = {
             "value": None if cpr is None else round(cpr, 2),
-            "sub": "issues closed by merged minion PRs / minion runs, 24h" if merged14 else "unavailable (merged PR read failed)",
+            "sub": "issues closed by merged minion PRs per minion run, 24h" if merged14 else "unavailable (merged PR read failed)",
             "series": daily_series("fleet.closed_per_minion_run")}
+        fresh["fleet.closed_per_minion_run"] = (min(sb_at, _cached_at("scoreboard_runs")), 1800)
         deploys = _scoreboard_deploy_runs()
         live = scoreboard.shipped_live_per_day(merged14, deploys, days, _central_day)
         live24 = sum(1 for t in scoreboard.live_merges(merged14, deploys) if now - t < 86400)
@@ -873,12 +967,7 @@ def metrics_snapshot() -> dict:
             "sub": (f"merged + deployed, 24h · {sum(live.values())} in 14d" if deploys
                     else f"unavailable (no successful {_deploy_workflow()} runs read)"),
             "series": [{"day": d, "value": live[d]} for d in days]}
-        trend = scoreboard.backlog_trend(daily_series("fleet.backlog_open"))
-        upsert("fleet.backlog_trend", trend)
-        out["fleet.backlog_trend"] = {
-            "value": trend, "bad": trend is not None and trend > 0,
-            "sub": "net open-backlog change, 7 days (negative = draining)",
-            "series": daily_series("fleet.backlog_trend")}
+        fresh["fleet.shipped_live_per_day"] = (sb_at, 1800)
 
         # philanthropy#8215: items gru's build gates dropped in the last 6h. Before this a drop
         # lived only in gru.log (26 of 30 priority-high items on 2026-09-26, nobody told).
@@ -889,6 +978,7 @@ def metrics_snapshot() -> dict:
             "sub": (f"{gd.get('needs-spec', 0)} need a spec (labeled {gate_drops.NEEDS_SPEC}) · "
                     f"{gd.get('fixed', 0)} auto-fixed · {gd.get('by-design', 0)} by design"),
             "series": []}
+        fresh["fleet.gate_drops_6h"] = (now, 60)  # gate_drops.jsonl, read on this request
 
         # philanthropy#8215 amendment: members message each other (fleet_msg.py). Open messages
         # by member and the oldest unacked one; red once anything has escalated past its owner.
@@ -911,8 +1001,9 @@ def metrics_snapshot() -> dict:
                 "value": ms["open"], "bad": ms["escalated"] > 0,
                 "sub": f"{who}{oldest} · {ms['closed_24h']} answered in 24h",
                 "series": []}
+            fresh["fleet.msgs_open"] = (now, 60)  # fleet.db, read on this request
 
-        # fleet.issues_resolved_per_hour / fleet.issues_resolved_7d (2026-09-24, operator ask):
+        # fleet.issues_resolved_24h (2026-09-24, operator ask; one tile since gh#8212):
         # the headline throughput number -- see scoreboard.resolved_events for the definition
         # (merged PR closes an issue COMPLETED, carried live by a later successful deploy;
         # NOT_PLANNED closes never count; a fleet:mega counts its full folded-children checklist).
@@ -926,28 +1017,70 @@ def metrics_snapshot() -> dict:
         # run read, "live" cannot be determined at all -- the honest answer is unavailable, not
         # a real zero (a repo with no deploy driver configured never resolves anything by this
         # definition, which is correct, but must say so rather than look like zero throughput).
-        out["fleet.issues_resolved_per_hour"] = {
-            "value": hour_buckets[-1] if deploys else None,
-            "sub": (f"{resolved24} resolved (PR + deployed), 24h · {closed_no_pr24} closed with no PR "
-                    "(busywork, doesn't count)" if deploys
-                    else f"unavailable (no successful {_deploy_workflow()} runs read)"),
-            "series": [{"day": f"-{23 - i}h", "value": v} for i, v in enumerate(hour_buckets)]}
+        # gh#8212: ONE resolved tile. The per-hour tile (this hour's bucket, 0) sat beside a
+        # per-day tile (today, 9), a "7d" caption (181, ~26/day) and the top chart's 24h rate
+        # (0.42/hr) -- four readings of one quantity that disagreed at a glance. The number is
+        # the last 24 hours; the caption carries the 7-day total and its daily rate.
         day_resolved: dict[str, int] = {d: 0 for d in days}
         for e in events:
             d = _central_day(e["ts"])
             if d in day_resolved:
                 day_resolved[d] += e["weight"]
-        resolved7d = sum(day_resolved[d] for d in days[-7:])
-        out["fleet.issues_resolved_7d"] = {
-            "value": day_resolved[days[-1]] if deploys else None,
-            "sub": (f"{resolved7d} resolved in 7d" if deploys
+        resolved7d = sum(e["weight"] for e in events if now - e["ts"] < 7 * 86400)
+        out["fleet.issues_resolved_24h"] = {
+            "value": resolved24 if deploys else None,
+            "sub": (f"merged PR + deployed, 24h · {resolved7d} in 7d ({resolved7d / 7:.0f}/day) · "
+                    f"{closed_no_pr24} closed with no PR don't count" if deploys
                     else f"unavailable (no successful {_deploy_workflow()} runs read)"),
             "series": [{"day": d, "value": day_resolved[d]} for d in days]}
+        fresh["fleet.issues_resolved_24h"] = (min(sb_at, _cached_at(f"scoreboard_issues:{days[0]}")), 1800)
         db.commit()
     finally:
         db.close()
-    return {"metrics": [dict(m, **out.get(m["id"], {"value": None, "sub": "not computed", "series": []}))
-                        for m in metric_registry()], "as_of": time.time()}
+    rows = []
+    for m in metric_registry():
+        row = dict(m, **out.get(m["id"], {"value": None, "sub": "not computed", "series": []}))
+        as_of, cadence = fresh.get(m["id"], (None, None))
+        row["as_of"], row["cadence_s"] = as_of, cadence
+        row["stale"] = bool(row.get("stale")) or as_of is None or (cadence is not None and now - as_of > 2 * cadence)
+        rows.append(row)
+    return {"metrics": rows, "as_of": now}
+
+
+NUMBER_FETCH_S = 6 * 3600  # entrypoint.sh cron: number_read.py --fetch at :29 every 6 hours
+PR_STUCK_S = 4 * 3600      # gh#8212: an open PR older than this is a stall, not a queue
+
+
+def _age_words(seconds: float) -> str:
+    s = max(0, int(seconds))
+    return f"{s // 60}m" if s < 3600 else f"{s // 3600}h" if s < 172800 else f"{s // 86400}d"
+
+
+def _stuck_runs(now: float) -> tuple[list[dict], int]:
+    """(runs past their own timeout_s whose newest row is still `started`, oldest first; how
+    many are started and still inside their timeout). Reads the runs.jsonl tail directly:
+    STATE.runs is a 500-row window, and a stuck run's `started` row is exactly the one that
+    falls out of it. Cached 60s."""
+    def produce():
+        last: dict[str, dict] = {}
+        for r in open_runs._tail_records(RUNS_FILE):
+            if r.get("run_id"):
+                last[r["run_id"]] = r
+        stuck, running = [], 0
+        for r in last.values():
+            if r.get("status") != "started":
+                continue
+            try:
+                timeout_s = float(r.get("timeout_s") or open_runs.MAX_AGE_S)
+            except (TypeError, ValueError):
+                timeout_s = open_runs.MAX_AGE_S
+            if now - open_runs._row_ts(r) > timeout_s:
+                stuck.append(r)
+            else:
+                running += 1
+        stuck.sort(key=open_runs._row_ts)
+        return (stuck, running), True
+    return _cached("runs_stuck", 60, produce)
 
 
 def _central_fmt(epoch: float) -> str:
@@ -964,8 +1097,8 @@ def read_env_flags() -> dict:
     strings, blank if unset) and SIBLINGS for the Settings page -- same file, same request,
     one round trip."""
     values = read_env_values()
-    brand = (values.get("FLEET_BRAND", "") or "").strip() or _brand_from_repo_url(REPO_URL) or "Fleet"
-    out = {"FLEET_ENABLED": values.get("FLEET_ENABLED", "true") == "true", "REPO_URL": REPO_URL,
+    brand = (values.get("FLEET_BRAND", "") or "").strip() or _brand_from_repo_url(repo_url()) or "Fleet"
+    out = {"FLEET_ENABLED": values.get("FLEET_ENABLED", "true") == "true", "REPO_URL": repo_url(),
            "BRAND": brand, "SIBLINGS": SIBLINGS}
     for key in DIAL_FIELDS:
         out[key] = values.get(key, "")
@@ -1148,8 +1281,9 @@ def minion_runs_payload(rows: list[dict], gh: dict, limit: int = 50) -> list[dic
 
 
 def poll_gh_state() -> dict:
+    started = time.time()
     prs_raw = _gh("pr", "list", "--state", "open", "--json",
-                   "number,title,isDraft,headRefName,url,statusCheckRollup,mergeStateStatus,updatedAt", timeout=GH_POLL_TIMEOUT_S)
+                   "number,title,isDraft,headRefName,url,statusCheckRollup,mergeStateStatus,updatedAt,createdAt", timeout=GH_POLL_TIMEOUT_S)
     # --limit 100 was a silent ceiling: fleet.backlog_open below is len(issues), so once the
     # real open-backlog count passed 100 the dashboard showed exactly 100 forever, with
     # nothing distinguishing "100 items" from "100 items, capped." Raised to 500 (real backlog
@@ -1263,7 +1397,26 @@ def poll_gh_state() -> dict:
     ok = bool(prs_raw or issues_raw or needs_human_op_raw or merged_raw)
     return {"prs": prs, "issues": issues, "issues_truncated": issues_truncated, "merged": merged,
             "self_evolution": self_evolution, "needs_human_op": needs_human_op,
+            "prs_ok": bool(prs_raw), "issues_ok": bool(issues_raw), "merged_ok": bool(merged_raw),
+            "poll_s": round(time.time() - started, 1),
             "polled_at": time.time(), "ok": ok, "error": "" if ok else _LAST_GH_ERROR["msg"]}
+
+
+def merge_gh_poll(prev: dict, new: dict) -> dict:
+    """The snapshot to publish after a poll: each source's newest GOOD read, stamped with when
+    it was read (prs_at / issues_at / merged_at), so a tile shows its real as-of time and goes
+    stale rather than dropping to 0 when one gh call fails (gh#8212). apply_gh handles the
+    every-call-failed case; this handles one slow call in an otherwise good poll."""
+    out = dict(new)
+    for src, keys in (("prs", ("prs",)), ("issues", ("issues", "issues_truncated")), ("merged", ("merged",))):
+        if new.get(f"{src}_ok", True):
+            out[f"{src}_at"] = new.get("polled_at")
+        else:
+            for k in keys:
+                if k in prev:
+                    out[k] = prev[k]
+            out[f"{src}_at"] = prev.get(f"{src}_at")
+    return out
 
 
 
@@ -1503,6 +1656,7 @@ class State:
                                     continue
                             self.runs = self.runs[-MAX_RUNS:]
                 fleet_db.sync(db)
+                self.runs_at = time.time()  # gh#8212: the run tiles' as-of time
             except Exception as exc:  # noqa: BLE001
                 # gh#273: this thread is the ONLY thing keeping fleet.db in sync with
                 # runs.jsonl (nerd's dedup history, gru's allowance calibration, dumbledore's
@@ -1519,7 +1673,7 @@ class State:
     def apply_gh(self, gh: dict):
         with self.lock:
             if gh.get("ok", True):
-                self.gh = gh
+                self.gh = merge_gh_poll(self.gh, gh)
             else:
                 # `gh` failed on every call this tick -- keep the last-good snapshot instead
                 # of stomping it with a false all-zero one, but surface the error so the
