@@ -44,6 +44,8 @@ jobs:
         run: python3 scripts/test_vp_labels.py
       - name: run test_dead_end_label.py
         run: python3 scripts/test_dead_end_label.py
+      - name: run test_claim_history_infra.py
+        run: python3 scripts/test_claim_history_infra.py
       - name: run members/librarian/test_librarian.py
         run: python3 members/librarian/test_librarian.py
       - name: run test_worktree_lock.py

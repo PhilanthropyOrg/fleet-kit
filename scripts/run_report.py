@@ -116,6 +116,14 @@ _REPORT_RE = re.compile(
     r"Score-now|Last-verdict|Vision-link)[*_]{0,2}[ \t]*:|\Z)",
     re.MULTILINE | re.IGNORECASE | re.DOTALL)
 
+# 2026-09-26: a minion's explicit "I can't go on" -- `Blocked: #N <reason>`, one line per item.
+# The ONLY signal claim_history.py counts as a dead end; a kill, a timeout or a Part-of PR
+# never is. Every such line is kept (findall, not search): a batch can block several items.
+# A leading `-`/`*` bullet is tolerated since minions list per-item results.
+_BLOCKED_RE = re.compile(
+    r"^[ \t]*(?:[-*][ \t]+)?#{0,6}[ \t]*[*_]{0,2}Blocked[*_]{0,2}[ \t]*:[ \t]*[*_]{0,2}[ \t]*(.+?)[ \t]*$",
+    re.MULTILINE | re.IGNORECASE)
+
 # An outcome must name something a human can open. "I looked at the dashboard" is not an
 # outcome; "#2771" is. This is the same bar the board already applies to a Vision score.
 # gh#251: a path/PID/SHA has no GitHub-artifact shape of its own, but this fleet's own
@@ -244,6 +252,8 @@ def parse_report(text: str) -> dict:
     # Reuse board_rice's guardrail rather than a second regex: one definition of what counts
     # as a named coordination link, shared by the board and by every run.
     out["vision_link"] = _vision_claim(text)
+    blocked = [b for b in _BLOCKED_RE.findall(text) if b.strip(" *_")]
+    out["blocked"] = "\n".join(blocked) if blocked else None
     # gh#252/gh#257: item IDs (`--item <N>`) or lane names (`--task "lane=<lane> ..."`) this
     # pass named in a run_member.sh dispatch line, in the order they appear -- whichever
     # alternative of _DISPATCH_RE matched. Only meaningful when `outcome` is empty (see
@@ -340,7 +350,8 @@ def build_record(*, member: str, run_id: str, kind: str, exit_code: int,
                  item_id: str | None = None, pr: str | None = None,
                  lane: str | None = None, trailing_loss: bool = False,
                  heartbeat: bool = False, dispatch_skipped: bool = False,
-                 fired_by: str | None = None, reason: str | None = None) -> dict:
+                 fired_by: str | None = None, reason: str | None = None,
+                 checkpoint_pr: int | None = None) -> dict:
     """One run = one record. `usage` is pass_accounting's parsed JSON, or None (mechanical)."""
     report = parse_report(pass_text)
     if not report.get("report") and kind != "llm" and (pass_text or "").strip():
@@ -397,6 +408,11 @@ def build_record(*, member: str, run_id: str, kind: str, exit_code: int,
         # as `lane` above.
         "fired_by": fired_by,
         "reason": reason,
+        # 2026-09-26: claim_history.py's dead-end inputs. `blocked` is the pass's own
+        # `Blocked:` lines; `checkpoint_pr` the draft PR minion_checkpoint.py opened during it
+        # (set by run_member.sh). A run with a checkpoint is progress, never a dead end.
+        "blocked": report.get("blocked"),
+        "checkpoint_pr": checkpoint_pr,
     }
     u = usage or {}
     # Field names here match pass_accounting.py's split() output verbatim -- that module is the
@@ -462,6 +478,9 @@ def main(argv=None) -> int:
     ap.add_argument("--lane", help="lane this pass was dispatched for, if any (e.g. nerd's lane=<name> --task prefix)")
     ap.add_argument("--fired-by", help="fk#1124: the webhook caller that fired this run, if any (webhook_auth.caller_for's name)")
     ap.add_argument("--reason", help="fk#1124: the one-line reason a webhook caller gave for firing this run")
+    ap.add_argument("--checkpoint-pr", type=int,
+                    help="draft PR minion_checkpoint.py opened during this pass, if any "
+                         "(run_member.sh). claim_history.py never counts such a run as a dead end.")
     ap.add_argument("--trailing-loss", action="store_true",
                     help="gh#257: stream_log.py's _detect_trailing_loss fired for this run -- "
                          "a real report existed one turn earlier and was overwritten by a "
@@ -507,7 +526,7 @@ def main(argv=None) -> int:
                        pass_text=text, usage=usage, vision_required=a.vision_required,
                        item_id=a.item_id, pr=a.pr, lane=a.lane, trailing_loss=a.trailing_loss,
                        heartbeat=a.heartbeat, dispatch_skipped=a.dispatch_skipped,
-                       fired_by=a.fired_by, reason=a.reason)
+                       fired_by=a.fired_by, reason=a.reason, checkpoint_pr=a.checkpoint_pr)
     # Reif, 2026-09-16, on a gru report in the console: "this needs to be in plain english and
     # run on haiku - dont burn tokens for this." The same 160-word haiku rewrite run_mail.py
     # already does for the email lands ON the record, so the console drawer opens with it.

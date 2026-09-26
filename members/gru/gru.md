@@ -255,6 +255,10 @@ spawns exactly one). Your job, in order:
    ```
    Default threshold: 3 dead-end claims inside a 14-day window (reasoned default — see
    `claim_history.py`'s docstring; the exact number was left `UNKNOWN` by this issue's PRD).
+   A dead-end claim is ONLY a minion run whose report said `Blocked: #<n> <reason>` (Reif,
+   2026-09-26). Kills (rc=143), timeouts (rc=124), other infra statuses, runs that opened a
+   checkpoint draft PR, and Part-of PRs never count. `attempts=` in the output is every run,
+   for context.
 
    **Make the drop visible — gh#5934.** A drop above was silent: no comment, no label, nothing
    on the board a person or a later pass can see — thirty `fleet:priority-high` items,
