@@ -144,10 +144,10 @@ CREATE TABLE IF NOT EXISTS asks (
 CREATE INDEX IF NOT EXISTS idx_asks_status ON asks(status);
 CREATE INDEX IF NOT EXISTS idx_asks_member ON asks(member);
 -- philanthropy#8215: member-to-member messages (gru -> marie + jefe on gate drops, a denial ->
--- jefe, ...). asks are for Reif; msgs are for each other. scripts/fleet_msg.py is the only
+-- jefe, ...). Reif's channel is ask.py; msgs are for each other. scripts/fleet_msg.py is the only
 -- reader/writer. status: open -> acked (did it) | replied (didn't, ack_note says why).
 -- escalated_to: NULL, 'jefe' (watchdog sent jefe a pointer), or 'reif' (folded into ask_id).
--- Like asks, NOT rebuilt from runs.jsonl: this is state, not an index.
+-- NOT rebuilt from runs.jsonl: this is state, not an index.
 CREATE TABLE IF NOT EXISTS msgs (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
   sender       TEXT NOT NULL,

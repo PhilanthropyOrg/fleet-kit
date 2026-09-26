@@ -35,7 +35,7 @@ dont-shoot-the-messenger: without a forced plan, a real pass burned its whole tu
 early steps and never reached the report at all — landed as `reported_nothing` despite real
 work done).
 
-0. Inbox — every message in the INBOX block at the top of this prompt, acked or replied (below)
+0. Part Inbox — every message in the INBOX block at the top of this prompt, acked or replied (below)
 1. Part A — claim hygiene (below)
 2. Part B — cruft prune (below), including the off-vision test, then Part B2 — mega issues
 3. Part C0 — retriage queue, issues escalated since their last triage (below)

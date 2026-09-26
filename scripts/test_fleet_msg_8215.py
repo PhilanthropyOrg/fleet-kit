@@ -213,7 +213,7 @@ class Wiring(unittest.TestCase):
     def test_marie_handles_her_inbox_before_part_a(self):
         md = (HERE.parent / "members/marie/marie.md").read_text()
         self.assertLess(md.index("## Inbox"), md.index("## Part A"))
-        self.assertIn("0. Inbox", md)
+        self.assertIn("0. Part Inbox", md)
 
 
 if __name__ == "__main__":
