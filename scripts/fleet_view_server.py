@@ -649,6 +649,7 @@ def _backfill_daily(db, mid: str, days: list[str], fetch) -> int:
     for day, value in open_per_day(rows, days[:-1]).items():
         db.execute("INSERT OR IGNORE INTO metric_points (id, day, value) VALUES (?, ?, ?)", (mid, day, float(value)))
         n += 1
+    db.commit()  # never hold the write lock into the caller's next (network) read
     return n
 
 
@@ -752,6 +753,11 @@ def metrics_snapshot() -> dict:
                 return
             db.execute("INSERT INTO metric_points (id, day, value) VALUES (?, ?, ?) "
                        "ON CONFLICT(id, day) DO UPDATE SET value = excluded.value", (mid, days[-1], float(value)))
+            # Commit per write: the tiles below make network/gh reads (30-50s each in the
+            # container). One transaction across all of them held fleet.db's write lock for
+            # minutes per /api/metrics poll, and every other writer (member tail syncs, asks,
+            # fleet_msg) got `database is locked` (2026-09-26 22:21-23:07 UTC, near-continuous).
+            db.commit()
 
         def daily_series(mid: str) -> list[dict]:
             have = dict(db.execute("SELECT day, value FROM metric_points WHERE id=? AND day>=? ORDER BY day",
@@ -773,6 +779,7 @@ def metrics_snapshot() -> dict:
             if val is not None and n.get("delta_7d") is not None and len(days) >= 8:
                 db.execute("INSERT OR IGNORE INTO metric_points (id, day, value) VALUES (?, ?, ?)",
                            ("okr.verified_claims", days[-8], float(val) - float(n["delta_7d"])))
+                db.commit()
             fetched = float((nr.get("payload") or {}).get("fetched_at") or 0) or None
             for mid in ("okr.verified_claims", "okr.clicks", "okr.conversion"):
                 fresh[mid] = (fetched, NUMBER_FETCH_S)
