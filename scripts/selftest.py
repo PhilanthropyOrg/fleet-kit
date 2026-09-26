@@ -5742,7 +5742,8 @@ def _console_tiles_are_registered_metrics_with_history_fk1058():
             fvs.ENV_FILE = tmp / "fleet.env"
             import fleet_db as _fdb
             _fdb.DB_FILE = tmp / "fleet.db"
-            fvs.STATE.gh = {"prs": [{"isDraft": False}, {"isDraft": True}], "issues": [{"_claimed": True}, {"_claimed": False}, {"_claimed": False}], "merged": []}
+            fvs.STATE.gh = {"prs": [{"isDraft": False}, {"isDraft": True}], "issues": [{"_claimed": True}, {"_claimed": False}, {"_claimed": False}], "merged": [],
+                            "prs_at": time.time(), "issues_at": time.time()}  # gh#8212: only a real read is history
             fvs.STATE.runs = []
             fvs._TTL_CACHE.clear()
             fvs._gh = lambda *a, **k: ""  # no network

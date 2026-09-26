@@ -52,12 +52,14 @@ def test_backlog_trend_is_net_change() -> None:
 def test_tiles_registered_on_fleet_home() -> None:
     ids = {m["id"] for m in json.loads((HERE / "metrics.json").read_text())["metrics"]}
     for want in ["fleet.items_per_minion_run", "fleet.closed_per_minion_run",
-                 "fleet.shipped_live_per_day", "fleet.backlog_trend"]:
+                 "fleet.shipped_live_per_day"]:
         assert want in ids, f"{want} missing from metrics.json (fleet_home renders one tile per row)"
     src = (HERE / "fleet_view_server.py").read_text()
     for want in ["fleet.items_per_minion_run", "fleet.closed_per_minion_run",
-                 "fleet.shipped_live_per_day", "fleet.backlog_trend"]:
+                 "fleet.shipped_live_per_day"]:
         assert f'out["{want}"]' in src, f"{want} never computed in metrics_snapshot"
+    # gh#8212: the backlog trend is the Backlog tile's caption, not a second backlog tile.
+    assert "fleet.backlog_trend" not in ids and "scoreboard.backlog_trend(" in src
     print("ok  scoreboard tiles registered and computed")
 
 

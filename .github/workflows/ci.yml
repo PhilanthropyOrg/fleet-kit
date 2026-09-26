@@ -162,6 +162,8 @@ jobs:
         run: python3 scripts/test_findings_are_always_raised.py
       - name: run test_fleet_home_spawns_vs_prs.py
         run: python3 scripts/test_fleet_home_spawns_vs_prs.py
+      - name: run test_fleet_home_tiles_8212.py
+        run: python3 scripts/test_fleet_home_tiles_8212.py
       - name: run test_worktree_prune.py
         run: python3 scripts/test_worktree_prune.py
       - name: run test_worktree_builder_prune.py

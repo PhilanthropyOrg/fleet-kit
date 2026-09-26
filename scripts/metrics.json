@@ -1,21 +1,12 @@
 {
- "_doc": "fk#1058: the metric registry. Every console tile is a row here; the OKR file references tiles by id. A KR that names an id not in this file fails a selftest. Order = display order.",
+ "_doc": "fk#1058: the metric registry. Every console tile is a row here; the OKR file references tiles by id. A KR that names an id not in this file fails a selftest. Order = display order. gh#8212: one tile per quantity, each with as_of + cadence_s from /api/metrics.",
  "metrics": [
   {
-   "id": "fleet.issues_resolved_per_hour",
-   "label": "Issues resolved / hour",
+   "id": "fleet.issues_resolved_24h",
+   "label": "Issues resolved",
    "unit": "issues",
-   "window": "per hour, 24h",
-   "source": "merged PR closes an issue COMPLETED, carried live by a later successful FLEET_DEPLOY_WORKFLOW run",
-   "lane": "fleet",
-   "history": "native"
-  },
-  {
-   "id": "fleet.issues_resolved_7d",
-   "label": "Resolved / day",
-   "unit": "issues",
-   "window": "per day, 7d",
-   "source": "fleet.issues_resolved_per_hour, same events bucketed daily",
+   "window": "24h; line = per day, 14d",
+   "source": "scoreboard.resolved_events: merged PR closes an issue COMPLETED, carried live by a later successful FLEET_DEPLOY_WORKFLOW run",
    "lane": "fleet",
    "history": "native"
   },
@@ -47,11 +38,47 @@
    "history": "daily"
   },
   {
+   "id": "fleet.prs_open_over_4h",
+   "label": "PRs open > 4h",
+   "unit": "PRs",
+   "window": "now; line = daily, 14d",
+   "source": "gh pr list --state open, createdAt older than 4h",
+   "lane": "fleet",
+   "history": "daily"
+  },
+  {
+   "id": "fleet.runs_stuck",
+   "label": "Runs stuck",
+   "unit": "runs",
+   "window": "now",
+   "source": "runs.jsonl: newest row still 'started' past the run's own timeout_s",
+   "lane": "fleet",
+   "history": "none"
+  },
+  {
+   "id": "fleet.gate_drops_6h",
+   "label": "Gate drops",
+   "unit": "items",
+   "window": "6 hours",
+   "source": "gate_drops.jsonl (gru's Vision-link + quality gates, scripts/gate_drops.py)",
+   "lane": "fleet",
+   "history": "none"
+  },
+  {
+   "id": "fleet.msgs_open",
+   "label": "Fleet messages",
+   "unit": "open",
+   "window": "now",
+   "source": "fleet.db msgs (member-to-member messages, scripts/fleet_msg.py)",
+   "lane": "fleet",
+   "history": "none"
+  },
+  {
    "id": "fleet.backlog_open",
    "label": "Backlog",
    "unit": "issues",
    "window": "14 days",
-   "source": "gh issue list --label fleet:backlog",
+   "source": "gh issue list --label fleet:backlog; 7d change from its daily history",
    "lane": "fleet",
    "history": "daily"
   },
@@ -68,8 +95,35 @@
    "id": "fleet.merged_per_day",
    "label": "Merged",
    "unit": "PRs",
-   "window": "per day, 14d",
-   "source": "gh pr list --state merged",
+   "window": "24h; line = per day, 14d",
+   "source": "gh pr list --state merged --search merged:>=14d (up to 1000)",
+   "lane": "fleet",
+   "history": "native"
+  },
+  {
+   "id": "fleet.shipped_live_per_day",
+   "label": "Shipped live",
+   "unit": "PRs",
+   "window": "24h; line = per day, 14d",
+   "source": "merged PRs carried by a later successful FLEET_DEPLOY_WORKFLOW run",
+   "lane": "fleet",
+   "history": "native"
+  },
+  {
+   "id": "fleet.prs_opened_per_hour",
+   "label": "PRs opened",
+   "unit": "PRs",
+   "window": "per hour, 24h",
+   "source": "gh pr list head:member/",
+   "lane": "fleet",
+   "history": "native"
+  },
+  {
+   "id": "fleet.minion_spawns_per_hour",
+   "label": "Spawns (minion)",
+   "unit": "passes",
+   "window": "per hour, 24h",
+   "source": "runs.jsonl",
    "lane": "fleet",
    "history": "native"
   },
@@ -92,47 +146,11 @@
    "history": "daily"
   },
   {
-   "id": "fleet.shipped_live_per_day",
-   "label": "Shipped live",
-   "unit": "PRs",
-   "window": "per day, 14d",
-   "source": "merged PRs carried by a later successful FLEET_DEPLOY_WORKFLOW run",
-   "lane": "fleet",
-   "history": "native"
-  },
-  {
-   "id": "fleet.backlog_trend",
-   "label": "Backlog trend",
-   "unit": "issues/7d",
-   "window": "7 days",
-   "source": "fleet.backlog_open daily history",
-   "lane": "fleet",
-   "history": "daily"
-  },
-  {
-   "id": "fleet.gate_drops_6h",
-   "label": "Gate drops",
-   "unit": "items",
-   "window": "6 hours",
-   "source": "gate_drops.jsonl (gru's Vision-link + quality gates, scripts/gate_drops.py)",
-   "lane": "fleet",
-   "history": "native"
-  },
-  {
-   "id": "fleet.msgs_open",
-   "label": "Fleet messages",
-   "unit": "open",
-   "window": "now",
-   "source": "fleet.db msgs (member-to-member messages, scripts/fleet_msg.py)",
-   "lane": "fleet",
-   "history": "native"
-  },
-  {
-   "id": "gh.actions_spend_mtd",
-   "label": "GitHub Actions",
-   "unit": "USD",
-   "window": "month to date",
-   "source": "gh api /orgs/{org}/settings/billing/usage",
+   "id": "fleet.ok_runs_per_hour",
+   "label": "Alive",
+   "unit": "ok runs",
+   "window": "per hour, 24h",
+   "source": "runs.jsonl",
    "lane": "fleet",
    "history": "native"
   },
@@ -146,29 +164,11 @@
    "history": "daily"
   },
   {
-   "id": "fleet.ok_runs_per_hour",
-   "label": "Alive",
-   "unit": "ok runs",
-   "window": "per hour, 24h",
-   "source": "runs.jsonl",
-   "lane": "fleet",
-   "history": "native"
-  },
-  {
-   "id": "fleet.minion_spawns_per_hour",
-   "label": "Spawns (minion)",
-   "unit": "passes",
-   "window": "per hour, 24h",
-   "source": "runs.jsonl",
-   "lane": "fleet",
-   "history": "native"
-  },
-  {
-   "id": "fleet.prs_opened_per_hour",
-   "label": "PRs opened",
-   "unit": "PRs",
-   "window": "per hour, 24h",
-   "source": "gh pr list head:member/",
+   "id": "gh.actions_spend_mtd",
+   "label": "GitHub Actions",
+   "unit": "USD",
+   "window": "month to date",
+   "source": "gh api /orgs/{org}/settings/billing/usage",
    "lane": "fleet",
    "history": "native"
   }
