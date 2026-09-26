@@ -43,6 +43,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import board_github  # noqa: E402 -- one definition of the release commands
+import minion_checkpoint  # noqa: E402 -- one definition of a checkpoint PR
 import pr_ci_wait  # noqa: E402 -- one definition of a "real" commit
 
 LABEL_CLAIMED = board_github.LABEL_CLAIMED
@@ -64,6 +65,12 @@ def _env_int(name: str, default: int) -> int:
 
 
 LEASE_MIN = _env_int("FLEET_CLAIM_LEASE_MIN", 60)
+# A claim whose only activity is a minion checkpoint draft PR, with no live runner, is released
+# after this many minutes instead of the full lease (2026-09-26: #7937/#7938/#7941 sat claimed
+# behind drafts #8152/#8134/#8136 with no minion running). The checkpoint's own commits are the
+# dead pass saving its work, not someone working. The next gru pass resumes the branch
+# (run_member.sh -> minion_checkpoint.py find). The grace covers the claim-to-spawn gap.
+CHECKPOINT_GRACE_MIN = _env_int("FLEET_CLAIM_CHECKPOINT_GRACE_MIN", 10)
 
 
 def log_dir() -> Path:
@@ -177,11 +184,20 @@ def assess(issue: dict, prs: list[dict], branches: list[dict], live: set[int], n
     mh = marie_hold_time(issue)
     if mh and (not claimed_at or mh >= claimed_at):
         return hold("marie-merged-pr", "marie left the claim in place (a merged PR references it)")
+    mine = [p for p in prs if _refs(p, n)]
+    ev["open_prs"] = [p["number"] for p in mine]
+    idle = n not in live and not any(int(p["number"]) in live for p in mine)
+    ckpt = [p["number"] for p in mine
+            if minion_checkpoint.is_checkpoint_pr(p.get("title"), p.get("body"))]
+    if idle and ckpt and (not claimed_at or now - claimed_at >= CHECKPOINT_GRACE_MIN * 60):
+        ev["checkpoint_prs"] = ckpt
+        return {"number": n, "release": True, "kind": "checkpoint-idle", "evidence": ev,
+                "why": (f"checkpoint draft PR #{ckpt[0]} holds the work and no live runner is on "
+                        f"it -- the next minion resumes that branch"
+                        f" (claimed {_iso(claimed_at) or 'unknown'})")}
     if claimed_at and now - claimed_at < lease:
         return hold("inside-lease", f"claimed {int((now - claimed_at) // 60)} min ago (inside the lease)")
 
-    mine = [p for p in prs if _refs(p, n)]
-    ev["open_prs"] = [p["number"] for p in mine]
     if n in live:
         return hold("live-runner", "a live runner process names this item")
     busy = [p["number"] for p in mine if int(p["number"]) in live]
@@ -213,6 +229,9 @@ def release_note(row: dict) -> str:
         # built part of #7940 and #7948, merged, and left both open on purpose).
         tail += (f" Merged PR(s) {', '.join('#%d' % p for p in merged)} reference it -- read their "
                  "`Remaining:` line and build only what remains, or close it if nothing does.")
+    if row.get("kind") == "checkpoint-idle":
+        return (f"stale_claims: released fleet:claimed -- {row['why']}. "
+                f"Re-claimable by the next gru pass.{tail}")
     return (f"stale_claims: released fleet:claimed -- lease expired: {row['why']}. "
             f"Re-claimable by the next gru pass.{tail}")
 
