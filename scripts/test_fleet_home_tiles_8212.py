@@ -86,6 +86,8 @@ class Tiles8212(unittest.TestCase):
         self.assertEqual(s["value"], 1, "only minion-a is past its timeout with no ending")
         self.assertIn("minion", s["sub"])
         self.assertIn("1 running", s["sub"])
+        self.assertEqual(by["fleet.msgs_open"]["value"], 0,
+                         "the msgs tile must read on the snapshot's own connection, not lock against it")
         for mid, m in by.items():
             self.assertIn("as_of", m, mid)
             self.assertIn("cadence_s", m, mid)
