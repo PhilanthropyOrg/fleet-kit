@@ -28,5 +28,14 @@ timeout 60 python3 "$KIT_DIR/scripts/open_runs.py" close-lost \
 ( cd "${FLEET_REPO:-/repo}" 2>/dev/null || true
   timeout 900 python3 "$KIT_DIR/scripts/stale_claims.py" release ) \
   || echo "[run_gru_fanout] stale_claims sweep failed (exit $?) -- continuing without it"
+# philanthropy#8218: normalize EVERY open backlog item before gru sees it (quality:solid default,
+# needs-spec + comment + one message to marie/jefe), message hq the open needs-prod-access items,
+# and message hq the minion drafts that are done and green. Fail-open, like the sweep above.
+( cd "${FLEET_REPO:-/repo}" 2>/dev/null || true
+  timeout 900 python3 "$KIT_DIR/scripts/gate_drops.py" intake ) \
+  || echo "[run_gru_fanout] backlog intake failed (exit $?) -- continuing without it"
+( cd "${FLEET_REPO:-/repo}" 2>/dev/null || true
+  timeout 120 python3 "$KIT_DIR/scripts/minion_checkpoint.py" complete --notify ) \
+  || echo "[run_gru_fanout] merge-ready scan failed (exit $?) -- continuing without it"
 
 exec bash "$KIT_DIR/scripts/run_member.sh" gru "$@"

@@ -90,6 +90,10 @@ def is_claimed(issue: dict) -> bool:
 
 
 LABEL_HUMAN_BLOCKED = f"{PREFIX}needs-human-op"
+# philanthropy#8218: prod DB reads, secrets, Cloudflare -- work no sandboxed minion can do. HQ
+# (the Claude session on the host) takes these; gate_drops.py intake messages it the open list.
+LABEL_PROD_ACCESS = f"{PREFIX}needs-prod-access"
+NOT_FOR_MINIONS = (LABEL_HUMAN_BLOCKED, LABEL_PROD_ACCESS)
 
 
 def is_human_blocked(issue: dict) -> bool:
@@ -97,8 +101,9 @@ def is_human_blocked(issue: dict) -> bool:
     (a prod credential, an OAuth registration, an --apply run) that no sandboxed builder can
     perform. Ported from nonprofit-atlas's `scripts/fleet/board_github.py` (gh#5870): this
     file forked from that one and never picked up the exclusion, so `fleet:needs-human-op`
-    was a silent no-op for every claim made through this copy."""
-    return any(lb.get("name") == LABEL_HUMAN_BLOCKED for lb in issue.get("labels") or [])
+    was a silent no-op for every claim made through this copy. `fleet:needs-prod-access`
+    (philanthropy#8218) is excluded the same way: HQ holds that access, no builder does."""
+    return any(lb.get("name") in NOT_FOR_MINIONS for lb in issue.get("labels") or [])
 
 
 BLOCKED_BY_RE = re.compile(
@@ -165,6 +170,8 @@ def ensure_labels(priority: str = "") -> None:
         _SEVERITY_LABEL_META,
         (LABEL_HUMAN_BLOCKED, "b60205",
          "code-complete, blocked on a one-time human action -- excluded from claim selection"),
+        (LABEL_PROD_ACCESS, "b60205",
+         "needs prod DB/secrets/Cloudflare -- HQ takes it; excluded from claim selection"),
     ]
     if priority:
         color, desc = _PRIORITY_LABEL_META.get(priority, ("ededed", f"priority: {priority}"))
