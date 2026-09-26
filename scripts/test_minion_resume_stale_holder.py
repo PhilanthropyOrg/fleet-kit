@@ -3,7 +3,7 @@
 2026-09-26 14:42 UTC: #7937's minion found checkpoint #8152's branch, but the killed 12:33 pass
 had never removed its worktree (another container's /tmp), so `git worktree add -B` failed with
 "already checked out". The minion started fresh from main and opened duplicate draft #8156.
-run_member.sh now overrides git's guard when the holder is dead, and only then.
+run_member.sh now removes that one dead entry and resumes; a live holder is left alone.
 
 Run: python3 scripts/test_minion_resume_stale_holder.py
 """
@@ -54,7 +54,7 @@ class ResumeStaleHolder(unittest.TestCase):
           git -C "$REPO" worktree add -B "$RESUME_BRANCH" "$WT_PATH" "origin/$RESUME_BRANCH" 2>/dev/null; rc=$?
           [ $rc -ne 0 ] || {{ echo "git guard did not fire"; exit 9; }}
           {AWK}
-          [ -n "$holder" ] && resume_holder_dead "$holder" && git -C "$REPO" worktree add -q -f -B "$RESUME_BRANCH" "$WT_PATH" "origin/$RESUME_BRANCH"
+          [ -n "$holder" ] && resume_holder_dead "$holder" && git -C "$REPO" worktree remove -f -f "$holder" && git -C "$REPO" worktree add -q -B "$RESUME_BRANCH" "$WT_PATH" "origin/$RESUME_BRANCH"
           git -C "$WT_PATH" log --format=%s -1
           """, d)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)

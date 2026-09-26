@@ -621,13 +621,16 @@ if [ "$WORKTREE_ENABLED" = "True" ] && [ "$DRY_RUN" -ne 1 ]; then
         # out" (2026-09-26 14:42: #7937's resume hit that, started fresh, and opened duplicate
         # draft #8156 beside checkpoint #8152). If the holder is dead -- its path is gone (another
         # container's /tmp, or cleaned) or the pid in its `-<pid>` suffix is not running --
-        # override git's guard. A LIVE holder is a real concurrent pass: leave it alone.
+        # remove THAT entry only (never a blanket prune, gh#684; its work is already pushed by
+        # the checkpoint) and add again. `add -f -B` is not enough: newer git refuses to
+        # force-update a branch another worktree holds. A LIVE holder is left alone.
         if [ "$rc" -ne 0 ]; then
           holder=$(git -C "$REPO" worktree list --porcelain | awk -v b="refs/heads/$RESUME_BRANCH" \
             '/^worktree /{p=substr($0,10)} $0=="branch "b{print p}' | head -1)
           if [ -n "$holder" ] && resume_holder_dead "$holder"; then
-            log "create_run_worktree: $RESUME_BRANCH held by dead worktree $holder -- resuming with --force"
-            git -C "$REPO" worktree add -f -B "$RESUME_BRANCH" "$WT_PATH" "origin/$RESUME_BRANCH" >>"$LOG" 2>&1
+            log "create_run_worktree: $RESUME_BRANCH held by dead worktree $holder -- removing that entry and resuming"
+            git -C "$REPO" worktree remove -f -f "$holder" >>"$LOG" 2>&1
+            git -C "$REPO" worktree add -B "$RESUME_BRANCH" "$WT_PATH" "origin/$RESUME_BRANCH" >>"$LOG" 2>&1
             rc=$?
           fi
         fi
