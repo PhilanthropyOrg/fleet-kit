@@ -80,7 +80,7 @@ the recipient's next pass opens with an INBOX block (run_member.sh) → `ack`/`r
 watchdog (cron :04/:19/:34/:49) escalates an unacked message to jefe after 2 of the recipient's
 cadences, then folds jefe's unacked ones into ONE ask for Reif. Senders today: gru → marie+jefe
 (>3 gate drops, `gate_drops.py`), any member → jefe (gh denial, `denial_asks.py`), the-fixer →
-owner (PR idle >4h, `check.sh`), sentry → the-fixer (failing journey, `journey_issue_filer.py`).
+owner (PR idle >4h, hourly :47 cron), sentry → the-fixer (failing journey, `journey_issue_filer.py`).
 Inspect: `podman exec -e FLEET_LOG_DIR=/var/log/fleet-kit philanthropy python3 /fleet-kit/scripts/fleet_msg.py summary`.
 
 `entrypoint.sh` renders these into `/etc/cron.d/fleet-kit` at container start; the manifest's

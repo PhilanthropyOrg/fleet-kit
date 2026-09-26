@@ -253,10 +253,6 @@ read_stale_prs() { # -> space-separated "num:sha:reason" triples, oldest first, 
   [ "${#filtered[@]}" -gt 0 ] && printf '%s ' "${filtered[@]}"
 }
 STALE_PRS=$(read_stale_prs)
-# philanthropy#8215 amendment: the-fixer -> the owning member when its PR sits idle > 4h
-# (fleet_msg.py dedupes the same set for 6h). Shell, so $0; stdout stays this script's one line.
-# Detached: its gh list is 30-50s in the container and must never delay an incident FIRE.
-( python3 "$(dirname "$0")/../../scripts/fleet_msg.py" idle-prs --from the-fixer >/dev/null 2>>"$LOG" & ) </dev/null
 # The dedup key for a stale-PR fire is the WHOLE batch, not the oldest PR's sha.
 #
 # It used to be the oldest sha alone, and that silently blinded the fleet for 11 hours
