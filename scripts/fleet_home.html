@@ -451,6 +451,11 @@ function renderAgents() {
 }
 
 function renderLanded() {
+  if (STATE.gh.ok === false) {
+    $('landedSub').textContent = 'gh unavailable';
+    $('landed').innerHTML = `<li class="empty">gh unavailable${STATE.gh.error ? `: ${esc(STATE.gh.error)}` : ''} -- showing last known state, not live.</li>`;
+    return;
+  }
   const merged = (STATE.gh.merged || []), today = centralDay(new Date());
   const rows = merged.filter(pr => pr.mergedAt && centralDay(new Date(pr.mergedAt)) === today).sort((a, b) => new Date(b.mergedAt) - new Date(a.mergedAt));
   $('landedSub').textContent = rows.length ? `${rows.length} today (Central)` : '';
