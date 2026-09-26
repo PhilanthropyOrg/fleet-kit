@@ -21,6 +21,10 @@ KIT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 # a human removed the label. Deterministic, fail-open (a failed sweep never blocks the pass);
 # gru step 0 reads the result with `stale_claims.py last`. Runs from the product checkout so gh
 # resolves the repo from its remote, the same way gru's own gh calls do.
+# gh#8197: first, give every run that died without an ending (SIGKILL, OOM, container stop) its
+# terminal row, so no run stays `started` and the claim sweep below reads the truth.
+timeout 60 python3 "$KIT_DIR/scripts/open_runs.py" close-lost \
+  || echo "[run_gru_fanout] close-lost sweep failed (exit $?) -- continuing without it"
 ( cd "${FLEET_REPO:-/repo}" 2>/dev/null || true
   timeout 900 python3 "$KIT_DIR/scripts/stale_claims.py" release ) \
   || echo "[run_gru_fanout] stale_claims sweep failed (exit $?) -- continuing without it"

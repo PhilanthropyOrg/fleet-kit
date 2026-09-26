@@ -149,7 +149,8 @@ class DeployShWiring(unittest.TestCase):
     def test_abandon_is_bounded_by_retire_max(self):
         body = _fn(DEPLOY, "proxy_deploy")
         guard = body[body.index('running "$RETIRED_MARKER"'):body.index("podman build")]
-        self.assertIn('-lt "$RETIRE_MAX_S"', guard, "ABANDONED must only apply while inside the drain budget")
+        self.assertIn('budget="$(drain_budget_s "$RETIRED_MARKER")"', guard, "gh#8197: minions get their own budget")
+        self.assertIn('-lt "$budget"', guard, "ABANDONED must only apply while inside the drain budget")
         self.assertIn('terminate_and_stop "$RETIRED_MARKER"', guard, "past the budget the tick must end the drain itself")
 
     def test_reaper_uses_the_same_termination_code(self):

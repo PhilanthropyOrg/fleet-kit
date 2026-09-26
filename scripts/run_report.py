@@ -314,7 +314,8 @@ def classify(report: dict, *, vision_required: bool, exit_code: int | None = Non
 
 def build_started_record(*, member: str, run_id: str, kind: str = "llm",
                          item_id: str | None = None, lane: str | None = None,
-                         fired_by: str | None = None, reason: str | None = None) -> dict:
+                         fired_by: str | None = None, reason: str | None = None,
+                         timeout_s: int | None = None) -> dict:
     """gh#145: the FIRST leg of a run record, written before `claude -p` is ever invoked.
 
     build_record's two callers (run_member.sh's normal-exit path and its SIGTERM trap,
@@ -342,6 +343,9 @@ def build_started_record(*, member: str, run_id: str, kind: str = "llm",
         "lane": lane,
         "fired_by": fired_by,
         "reason": reason,
+        # gh#8197: the pass's own timeout, so open_runs.py close-lost knows when a run with
+        # no ending can no longer be alive (null for a caller that does not pass it).
+        "timeout_s": timeout_s,
     }
 
 
@@ -497,6 +501,8 @@ def main(argv=None) -> int:
                          "Records status 'dispatch_skipped', which fleet_metrics.py excludes "
                          "from EXECUTED and SIGNAL_DENOM, so a lock collision never counts as "
                          "a run.")
+    ap.add_argument("--timeout-s", type=lambda v: int(float(v)) if str(v).replace(".", "", 1).isdigit() else None,
+                    help="gh#8197: with --started, the pass's timeout, for open_runs.py close-lost")
     ap.add_argument("--started", action="store_true",
                     help="write a provisional 'started' row (gh#145), before claude -p runs -- "
                          "ignores --exit-code/--pass-file/--usage-file/--vision-required/--pr")
@@ -505,7 +511,7 @@ def main(argv=None) -> int:
     if a.started:
         rec = build_started_record(member=a.member, run_id=a.run_id, kind=a.kind,
                                    item_id=a.item_id, lane=a.lane,
-                                   fired_by=a.fired_by, reason=a.reason)
+                                   fired_by=a.fired_by, reason=a.reason, timeout_s=a.timeout_s)
         print(json.dumps(rec))
         return 0
 
