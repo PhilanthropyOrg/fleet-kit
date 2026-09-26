@@ -44,6 +44,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import board_github  # noqa: E402 -- one definition of the release commands
 import minion_checkpoint  # noqa: E402 -- one definition of a checkpoint PR
+import open_runs  # noqa: E402 -- live runs in any container, from runs.jsonl
 import pr_ci_wait  # noqa: E402 -- one definition of a "real" commit
 
 LABEL_CLAIMED = board_github.LABEL_CLAIMED
@@ -330,7 +331,11 @@ def sweep(repo: str | None, dry_run: bool, gh=pr_ci_wait._gh, now: float | None 
         # claim with a working PR to a second builder. Hold everything this pass.
         return {"error": "gh pr list failed -- no claims released this pass", "ts": _iso(now)}
     branches = pushed_branches(repo, {p["headRefName"] for p in prs}, gh)
-    live = live_numbers() if live is None else live
+    if live is None:
+        # /proc sees only THIS container. A deploy leaves the old build draining as
+        # `philanthropy-retired`, and its minions are live too: open_runs reads the shared
+        # runs.jsonl (2026-09-26 16:39, #7939/#7941/#7950 resuming there).
+        live = live_numbers() | open_runs.open_items(open_runs._tail_records(open_runs.runs_file()), now)
     rows = [assess(i, prs, branches, live, now) for i in issues]
     merged = merged_f.result()
     by_num = {int(i["number"]): i for i in issues}

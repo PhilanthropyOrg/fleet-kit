@@ -593,7 +593,12 @@ if [ "$WORKTREE_ENABLED" = "True" ] && [ "$DRY_RUN" -ne 1 ]; then
 
   # Is the worktree at $1 left over from a pass that is gone? Gone path, or dead `-<pid>` suffix.
   resume_holder_dead() {
-    local path="$1" pid
+    local path="$1" pid tag
+    # Its run may be live in ANOTHER container (a deploy's draining `-retired` build), where
+    # neither its /tmp path nor its pid is visible from here: runs.jsonl is shared, so an open
+    # `started` row for this worktree's run is the cross-container liveness signal.
+    tag="$(basename "$path")"; tag="${tag#fleet-run-}"
+    python3 "$KIT_DIR/scripts/open_runs.py" has --prefix "$tag-" 2>/dev/null && return 1
     [ -d "$path" ] || return 0
     pid="${path##*-}"
     case "$pid" in (""|*[!0-9]*) return 1 ;; esac
