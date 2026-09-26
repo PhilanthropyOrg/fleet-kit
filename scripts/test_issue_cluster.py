@@ -181,8 +181,14 @@ def test_filer_members_cannot_bypass_the_helper() -> None:
     for name in ic.FILER_MEMBERS:
         spec = json.loads((root / "members" / name / f"{name}.fleet.json").read_text())
         deny = ((spec.get("llm") or {}).get("tools") or {}).get("deny") or []
-        assert "Bash(gh issue create:*)" in deny, f"{name} can still run raw gh issue create"
-    print(f"ok  filer members deny raw gh issue create: {', '.join(ic.FILER_MEMBERS)}")
+        if name in ic.RAW_CREATE_ALLOWED:
+            # philanthropy#8215: allowed, and deduped by the PreToolUse hook instead
+            assert "Bash(gh issue create:*)" not in deny, f"{name} is still denied gh issue create"
+        else:
+            assert "Bash(gh issue create:*)" in deny, f"{name} can still run raw gh issue create"
+    import worktree_guard_hook_install as inst
+    assert any("issue_create_hook.py" in c for c in inst._hook_commands()), "dedupe hook not registered"
+    print(f"ok  filer members deny raw gh issue create, or are deduped by the hook: {', '.join(ic.FILER_MEMBERS)}")
 
 
 if __name__ == "__main__":

@@ -54,6 +54,10 @@ DEFAULT_MIN_CLUSTER = 3
 # inbox's alert path, reif_eyes. journey_issue_filer / prod_incident keep their own marker dedupe.
 FILER_MEMBERS = ["sentry", "red", "nerd", "the-fixer", "librarian", "vp",
                  "dont-shoot-the-messenger", "marie"]
+# philanthropy#8215: these two must be able to file even when they reach for raw `gh issue
+# create` (a real org's removal request sat unfiled behind the deny, 2026-09-26). They are not
+# denied; issue_create_hook.py applies find_existing to every raw create instead.
+RAW_CREATE_ALLOWED = ["sentry", "dont-shoot-the-messenger"]
 
 
 def _labels(issue: dict) -> set[str]:

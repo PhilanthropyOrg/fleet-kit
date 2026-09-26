@@ -37,8 +37,7 @@
       ],
       "deny": [
         "Bash(git push --force:*)",
-        "Bash(git push origin main:*)",
-        "Bash(gh issue create:*)"
+        "Bash(git push origin main:*)"
       ]
     }
   },

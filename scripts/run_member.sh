@@ -1090,6 +1090,10 @@ rm -f "$ACCOUNT_POOL_SELECTED_FILE" "$ACCOUNT_POOL_REASON_FILE"
 
 RAW=$(cat "$RESULT_FILE" 2>/dev/null)
 rm -f "$RESULT_FILE"
+# philanthropy#8215: a gh call the sandbox refused becomes an ask (next brief + console), never
+# a polite stop in a report nobody reads. Best-effort; never changes RC.
+DENIAL_NOTE=$(printf '%s' "$RAW" | python3 "$KIT_DIR/scripts/denial_asks.py" --member "$MEMBER" --run-id "$RUN_ID" 2>>"$LOG")
+[ -n "$DENIAL_NOTE" ] && log "$DENIAL_NOTE"
 OUT=$(printf '%s' "$RAW" | python3 "$KIT_DIR/scripts/pass_accounting.py" text)
 USAGE_FILE=$(mktemp "${TMPDIR:-/tmp}/fleet_usage.XXXXXX")
 printf '%s' "$RAW" | python3 "$KIT_DIR/scripts/pass_accounting.py" usage > "$USAGE_FILE" 2>/dev/null

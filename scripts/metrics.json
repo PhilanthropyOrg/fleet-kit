@@ -110,6 +110,15 @@
    "history": "daily"
   },
   {
+   "id": "fleet.gate_drops_6h",
+   "label": "Gate drops",
+   "unit": "items",
+   "window": "6 hours",
+   "source": "gate_drops.jsonl (gru's Vision-link + quality gates, scripts/gate_drops.py)",
+   "lane": "fleet",
+   "history": "native"
+  },
+  {
    "id": "gh.actions_spend_mtd",
    "label": "GitHub Actions",
    "unit": "USD",
