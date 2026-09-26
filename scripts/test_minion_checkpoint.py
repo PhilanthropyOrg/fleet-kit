@@ -156,6 +156,21 @@ def test_find_reads_the_real_remote_and_run_member_resumes_it() -> None:
     print("ok  find returns the pushed checkpoint; run_member.sh resumes, watches, saves on 124")
 
 
+def test_killed_pass_saves_like_a_timeout_and_the_trap_calls_it() -> None:
+    # 2026-09-26 06:42: a deploy's retire drain SIGTERMed #7938 #7939 #7941 #7950 34 min in.
+    sb = Sandbox()
+    br = "member/minion-item7938-36096-1790402919"
+    wt = sb.worktree(br)
+    (Path(wt) / "a.py").write_text("x = 42\n")           # never committed by the model
+    r = mc.save(wt, br, [7938], "killed")
+    assert r["saved"] and r["wip_commit"] and sb.remote_has(br), r
+    assert mc.find(str(sb.repo), [7938]) == br
+    rm = (HERE / "run_member.sh").read_text()
+    trap = rm[rm.index("record_killed_pass() {"):rm.index("trap record_killed_pass TERM INT")]
+    assert "--reason killed" in trap and "timeout" in trap, "SIGTERM trap does not checkpoint"
+    print("ok  killed: the SIGTERM trap WIP-commits and pushes, the next pass can resume it")
+
+
 def test_run_member_refuses_a_batch_over_target_items() -> None:
     tmp = Path(tempfile.mkdtemp(prefix="rm-guard-"))
     env = {**os.environ, "FLEET_ENV_FILE": "/dev/null", "FLEET_REPO": str(tmp),

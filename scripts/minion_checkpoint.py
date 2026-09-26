@@ -11,6 +11,11 @@ THREE SAVES, all pushing the pass's own branch and opening (once) a DRAFT PR:
   * pre-timeout  -- FLEET_CHECKPOINT_LEAD_S before the timeout: push whatever commits exist.
   * timed-out    -- after rc=124, before the worktree is removed: also commit the uncommitted
                     work as a WIP commit, so nothing that was typed is lost.
+  * killed       -- same as timed-out, from run_member.sh's SIGTERM trap. A deploy retires the
+                    old container and SIGTERMs every pass still running 15 min later (60s grace);
+                    on 2026-09-26 06:42 that killed #7938 #7939 #7941 #7950 34 min in, unsaved.
+                    The push comes before the PR call, so even a save the grace window cuts off
+                    leaves a branch the next pass resumes.
 The first two run while the model is still working, so they never touch the index; only the
 last one (the model is dead by then) commits.
 
@@ -114,7 +119,7 @@ def head_is_green(wt: str) -> bool:
 
 def commit_wip(wt: str, items: list[int]) -> bool:
     """Stage tracked changes plus small untracked files and commit them. Only after the model is
-    dead (timed-out): while it runs, the index is its own."""
+    dead (timed-out or killed): while it runs, the index is its own."""
     _git(wt, "add", "-u")
     rc, out = _git(wt, "ls-files", "--others", "--exclude-standard", "-z")
     if rc == 0:
@@ -128,7 +133,7 @@ def commit_wip(wt: str, items: list[int]) -> bool:
     refs = " ".join(f"#{n}" for n in items)
     rc, _ = _git(wt, "-c", "user.name=fleet-minion", "-c", "user.email=fleet-minion@users.noreply.github.com",
                  "commit", "--no-verify", "-m",
-                 f"wip(checkpoint): uncommitted work at minion timeout ({refs})\n\n"
+                 f"wip(checkpoint): uncommitted work when the minion pass ended ({refs})\n\n"
                  "Saved by minion_checkpoint.py so the next pass resumes instead of restarting. "
                  "Not tested: re-run verified_test.sh before building on it.")
     return rc == 0
@@ -151,7 +156,7 @@ def open_pr_for(wt: str, branch: str) -> int | None:
 
 def save(wt: str, branch: str, items: list[int], reason: str) -> dict:
     res: dict = {"reason": reason, "branch": branch, "items": items, "saved": False}
-    if reason == "timed-out":
+    if reason in ("timed-out", "killed"):
         res["wip_commit"] = commit_wip(wt, items)
     res["commits"] = commits_ahead(wt)
     if res["commits"] == 0:
@@ -216,7 +221,7 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--wt", required=True)
     s.add_argument("--branch", required=True)
     s.add_argument("--items", required=True)
-    s.add_argument("--reason", required=True, choices=["green", "pre-timeout", "timed-out"])
+    s.add_argument("--reason", required=True, choices=["green", "pre-timeout", "timed-out", "killed"])
     f = sub.add_parser("find")
     f.add_argument("--items", required=True)
     f.add_argument("--repo", default=".")
