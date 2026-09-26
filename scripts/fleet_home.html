@@ -453,7 +453,7 @@ function renderAgents() {
 function renderLanded() {
   const merged = (STATE.gh.merged || []), today = centralDay(new Date());
   const rows = merged.filter(pr => pr.mergedAt && centralDay(new Date(pr.mergedAt)) === today).sort((a, b) => new Date(b.mergedAt) - new Date(a.mergedAt));
-  $('landedSub').textContent = rows.length ? `${rows.length} today (Central)` : '';
+  $('landedSub').textContent = (rows.length ? `${rows.length} today (Central)` : '') + (STATE.gh.ok === false ? ' · gh down, not live' : '');
   if (!rows.length) { $('landed').innerHTML = `<li class="empty">Nothing merged yet today (Central time).</li>`; return; }
   $('landed').innerHTML = rows.map(pr => `<li><a href="${esc(pr.url)}" target="_blank"><span>${esc(pr.title)}</span><span class="who">#${esc(pr.number)} · ${esc(ago(new Date(pr.mergedAt).getTime()/1000))}</span></a></li>`).join('');
 }

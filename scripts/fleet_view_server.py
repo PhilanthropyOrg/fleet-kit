@@ -115,6 +115,11 @@ SIBLINGS = _resolve_siblings()
 RUNS_FILE = LOG_DIR / "runs.jsonl"
 PORT = int(os.environ.get("FLEET_VIEW_PORT", "8420"))
 GH_POLL_S = int(os.environ.get("FLEET_VIEW_GH_POLL_S", "20"))
+# Per-call ceiling for the background poll. _gh's 15s default is sized for request-time calls; on
+# a loaded host (dino, 2026-09-26: load 30 on 7 cores) every poll call took 70-85s, all timed out,
+# and the dashboard read "nothing merged" through a day the fleet merged 23 PRs. The poll runs on
+# its own thread, so a slow call only delays the next refresh; it never blocks a page load.
+GH_POLL_TIMEOUT_S = int(os.environ.get("FLEET_VIEW_GH_POLL_TIMEOUT_S", "180"))
 MAX_RUNS = 500  # bound memory; this is a window, not an archive -- runs.jsonl on disk is the archive
 
 # The ONE file the master switch and every per-member switch live in -- same file a human
@@ -199,11 +204,20 @@ def next_fires() -> list[dict]:
     return out
 
 
+_LAST_GH_ERROR: dict[str, str] = {"msg": ""}  # last `gh` failure reason, so a caller can tell
+# a swallowed error apart from a legitimate empty result instead of scoring both as zero.
+
+
 def _gh(*args: str, timeout: int = 15) -> str:
     try:
         p = subprocess.run(["gh", *args], cwd=REPO or None, capture_output=True, text=True, timeout=timeout)
-        return p.stdout if p.returncode == 0 else ""
-    except (subprocess.TimeoutExpired, OSError):
+        if p.returncode != 0:
+            _LAST_GH_ERROR["msg"] = (p.stderr or "").strip()[:300] or f"gh exited {p.returncode}"
+            return ""
+        _LAST_GH_ERROR["msg"] = ""
+        return p.stdout
+    except (subprocess.TimeoutExpired, OSError) as e:
+        _LAST_GH_ERROR["msg"] = str(e)[:300]
         return ""
 
 
@@ -1112,7 +1126,7 @@ def minion_runs_payload(rows: list[dict], gh: dict, limit: int = 50) -> list[dic
 
 def poll_gh_state() -> dict:
     prs_raw = _gh("pr", "list", "--state", "open", "--json",
-                   "number,title,isDraft,headRefName,url,statusCheckRollup,mergeStateStatus,updatedAt")
+                   "number,title,isDraft,headRefName,url,statusCheckRollup,mergeStateStatus,updatedAt", timeout=GH_POLL_TIMEOUT_S)
     # --limit 100 was a silent ceiling: fleet.backlog_open below is len(issues), so once the
     # real open-backlog count passed 100 the dashboard showed exactly 100 forever, with
     # nothing distinguishing "100 items" from "100 items, capped." Raised to 500 (real backlog
@@ -1120,15 +1134,15 @@ def poll_gh_state() -> dict:
     # now reported as `issues_truncated` so the frontend can say "500+" instead of lying with
     # a precise-looking wrong number.
     issues_raw = _gh("issue", "list", "--state", "open", "--label", "fleet:backlog", "--json",
-                      "number,title,labels,updatedAt", "--limit", "500")
+                      "number,title,labels,updatedAt", "--limit", "500", timeout=GH_POLL_TIMEOUT_S)
     # Independent call, not a filter over the fleet:backlog list above -- gh#340: nothing
     # enforces that fleet:needs-human-op issues are always also fleet:backlog, so filtering
     # the backlog-scoped list would silently miss one filed without that pairing.
     needs_human_op_raw = _gh("issue", "list", "--state", "open", "--label", "fleet:needs-human-op",
-                              "--json", "number,title,createdAt", "--limit", "500")
+                              "--json", "number,title,createdAt", "--limit", "500", timeout=GH_POLL_TIMEOUT_S)
     # Recently merged: plain feed, whatever's most recent -- what just shipped, any branch.
     merged_raw = _gh("pr", "list", "--state", "merged", "--json",
-                      "number,title,mergedAt,url,author,files,headRefName", "--limit", "30")
+                      "number,title,mergedAt,url,author,files,headRefName", "--limit", "30", timeout=GH_POLL_TIMEOUT_S)
     # Self-evolution: server-side head: search per persona (see the "Self-evolution means
     # jefe or dumbledore" comment above for why) rather than filtering a recent-N window
     # client-side. Two searches per persona: their own `<name>/...` branch convention AND the
@@ -1140,14 +1154,14 @@ def poll_gh_state() -> dict:
     # and is an explicit, known residual gap (#237's PRD non-goal).
     self_evolution_fields = "number,title,mergedAt,url,author,files,headRefName"
     jefe_raw = _gh("pr", "list", "--state", "merged", "--search", "head:jefe/", "--json",
-                    self_evolution_fields, "--limit", "20")
+                    self_evolution_fields, "--limit", "20", timeout=GH_POLL_TIMEOUT_S)
     dumbledore_raw = _gh("pr", "list", "--state", "merged", "--search", "head:dumbledore/",
-                          "--json", self_evolution_fields, "--limit", "20")
+                          "--json", self_evolution_fields, "--limit", "20", timeout=GH_POLL_TIMEOUT_S)
     jefe_member_raw = _gh("pr", "list", "--state", "merged", "--search", "head:member/jefe-",
-                           "--json", self_evolution_fields, "--limit", "20")
+                           "--json", self_evolution_fields, "--limit", "20", timeout=GH_POLL_TIMEOUT_S)
     dumbledore_member_raw = _gh("pr", "list", "--state", "merged", "--search",
                                  "head:member/dumbledore-", "--json", self_evolution_fields,
-                                 "--limit", "20")
+                                 "--limit", "20", timeout=GH_POLL_TIMEOUT_S)
     try:
         prs = json.loads(prs_raw) if prs_raw else []
     except json.JSONDecodeError:
@@ -1219,9 +1233,14 @@ def poll_gh_state() -> dict:
             continue
         oldest_age_hours = max(oldest_age_hours, age_hours)
     needs_human_op = {"count": len(needs_human_op_issues), "oldest_age_hours": oldest_age_hours}
+    # gh#1287-followup: every _gh call above swallows its own failure into "" -> []. If ALL of
+    # them came back empty in the same tick, that's not "zero open PRs and zero merges today" --
+    # it's `gh` itself down on this host (auth/rate-limit/network). Report it so the caller can
+    # keep the last-good snapshot instead of overwriting it with a false all-zero one.
+    ok = bool(prs_raw or issues_raw or needs_human_op_raw or merged_raw)
     return {"prs": prs, "issues": issues, "issues_truncated": issues_truncated, "merged": merged,
             "self_evolution": self_evolution, "needs_human_op": needs_human_op,
-            "polled_at": time.time()}
+            "polled_at": time.time(), "ok": ok, "error": "" if ok else _LAST_GH_ERROR["msg"]}
 
 
 
@@ -1417,8 +1436,9 @@ class State:
     def __init__(self):
         self.lock = threading.Lock()
         self.runs: list[dict] = []
-        self.gh = {"prs": [], "issues": [], "issues_truncated": False,
-                   "needs_human_op": {"count": 0, "oldest_age_hours": 0.0}, "polled_at": 0}
+        self.gh = {"prs": [], "issues": [], "issues_truncated": False, "merged": [],
+                   "self_evolution": [], "needs_human_op": {"count": 0, "oldest_age_hours": 0.0},
+                   "polled_at": 0, "ok": True, "error": ""}
         self._seen_offset = 0
 
     def load_existing_runs(self):
@@ -1473,11 +1493,19 @@ class State:
                 log_sync_error(exc)
             time.sleep(2)
 
+    def apply_gh(self, gh: dict):
+        with self.lock:
+            if gh.get("ok", True):
+                self.gh = gh
+            else:
+                # `gh` failed on every call this tick -- keep the last-good snapshot instead
+                # of stomping it with a false all-zero one, but surface the error so the
+                # frontend can say "gh unavailable" rather than "nothing merged today".
+                self.gh = {**self.gh, "ok": False, "error": gh["error"]}
+
     def poll_gh_forever(self):
         while True:
-            gh = poll_gh_state()
-            with self.lock:
-                self.gh = gh
+            self.apply_gh(poll_gh_state())
             time.sleep(GH_POLL_S)
 
     def tail_member_logs_forever(self):
