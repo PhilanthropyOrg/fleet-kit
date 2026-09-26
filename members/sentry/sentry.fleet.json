@@ -36,8 +36,7 @@
       ],
       "deny": [
         "Bash(git push:*)",
-        "Bash(gh pr merge:*)",
-        "Bash(gh issue create:*)"
+        "Bash(gh pr merge:*)"
       ]
     },
     "capabilities": [

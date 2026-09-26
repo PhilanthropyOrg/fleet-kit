@@ -45,6 +45,7 @@ import fleet_db          # noqa: E402  (sqlite mirror -- search/spend queries ov
 import fleet_kpi         # noqa: E402  (per-member headline-count extraction from outcome prose)
 import fleet_stats       # noqa: E402  (Stats page aggregation: run timeline, tokens, backlog history)
 import fleet_metrics     # noqa: E402  (named run-derived metrics; items_per_run for the scoreboard)
+import gate_drops        # noqa: E402  (philanthropy#8215: gru gate drops, 6h tile)
 import scoreboard        # noqa: E402  (2026-09-24 throughput scoreboard: items/run, closed/run, live, trend)
 import issues_per_hour_chart  # noqa: E402  (full-width 7d graph on top of scoreboard.resolved_events)
 import member_spec       # noqa: E402
@@ -863,6 +864,16 @@ def metrics_snapshot() -> dict:
             "value": trend, "bad": trend is not None and trend > 0,
             "sub": "net open-backlog change, 7 days (negative = draining)",
             "series": daily_series("fleet.backlog_trend")}
+
+        # philanthropy#8215: items gru's build gates dropped in the last 6h. Before this a drop
+        # lived only in gru.log (26 of 30 priority-high items on 2026-09-26, nobody told).
+        # Red while any dropped item still needs a spec; gate_drops.py labels + asks for those.
+        gd = gate_drops.count(6)
+        out["fleet.gate_drops_6h"] = {
+            "value": gd["items"], "bad": gd.get("needs-spec", 0) > 0,
+            "sub": (f"{gd.get('needs-spec', 0)} need a spec (labeled {gate_drops.NEEDS_SPEC}) · "
+                    f"{gd.get('fixed', 0)} auto-fixed · {gd.get('by-design', 0)} by design"),
+            "series": []}
 
         # fleet.issues_resolved_per_hour / fleet.issues_resolved_7d (2026-09-24, operator ask):
         # the headline throughput number -- see scoreboard.resolved_events for the definition

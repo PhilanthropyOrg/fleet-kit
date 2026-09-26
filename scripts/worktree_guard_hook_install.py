@@ -33,11 +33,13 @@ def _hook_commands() -> list[str]:
     Same matcher, same settings files, same idempotence -- a second installer would duplicate
     all of that to register one more line. pretest_push_hook.py joins the list rather than
     getting its own entrypoint. So does checkpoint_pr_hook.py (2026-09-26, #8110: a minion
-    checkpoint PR leaves draft only through `minion_checkpoint.py ready`).
+    checkpoint PR leaves draft only through `minion_checkpoint.py ready`). So does
+    issue_create_hook.py (philanthropy#8215: raw `gh issue create` is deduped here, not denied).
     """
     scripts = Path(__file__).resolve().parent
     return [f"python3 {scripts / name}" for name in
-            ("worktree_guard_hook.py", "pretest_push_hook.py", "checkpoint_pr_hook.py")]
+            ("worktree_guard_hook.py", "pretest_push_hook.py", "checkpoint_pr_hook.py",
+             "issue_create_hook.py")]
 
 
 def _stop_hook_commands() -> list[str]:

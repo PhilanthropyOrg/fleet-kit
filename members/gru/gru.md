@@ -303,13 +303,24 @@ spawns exactly one). Your job, in order:
    never got a `fleet:prd` comment (PRDs were high-tier only until fk#1191), so marie.md Part C4 now
    runs an uncapped backfill sweep posting a `Vision-link:`-only comment — a candidate still
    missing the line after that sweep is a genuine gap to flag, not the gate working as designed.
-   Run on survivors from ALL tiers queried so far:
+   Run on survivors from ALL tiers queried so far -- this ONE call runs this gate and the
+   quality gate below, in that order (philanthropy#8215):
    ```
-   python3 /fleet-kit/scripts/vision_link_gate.py --items /tmp/gru_items.json   # or --items - (stdin)
+   python3 /fleet-kit/scripts/gate_drops.py run --items /tmp/gru_items.json --run-id <run-id>
    # {"eligible": [<numbers, same relative order as --items>],
-   #  "dropped": [{"number":.., "reason":"no Vision-link line..." | "none (maintenance), but a
-   #               linked-KR candidate is open: #.."}]}
+   #  "dropped": [{"number":.., "gate":"vision-link"|"quality", "reason":..,
+   #               "action":"fixed"|"needs-spec"|"by-design"}], "ask_id": <id or null>, ...}
    ```
+   **Never silent — philanthropy#8215.** Reif, 2026-09-26: *"so gru passes on something with
+   no quality label and then never alerts anyone?"* 26 of 30 priority-high items were dropped
+   that day into gru.log alone. `gate_drops.py` makes every drop land somewhere: a
+   `fleet:reif-priority`/`fleet:reif-asked` item with no `quality:` label gets `quality:solid`
+   and is re-gated at once (`fixed`, and it is in `eligible`); a spec gap gets `fleet:needs-spec`
+   plus one comment naming the missing piece, and the pass files ONE ask listing the items newly
+   labeled (it reaches Reif in the next brief; `ask_id`); an epic or a world-class item awaiting
+   VP design review is `by-design`. The console's "Gate drops" tile counts the last 6h. Do not
+   run `vision_link_gate.py` / `quality_gate.py` yourself -- they are the pure cores this calls,
+   and calling them directly is exactly the silent drop this replaced.
    `--items` takes a JSON file path, `-` for stdin, or inline JSON. Write the candidates
    (`[{"number","labels","body","comments"}, ...]`) to a file once and pass that path to both
    gates: full issue bodies overflow inline argv, so don't paste them into the command line
@@ -324,11 +335,10 @@ spawns exactly one). Your job, in order:
    `quality:world-class` label AND at least one Given/When/Then acceptance criterion in the
    newest PRD comment or body. A `quality:world-class` candidate is buildable only for its
    research pass (criteria carry a `References:` line) or after a `Design approved (VP review):`
-   comment — never the build before the design review has passed. Run on `eligible`, same shape:
-   ```
-   python3 /fleet-kit/scripts/quality_gate.py --items /tmp/gru_items.json   # same file, or --items -
-   # {"eligible": [...], "dropped": [{"number":.., "reason":"no quality: label ..." | "no Given/When/Then ..." | "world-class with no Design approved ..."}]}
-   ```
+   comment — never the build before the design review has passed. `gate_drops.py run` above
+   already applied this gate to the Vision-link survivors; its quality drops carry
+   `"gate":"quality"` and a reason of `no quality: label ...` | `no Given/When/Then ...` |
+   `world-class with no Design approved ...`.
 
    **The fleet decides acceptance, not Reif — `vp`.** Reif, 2026-09-08: *"It's appropriate
    to have our system decide what is acceptable instead of having a human decide it. Just
