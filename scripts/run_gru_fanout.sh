@@ -22,7 +22,7 @@ KIT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 # gru step 0 reads the result with `stale_claims.py last`. Runs from the product checkout so gh
 # resolves the repo from its remote, the same way gru's own gh calls do.
 ( cd "${FLEET_REPO:-/repo}" 2>/dev/null || true
-  timeout 300 python3 "$KIT_DIR/scripts/stale_claims.py" release ) \
+  timeout 900 python3 "$KIT_DIR/scripts/stale_claims.py" release ) \
   || echo "[run_gru_fanout] stale_claims sweep failed (exit $?) -- continuing without it"
 
 exec bash "$KIT_DIR/scripts/run_member.sh" gru "$@"
