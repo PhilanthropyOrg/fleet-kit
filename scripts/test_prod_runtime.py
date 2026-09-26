@@ -126,6 +126,41 @@ class Checks(unittest.TestCase):
         self.assertEqual(f[0]["severity"], "breach")
 
 
+class FileFindings(unittest.TestCase):
+    def test_second_filing_comments_on_the_first_instead_of_creating_a_twin(self):
+        """gh#8151: prod_runtime labelled its own filings fleet:mega, which made them invisible
+        to issue_cluster's dedupe (a mega only matches via a body SIG_MARKER this issue never
+        writes; the plain-twin path explicitly skips anything mega-labeled) -- so every tick
+        filed a fresh issue instead of commenting on the open one. 24 duplicates resulted."""
+        board: list[dict] = []
+
+        def fake_file_issue(title, body, labels, repo=None, run=None, open_issues=None, who=""):
+            import issue_cluster
+            hit = issue_cluster.find_existing(title, labels, open_issues or [])
+            if hit:
+                return {"action": "commented", "number": hit["number"]}
+            number = 501 + len(board)
+            board.append({"number": number, "title": title, "labels": list(labels), "body": body})
+            return {"action": "created", "number": number}
+
+        import issue_cluster
+        real_file_issue = issue_cluster.file_issue
+        real_list_open = issue_cluster.list_open
+        issue_cluster.file_issue = fake_file_issue
+        issue_cluster.list_open = lambda repo: list(board)
+        try:
+            finding = {"check": "db-statement-timeout", "severity": "breach", "title": "t",
+                       "evidence": ["e"], "fix": ""}
+            first = pr.file_findings([finding])[0]
+            self.assertEqual(first["action"], "created")
+            second = pr.file_findings([finding])[0]
+            self.assertEqual(second["action"], "commented", second)
+            self.assertEqual(second["number"], first["number"])
+        finally:
+            issue_cluster.file_issue = real_file_issue
+            issue_cluster.list_open = real_list_open
+
+
 class HqPush(unittest.TestCase):
     def test_breach_starts_once_and_resolves_once(self):
         d = Path(tempfile.mkdtemp())

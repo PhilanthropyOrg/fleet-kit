@@ -287,7 +287,11 @@ def issue_body(x: dict) -> str:
 
 def file_findings(findings: list[dict], repo: str | None = None) -> list[dict]:
     import issue_cluster
-    labels = ["fleet:backlog", f"lane:{LANE}", issue_cluster.MEGA_LABEL]
+    # NOT MEGA_LABEL: find_existing() only matches a mega via its body SIG_MARKER, which this
+    # issue never writes, and its plain-twin path explicitly skips anything mega-labeled -- so a
+    # mega-labeled finding is invisible to dedupe on both paths and a new issue fires every tick
+    # (gh#8151: 24 duplicate prod-runtime issues from this exact mislabel).
+    labels = ["fleet:backlog", f"lane:{LANE}"]
     try:  # one board read per run, not one per issue; on failure file_issue retries and reports it
         open_issues = issue_cluster.list_open(repo) if findings else []
     except (RuntimeError, ValueError):
