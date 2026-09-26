@@ -187,7 +187,7 @@ cleanup() {
   worktree_lock_acquire 30
   git -C "$REPO" worktree remove --force "$WT_PATH" >/dev/null 2>&1 || true
   worktree_prune_own_container "$REPO" 2>>"$LOG" || true
-  git -C "$REPO" branch -D "$WT_BRANCH" >/dev/null 2>&1 || true  # see run_member.sh's cleanup_run_worktree
+  [ -n "${WT_BRANCH:-}" ] && git -C "$REPO" branch -D "$WT_BRANCH" >/dev/null 2>&1 || true  # see run_member.sh's cleanup_run_worktree
   worktree_lock_release
   rm -f "${USAGE_FILE:-}"
   if [ "$BUILD_SUCCEEDED" -ne 1 ]; then
