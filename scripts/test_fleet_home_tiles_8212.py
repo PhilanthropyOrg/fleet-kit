@@ -23,7 +23,7 @@ def iso(ts: float) -> str:
 
 
 class Tiles8212(unittest.TestCase):
-    def _snap(self, gh, run_rows=()):
+    def _snap(self, gh, run_rows=(), prs_opened=()):
         with tempfile.TemporaryDirectory() as tmp:
             tmp = Path(tmp)
             old = {k: os.environ.get(k) for k in ("FLEET_DB_PATH", "FLEET_LOG_DIR", "FLEET_ENV_FILE", "ACCOUNT_POOL_STATE_FILE")}
@@ -44,7 +44,7 @@ class Tiles8212(unittest.TestCase):
                 fvs.STATE.runs = []
                 fvs._TTL_CACHE.clear()
                 fvs._gh = lambda *a, **k: ""
-                fvs._fleet_prs_opened = lambda: []
+                fvs._fleet_prs_opened = lambda: None if prs_opened is None else list(prs_opened)
                 return fvs, {m["id"]: m for m in fvs.metrics_snapshot()["metrics"]}
             finally:
                 for k, v in old.items():
@@ -99,6 +99,15 @@ class Tiles8212(unittest.TestCase):
         _, by = self._snap({"prs": [], "prs_at": now - 3600, "issues": [], "issues_at": now - 3600,
                             "merged": [], "poll_s": 40})
         self.assertTrue(by["fleet.backlog_open"]["stale"], "an hour-old poll is past 2x a ~1-min cadence")
+
+    def test_failed_reads_are_not_zeros(self):
+        # A fresh container whose first gh reads fail (2026-09-26, GraphQL quota spent): no
+        # tile may present that as a real 0.
+        _, by = self._snap({"prs": [], "issues": [], "merged": [], "poll_s": 40}, prs_opened=None)
+        for mid in ("fleet.backlog_open", "fleet.prs_open", "fleet.prs_open_over_4h", "fleet.merged_per_day",
+                    "fleet.shipped_live_per_day", "fleet.issues_resolved_24h", "fleet.prs_opened_per_hour",
+                    "fleet.closed_per_minion_run"):
+            self.assertIsNone(by[mid]["value"], f"{mid}: {by[mid]}")
 
     def test_one_tile_per_quantity_and_no_top_chart(self):
         ids = [m["id"] for m in json.loads((ROOT / "scripts" / "metrics.json").read_text())["metrics"]]
