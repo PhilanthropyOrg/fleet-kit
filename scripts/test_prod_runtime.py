@@ -178,6 +178,12 @@ class HqPush(unittest.TestCase):
         a = pr.issue_title({"check": "cron-failures", "severity": "finding"})
         self.assertNotRegex(a, r"\d")
 
+    def test_issue_body_carries_a_vision_link(self):
+        # gh#8270/#8271: no Vision-link line meant gru's gate marked every prod-runtime
+        # issue fleet:needs-spec. This is maintenance work with no KR of its own.
+        body = pr.issue_body({"title": "t", "evidence": ["e"], "fix": None, "check": "x"})
+        self.assertIn("Vision-link: none (maintenance)", body)
+
 
 if __name__ == "__main__":
     unittest.main()
