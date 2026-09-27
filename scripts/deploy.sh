@@ -374,10 +374,11 @@ retire_services_in() {
 # retired build and, once RETIRE_MAX_S is up, to terminate exactly those.
 # Anchored to argv[0]=bash + argv[1]=the script (gh#8197): unanchored, it also matched every
 # `timeout` wrapper and model CLI process whose PROMPT argv mentions run_member.sh --
-# measured live 2026-09-26 21:12 UTC, terminate_non_minions SIGTERMed three minions' own
+# measured live 2026-09-26 21:12 UTC, the reaper SIGTERMed three minions' own
 # model-CLI children (pass end rc=143) while sparing their bash wrappers.
 PASS_PATTERN='^(/usr)?(/bin/)?bash [^ ]*(run_member|worktree_builder|judge-judy)[.]sh'
 # gh#8197: the minion passes among them (dispatch_member.sh / gru's `run_member.sh minion ...`).
+# While one is in flight the retired build stays up, so nothing in it is terminated early.
 MINION_PATTERN='^(/usr)?(/bin/)?bash [^ ]*run_member[.]sh minion( |$)'
 inflight_in() {
     local n
@@ -385,15 +386,6 @@ inflight_in() {
     echo "${n:-0}"
 }
 minions_in() { inflight_in "$1" "$MINION_PATTERN"; }
-
-# gh#8197: SIGTERM every in-flight pass EXCEPT a minion's (their record_killed_pass trap writes
-# the status=killed row, same as terminate_and_stop). Leaves the container running.
-terminate_non_minions() {
-    podman exec "$1" sh -c 'm="$(pgrep -f "$1")"
-        for p in $(pgrep -f "$0"); do
-            printf "%s\n" "$m" | grep -qx "$p" || kill -TERM "$p" 2>/dev/null
-        done; true' "$PASS_PATTERN" "$MINION_PATTERN" >/dev/null 2>&1 9>&- || true
-}
 
 # gh#8197: how long a retired build may drain right now -- RETIRE_MINION_MAX_S while a minion
 # pass is still in flight in it, RETIRE_MAX_S otherwise.
@@ -458,9 +450,12 @@ spawn_reaper() {
             if [ "$waited" -ge "$RETIRE_MAX_S" ]; then
                 m="$(minions_in "$name")"
                 if [ "$m" -gt 0 ] && [ "$waited" -lt "$RETIRE_MINION_MAX_S" ]; then
-                    # gh#8197: past the short budget, end everything but the minions.
-                    terminate_non_minions "$name"
-                    [ "$said" = 1 ] || rlog "drain hit FLEET_RETIRE_MAX_S=${RETIRE_MAX_S}s -- SIGTERMed the non-minion passes; $m minion process(es) keep running up to FLEET_RETIRE_MINION_MAX_S=${RETIRE_MINION_MAX_S}s (gh#8197)"
+                    # gh#8197: a minion keeps this container up past the short budget. Every other
+                    # pass in it drains too: each is bounded by its own timeout_s, and SIGTERMing
+                    # them bought no earlier stop -- it only threw work away. Measured 2026-09-27:
+                    # 31 non-minion passes killed in 24h (gru 7, the-fixer 7, sentry 6, marie 5,
+                    # nerd 5) against completed p90s of 28-47 min for gru/marie/sentry/the-fixer.
+                    [ "$said" = 1 ] || rlog "drain passed FLEET_RETIRE_MAX_S=${RETIRE_MAX_S}s with $m minion process(es) in flight -- all $n pass(es) keep running up to FLEET_RETIRE_MINION_MAX_S=${RETIRE_MINION_MAX_S}s (gh#8197)"
                     said=1
                 else
                     left="$(terminate_and_stop "$name")"
@@ -470,7 +465,7 @@ spawn_reaper() {
             fi
             sleep 30; waited=$((waited + 30))
         done' _ "$name" "$RETIRE_MAX_S" "$DEPLOY_LOG" "$RETIRE_KILL_GRACE_S" "$PASS_PATTERN" \
-        "$(declare -f inflight_in terminate_and_stop minions_in terminate_non_minions)" \
+        "$(declare -f inflight_in terminate_and_stop minions_in)" \
         "$MINION_PATTERN" "$RETIRE_MINION_MAX_S" >/dev/null 2>&1 9>&- &
 }
 
