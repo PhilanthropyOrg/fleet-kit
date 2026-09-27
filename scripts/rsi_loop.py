@@ -26,6 +26,7 @@ STEPS: tuple[tuple[str, str, str], ...] = (
     ("accept: a world-class item is judged against its own bar", "member", "vp"),
     ("grade: the fleet scores its own week against the predictions ledger", "script", "self_improve_score.sh"),
     ("act on the grade: a flat or falling score becomes a filed item", "script", "rsi_stall_check.py"),
+    ("fix the fleet: a diagnosed cause becomes one armed fleet-kit PR", "member", "dumbledore"),
     ("learn: every Broken: line in a handoff becomes an owner issue", "script", "handoff.py file-broken"),
     ("prune the rules: charters accumulating patches get named", "script", "charter_bloat_check.py"),
 )

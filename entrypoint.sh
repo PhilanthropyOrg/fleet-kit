@@ -169,7 +169,7 @@ case "${1:-cron-foreground}" in
     # `FLEET_CRON_MEMBERS=judge-judy`) to schedule only those. dont-shoot-the-messenger is
     # excluded from ALL_CRON_MEMBERS because its own cron line is already commented out
     # (archived 2026-09-04, see below) -- re-enabling it is a separate step from this mechanism.
-    ALL_CRON_MEMBERS=(the-fixer judge-judy gru marie sentry librarian librarian-scrub red dont-shoot-the-messenger jefe)
+    ALL_CRON_MEMBERS=(the-fixer judge-judy gru marie sentry librarian librarian-scrub red dont-shoot-the-messenger jefe dumbledore)
     if [ -n "${FLEET_CRON_MEMBERS:-}" ]; then
       IFS=', ' read -ra RESOLVED_CRON_MEMBERS <<< "$FLEET_CRON_MEMBERS"
       for m in "${RESOLVED_CRON_MEMBERS[@]}"; do
@@ -294,7 +294,7 @@ case "${1:-cron-foreground}" in
       fi
       # jefe, roomba, custodian, signals, datta, dumbledore: folded into other members and
       # removed from cron entirely (fk#1195; jefe is back as the inbox desk, philanthropy#8215,
-      # below). jefe and dumbledore were already enabled=false
+      # and dumbledore as the fleet's own fixer, 2026-09-26 -- both below). jefe and dumbledore were already enabled=false
       # since 2026-09-17 and archived with nothing moved; roomba's worktree sweep and
       # custodian's surface-debt duty are now marie's Part E/F (marie.md); signals' funnel read
       # and "doubt the number" rule are now nerd's datadog lane (nerd.md); datta's coverage
@@ -327,6 +327,12 @@ case "${1:-cron-foreground}" in
       # (every 15 min, shell) escalates unacked messages: recipient -> jefe -> one ask for Reif.
       if cron_member_enabled jefe; then
         echo "21 * * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh jefe >> $LOG_DIR/jefe.log 2>&1"
+      fi
+      # dumbledore (Reif, 2026-09-26): back to fix the fleet itself -- the duty archived with
+      # "nothing moved" in fk#1195. Every 7h at :13 (01/08/15/22), his pre-fold slot, off the
+      # :03/:21/:33/:41/:47/:51 minutes other members own.
+      if cron_member_enabled dumbledore; then
+        echo "13 1,8,15,22 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh dumbledore >> $LOG_DIR/dumbledore.log 2>&1"
       fi
       # the-fixer -> the owning member when a fleet PR sits idle > 4h (philanthropy#8215). Its
       # own shell line at the-fixer's minute, not inside check.sh: a 30-50s gh list must never
