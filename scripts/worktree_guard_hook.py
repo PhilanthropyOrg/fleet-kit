@@ -60,6 +60,8 @@ _MUTATING_BASH_RE = re.compile(
     r"|\b(rm|mv|cp|sed\s+-i|mkdir|touch|chmod|chown|tee)\b"
     r"|(?:^|[\s;&|])>>?(?!=)\s*\S"
 )
+# The redirect branch of _MUTATING_BASH_RE, capturing its target (msg#95).
+_REDIRECT_RE = re.compile(r"(?:^|(?<=[\s;&|]))\d?>>?(?!=)\s*([^\s;&|]+)")
 _MUTATING_GIT_VERB_RE = re.compile(
     r"\bgit\s+(?:commit|checkout|switch|reset|add|merge|rebase|push|pull|stash\s+pop|clean)\b")
 _GIT_DASH_C_RE = re.compile(r"git\s+-C\s+(\S+)\s+(\S+)(?:\s+(\S+))?")
@@ -158,6 +160,19 @@ def _bash_targets_repo(command: str, repo_real: str, wt_real: str, cwd_real: str
 
     if not _MUTATING_BASH_RE.search(command):
         return False
+
+    # jefe msg#95: `cd /repo && gh issue list ... > /tmp/x.json` matched only on its redirect, and
+    # the loop below then blocked on the unrelated `cd /repo` token. When a redirect is the ONLY
+    # mutating trigger, judge the redirect targets alone: every one absolute and outside $REPO
+    # is allowed. A relative target (written under whatever the cd chose) still falls through.
+    if not _MUTATING_BASH_RE.search(_REDIRECT_RE.sub(" ", command)):
+        targets = [t.strip("'\"") for t in _REDIRECT_RE.findall(command)]
+        try:
+            if targets and all(os.path.isabs(os.path.expanduser(t))
+                               and not _under(_resolve(t), repo_real) for t in targets):
+                return False
+        except OSError:
+            pass
 
     for raw_tok in _PATH_TOKEN_RE.findall(command):
         tok = raw_tok.strip("'\"")
