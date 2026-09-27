@@ -134,7 +134,7 @@ class DrainSparesMinions(unittest.TestCase):
             self.assertNotRegex(args, self.PASS)
             self.assertNotRegex(args, self.MINION)
 
-    def test_terminate_non_minions_spares_the_minion(self):
+    def test_drain_counts_minions_apart_from_other_passes(self):
         # Real processes, but patterns scoped to this temp dir: pgrep on dino also sees the
         # fleet's own containers, and this test must never signal a real pass.
         d = tempfile.mkdtemp()
@@ -153,18 +153,15 @@ class DrainSparesMinions(unittest.TestCase):
             scoped = lambda pat: pat.replace("bash [^ ]*", f"bash {re.escape(d)}/[^ ]*", 1)  # noqa: E731
             body = "\n".join([f"PASS_PATTERN='{scoped(self.PASS)}'", f"MINION_PATTERN='{scoped(self.MINION)}'",
                               _fn(DEPLOY, "inflight_in"), _fn(DEPLOY, "minions_in"),
-                              _fn(DEPLOY, "terminate_non_minions"), _fn(DEPLOY, "drain_budget_s"),
+                              _fn(DEPLOY, "drain_budget_s"),
                               "RETIRE_MAX_S=900 RETIRE_MINION_MAX_S=5700",
-                              'echo "budget=$(drain_budget_s x)"; terminate_non_minions x; sleep 0.5',
+                              'echo "budget=$(drain_budget_s x)"',
                               'echo "minions=$(minions_in x) all=$(inflight_in x)"'])
             env = dict(os.environ, PATH=f"{d}:{os.environ['PATH']}")
             p = subprocess.run(["bash", "-c", body], env=env, capture_output=True, text=True, timeout=30)
             self.assertEqual(p.returncode, 0, p.stderr)
             self.assertIn("budget=5700", p.stdout)
-            self.assertIn("minions=1 all=1", p.stdout)
-            self.assertIsNotNone(procs["gru"].poll(), "the non-minion pass must get SIGTERM")
-            self.assertIsNone(procs["minion"].poll(), "the minion must keep running")
-            self.assertIsNone(procs["minion_child"].poll(), "a process whose argv merely names a pass is not one")
+            self.assertIn("minions=1 all=2", p.stdout)
         finally:
             for pr in procs.values():
                 pr.kill()
@@ -172,9 +169,10 @@ class DrainSparesMinions(unittest.TestCase):
 
     def test_reaper_waits_for_minions_up_to_their_budget(self):
         fn = DEPLOY[DEPLOY.index("spawn_reaper() {"):DEPLOY.index("proxy_deploy() {")]
-        self.assertIn("declare -f inflight_in terminate_and_stop minions_in terminate_non_minions", fn)
+        self.assertIn("declare -f inflight_in terminate_and_stop minions_in", fn)
         self.assertIn('-lt "$RETIRE_MINION_MAX_S"', fn)
-        self.assertIn('terminate_non_minions "$name"', fn)
+        # While a minion holds the retired build up, no other pass in it is terminated early.
+        self.assertNotIn("terminate_non_minions", DEPLOY)
         m = re.search(r'RETIRE_MINION_MAX_S="\$\{FLEET_RETIRE_MINION_MAX_S:-(\d+)\}"', DEPLOY)
         timeout = json.loads((HERE.parent / "members" / "minion" / "minion.fleet.json").read_text())["timeout_s"]
         interval = int(re.search(r'FLEET_DEPLOY_MIN_INTERVAL_S:-(\d+)',
