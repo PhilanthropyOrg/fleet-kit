@@ -58,7 +58,7 @@ check_repo_clean_postflight() {
     # mid-check). Alert on the uncertainty itself rather than silently reporting all-clear.
     log "ALERT: could not verify \$REPO ($REPO) is clean after this pass exited (run=$label) -- \`git status\` itself failed (rc=$rc): $dirty"
     {
-      echo "[$(date '+%Y-%m-%d %H:%M:%S %Z')] run=$label repo=$REPO git-status-failed rc=$rc"
+      echo "[$(TZ=America/Chicago date '+%Y-%m-%d %H:%M:%S %Z')] run=$label repo=$REPO git-status-failed rc=$rc"
       echo "$dirty"
     } >> "$LOG_DIR/repo_dirty_alerts.log"
     return 0
@@ -87,7 +87,7 @@ check_repo_clean_postflight() {
   # checkout every member's worktree comes from) -- one file any pass can tail/grep across
   # every occurrence, instead of hunting through each member's own log in turn.
   {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S %Z')] run=$label repo=$REPO"
+    echo "[$(TZ=America/Chicago date '+%Y-%m-%d %H:%M:%S %Z')] run=$label repo=$REPO"
     echo "$dirty"
   } >> "$LOG_DIR/repo_dirty_alerts.log"
 
@@ -96,7 +96,7 @@ check_repo_clean_postflight() {
   # this stash can never touch the index at the same time.
   local lockfile="$REPO/.git/fleet_pull.lock"
   local stash_msg
-  stash_msg="postflight-dirty-check auto-stash run=$label $(date '+%Y-%m-%dT%H:%M:%SZ')"
+  stash_msg="postflight-dirty-check auto-stash run=$label $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
   local stash_out stash_rc
   if command -v flock >/dev/null 2>&1; then
     stash_out=$(flock "$lockfile" git -C "$REPO" stash push -u -m "$stash_msg" 2>&1)
@@ -110,13 +110,13 @@ check_repo_clean_postflight() {
     local pile_count
     pile_count=$(git -C "$REPO" stash list 2>/dev/null | wc -l | tr -d ' ')
     log "REMEDIATED: auto-stashed the leak from run=$label so gitpull can proceed on its next tick ($stash_out); \$REPO stash pile now has $pile_count entries, nothing dropped"
-    echo "[$(date '+%Y-%m-%d %H:%M:%S %Z')] REMEDIATED run=$label repo=$REPO auto-stashed pile=$pile_count" >> "$LOG_DIR/repo_dirty_alerts.log"
+    echo "[$(TZ=America/Chicago date '+%Y-%m-%d %H:%M:%S %Z')] REMEDIATED run=$label repo=$REPO auto-stashed pile=$pile_count" >> "$LOG_DIR/repo_dirty_alerts.log"
     if [ "$pile_count" -ge "$STASH_PILE_WARN_THRESHOLD" ]; then
       log "POLICY: \$REPO auto-stash pile has grown to $pile_count entries (threshold $STASH_PILE_WARN_THRESHOLD) -- these are reversible rescues, never auto-expired; a human needs to run \`git -C $REPO stash list\` and decide what to land or drop"
-      echo "[$(date '+%Y-%m-%d %H:%M:%S %Z')] POLICY repo=$REPO stash-pile=$pile_count threshold=$STASH_PILE_WARN_THRESHOLD needs-human-review" >> "$LOG_DIR/repo_dirty_alerts.log"
+      echo "[$(TZ=America/Chicago date '+%Y-%m-%d %H:%M:%S %Z')] POLICY repo=$REPO stash-pile=$pile_count threshold=$STASH_PILE_WARN_THRESHOLD needs-human-review" >> "$LOG_DIR/repo_dirty_alerts.log"
     fi
   else
     log "REMEDIATION FAILED: could not auto-stash \$REPO ($REPO) after run=$label -- leak left in place, gitpull will keep refusing until a human intervenes: $stash_out"
-    echo "[$(date '+%Y-%m-%d %H:%M:%S %Z')] REMEDIATION-FAILED run=$label repo=$REPO: $stash_out" >> "$LOG_DIR/repo_dirty_alerts.log"
+    echo "[$(TZ=America/Chicago date '+%Y-%m-%d %H:%M:%S %Z')] REMEDIATION-FAILED run=$label repo=$REPO: $stash_out" >> "$LOG_DIR/repo_dirty_alerts.log"
   fi
 }

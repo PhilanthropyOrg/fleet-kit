@@ -121,7 +121,9 @@ lines = log_path.read_text(errors="ignore").splitlines()
 # Each "pass start"/"pass end" line opens with a "[YYYY-MM-DD HH:MM:SS TZ]" stamp -- parse it
 # per line and pick the start whose own time is closest to (and no later than) this run's own
 # recorded ts, rather than always grabbing the newest block regardless of match.
-STAMP_RE = re.compile(r"^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})")
+# The TZ is UTC on old lines, CDT/CST since the container went Central -- read it, never assume.
+STAMP_RE = re.compile(r"^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})(?: (UTC|GMT|CDT|CST))?")
+OFFSET_H = {"UTC": 0, "GMT": 0, "CDT": -5, "CST": -6}
 def line_epoch(ln):
     m = STAMP_RE.match(ln)
     if not m:
@@ -129,7 +131,8 @@ def line_epoch(ln):
     import datetime
     try:
         dt = datetime.datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S")
-        return dt.replace(tzinfo=datetime.timezone.utc).timestamp()
+        tz = datetime.timezone(datetime.timedelta(hours=OFFSET_H[m.group(2) or "UTC"]))
+        return dt.replace(tzinfo=tz).timestamp()
     except ValueError:
         return None
 starts = [i for i, ln in enumerate(lines) if "pass start" in ln]

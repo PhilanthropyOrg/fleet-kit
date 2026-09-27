@@ -42,7 +42,7 @@ STATE="${FIXER_STATE_FILE:-$LOG_DIR/the-fixer.state}"
 HB_STAMP="$LOG_DIR/the-fixer.hb"
 
 mkdir -p "$(dirname "$LOG")" "$(dirname "$STATE")"
-ts() { date '+%Y-%m-%d %H:%M:%S %Z'; }
+ts() { TZ=America/Chicago date '+%Y-%m-%d %H:%M:%S %Z'; }
 log() { echo "[$(ts)] $*" >> "$LOG"; }
 
 cd "$REPO" 2>/dev/null || { log "FATAL: repo missing at $REPO"; echo "FIRE repo-missing none"; exit 0; }

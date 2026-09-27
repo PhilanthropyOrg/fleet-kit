@@ -8,7 +8,7 @@ set -u
 KIT="$(cd "$(dirname "$0")/.." && pwd)"
 REPO="${FLEET_REPO:?set FLEET_REPO (env or fleet.env)}"
 LOG_DIR="${FLEET_LOG_DIR:-/var/log/fleet-kit}"
-log() { echo "[$(date -u '+%F %T UTC')] vp_due: $*"; }
+log() { echo "[$(TZ=America/Chicago date '+%F %T %Z')] vp_due: $*"; }
 
 out="$(python3 "$KIT/scripts/vp_due.py" --repo-dir "$REPO" 2>&1)" || { log "vp_due.py failed: ${out:0:200}"; exit 0; }
 due="$(printf '%s' "$out" | python3 -c 'import sys,json; print(" ".join(str(n) for n in json.load(sys.stdin)["due"]))' 2>/dev/null)"

@@ -93,6 +93,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import alert_store  # noqa: E402
+from fleet_tz import stamp as central_stamp  # noqa: E402 -- humans read Central
 import prod_incident  # noqa: E402 -- shared with fixer_fire_path.py (gh#728 VP fix 3): one
                        # marker, one filing helper, one explicit repo for the "a probe is
                        # actually down" incident class both members can independently observe.
@@ -254,13 +255,13 @@ def evaluate(probes: list[ProbeResult], heartbeat: HeartbeatResult) -> list[Aler
 
 
 def verdict_line(alerts: list[AlertCall], probes: list[ProbeResult] | None = None) -> str:
-    ts = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())
+    ts = central_stamp()  # "... CDT"/"... CST"; status_data.py reads old UTC lines too
     skipped = [p.name for p in (probes or []) if p.skipped]
     skip_note = f" (skipped: {', '.join(skipped)})" if skipped else ""
     if not alerts:
-        return f"[prod_health_check {ts} UTC] ok all probes healthy, canary heartbeat fresh{skip_note}"
+        return f"[prod_health_check {ts}] ok all probes healthy, canary heartbeat fresh{skip_note}"
     parts = ", ".join(f"{a.problem} ({a.reason})" if a.reason else a.problem for a in alerts)
-    return f"[prod_health_check {ts} UTC] FAILED {parts}{skip_note}"
+    return f"[prod_health_check {ts}] FAILED {parts}{skip_note}"
 
 
 def page(problem: str, severity: str, title: str, body: str) -> bool | None:

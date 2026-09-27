@@ -42,6 +42,7 @@ import subprocess
 import sys
 import time
 import urllib.request
+from fleet_tz import stamp as central_stamp  # noqa: E402 -- humans read Central
 
 LOG_DIR = pathlib.Path(os.environ.get("FLEET_LOG_DIR") or os.path.expanduser("~/Library/Logs/fleet-kit"))
 INBOX = LOG_DIR / "inbox.jsonl"
@@ -61,7 +62,7 @@ TOLERANCE_S = 300
 def log(msg: str) -> None:
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     with open(LOG_DIR / "inbox.log", "a") as fh:
-        fh.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())}] {msg}\n")
+        fh.write(f"[{central_stamp()}] {msg}\n")
 
 
 # ---------------------------------------------------------------- webhook side

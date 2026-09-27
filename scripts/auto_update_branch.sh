@@ -27,7 +27,7 @@ LOG_DIR="${FLEET_LOG_DIR:-$HOME/Library/Logs/fleet-kit}"
 LOG="$LOG_DIR/auto_update_branch.log"
 
 mkdir -p "$LOG_DIR"
-ts() { date '+%Y-%m-%d %H:%M:%S %Z'; }
+ts() { TZ=America/Chicago date '+%Y-%m-%d %H:%M:%S %Z'; }
 log() { echo "[$(ts)] $*" >> "$LOG"; }
 
 # shellcheck source=/dev/null

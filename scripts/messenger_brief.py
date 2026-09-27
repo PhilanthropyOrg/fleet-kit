@@ -42,6 +42,7 @@ import urllib.request
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import plan_rank  # noqa: E402 -- one shared plan-path resolver, fk#559 VP review fix 1
 import inbox  # noqa: E402 -- fk#1129 slice 3: came_in() reads the same intake store inbox.py owns
+from fleet_tz import CENTRAL, parse_stamp, stamp as central_stamp  # noqa: E402
 
 KIT = pathlib.Path(__file__).resolve().parent.parent
 LOG_DIR = pathlib.Path(os.environ.get("FLEET_LOG_DIR") or os.path.expanduser("~/Library/Logs/fleet-kit"))
@@ -50,12 +51,11 @@ RESEND_URL = os.environ.get("RESEND_API_URL", "https://api.resend.com/emails")
 KINDS = ("morning", "afternoon", "wrap", "ask", "run")
 # "ask" and "run" are per-event, not per-day: every ask and every finished run is its own mail.
 PER_EVENT_KINDS = ("ask", "run")
-CENTRAL = dt.timezone(dt.timedelta(hours=-5))  # CDT; the crontab is in UTC, see entrypoint.sh
 
 
 def log(msg: str) -> None:
     LOG_DIR.mkdir(parents=True, exist_ok=True)
-    stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    stamp = central_stamp()
     with open(LOG_DIR / "messenger.log", "a") as fh:
         fh.write(f"[{stamp}] {msg}\n")
 
@@ -128,14 +128,11 @@ def deploys_since(since: dt.datetime) -> list[str]:
         if not p.exists():
             continue
         for line in p.read_text(errors="ignore").splitlines()[-400:]:
-            m = re.match(r"\[deploy (\S+ \S+) \S+\] (DEPLOYED:|ROLLED BACK|FAILED)(.*)", line)
+            m = re.match(r"\[deploy (\S+ \S+) (\S+)\] (DEPLOYED:|ROLLED BACK|FAILED)(.*)", line)
             if not m:
                 continue
-            try:
-                when = dt.datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S").replace(tzinfo=CENTRAL)
-            except ValueError:
-                continue
-            if when >= since:
+            when = parse_stamp(m.group(1), m.group(2))  # UTC on old lines, CDT/CST on new
+            if when is not None and when >= since:
                 out.append(line[:200])
     return out[-20:]
 

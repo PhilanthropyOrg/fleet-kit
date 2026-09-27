@@ -14,7 +14,7 @@ SELF_LOG="$LOG_DIR/dont-shoot-the-messenger.log"
 DRIVER="${FLEET_MESSENGER_DRIVER:-}"
 
 mkdir -p "$LOG_DIR"
-ts() { date '+%Y-%m-%d %H:%M:%S %Z'; }
+ts() { TZ=America/Chicago date '+%Y-%m-%d %H:%M:%S %Z'; }
 log() { echo "[$(ts)] $*" >> "$SELF_LOG"; }
 
 if [ -z "$DRIVER" ]; then

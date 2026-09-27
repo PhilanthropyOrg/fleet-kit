@@ -29,7 +29,6 @@ auto_deploy.sh's own header explains it needs for `podman build`/`podman run`.
 from __future__ import annotations
 
 import argparse
-import calendar
 import os
 import re
 import sys
@@ -38,6 +37,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 import fleet_db  # noqa: E402
+from fleet_tz import ZONE_RE, parse_stamp  # noqa: E402
 
 LOG_DIR = fleet_db.LOG_DIR
 DEPLOY_LOG = Path(os.environ.get("FLEET_AUTO_DEPLOY_LOG", LOG_DIR / "auto_deploy.log"))
@@ -52,7 +52,8 @@ EXPECTED_INTERVAL_S = 3600.0
 LANE = "devops"
 METRIC = "deploy_success_rate"
 
-_TS_RE = re.compile(r"^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) UTC\]")
+# Old lines say UTC, lines since the container went Central say CDT/CST (fleet_tz.py).
+_TS_RE = re.compile(r"^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) (" + ZONE_RE + r")\]")
 _SUCCESS_RE = re.compile(r"deploy OK at")
 # AC2's exact three failure shapes (scripts/auto_deploy.sh:150,152,104,142). A `drain:` line
 # (deploy.sh's own in-flight-pass wait, captured into the same log by auto_deploy.sh's
@@ -69,10 +70,8 @@ def _line_epoch(line: str) -> float | None:
     m = _TS_RE.match(line)
     if not m:
         return None
-    try:
-        return calendar.timegm(time.strptime(m.group(1), "%Y-%m-%d %H:%M:%S"))
-    except ValueError:
-        return None
+    when = parse_stamp(m.group(1), m.group(2))
+    return when.timestamp() if when else None
 
 
 def classify_ticks(log_path: Path, since: float) -> tuple[int, int]:

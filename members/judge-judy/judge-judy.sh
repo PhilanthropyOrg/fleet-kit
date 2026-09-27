@@ -71,7 +71,7 @@ CONTEXT="fleet-code-review"
 VERDICT_SCHEMA='{"type":"object","properties":{"verdict":{"type":"string","enum":["approve","block"]},"findings":{"type":"array","items":{"type":"object","properties":{"file":{"type":"string"},"line":{"type":"integer"},"severity":{"type":"string"},"what_breaks":{"type":"string"},"plain":{"type":"string"}},"required":["file","line","severity","what_breaks","plain"]}}},"required":["verdict","findings"]}'
 
 mkdir -p "$LOG_DIR" "$STRIKE_DIR"
-ts() { date '+%Y-%m-%d %H:%M:%S %Z'; }
+ts() { TZ=America/Chicago date '+%Y-%m-%d %H:%M:%S %Z'; }
 log() { echo "[$(ts)] $*" >> "$LOG"; }
 
 # Master kill switch, then this member's own switch -- see fleet_enabled.sh's header for why

@@ -165,7 +165,7 @@ if [ "$http_code" = "200" ]; then
 fi
 
 if [ -z "$already_paged" ]; then
-  paged_at="$(date -u '+%Y-%m-%d %H:%M UTC')"
+  paged_at="$(TZ=America/Chicago date '+%Y-%m-%d %H:%M %Z')"
   _ntfy "🚨 fleet-kit: public URL down, self-heal did not fix it" \
     "$PUBLIC_URL still returns HTTP ${http_code:-timeout} after self-heal attempt: $heal_result" \
     "urgent"

@@ -57,7 +57,7 @@ unset FLEET_API_KEY
 LOG_DIR="${FLEET_LOG_DIR:-/home/ubuntu/fleet-kit-logs}"
 mkdir -p "$LOG_DIR"
 LOG="$LOG_DIR/account_heartbeat.log"
-log() { echo "[$(date -u '+%Y-%m-%d %H:%M:%S UTC')] $*" >> "$LOG"; }
+log() { echo "[$(TZ=America/Chicago date '+%Y-%m-%d %H:%M:%S %Z')] $*" >> "$LOG"; }
 
 CONTAINER="${FLEET_CONTAINER_NAME:?set FLEET_CONTAINER_NAME}"
 ACCOUNTS="${FLEET_ACCOUNTS:-}"

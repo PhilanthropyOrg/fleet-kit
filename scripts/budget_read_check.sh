@@ -40,7 +40,7 @@ mkdir -p "$LOG_DIR"
 LOG="$LOG_DIR/budget_read_check.log"
 STATE="${BUDGET_READ_STATE_FILE:-$LOG_DIR/.budget_read_paged.state}"
 MAX_ANCHOR_AGE="${BUDGET_MAX_ANCHOR_AGE:-3600}"
-log() { echo "[$(date -u '+%Y-%m-%d %H:%M:%S UTC')] $*" >> "$LOG"; }
+log() { echo "[$(TZ=America/Chicago date '+%Y-%m-%d %H:%M:%S %Z')] $*" >> "$LOG"; }
 
 CONTAINER="${FLEET_CONTAINER_NAME:?set FLEET_CONTAINER_NAME}"
 

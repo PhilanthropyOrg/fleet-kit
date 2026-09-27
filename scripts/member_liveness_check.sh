@@ -53,7 +53,7 @@ DB="$LOG_DIR/fleet.db"
 EXHAUSTED_STATE="${ACCOUNT_POOL_STATE_FILE:-$LOG_DIR/account-pool-exhausted.state}"
 CHECK=member_liveness
 
-_log() { echo "[$(date -u '+%Y-%m-%d %H:%M:%S UTC')] [$INSTANCE] $*"; }
+_log() { echo "[$(TZ=America/Chicago date '+%Y-%m-%d %H:%M:%S %Z')] [$INSTANCE] $*"; }
 
 # _page <title> <body> <problem> <severity>
 # Under the selftest (NTFY_CALLS_FILE set) record what the helper WOULD have received instead
@@ -119,7 +119,7 @@ fi
 NOW=$(date -u +%s)
 AGE=$(( NOW - NEWEST ))
 AGE_H=$(( AGE / 3600 ))
-NEWEST_HUMAN=$( [ "$NEWEST" -gt 0 ] && date -u -d "@$NEWEST" '+%Y-%m-%d %H:%M UTC' 2>/dev/null || echo never )
+NEWEST_HUMAN=$( [ "$NEWEST" -gt 0 ] && TZ=America/Chicago date -d "@$NEWEST" '+%Y-%m-%d %H:%M %Z' 2>/dev/null || echo never )
 
 # fk#1147: awake but not building. Checked BEFORE the age gate, because this is precisely
 # the case the age gate cannot see -- the fleet is producing rows, just never `ok` ones.
@@ -148,14 +148,14 @@ if [ -f "$EXHAUSTED_STATE" ]; then
   while read -r acct epoch _; do
     case "$epoch" in ''|*[!0-9]*) continue ;; esac
     if [ "$epoch" -gt "$NOW" ]; then
-      RESET_LIST="$RESET_LIST $acct=$(date -u -d "@$epoch" '+%b %-d %H:%M UTC' 2>/dev/null || echo "$epoch")"
+      RESET_LIST="$RESET_LIST $acct=$(TZ=America/Chicago date -d "@$epoch" '+%b %-d %H:%M %Z' 2>/dev/null || echo "$epoch")"
       [ "$epoch" -gt "$RESET_MAX" ] && RESET_MAX=$epoch
     fi
   done < "$EXHAUSTED_STATE"
 fi
 
 if [ "$RESET_MAX" -gt 0 ]; then
-  RESET_HUMAN=$(date -u -d "@$RESET_MAX" '+%a %b %-d %H:%M UTC' 2>/dev/null || echo "$RESET_MAX")
+  RESET_HUMAN=$(TZ=America/Chicago date -d "@$RESET_MAX" '+%a %b %-d %H:%M %Z' 2>/dev/null || echo "$RESET_MAX")
   _log "PAGED out_of_tokens -- silent ${AGE_H}h, pool exhausted until $RESET_HUMAN"
   _page "fleet-kit: $INSTANCE out of tokens until $RESET_HUMAN" \
         "No member has completed work for ${AGE_H}h (newest ok: $MEMBER at $NEWEST_HUMAN). The account pool reports every account gated:$RESET_LIST. This is the legitimate kind of down -- nothing to fix, it resumes at the reset. One page, no more." \

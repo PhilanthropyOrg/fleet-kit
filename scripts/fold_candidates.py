@@ -36,6 +36,7 @@ CLI: fetches live issues/PRs for FLEET_REPO via `gh` and prints the candidate JS
 """
 from __future__ import annotations
 
+import calendar
 import json
 import os
 import re
@@ -75,9 +76,7 @@ def _is_excluded(pr: dict, now: float) -> bool:
     updated = pr.get("updatedAt")
     if updated:
         try:
-            ts = time.mktime(time.strptime(updated[:19], "%Y-%m-%dT%H:%M:%S"))
-            # updatedAt from `gh ... --json` is UTC; time.mktime assumes local time, but the
-            # error that introduces (a few hours) is negligible against a 24h staleness window.
+            ts = calendar.timegm(time.strptime(updated[:19], "%Y-%m-%dT%H:%M:%S"))  # updatedAt is UTC
             if now - ts > STALE_SECONDS:
                 return True
         except ValueError:

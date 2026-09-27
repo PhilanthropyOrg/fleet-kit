@@ -39,6 +39,7 @@ import urllib.request
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import issue_cluster  # noqa: E402  (one definition of "the same issue", fk dedupe-at-birth)
+from fleet_tz import stamp as central_stamp  # noqa: E402 -- humans read Central
 
 HERE = pathlib.Path(__file__).resolve().parent
 LOG_DIR = pathlib.Path(os.environ.get("FLEET_LOG_DIR") or os.path.expanduser("~/Library/Logs/fleet-kit"))
@@ -47,7 +48,7 @@ LABELS = "fleet:backlog,fleet:priority-high,lane:fleet"
 
 
 def log(msg: str) -> None:
-    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())}] {msg}")
+    print(f"[{central_stamp()}] {msg}")
 
 
 # ---------------------------------------------------------------- checks (pure)

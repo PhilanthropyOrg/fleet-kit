@@ -23,6 +23,7 @@ import pathlib
 import sys
 import time
 import urllib.request
+from fleet_tz import stamp as central_stamp  # noqa: E402 -- humans read Central
 
 LOG_DIR = pathlib.Path(os.environ.get("FLEET_LOG_DIR") or os.path.expanduser("~/Library/Logs/fleet-kit"))
 SIG_DIR = LOG_DIR / "signals"
@@ -100,7 +101,7 @@ def _delta(now, before):
 
 def render(snap: dict, prev: dict | None) -> str:
     r, pr = snap.get("reads", {}), (prev or {}).get("reads", {})
-    out = [f"# SIGNALS -- the product's datafeed, read {time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime(snap.get('fetched_at', 0)))}"
+    out = [f"# SIGNALS -- the product's datafeed, read {central_stamp('%Y-%m-%d %H:%M %Z', snap.get('fetched_at', 0))}"
            + (f" (previous snapshot {day_of(prev['fetched_at'])})" if prev else " (no previous snapshot: first day)")]
     n = _g(r, "number")
     if n:

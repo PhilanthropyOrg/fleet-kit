@@ -59,7 +59,7 @@ librarian-scrub stay separate dispatch targets despite the letter of the PRD's 1
 both hit a real tool-grant/cadence conflict with the member they'd otherwise fold into (see
 judge-judy.md and librarian.md for the specifics); that is a stated deviation, not an oversight.
 
-| member | cadence (UTC) | job |
+| member | cadence (Central -- the container clock) | job |
 |---|---|---|
 | gru | hourly :03 | orchestrator: reads runway, picks how many minions, fans out; also computes lane coverage and spawns nerd on demand (folded from datta), and answers decision/infra asks within the hour |
 | minion | spawned by gru | builds a batch of backlog items → `member/…` branch → PR |
@@ -71,7 +71,7 @@ judge-judy.md and librarian.md for the specifics); that is a stated deviation, n
 | nerd | spawned by gru with `lane=<name>` | filed-findings pass (ui/quality/datadog/…); the datadog lane also carries the product funnel read and "doubt the number" rule (folded from signals) |
 | red | every 6h :23 | adversary: `members/red/attacks.yaml` |
 | dont-shoot-the-messenger | daily 06:30 CT (+12:30, 17:30) | the one voice to the human: the brief |
-| librarian | daily 05:15 | tends memory dirs; writes INTENT.md |
+| librarian | daily 00:15 | tends memory dirs; writes INTENT.md |
 | librarian-scrub | hourly :06 | the shell credential scrub (kept as its own dispatch target — see fk#1195 note above) |
 | jefe | hourly :21, only when its inbox has mail | escalation desk for member-to-member messages (`scripts/fleet_msg.py`): gru's gate-drop cc, permission denials, and anything a member left unacked for 2 of its cadences. Back from the fk#1195 archive by Reif's #8215 amendment (he named jefe as the recipient); its `llm.pregate` makes an empty inbox cost $0, so it adds no spend to a quiet hour |
 

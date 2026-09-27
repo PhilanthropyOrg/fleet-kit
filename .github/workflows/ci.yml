@@ -40,6 +40,8 @@ jobs:
         run: python3 scripts/selftest.py
       - name: run test_ci_required_check_gh804.py
         run: python3 scripts/test_ci_required_check_gh804.py
+      - name: run test_central_time.py
+        run: python3 scripts/test_central_time.py
       - name: run test_vp_labels.py
         run: python3 scripts/test_vp_labels.py
       - name: run test_dead_end_label.py

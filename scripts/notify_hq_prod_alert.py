@@ -17,7 +17,6 @@ Usage: notify_hq_prod_alert.py <prod-alerts.jsonl> [--job-sh ~/reif-chat/job.sh]
 from __future__ import annotations
 
 import argparse
-import datetime
 import subprocess
 import sys
 import tempfile
@@ -25,11 +24,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from notify_reif_hq import read_new_records, sanitize_title  # noqa: E402
+from fleet_tz import stamp as central_stamp  # noqa: E402 -- humans read Central
 
 
 def _ts(v) -> str:
     try:
-        return datetime.datetime.fromtimestamp(int(v), datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        return central_stamp("%Y-%m-%d %H:%M %Z", int(v))
     except (TypeError, ValueError, OverflowError, OSError):
         return "?"
 

@@ -87,7 +87,7 @@ _migrate_state() {
   epoch=$(awk -v a="$OLD" '$1==a{print $2}' "$STATE_FILE" | tail -1)
   now=$(date +%s)
   if [ "$epoch" -gt "$now" ]; then
-    say "state: '$OLD' is GATED until $(date -u -d "@$epoch" 2>/dev/null || date -u -r "$epoch" 2>/dev/null) -- carrying that gate over to '$NEW'"
+    say "state: '$OLD' is GATED until $(TZ=America/Chicago date -d "@$epoch" 2>/dev/null || TZ=America/Chicago date -r "$epoch" 2>/dev/null) -- carrying that gate over to '$NEW'"
   else
     say "state: '$OLD' entry is stale (expired) -- carrying it over anyway, it is inert"
   fi

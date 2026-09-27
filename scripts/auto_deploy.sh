@@ -37,7 +37,7 @@ LOG="$LOG_DIR/auto_deploy.log"
 INSTANCE_KEY="${FLEET_CONTAINER_NAME:-default}"
 STATE="$HOME/.cache/fleet-kit/auto_deploy.last_sha.${INSTANCE_KEY}"
 mkdir -p "$LOG_DIR" "$(dirname "$STATE")"
-log() { echo "[$(date -u '+%Y-%m-%d %H:%M:%S UTC')] $*" >> "$LOG"; }
+log() { echo "[$(TZ=America/Chicago date '+%Y-%m-%d %H:%M:%S %Z')] $*" >> "$LOG"; }
 
 cd "$KIT_DIR"
 

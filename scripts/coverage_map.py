@@ -34,6 +34,7 @@ Usage:
 """
 from __future__ import annotations
 
+import calendar
 import argparse
 import hashlib
 import json
@@ -247,7 +248,7 @@ def last_runs_from_db() -> dict[str, float] | None:
             out[member] = float(ts)
         except (TypeError, ValueError):
             try:
-                out[member] = time.mktime(time.strptime(str(ts)[:19], "%Y-%m-%dT%H:%M:%S"))
+                out[member] = calendar.timegm(time.strptime(str(ts)[:19], "%Y-%m-%dT%H:%M:%S"))
             except ValueError:
                 pass
     return out

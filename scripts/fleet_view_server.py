@@ -210,11 +210,14 @@ def next_fires() -> list[dict]:
                 candidate += _dt.timedelta(hours=1)
             next_at = candidate
         elif "daily_at" in sched:
+            # daily_at is a Central wall-clock time: cron runs on the container's
+            # America/Chicago clock (Dockerfile), so the next fire is computed there.
             hh, mm = (int(x) for x in str(sched["daily_at"]).split(":"))
-            candidate = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
-            if candidate <= now:
-                candidate += _dt.timedelta(days=1)
-            next_at = candidate
+            local = now.astimezone(_central_tz())
+            candidate = local.replace(hour=hh, minute=mm, second=0, microsecond=0)
+            if candidate <= local:
+                candidate += _dt.timedelta(days=1)  # wall-clock day under ZoneInfo
+            next_at = candidate.astimezone(_dt.timezone.utc)
         out.append({
             "member": spec["name"],
             "enabled": enabled,
@@ -1618,7 +1621,7 @@ def log_sync_error(exc: Exception) -> None:
         return
     try:
         LOG_DIR.mkdir(parents=True, exist_ok=True)
-        ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        ts = datetime.datetime.now(_central_tz()).strftime("%Y-%m-%d %H:%M:%S %Z")
         with (LOG_DIR / "fleet_view.log").open("a") as fh:
             fh.write(f"[{ts}] tail_runs_forever sync error: {exc}\n")
             fh.write(traceback.format_exc())

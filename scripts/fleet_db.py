@@ -29,6 +29,7 @@ import re
 import sqlite3
 import sys
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 LOG_DIR = Path(os.environ.get("FLEET_LOG_DIR", Path.home() / "Library" / "Logs" / "fleet-kit")).expanduser()
 RUNS_FILE = LOG_DIR / "runs.jsonl"
@@ -596,7 +597,7 @@ def format_run(rec: dict) -> str:
     """One pass, rendered the way the run card renders it -- so a reader who was handed the id
     in a chat gets the same answer the panel would give, without a browser."""
     ts = rec.get("recorded_at") or 0
-    when = datetime.datetime.fromtimestamp(ts, tz=datetime.timezone.utc).astimezone().strftime(
+    when = datetime.datetime.fromtimestamp(ts, tz=ZoneInfo("America/Chicago")).strftime(
         "%a %b %d %Y, %-I:%M %p %Z") if ts else "unknown time"
     cost = rec.get("cost_usd")
     took = f"{round((rec.get('duration_ms') or 0) / 60000)} min" if rec.get("duration_ms") else "--"

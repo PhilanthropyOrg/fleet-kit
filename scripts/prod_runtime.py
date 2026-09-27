@@ -42,6 +42,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+from fleet_tz import stamp as central_stamp  # noqa: E402 -- humans read Central
 
 LANE = "prod-runtime"
 LOG_DIR = Path(os.environ.get("FLEET_LOG_DIR", "/var/log/fleet-kit"))
@@ -279,7 +280,7 @@ def issue_title(x: dict) -> str:
 def issue_body(x: dict) -> str:
     ev = "\n".join(f"- {e}" for e in x["evidence"])
     return (f"**{x['title']}**\n\nRead from the live prod system by `scripts/prod_runtime.py` "
-            f"(nerd lane `{LANE}`), {time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime())}.\n\n"
+            f"(nerd lane `{LANE}`), {central_stamp('%Y-%m-%d %H:%M %Z')}.\n\n"
             f"Evidence:\n{ev}\n\n" + (f"Standard fix: {x['fix']}\n\n" if x["fix"] else "")
             + "Done = this check passes on the next probe run (the issue gets a comment each tick "
               "it still fails).")

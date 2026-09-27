@@ -40,7 +40,7 @@ done
 
 LOG="$LOG_DIR/${CHARTER_NAME}.log"
 mkdir -p "$LOG_DIR"
-ts() { date '+%Y-%m-%d %H:%M:%S %Z'; }
+ts() { TZ=America/Chicago date '+%Y-%m-%d %H:%M:%S %Z'; }
 log() { echo "[$(ts)] $*" >> "$LOG"; }
 
 CHARTER="$KIT_DIR/agents/${CHARTER_NAME}.md"

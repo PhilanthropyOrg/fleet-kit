@@ -465,14 +465,17 @@ function humanDate(v, opts) {
     else { d = new Date(str); hasTime = true; }
   }
   if (isNaN(d.getTime())) return String(v);
-  const day = d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  // Clock times render on Reif's clock (Central) wherever the viewer is; a bare day stays local
+  // so the split-date above still means that day.
+  const tz = hasTime ? { timeZone: 'America/Chicago' } : {};
+  const day = d.toLocaleDateString([], { month: 'short', day: 'numeric', ...tz });
   if (!hasTime || !withTime) return day;
-  const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }).toLowerCase().replace(' ', '');
+  const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', ...tz }).toLowerCase().replace(' ', '');
   return `${day}, ${time}`;
 }
 function clockTime(epoch) {
   if (!epoch) return '';
-  return new Date(epoch * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  return new Date(epoch * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', timeZone: 'America/Chicago' });
 }
 function fmtIn(s) {
   if (s === null || s === undefined) return '—';
@@ -1992,7 +1995,7 @@ const DIAL_FIELDS = [
    PCT_STEPS, {labels: PCT_LABELS}],
   ['FLEET_GRU_CADENCE', 'How often gru runs (cron hour)',
    'Which hour(s) gru wakes to claim work and spawn minions (minute is a hardcoded :03). Blank = every hour. This dial actually sets the cron HOUR field (entrypoint.sh), so only hour-valid values belong here -- see gh#347/gh#380 before adding more presets.',
-   ['', '*/2', '3'], {labels: {'': 'once an hour (default)', '*/2': 'every 2 hours', '3': 'once a day, at 03:03 UTC'}, allowCustom: true}],
+   ['', '*/2', '3'], {labels: {'': 'once an hour (default)', '*/2': 'every 2 hours', '3': 'once a day, at 03:03 CT'}, allowCustom: true}],
   ['FLEET_DATTA_MAX_NERDS_PER_PASS', 'Max nerds datta spawns per pass',
    "Flat cap on how many nerds datta spawns in one hourly pass, one per qualifying lane up to this number. gh#390: datta's charter always said to bound this off 'the hour's allowance' but no such dial existed, so every pass improvised a judgment call. Turn it UP to cover more lanes per hour; DOWN if datta is competing with gru/marie for budget.",
    ['1', '2', '3', '4', '5'], {allowCustom: true}],
