@@ -99,11 +99,21 @@ class PushGateTests(unittest.TestCase):
         self.assertIn("No test receipt", self.wt.decide() or "")
 
     def test_commands_that_are_not_a_push_are_left_alone(self):
-        for cmd in ("git status", "git commit -m x", "pytest -q", "echo git push"):
+        for cmd in ("git status", "git commit -m x", "pytest -q tests/test_x.py",
+                    "echo git push"):
             self.assertIsNone(self.wt.decide(cmd), cmd)
 
     def test_a_push_inside_a_chain_is_still_a_push(self):
         self.assertIn("No test receipt", self.wt.decide("git add -A && git push origin HEAD") or "")
+
+    def test_a_push_only_quoted_in_an_argument_is_not_a_push(self):
+        # msg#56: gru's `ask.py answer --answer "..."` quoted a deny list containing
+        # `; git push --force` and was blocked for a receipt it never needed.
+        for cmd in ('python3 ask.py answer 53 --answer "deny: Bash(x); git push --force:*"',
+                    "gh issue comment 1 --body-file - <<'EOF'\nthen && git push\nEOF"):
+            self.assertIsNone(self.wt.decide(cmd), cmd)
+        self.assertIn("No test receipt",
+                      self.wt.decide('git commit -m "ship it" && git push origin HEAD') or "")
 
     def test_a_pass_that_is_not_worktree_isolated_is_exempt(self):
         # run_member.sh leaves WT_PATH unset for `llm.worktree: false` passes -- the same
