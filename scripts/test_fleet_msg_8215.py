@@ -236,6 +236,15 @@ class Wiring(unittest.TestCase):
         self.assertIn("run_member.sh jefe", ep)
         self.assertIn("fleet_msg.py watchdog", ep)
 
+    def test_green_pregate_still_wakes_a_member_with_mail(self):
+        # jefe msg#110/#120: the-fixer's green check.sh exited before its inbox was ever read.
+        sh = (HERE / "run_member.sh").read_text()
+        wake = sh.index('fleet_msg.py" pregate --me "$MEMBER"')
+        self.assertLess(wake, sh.index("-- quiet, no model spawned"))
+        md = (HERE.parent / "members/the-fixer/the-fixer.md").read_text()
+        self.assertIn("## INBOX", md)
+        self.assertIn("fleet_msg.py ack", md)
+
     def test_marie_handles_her_inbox_before_part_a(self):
         md = (HERE.parent / "members/marie/marie.md").read_text()
         self.assertLess(md.index("## Inbox"), md.index("## Part A"))

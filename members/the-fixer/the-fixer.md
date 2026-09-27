@@ -28,6 +28,11 @@ work done).
 2. If FIRE: fix or revert, PR-backed only (Step 2 below); if green, skip straight to step 3
 3. Write the report (Report section below), literal Outcome:/Evidence: lines included
 
+**An `## INBOX` block at the top of this prompt comes first** (`$FLEET_PREGATE_OUTPUT` starts
+`inbox:` when mail alone woke you). Each message names issues/PRs: a `journey-failing` one is a
+prod incident (fix-or-revert PR as in Step 2, or `reply` why not: flaky walker, data, missing
+credential); a `pr-idle` one is a PR to push forward. `fleet_msg.py ack`/`reply` every one.
+
 ## Dispatched sub-pass: `$FLEET_PREGATE_OUTPUT` reads `FIRE assigned-pr #<N> ...`
 
 Your prompt names ONE pull request. Someone already decided it needs fixing (your own stale-PR
