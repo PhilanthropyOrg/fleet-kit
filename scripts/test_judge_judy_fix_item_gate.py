@@ -31,6 +31,16 @@ class FixItemGateTest(unittest.TestCase):
         self.assertIn("gh issue comment", before, "a repeat must comment, not file")
         self.assertIn('startswith(p)', before, "lookup must match on the title prefix, not the exact title")
 
+    def test_the_fix_item_passes_the_quality_gate(self):
+        # jefe msg#23: every fix item bounced at gru's spec gate for want of a criterion.
+        import re, sys
+        sys.path.insert(0, str(ROOT / "scripts"))
+        import quality_gate as qg
+        m = re.search(r'FIX_BODY="(.*?)"\n', self.tail, re.S)
+        body = m.group(1).replace("$FINDINGS", "- `app.py:12` raises on empty input")
+        ok, reason = qg.classify_candidate(["quality:ship-it"], body, [])
+        self.assertTrue(ok, reason)
+
 
 if __name__ == "__main__":
     unittest.main()
