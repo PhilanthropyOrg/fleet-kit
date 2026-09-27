@@ -1059,6 +1059,27 @@ def metrics_snapshot() -> dict:
                     else f"unavailable (no successful {_deploy_workflow()} runs read)"),
             "series": [{"day": d, "value": day_resolved[d]} for d in days]}
         fresh["fleet.issues_resolved_24h"] = (min(sb_at, _cached_at(f"scoreboard_issues:{days[0]}")), 1800)
+
+        # fleet.reif_priority_throughput_6h (philanthropy#8197 AC1): "Given the fleet's
+        # reif-priority queue has items, When an hour passes, Then at least 1 of them is merged
+        # and deployed (rolling 6h avg >= 1/hr), shown on the console." A 6h window (not 24h)
+        # so a stall in Reif's own named top-priority queue surfaces within the hour, per the
+        # issue's own wording -- issues_resolved_24h's 24h window would hide exactly the kind
+        # of multi-hour stall #8197 was filed over.
+        reif_events = [e for e in events if e.get("is_reif_priority")]
+        reif_buckets6 = scoreboard.resolved_per_hour_buckets(reif_events, now, hours=6)
+        reif_rate6 = sum(reif_buckets6) / 6
+        reif_queue_has_items = any(scoreboard.REIF_PRIORITY_LABEL in {
+            (lab.get("name") if isinstance(lab, dict) else str(lab)) for lab in (i.get("labels") or [])
+        } for i in issues)
+        out["fleet.reif_priority_throughput_6h"] = {
+            "value": round(reif_rate6, 2) if deploys and merged14 else None,
+            "bad": bool(deploys and merged14 and reif_queue_has_items and reif_rate6 < 1.0),
+            "sub": (f"{sum(reif_buckets6)} in 6h · {'queue has open items' if reif_queue_has_items else 'queue empty'}"
+                    if deploys and merged14 else "unavailable (merged PR read failed)" if deploys
+                    else f"unavailable (no successful {_deploy_workflow()} runs read)"),
+            "series": []}
+        fresh["fleet.reif_priority_throughput_6h"] = (min(sb_at, _cached_at(f"scoreboard_issues:{days[0]}")), 1800)
         db.commit()
     finally:
         db.close()

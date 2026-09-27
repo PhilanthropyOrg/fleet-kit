@@ -113,6 +113,7 @@ def backlog_trend(series: list[dict], days: int = 7) -> float | None:
 
 _COMPLETED = "COMPLETED"
 _MEGA_LABEL = "fleet:mega"
+REIF_PRIORITY_LABEL = "fleet:reif-priority"
 
 
 def _labels_of(issue: dict) -> set[str]:
@@ -185,7 +186,8 @@ def resolved_events(merged_prs: list[dict], deploy_runs: list[dict],
             w = resolved_weight(issue)
             if w:
                 out.append({"ts": live_at, "weight": w, "pr": pr.get("number"), "issue": num,
-                           "is_mega": bool(mega_child_numbers(issue))})
+                           "is_mega": bool(mega_child_numbers(issue)),
+                           "is_reif_priority": REIF_PRIORITY_LABEL in _labels_of(issue)})
     return out
 
 
