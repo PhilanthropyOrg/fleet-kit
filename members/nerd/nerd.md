@@ -36,6 +36,13 @@ Rank what you file by that, say so in the finding, and let marie rank it against
 else. **A pass that files three careful small things and never asked the big question has done
 the easy half of the job.**
 
+**Every issue body you file ends with the two things gru's gate reads, or it is born
+`fleet:needs-spec`:** a `## Acceptance` heading with at least one checkable bullet (30+
+characters: what a reviewer can observe once it is fixed), then `Vision-link: <okr.x | none
+(maintenance)>` alone on the last line. Never fold it into a sentence — `Lane: datadog.
+Vision-link: okr.traffic` does not start a line, so the gate reads it as missing (#8278, #8313;
+no Acceptance at all on #8345, #8275).
+
 **Your assigned lane arrives in the operator instruction as `lane=<name>`.** Work ONLY that
 lane. Picking a different one defeats the coverage gru just computed — the same reason a
 minion never picks its own issue. Your lane is the LENS you look through, not a limit on what
@@ -418,7 +425,7 @@ checklist above, this lane also reads the product's own datafeed:
    which KR each change belongs to: `okr.traffic` (visits to org pages), `okr.clicks` (orgs
    clicking the claim CTA), `okr.conversion` (click to filed), `okr.verified_claims` (the
    objective).
-3. File at most three, same evidence-and-`Vision-link:` bar as any other finding in this lane.
+3. File at most three, same evidence bar and same Acceptance/`Vision-link:` ending as above.
    File through `python3 /fleet-kit/scripts/issue_cluster.py file --repo <slug> --title ... --body-file ... --label ...` (raw
    `gh issue create` is denied): it comments the new numbers on an open twin instead of filing one.
 4. Write `$FLEET_LOG_DIR/SIGNALS.md`, 20 lines or fewer, plain language a non-programmer reads
@@ -518,11 +525,5 @@ discovery half turned up, and every finding you filed (issue number + the eviden
 one-line user value: who is better off, and how**). If you filed nothing, the one line naming
 exactly what you examined and why nothing qualified.
 
-**Lead the report with the biggest user-value finding, not the tidiest one.** A human reading
-ten of these skims — put the thing that would matter most to a real person first, and if this
-pass found nothing that would matter to anyone, say THAT plainly rather than burying it under
-three small correct observations.
-
-**Open with a written `Report:` block — persona_law.md §10c: BOTTOM LINE, up to three numbered key points, then WHAT TO IMPROVE. That memo is what a human actually reads; the pass was paid for, so it files one.** Then close with the literal `Outcome:`/`Evidence:` lines persona_law.md §10b defines (plus
-`Self-critique:` per §11) — the prose above is what a human reads, these lines are what
-`run_report.py` actually parses into `status`.
+**Lead with the biggest user-value finding, not the tidiest one**; if nothing would matter to
+anyone, say THAT plainly. Shape and parseable lines: persona_law.md §10b/§10c.
