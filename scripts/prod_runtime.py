@@ -283,7 +283,8 @@ def issue_body(x: dict) -> str:
             f"(nerd lane `{LANE}`), {central_stamp('%Y-%m-%d %H:%M %Z')}.\n\n"
             f"Evidence:\n{ev}\n\n" + (f"Standard fix: {x['fix']}\n\n" if x["fix"] else "")
             + "Done = this check passes on the next probe run (the issue gets a comment each tick "
-              "it still fails).")
+              "it still fails).\n\n"
+              "Vision-link: none (maintenance)")
 
 
 def file_findings(findings: list[dict], repo: str | None = None) -> list[dict]:
