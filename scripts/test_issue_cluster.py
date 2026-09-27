@@ -200,3 +200,41 @@ if __name__ == "__main__":
             fails += 1
             print(f"FAIL {fn.__name__}: {type(exc).__name__}: {exc}")
     sys.exit(1 if fails else 0)
+
+
+# jefe msg#121: the `file` door refuses a new issue gru's intake gate would drop to needs-spec.
+_GOOD = ("Evidence.\n\n## Acceptance\n- Given a visitor opens the claim page, when it loads, "
+         "then the stage label names the real step.\n\nVision-link: none (maintenance)\n")
+
+
+def _cli(monkeypatch, body, labels=(), board=()):
+    calls = []
+    monkeypatch.setattr(ic, "list_open", lambda repo, run=None, limit=1000: list(board))
+    monkeypatch.setattr(ic.subprocess, "run", lambda cmd, **kw: calls.append(cmd) or SimpleNamespace(
+        returncode=0, stdout="https://github.com/o/r/issues/9\n", stderr=""))
+    argv = ["file", "--title", "Claim funnel names a dead paywall", "--body", body]
+    for lab in labels:
+        argv += ["--label", lab]
+    return ic.main(argv), calls
+
+
+def test_file_refuses_a_body_with_no_acceptance_or_vision_link(monkeypatch, capsys) -> None:
+    rc, calls = _cli(monkeypatch, "## Evidence\nsome prose\n\n## Standard fix\n- do the thing properly")
+    out = json.loads(capsys.readouterr().out)
+    assert rc == 2 and not calls and out["action"] == "refused"
+    assert [g.split(":")[0] for g in out["missing"]] == ["vision-link", "acceptance"]
+
+
+def test_file_rewrites_a_vision_link_heading_inline_and_creates(monkeypatch) -> None:
+    body = _GOOD.replace("Vision-link: none (maintenance)", "## Vision-link\nnone (maintenance)")
+    rc, calls = _cli(monkeypatch, body)
+    assert rc == 0 and calls[-1][:3] == ["gh", "issue", "create"]
+    assert "Vision-link: none (maintenance)" in calls[-1][calls[-1].index("--body") + 1]
+
+
+def test_file_still_comments_on_a_twin_and_files_reif_asks(monkeypatch) -> None:
+    twin = {"number": 7, "title": "Claim funnel names a dead paywall", "labels": [], "body": ""}
+    rc, calls = _cli(monkeypatch, "seen again, no spec", board=[twin])
+    assert rc == 0 and calls[-1][:3] == ["gh", "issue", "comment"]
+    rc, calls = _cli(monkeypatch, "Reif's words", labels=["fleet:reif-asked"])
+    assert rc == 0 and calls[-1][:3] == ["gh", "issue", "create"]

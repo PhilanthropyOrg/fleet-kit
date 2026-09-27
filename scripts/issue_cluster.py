@@ -284,6 +284,37 @@ def file_issue(title: str, body: str, labels: list[str], repo: str | None = None
     return out
 
 
+# jefe msg#121 (philanthropy#8346/#8355/#8370/#8379): gru's intake gate drops an issue with no
+# `Vision-link:` line or no acceptance criterion into fleet:needs-spec, and nerd.md naming the
+# exact shape by number failed four times running (#1354 merged 13:45Z; #8379 filed 14:35Z
+# still without `## Acceptance`). So the `file` door checks the body with the gate's OWN
+# parsers before creating -- the filer hears it same-pass, not as a cold gate-drop later.
+_VL_HEADING_RE = re.compile(r"^#{1,6}[ \t]*vision[- ]link[ \t]*:?[ \t]*\n+[ \t]*(\S.*)$",
+                            re.IGNORECASE | re.MULTILINE)
+
+
+def normalize_spec(body: str) -> str:
+    """`## Vision-link` heading + value on the next line -> the inline `Vision-link: <value>`
+    the gate reads (the #8278/#8313/#8355/#8370 shape). Nothing else is rewritten."""
+    return _VL_HEADING_RE.sub(lambda m: f"Vision-link: {m.group(1).strip()}", body or "")
+
+
+def spec_gaps(body: str, labels: list[str]) -> list[str]:
+    """What gru's intake gate would drop this body for; [] when it would pass both checks."""
+    import quality_gate
+    import vision_link_gate
+    gaps = []
+    status, raw = vision_link_gate.classify_candidate(body, [])
+    if status == vision_link_gate.STATUS_MISSING:
+        gaps.append("vision-link: add a line starting `Vision-link: okr.<kr id>` or "
+                    "`Vision-link: none (maintenance)` (inline, not a `## Vision-link` heading)"
+                    + (f"; `{raw[:60]}` names no registered KR id" if raw else ""))
+    if "fleet:epic" not in labels and not quality_gate.count_gwt(body):
+        gaps.append("acceptance: add a `## Acceptance` heading with at least one bullet "
+                    "(Given ... when ... then ...)")
+    return gaps
+
+
 def apply_plan(plan: dict, repo: str | None = None, run=_run) -> dict:
     """Create (or extend) the mega, THEN close children -- a child is never closed unless the
     mega that tracks it exists. Linked Reif asks only get a pointer comment."""
@@ -340,9 +371,22 @@ def main(argv=None) -> int:
         print(signature(a.title))
         return 0
     if a.cmd == "file":
-        body = open(a.body_file).read() if a.body_file else a.body
+        body = normalize_spec(open(a.body_file).read() if a.body_file else a.body)
         labels = [x.strip() for lab in a.label for x in lab.split(",") if x.strip()]
-        res = file_issue(a.title, body, labels, repo=a.repo, who=os.environ.get("FLEET_MEMBER", ""))
+        try:
+            open_issues = list_open(a.repo)
+        except (RuntimeError, ValueError):
+            open_issues = None  # file_issue re-reads and surfaces the error
+        # A twin only gets a "Seen again" comment, which no gate reads -- check new issues only.
+        twin = find_existing(a.title, labels, open_issues or [])
+        gaps = [] if twin or set(labels) & PROTECTED_LABELS else spec_gaps(body, labels)
+        if gaps:
+            print(json.dumps({"action": "refused", "ok": False, "missing": gaps,
+                              "why": "gru's intake gate would drop this to fleet:needs-spec; "
+                                     "fix the body and re-run"}))
+            return 2
+        res = file_issue(a.title, body, labels, repo=a.repo, open_issues=open_issues,
+                         who=os.environ.get("FLEET_MEMBER", ""))
         print(json.dumps(res))
         return 0 if res.get("ok") else 1
     plans = plan_megas(list_open(a.repo), min_size=a.min_size)[: a.max]
