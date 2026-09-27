@@ -440,6 +440,13 @@ _account_pool_week_bank() {
 # week_bank -32.9) sorted ahead of a fresh tgp (+1.0) purely because gmail's week reset was
 # 2.5 days sooner, so gru paced the whole evening against the drained meter. An account whose
 # bank is unreadable keeps the old soonest-reset rule, after every account with a reading.
+#
+# Reif, 2026-09-27: "chooses always the next one that is going to end soonest - uses it up, and
+# then moves to the next". Unspent week expires at reset, so among accounts with headroom
+# (bank > 0) the SOONEST reset goes first and is drained before a later one. Live 02:46Z: tgp
+# (bank 27.2, reset 4.9d) ran ahead of gmail (bank 20.3, reset 2.4d). Accounts at or below
+# pace (bank <= 0) keep fk#1136's most-bank-first order behind them, so a drained account
+# still never sorts ahead of a fresh one.
 _account_pool_order() {
   local account epoch now wr bank known="" lapsed="" weekly="" weekly_nobank="" unknown=""
   now=$(date +%s)
@@ -470,11 +477,16 @@ _account_pool_order() {
       fi
     fi
   done
-  [ -n "$weekly" ] && _account_pool_log "order by week bank: $(printf '%s' "$weekly" | sort -k1,1gr -k2,2n | awk '{printf "%s(bank=%s) ", $3, $1}')"
+  local weekly_sorted=""
+  [ -n "$weekly" ] && weekly_sorted=$({
+    printf '%s' "$weekly" | awk '$1 > 0' | sort -k2,2n -k1,1gr
+    printf '%s' "$weekly" | awk '$1 <= 0' | sort -k1,1gr -k2,2n
+  })
+  [ -n "$weekly_sorted" ] && _account_pool_log "order by soonest reset with headroom: $(printf '%s\n' "$weekly_sorted" | awk '{printf "%s(bank=%s) ", $3, $1}')"
   {
     [ -n "$known" ] && printf '%s' "$known" | sort -n | awk '{print $2}'
     [ -n "$lapsed" ] && printf '%s' "$lapsed" | sort -n | awk '{print $2}'
-    [ -n "$weekly" ] && printf '%s' "$weekly" | sort -k1,1gr -k2,2n | awk '{print $3}'
+    [ -n "$weekly_sorted" ] && printf '%s\n' "$weekly_sorted" | awk '{print $3}'
     [ -n "$weekly_nobank" ] && printf '%s' "$weekly_nobank" | sort -n | awk '{print $2}'
     [ -n "$unknown" ] && printf '%s' "$unknown"
   } | grep -v '^$' || true

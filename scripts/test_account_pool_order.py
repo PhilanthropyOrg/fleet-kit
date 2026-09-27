@@ -39,6 +39,16 @@ class OrderTest(unittest.TestCase):
         ])
         self.assertEqual(got, ["tgp", "philanthropy", "gmail"])
 
+    def test_among_accounts_with_headroom_the_soonest_reset_is_used_up_first(self):
+        # Reif, 2026-09-27: "chooses always the next one that is going to end soonest - uses it
+        # up, and then moves to the next". The live 02:46Z shape: tgp bank 27.2 resets in 4.9d,
+        # gmail bank 20.3 resets in 2.4d. gmail's unspent week expires first, so it goes first.
+        got = order(self.tmp.name, [
+            f"tgp {self.now + 422054} {self.now} 27.2\n",
+            f"gmail {self.now + 209644} {self.now} 20.3\n",
+        ], accounts="tgp gmail")
+        self.assertEqual(got, ["gmail", "tgp"])
+
     def test_equal_banks_fall_back_to_soonest_reset(self):
         got = order(self.tmp.name, [
             f"gmail {self.now + 380000} {self.now} 5\n",
