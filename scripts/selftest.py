@@ -13882,10 +13882,11 @@ def _run_member_pregate_short_circuits_in_shell_fk1093():
     # jefe and dumbledore were deactivated (governance overhead, 2026-09-16) then fully archived
     # -- nothing in the repo still read their charter content, so fk#1195 deleted their
     # directories outright rather than leaving them disabled-but-present.
-    # jefe came back as the pregated inbox desk (philanthropy#8215); dumbledore stays archived.
+    # jefe came back as the pregated inbox desk (philanthropy#8215); dumbledore came back
+    # (Reif, 2026-09-26) as the fleet's own fixer, every 7h, since archiving him moved his duty
+    # to no one.
     assert specs["jefe"]["llm"].get("pregate") == "members/jefe/pregate.sh", "jefe must be pregated"
-    for name in ("dumbledore",):
-        assert name not in specs, f"{name} was archived (fk#1195) and should no longer be a spec-able member"
+    assert specs["dumbledore"]["enabled"] is True, "dumbledore is the fleet's own fixer again"
     vp_due = (HERE / "vp_due.sh").read_text()
     assert 'VP_ENABLED' in vp_due and vp_due.find("VP_ENABLED") < vp_due.find("run_member.sh\" vp"), "vp_due must check enabled before spawning vp"
     marie = (ROOT / "members/marie/marie.md").read_text()
@@ -15684,6 +15685,9 @@ def _roster_is_ten_members_after_fk1195_fold():
         # philanthropy#8215 (Reif's amendment names jefe as the recipient/escalation desk for
         # member-to-member messages): back from the archive, pregated so an empty inbox is $0.
         "jefe",
+        # Reif, 2026-09-26: back to fix the fleet itself -- archived with "nothing moved", so
+        # for nine days the fleet diagnosed itself and nobody fixed the cause.
+        "dumbledore",
     }
     assert set(member_dirs) == expected, \
         f"roster drifted from fk#1195's fold: have {sorted(member_dirs)}, want {sorted(expected)}"
@@ -15693,12 +15697,12 @@ def _roster_is_ten_members_after_fk1195_fold():
     # dont-shoot-the-messenger" budget is about independently-scheduled workers, not raw dirs.
     independently_scheduled = {
         "the-fixer", "judge-judy", "gru", "marie", "sentry", "librarian", "red",
-        "dont-shoot-the-messenger", "jefe",
+        "dont-shoot-the-messenger", "jefe", "dumbledore",
     }
     assert independently_scheduled <= expected
 
     entry = (ROOT / "entrypoint.sh").read_text()
-    for archived in ("roomba", "custodian", "signals", "datta", "dumbledore"):
+    for archived in ("roomba", "custodian", "signals", "datta"):
         assert not re.search(rf'run_member\.sh {archived}\b', entry), \
             f"a cron line still launches archived member {archived!r}"
         assert f"cron_member_enabled {archived}" not in entry, \

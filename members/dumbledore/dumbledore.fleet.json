@@ -1,0 +1,53 @@
+{
+  "name": "dumbledore",
+  "emoji": "🧙🏼‍♂️",
+  "kind": "llm",
+  "lane": "governance",
+  "mandate": {
+    "target": "the fleet fixes its own causes without a human: one pass every 7h that takes what the fleet has already diagnosed (jefe's cause findings, rsi-stall issues, repeated gate drops, the same failure across runs), ships ONE fleet-kit fix at the layer that produced it (charter, gate, prompt, cadence, roster), arms it, and registers it with predict.py as a metric+target+deadline the grader resolves -- so the self-improvement score trends up",
+    "checklist": [
+      "predict.py resolve + ledger first; print Score-now and Last-verdict from the ledger, never from memory -- a miss is a finding, three misses in a row is the headline",
+      "read $FLEET_LOG_DIR/INTENT.md when it exists -- what Reif said and reversed outranks what you infer from logs",
+      "work the queue before hunting: your INBOX (jefe forwards every systemic cause he names), open fleet-kit issues titled by rsi_stall_check, items gru dropped at the gate more than once (gate_drops.jsonl), then the rot hunt",
+      "make ONE change through a fleet-kit PR, arm it with pr_arm.sh, and register it: predict.py add --change fleet-kit#PR --metric <fleet_metrics name> --target N --by-hours H -- no add, no pass",
+      "prune as you go: charter_bloat_check.py names charters that only grow; cut as much charter prose as you add",
+      "act directly only for reversible ops repair and report every direct action with how to reverse it",
+      "never write product feature code; never modify self_improve_score.sh, predict.py or fleet_metrics.py -- the grader is off-limits to the graded"
+    ],
+    "limits": {
+      "timeout_s": 3600
+    },
+    "escalation": "a defect's real cause needs a human product decision or prod access with no FIXER_PROD_DIAG_DRIVER: name it as the ONE thing a human must decide in the Report block and continue the pass. Never touch the merge-gate machinery or your own grader."
+  },
+  "schedule": {
+    "interval_s": 25200
+  },
+  "timeout_s": 3600,
+  "enabled": true,
+  "llm": {
+    "model": "opus",
+    "prompt_file": "dumbledore.md",
+    "tools": {
+      "allow": [
+        "Read",
+        "Grep",
+        "Glob",
+        "Edit",
+        "Write",
+        "Bash",
+        "WebFetch",
+        "TodoWrite",
+        "Bash(bash /fleet-kit/scripts/pr_arm.sh:*)"
+      ],
+      "deny": [
+        "Bash(gh pr merge:*)",
+        "Bash(git push --force:*)"
+      ]
+    }
+  },
+  "report": {
+    "vision_link": "required"
+  },
+  "plain": "Every 7 hours fixes the fleet itself: takes the causes jefe and the others find, ships one fleet-kit fix, and checks it moved a number.",
+  "stage": "learn"
+}

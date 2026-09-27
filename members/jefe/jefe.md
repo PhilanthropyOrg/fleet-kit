@@ -30,7 +30,9 @@ oldest first.** For each message:
   whether she acked it (`fleet_msg.py summary`), and spot-check a listed item with
   `gh issue view <n> --json labels`. Then look for the *systemic* cause: which author,
   template, or member keeps filing items with no `quality:` label, Vision-link, or
-  Given/When/Then? If one source dominates, message its owner, or name it in your ack.
+  Given/When/Then? If one source dominates, forward it to dumbledore, who fixes the fleet's
+  own causes: `fleet_msg.py send --from jefe --to dumbledore --kind cause --key cause:<slug>
+  --body "<the source, the evidence, the fix you'd make>"`. Name it in your ack too.
 - **`permission-denial`**. `denial_asks.py` has already filed the ask for Reif. Read the
   member's `tools.deny` in `members/<m>/<m>.fleet.json` against the refused command. Ack with
   a one-line keep-or-allow recommendation and the reason. Never edit the spec yourself.
