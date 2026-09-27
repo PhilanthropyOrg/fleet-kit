@@ -60,7 +60,7 @@ LOG="${FLEET_ALERT_LOG:-${FLEET_LOG_DIR:-/home/ubuntu/fleet-kit-logs}/fleet_aler
 # Alarms neither channel could deliver wait here and are retried at the front of the NEXT
 # call (fleet-kit#512). See the drain block below for why.
 QUEUE="${FLEET_ALERT_QUEUE:-$(dirname "$LOG")/alerts_undelivered.jsonl}"
-_slog() { echo "[$(date -u '+%Y-%m-%d %H:%M:%S UTC')] $*" >> "$LOG"; }
+_slog() { echo "[$(TZ=America/Chicago date '+%Y-%m-%d %H:%M:%S %Z')] $*" >> "$LOG"; }
 
 # Recovery path: only tell a human it recovered if a human was told it broke.
 if [ "$RESOLVE" = "1" ] && [ -n "$CHECK" ]; then
@@ -96,7 +96,7 @@ if [ -n "$CHECK" ] && [ -n "$SEVERITY" ] && [ "$RESOLVE" = "0" ]; then
   fi
   _slog "PAGING [$SEVERITY] $CHECK/$PROBLEM -- $VERDICT"
 fi
-log() { echo "[$(date -u '+%Y-%m-%d %H:%M:%S UTC')] $*" >> "$LOG"; }
+log() { echo "[$(TZ=America/Chicago date '+%Y-%m-%d %H:%M:%S %Z')] $*" >> "$LOG"; }
 
 [ -f /home/ubuntu/.config/maxx/alert.env ] && { set -a; . /home/ubuntu/.config/maxx/alert.env; set +a; }
 

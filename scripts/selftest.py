@@ -4084,7 +4084,7 @@ _ENTRYPOINT_SCHEDULED_SCRIPTS = (
     ("git_pull_guard.sh", "bash /fleet-kit/scripts/git_pull_guard.sh", "gh#68"),
     ("vp_due.sh", "bash /fleet-kit/scripts/vp_due.sh", "vp loop, 2026-09-08"),
     ("librarian-scrub (hourly shell scrub)", "run_member.sh librarian-scrub >>", "fleet-kit#784"),
-    ("librarian (daily reader, 05:15 UTC)", "15 5 * * * root export GH_TOKEN=\\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh librarian >>", "fleet-kit#784"),
+    ("librarian (daily reader, 00:15 Central)", "15 0 * * * root export GH_TOKEN=\\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh librarian >>", "fleet-kit#784"),
     ("pacing_hold_check.py", "python3 /fleet-kit/scripts/pacing_hold_check.py", "gh#812"),
     ("rsi_stall_check.py", "python3 /fleet-kit/scripts/rsi_stall_check.py", "fk#1122"),
     ("charter_bloat_check.py (weekly)", "python3 /fleet-kit/scripts/charter_bloat_check.py", "fk#1122"),
@@ -5327,15 +5327,15 @@ def _messenger_brief_restates_the_strategy_and_points_at_pages():
 
 def _messenger_is_scheduled_three_times_a_day_with_creds_mounted():
     """fk#558: entrypoint.sh schedules dont-shoot-the-messenger at 06:30/12:30/17:30 Central
-    (11:30/17:30/22:30 UTC under CDT), one slot per task line, and it is a real cron member;
+    (cron runs on the container's Central clock), one slot per task line, and it is a real cron member;
     deploy.sh mounts the host alert.env read-only so the container can actually send; the
     member is enabled on sonnet with a send-only charter.
     """
     ep = (ROOT / "entrypoint.sh").read_text()
     assert re.search(r"dont-shoot-the-messenger[ )]", ep.split("ALL_CRON_MEMBERS=(")[1].split("\n")[0]), "messenger not in ALL_CRON_MEMBERS"
-    for minute_hour, slot in (("30 11", "morning"), ("30 17", "afternoon"), ("30 22", "wrap")):
+    for minute_hour, slot in (("30 6", "morning"), ("30 12", "afternoon"), ("30 17", "wrap")):
         assert re.search(rf'^\s*messenger_slot_enabled {slot} && echo "{minute_hour} \* \* \* root .*run_member\.sh dont-shoot-the-messenger --task {slot} ', ep, re.M), \
-            f"no {slot} cron line at {minute_hour} UTC"
+            f"no {slot} cron line at {minute_hour} Central"
     assert "if cron_member_enabled dont-shoot-the-messenger; then" in ep
     # FLEET_MESSENGER_SLOTS gates each slot independently; unset keeps all three.
     fn = ep.split("messenger_slot_enabled() {")[1].split("\n      }")[0]
@@ -11827,7 +11827,7 @@ def _member_liveness_names_the_reset_when_the_pool_is_exhausted():
         assert "PAGED out_of_tokens" in proc.stdout, f"stdout: {proc.stdout!r} stderr: {proc.stderr[:300]!r}"
         text = calls.read_text() if calls.exists() else ""
         assert "problem=out_of_tokens severity=degraded" in text, f"calls: {text!r}"
-        assert "out of tokens until" in text and "UTC" in text, f"page must name the reset: {text!r}"
+        assert "out of tokens until" in text and ("CDT" in text or "CST" in text), f"page must name the reset (Central): {text!r}"
         # A reset already in the PAST is not exhaustion -- that pool should be working again.
         (tmp / "logs" / "account-pool-exhausted.state").write_text(f"tgp {int(time.time()) - 3600}\n")
         calls.unlink(missing_ok=True)
@@ -13096,7 +13096,7 @@ def _librarian_scrub_is_shell_hourly_and_librarian_runs_daily_gh784():
     assert scrub.get("kind") == "shell" and scrub["llm"]["runner"] == "members/librarian-scrub/librarian-scrub.sh", scrub
     assert os.access(ROOT / scrub["llm"]["runner"], os.X_OK)
     assert scrub["schedule"] == {"hourly_at_minute": 6}, scrub["schedule"]
-    assert lib["schedule"].get("daily_at") == "05:15" and lib["llm"]["model"] == "sonnet", lib["schedule"]
+    assert lib["schedule"].get("daily_at") == "00:15" and lib["llm"]["model"] == "sonnet", lib["schedule"]
     deny = set(lib["llm"]["tools"]["deny"])
     assert {"Edit(/repo/**)", "Write(/repo/**)", "Edit(/fleet-kit/**)", "Write(/fleet-kit/**)"} <= deny, deny
     entry = (ROOT / "entrypoint.sh").read_text()

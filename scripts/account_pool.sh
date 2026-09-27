@@ -51,7 +51,7 @@ ACCOUNT_POOL_WEEK_RESET_TTL="${ACCOUNT_POOL_WEEK_RESET_TTL:-600}"
 
 _account_pool_log() {
   mkdir -p "$(dirname "$ACCOUNT_POOL_LOG_FILE")" 2>/dev/null
-  echo "[$(date '+%Y-%m-%d %H:%M:%S %Z')] account_pool: $*" >> "$ACCOUNT_POOL_LOG_FILE"
+  echo "[$(TZ=America/Chicago date '+%Y-%m-%d %H:%M:%S %Z')] account_pool: $*" >> "$ACCOUNT_POOL_LOG_FILE"
 }
 
 # _account_pool_parse_reset <output> — pull a reset time out of the CLI's own wording
@@ -136,14 +136,14 @@ _account_pool_mark_exhausted() {
   now=$(date +%s)
   ceiling=$(( now + 8 * 86400 ))
   if [ "$epoch" -gt "$ceiling" ]; then
-    _account_pool_log "account=$account computed gate epoch=$epoch ($(date -d "@$epoch" '+%Y-%m-%d %H:%M UTC' 2>/dev/null || date -r "$epoch" '+%Y-%m-%d %H:%M UTC' 2>/dev/null)) exceeds the sanity ceiling -- refusing to write, account not gated this call"
+    _account_pool_log "account=$account computed gate epoch=$epoch ($(TZ=America/Chicago date -d "@$epoch" '+%Y-%m-%d %H:%M %Z' 2>/dev/null || TZ=America/Chicago date -r "$epoch" '+%Y-%m-%d %H:%M %Z' 2>/dev/null)) exceeds the sanity ceiling -- refusing to write, account not gated this call"
     return 1
   fi
   mkdir -p "$(dirname "$ACCOUNT_POOL_STATE_FILE")" 2>/dev/null
   grep -v "^${account} " "$ACCOUNT_POOL_STATE_FILE" 2>/dev/null > "${ACCOUNT_POOL_STATE_FILE}.tmp" || true
   echo "$account $epoch" >> "${ACCOUNT_POOL_STATE_FILE}.tmp"
   mv "${ACCOUNT_POOL_STATE_FILE}.tmp" "$ACCOUNT_POOL_STATE_FILE"
-  _account_pool_log "account=$account marked gated until epoch=$epoch ($(date -d "@$epoch" '+%Y-%m-%d %H:%M UTC' 2>/dev/null || date -r "$epoch" '+%Y-%m-%d %H:%M UTC' 2>/dev/null))"
+  _account_pool_log "account=$account marked gated until epoch=$epoch ($(TZ=America/Chicago date -d "@$epoch" '+%Y-%m-%d %H:%M %Z' 2>/dev/null || TZ=America/Chicago date -r "$epoch" '+%Y-%m-%d %H:%M %Z' 2>/dev/null))"
 }
 
 # _account_pool_note_unauthenticated <account> -- gh#134. account_readiness.sh's ONLY signal is

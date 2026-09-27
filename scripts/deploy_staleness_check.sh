@@ -45,7 +45,7 @@ DEPLOY_LOG="$LOG_DIR/deploy.log"
 date -u '+%Y-%m-%dT%H:%M:%SZ' > "$LOG_DIR/deploy_staleness_check.lastrun"
 
 log() {
-    local line="[deploy-staleness $(date -u '+%Y-%m-%d %H:%M:%S UTC')] $*"
+    local line="[deploy-staleness $(TZ=America/Chicago date '+%Y-%m-%d %H:%M:%S %Z')] $*"
     echo "$line"
     echo "$line" >> "$DEPLOY_LOG"
 }

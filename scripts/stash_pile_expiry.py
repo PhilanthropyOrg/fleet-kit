@@ -33,6 +33,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 import fleet_db  # noqa: E402
+from fleet_tz import stamp as central_stamp  # noqa: E402 -- humans read Central
 
 LOG_DIR_DEFAULT = fleet_db.LOG_DIR
 STATE_FILE_NAME = ".stash_pile_expiry_state.json"
@@ -108,7 +109,7 @@ def run_expiry(repo, log_dir, ceiling):
                 dropped.append((idx, message))
 
     alert_log = Path(log_dir) / ALERT_LOG_NAME
-    stamp = time.strftime("%Y-%m-%d %H:%M:%S %Z")
+    stamp = central_stamp()
     with open(alert_log, "a") as f:
         for idx, message in dropped:
             line = (f"[{stamp}] EXPIRED stash@{{{idx}}} "

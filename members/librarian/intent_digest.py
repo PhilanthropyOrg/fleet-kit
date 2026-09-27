@@ -19,6 +19,7 @@ Usage: intent_digest.py [--days 14] [--max 150] [--out PATH] [--gh-repo OWNER/NA
 """
 from __future__ import annotations
 
+import calendar
 import argparse
 import glob
 import json
@@ -119,7 +120,7 @@ def from_gh(repos: list[str], cutoff: float, run=None) -> tuple[list[dict], str]
                 for c in json.loads(body):
                     b = c.get("body") or ""
                     if b.startswith("Reif:"):
-                        ts = time.mktime(time.strptime(c["created_at"], "%Y-%m-%dT%H:%M:%SZ")) - time.timezone
+                        ts = calendar.timegm(time.strptime(c["created_at"], "%Y-%m-%dT%H:%M:%SZ"))
                         repo_rows.append({"ts": ts, "source": f"{repo.split('/')[-1]} comment", "text": b})
                 pages_read += 1
                 endpoint = _next_page_url(headers)

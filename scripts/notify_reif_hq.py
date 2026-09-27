@@ -23,6 +23,7 @@ Usage: notify_reif_hq.py <merged-prs.jsonl path> [--tmux-session reif]
 """
 from __future__ import annotations
 
+import calendar
 import argparse
 import json
 import re
@@ -98,7 +99,7 @@ def batch_by_window(records: list[dict], window_s: int = BATCH_WINDOW_S) -> list
     def parse_ts(r: dict) -> float:
         raw = r.get("merged_at") or ""
         try:
-            return time.mktime(time.strptime(raw, "%Y-%m-%dT%H:%M:%SZ"))
+            return calendar.timegm(time.strptime(raw, "%Y-%m-%dT%H:%M:%SZ"))
         except ValueError:
             return time.time()
 

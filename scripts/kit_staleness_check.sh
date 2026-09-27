@@ -75,7 +75,7 @@ case "$AHEAD_BY" in ''|*[!0-9]*) exit 0 ;; esac
 
 BUILD_DATE="$(timeout 10s gh api "repos/$KIT_REPO_SLUG/commits/$DEPLOYED_SHA" --jq .commit.committer.date 2>/dev/null || echo "")"
 BUILD_TIME_HUMAN="an unknown time"
-[ -n "$BUILD_DATE" ] && BUILD_TIME_HUMAN="$(date -u -d "$BUILD_DATE" '+%Y-%m-%d %H:%M UTC' 2>/dev/null || echo "$BUILD_DATE")"
+[ -n "$BUILD_DATE" ] && BUILD_TIME_HUMAN="$(TZ=America/Chicago date -d "$BUILD_DATE" '+%Y-%m-%d %H:%M %Z' 2>/dev/null || echo "$BUILD_DATE")"
 
 SHORT_SHA="${DEPLOYED_SHA:0:7}"
 echo "kit snapshot $SHORT_SHA is $AHEAD_BY commit(s) behind origin/main (built $BUILD_TIME_HUMAN) -- scripts under the kit path are NOT current main; verify fixes from a fresh worktree instead."

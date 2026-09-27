@@ -39,6 +39,12 @@ RUN apt-get update -qq && apt-get install -y -qq \
       python3.11-minimal libpython3.11-stdlib \
     && rm -rf /var/lib/apt/lists/*
 
+# The container's clock is Central (Reif's): logs, pages and cron hours read in America/Chicago.
+# cron fires schedules in this localtime. Machines still keep UTC -- ISO ...Z stamps, epochs and
+# fleet.db values are zone-free -- so only what a human reads changes.
+ENV TZ=America/Chicago
+RUN ln -snf /usr/share/zoneinfo/America/Chicago /etc/localtime && echo America/Chicago > /etc/timezone
+
 # Python libs the ANALYSIS lanes need (datta/nerd). The container shipped with NO third-party
 # python at all -- not even requests -- so a nerd told to read GSC or GA4 could not, and would
 # have filed "no credential" forever even once the credentials landed.

@@ -30,6 +30,7 @@ import pathlib
 import subprocess
 import sys
 import time
+from fleet_tz import stamp as central_stamp  # noqa: E402 -- humans read Central
 
 HERE = pathlib.Path(__file__).resolve().parent
 LOG_DIR = pathlib.Path(os.environ.get("FLEET_LOG_DIR") or os.path.expanduser("~/Library/Logs/fleet-kit"))
@@ -70,7 +71,7 @@ def render(runs: list[dict], asks: list[dict], instrument_issues: list[dict], no
             continue
         if r["member"] not in last or r.get("ts", 0) > last[r["member"]].get("ts", 0):
             last[r["member"]] = r
-    out = [f"# HANDOFF -- what the team learned in the last {int(hours)}h (written {time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime(now))})",
+    out = [f"# HANDOFF -- what the team learned in the last {int(hours)}h (written {central_stamp('%Y-%m-%d %H:%M %Z', now)})",
            "", "Read this before choosing what to do. A Broken: instrument below is someone's job, not a fact to cite again.", ""]
     out.append("## Where each member left off")
     for m, r in sorted(last.items(), key=lambda kv: -kv[1].get("ts", 0)):

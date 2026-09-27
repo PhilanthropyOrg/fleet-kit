@@ -123,7 +123,7 @@ if [ "$offset" -ge "$size" ]; then
   rm -f "$GAP_STATE_FILE"
   if [ -n "$already_paged_epoch" ]; then
     _ntfy "fleet-kit: fleet.db sync recovered" \
-      "sync_state.offset is caught up with runs.jsonl again after a gap flagged at $(date -u -d "@$already_paged_epoch" '+%Y-%m-%d %H:%M UTC' 2>/dev/null || date -u -r "$already_paged_epoch" '+%Y-%m-%d %H:%M UTC' 2>/dev/null || echo "epoch $already_paged_epoch")." \
+      "sync_state.offset is caught up with runs.jsonl again after a gap flagged at $(TZ=America/Chicago date -d "@$already_paged_epoch" '+%Y-%m-%d %H:%M %Z' 2>/dev/null || TZ=America/Chicago date -r "$already_paged_epoch" '+%Y-%m-%d %H:%M %Z' 2>/dev/null || echo "epoch $already_paged_epoch")." \
       "resolve"
     rm -f "$PAGED_STATE_FILE"
   fi

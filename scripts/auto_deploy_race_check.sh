@@ -125,7 +125,7 @@ check_unrecognized_race() {
     [ -z "$matches" ] && return 0
 
     local now
-    now="$(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+    now="$(TZ=America/Chicago date '+%Y-%m-%d %H:%M:%S %Z')"
 
     # "Did the next tick's deploy subsequently succeed" (AC2) -- auto_deploy.cron.log carries no
     # per-line timestamps of its own (git's raw stderr has none), so exact time-correlation isn't
@@ -197,7 +197,7 @@ check_sanctioned_escalation() {
     case "$diverged_alerted" in (''|*[!0-9]*) diverged_alerted=0 ;; esac
 
     local now
-    now="$(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+    now="$(TZ=America/Chicago date '+%Y-%m-%d %H:%M:%S %Z')"
 
     while IFS= read -r line; do
         [ -z "$line" ] && continue

@@ -28,6 +28,7 @@ Reif signal or funnel leaves the weights at the equal split, which is today's be
 """
 from __future__ import annotations
 
+import calendar
 import argparse
 import json
 import os
@@ -39,6 +40,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from fleet_tz import stamp as central_stamp  # noqa: E402 -- humans read Central
 
 HERE = pathlib.Path(__file__).resolve().parent
 LOG_DIR = pathlib.Path(os.environ.get("FLEET_LOG_DIR") or os.path.expanduser("~/Library/Logs/fleet-kit"))
@@ -120,7 +122,7 @@ def reif_prs(slug: str, now: float, days: int = 14, run=_run) -> tuple[list[dict
         if (p.get("headRefName") or "").startswith("member/"):
             continue
         try:
-            ts = time.mktime(time.strptime(p.get("mergedAt", "")[:19], "%Y-%m-%dT%H:%M:%S")) - time.timezone
+            ts = calendar.timegm(time.strptime(p.get("mergedAt", "")[:19], "%Y-%m-%dT%H:%M:%S"))
         except (ValueError, TypeError):
             continue
         if ts < since:
@@ -305,7 +307,7 @@ def render(reif: list[dict], reif_err: str | None, okr: dict, funnel: dict, funn
     labels[(okr.get("objective") or {}).get("id", "okr.verified_claims")] = (okr.get("objective") or {}).get("label", "")
     leak = worst_step_kr(funnel)
     w = weights(reif, leak)
-    out = [f"# NORTH -- where Reif is paddling (written {time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime(now))})",
+    out = [f"# NORTH -- where Reif is paddling (written {central_stamp('%Y-%m-%d %H:%M %Z', now)})",
            "", "## 1. What Reif shipped himself, last 14 days (not the fleet's PRs)"]
     if reif_err:
         out.append(f"unreadable: {reif_err}")

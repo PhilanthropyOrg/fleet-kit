@@ -197,6 +197,10 @@ case "${1:-cron-foreground}" in
     CRONTAB=/etc/cron.d/fleet-kit
     {
       echo "FLEET_ENV_FILE=/fleet-kit/fleet.env"
+      # Humans read Central. Debian cron fires schedules in system localtime (Dockerfile sets
+      # America/Chicago), so every hour field below is a Central hour; TZ here makes the jobs
+      # themselves inherit it too. Machines still keep UTC (ISO ...Z stamps, epochs, fleet.db).
+      echo "TZ=America/Chicago"
       echo "PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
       echo "HOME=/root"
       # gh#569: deploy.sh's `docker run -e FLEET_SHARE_DIR=...` only reaches PID 1 and its
@@ -251,8 +255,8 @@ case "${1:-cron-foreground}" in
       # fleet.env` returns nothing. Re-enable by setting FLEET_MESSENGER_DRIVER to an
       # executable driver, then uncommenting the line below.
       # dont-shoot-the-messenger (fk#558 deliverable 8): the one voice to Reif. 06:30 / 12:30 /
-      # 17:30 Central = 11:30 / 17:30 / 22:30 UTC while CDT holds (UTC-5). When DST ends these
-      # drift an hour late; fix here, not in the member. Each slot is passed as the task line.
+      # 17:30 Central -- cron runs on Central time now, so these hold across DST with no drift.
+      # Each slot is passed as the task line.
       # FLEET_MESSENGER_SLOTS: which of the three slots to schedule (space/comma-separated
       # subset of morning|afternoon|wrap). Unset = all three. `FLEET_MESSENGER_SLOTS="morning wrap"`
       # drops the 12:30 afternoon block without silencing the whole member.
@@ -263,9 +267,9 @@ case "${1:-cron-foreground}" in
         return 1
       }
       if cron_member_enabled dont-shoot-the-messenger; then
-        messenger_slot_enabled morning && echo "30 11 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh dont-shoot-the-messenger --task morning >> $LOG_DIR/dont-shoot-the-messenger.log 2>&1"
-        messenger_slot_enabled afternoon && echo "30 17 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh dont-shoot-the-messenger --task afternoon >> $LOG_DIR/dont-shoot-the-messenger.log 2>&1"
-        messenger_slot_enabled wrap && echo "30 22 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh dont-shoot-the-messenger --task wrap >> $LOG_DIR/dont-shoot-the-messenger.log 2>&1"
+        messenger_slot_enabled morning && echo "30 6 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh dont-shoot-the-messenger --task morning >> $LOG_DIR/dont-shoot-the-messenger.log 2>&1"
+        messenger_slot_enabled afternoon && echo "30 12 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh dont-shoot-the-messenger --task afternoon >> $LOG_DIR/dont-shoot-the-messenger.log 2>&1"
+        messenger_slot_enabled wrap && echo "30 17 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh dont-shoot-the-messenger --task wrap >> $LOG_DIR/dont-shoot-the-messenger.log 2>&1"
       fi
       if cron_member_enabled judge-judy; then
         echo "*/15 * * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh judge-judy >> $LOG_DIR/judge-judy.log 2>&1"
@@ -309,14 +313,14 @@ case "${1:-cron-foreground}" in
       # already declared -- fleet.json edits do not update this line by themselves (see the
       # selftest check that now compares them). fleet-kit#784: the hourly scrub is a shell
       # member now (no model); librarian itself is the daily reader (memory under cap,
-      # INTENT.md) at 05:15 UTC, before the morning brief. Kept as its own dispatch target
+      # INTENT.md) at 00:15 Central, before the morning brief. Kept as its own dispatch target
       # (fk#1195): a `kind: shell` zero-token hourly pass and a real daily model pass cannot
       # share one member's schedule/tool grant under today's dispatch mechanism.
       if cron_member_enabled librarian-scrub; then
         echo "6 * * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh librarian-scrub >> $LOG_DIR/librarian-scrub.log 2>&1"
       fi
       if cron_member_enabled librarian; then
-        echo "15 5 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh librarian >> $LOG_DIR/librarian.log 2>&1"
+        echo "15 0 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh librarian >> $LOG_DIR/librarian.log 2>&1"
       fi
       if cron_member_enabled marie; then
         echo "33 ${FLEET_MARIE_CADENCE:-*} * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh marie >> $LOG_DIR/marie.log 2>&1"
@@ -370,10 +374,10 @@ case "${1:-cron-foreground}" in
       # unclaimed on the minute map and five minutes after the grader's own slot.
       echo "12 * * * * root [ -f \"\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}\" ] && { set -a; . \"\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}\"; set +a; }; export GH_TOKEN=\$(cat $TOKEN_FILE) FLEET_LOG_DIR=$LOG_DIR; python3 /fleet-kit/scripts/rsi_stall_check.py >> $LOG_DIR/rsi_stall_check.log 2>&1"
       # charter_bloat_check.py (fk#753, fk#1122): the consolidation duty jefe held by prose and
-      # dumbledore did by initiative -- both off since fk#1116. Weekly, Sunday 05:40 UTC; prints
+      # dumbledore did by initiative -- both off since fk#1116. Weekly, Sunday 00:40 Central; prints
       # the reconstruction so the next librarian pass and any human can see which charters are
       # accumulating patches with no consolidation pass.
-      echo "40 5 * * 0 root [ -f \"\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}\" ] && { set -a; . \"\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}\"; set +a; }; export GH_TOKEN=\$(cat $TOKEN_FILE); cd /fleet-kit && python3 /fleet-kit/scripts/charter_bloat_check.py --root /fleet-kit >> $LOG_DIR/charter_bloat_check.log 2>&1"
+      echo "40 0 * * 0 root [ -f \"\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}\" ] && { set -a; . \"\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}\"; set +a; }; export GH_TOKEN=\$(cat $TOKEN_FILE); cd /fleet-kit && python3 /fleet-kit/scripts/charter_bloat_check.py --root /fleet-kit >> $LOG_DIR/charter_bloat_check.log 2>&1"
       # number_read.py --fetch (fleet-kit#513): pulls the venture's number from FLEET_NUMBER_URL
       # into $LOG_DIR/number.json so run_member.sh can put it above every charter. Every 6h at
       # :29 (unclaimed on the minute map above); the endpoint caches 6h itself. Sources
@@ -593,13 +597,13 @@ case "${1:-cron-foreground}" in
     # is not firing" within one 5-minute tick of every single deploy, and kill -9's a cron that
     # has simply not reached its first */10 tick yet. Touching it here means the age measured
     # below is always age-since-THIS-container-started, which is what the check actually means.
-    echo "[$(date -u '+%Y-%m-%d %H:%M:%S UTC')] [$WATCHDOG_TAG] entrypoint start -- seeding canary" >> "$CANARY"
+    echo "[$(TZ=America/Chicago date '+%Y-%m-%d %H:%M:%S %Z')] [$WATCHDOG_TAG] entrypoint start -- seeding canary" >> "$CANARY"
     STALL_THRESHOLD_S="${FLEET_CRON_STALL_THRESHOLD_S:-1800}"
     WATCHDOG_LOG="$LOG_DIR/cron_watchdog.log"
     while true; do
       sleep 300
       if ! kill -0 "$CRON_PID" 2>/dev/null; then
-        echo "[$(date -u '+%Y-%m-%d %H:%M:%S UTC')] [$WATCHDOG_TAG] cron pid $CRON_PID gone -- restarting" \
+        echo "[$(TZ=America/Chicago date '+%Y-%m-%d %H:%M:%S %Z')] [$WATCHDOG_TAG] cron pid $CRON_PID gone -- restarting" \
           | tee -a "$WATCHDOG_LOG"
         cron -f &
         CRON_PID=$!
@@ -608,7 +612,7 @@ case "${1:-cron-foreground}" in
       if [ -f "$CANARY" ]; then
         age=$(( $(date +%s) - $(stat -c %Y "$CANARY") ))
         if [ "$age" -gt "$STALL_THRESHOLD_S" ]; then
-          echo "[$(date -u '+%Y-%m-%d %H:%M:%S UTC')] [$WATCHDOG_TAG] CRITICAL: $CANARY stale ${age}s (> ${STALL_THRESHOLD_S}s) -- cron pid $CRON_PID alive but not firing jobs, restarting it" \
+          echo "[$(TZ=America/Chicago date '+%Y-%m-%d %H:%M:%S %Z')] [$WATCHDOG_TAG] CRITICAL: $CANARY stale ${age}s (> ${STALL_THRESHOLD_S}s) -- cron pid $CRON_PID alive but not firing jobs, restarting it" \
             | tee -a "$WATCHDOG_LOG"
           # Only ever kill a cron that is genuinely our own child. Guards against the
           # orphaned-watchdog case above, where $CRON_PID may name a pid belonging to a
@@ -617,13 +621,13 @@ case "${1:-cron-foreground}" in
             kill -9 "$CRON_PID" 2>/dev/null || true
             wait "$CRON_PID" 2>/dev/null || true
           else
-            echo "[$(date -u '+%Y-%m-%d %H:%M:%S UTC')] [$WATCHDOG_TAG] refusing to kill pid $CRON_PID -- not our child (orphan watchdog?); exiting" \
+            echo "[$(TZ=America/Chicago date '+%Y-%m-%d %H:%M:%S %Z')] [$WATCHDOG_TAG] refusing to kill pid $CRON_PID -- not our child (orphan watchdog?); exiting" \
               | tee -a "$WATCHDOG_LOG"
             exit 0
           fi
           cron -f &
           CRON_PID=$!
-          echo "[$(date -u '+%Y-%m-%d %H:%M:%S UTC')] [$WATCHDOG_TAG] cron restarted (pid $CRON_PID)" \
+          echo "[$(TZ=America/Chicago date '+%Y-%m-%d %H:%M:%S %Z')] [$WATCHDOG_TAG] cron restarted (pid $CRON_PID)" \
             | tee -a "$WATCHDOG_LOG"
         fi
       fi

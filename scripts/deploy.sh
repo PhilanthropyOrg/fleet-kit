@@ -128,7 +128,7 @@ mkdir -p "$LOG_DIR"
 DEPLOY_LOG="$LOG_DIR/deploy.log"
 
 log() {
-    local line="[deploy $(date '+%Y-%m-%d %H:%M:%S %Z')] $*"
+    local line="[deploy $(TZ=America/Chicago date '+%Y-%m-%d %H:%M:%S %Z')] $*"
     echo "$line"
     echo "$line" >> "$DEPLOY_LOG"
 }
@@ -437,7 +437,7 @@ spawn_reaper() {
         eval "$6"
         name="$1"; RETIRE_MAX_S="$2"; log="$3"; RETIRE_KILL_GRACE_S="$4"; PASS_PATTERN="$5"; waited=0
         MINION_PATTERN="$7"; RETIRE_MINION_MAX_S="$8"; said=0
-        rlog() { echo "[deploy $(date "+%Y-%m-%d %H:%M:%S %Z")] reaper: $*" >> "$log"; }
+        rlog() { echo "[deploy $(TZ=America/Chicago date "+%Y-%m-%d %H:%M:%S %Z")] reaper: $*" >> "$log"; }
         while :; do
             state="$(podman inspect "$name" --format "{{.State.Running}}" 2>/dev/null || echo gone)"
             [ "$state" = "true" ] || exit 0

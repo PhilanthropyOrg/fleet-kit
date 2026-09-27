@@ -20,6 +20,8 @@ import os
 import re
 from pathlib import Path
 
+from fleet_tz import ZONE_RE, parse_stamp, stamp as central_stamp
+
 LOG_DIR = Path(os.environ.get("FLEET_LOG_DIR", "/home/ubuntu/fleet-kit-logs"))
 
 OK = "ok"
@@ -89,7 +91,8 @@ BAD_WORDS = ("STALE", "ALARM", "DOWN", "FAILED", "unhealthy", "WARNING", "unreac
 # after the opening bracket. Without this, a real per-line timestamp on an hourly check falls
 # through to the 5-minute-cadence mtime fallback below and misplaces every line but the newest
 # (gh#367 fleet-code-review BLOCK).
-_TS = re.compile(r"\[[^\[\]]*?(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) UTC\]")
+# Zone is UTC on old lines, CDT/CST since the container went Central (fleet_tz.py).
+_TS = re.compile(r"\[[^\[\]]*?(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) (" + ZONE_RE + r")\]")
 
 
 def classify(line: str) -> str:
@@ -138,10 +141,8 @@ def read_component(names, hours: int = 72) -> tuple[list[str], float | None]:
         cadence = _cadence_minutes(path)
         for i, line in enumerate(reversed(lines)):
             m = _TS.search(line)
-            if m:
-                ts = _dt.datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S").replace(
-                    tzinfo=_dt.timezone.utc)
-            else:
+            ts = parse_stamp(m.group(1), m.group(2)) if m else None
+            if ts is None:
                 ts = mtime - _dt.timedelta(minutes=cadence * i)
             age_h = int((now - ts.replace(minute=0, second=0, microsecond=0)).total_seconds() // 3600)
             if 0 <= age_h < hours:
@@ -246,7 +247,7 @@ def snapshot(hours: int = 72) -> dict:
         "members": members(hours),
         "live_alerts": live_alerts(),
         "number": number_snapshot(),
-        "generated_at": _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+        "generated_at": central_stamp("%Y-%m-%d %H:%M %Z"),
     }
 
 

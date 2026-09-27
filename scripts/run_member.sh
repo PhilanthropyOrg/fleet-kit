@@ -136,7 +136,7 @@ FIRED_FLAG=""; [ -n "${FLEET_FIRED_BY:-}" ] && FIRED_FLAG="--fired-by $FLEET_FIR
 REASON_FLAG=""; [ -n "${FLEET_FIRED_REASON:-}" ] && REASON_FLAG="--reason $FLEET_FIRED_REASON"
 
 LOG="$LOG_DIR/${MEMBER}.log"
-ts() { date '+%Y-%m-%d %H:%M:%S %Z'; }
+ts() { TZ=America/Chicago date '+%Y-%m-%d %H:%M:%S %Z'; }
 log() { echo "[$(ts)] $*" >> "$LOG"; }
 
 # gh#731: warn THIS pass, in its own log, before any member-specific work runs, when

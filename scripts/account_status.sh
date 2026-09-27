@@ -42,7 +42,7 @@ source "$HERE/account_pool.sh" 2>/dev/null || {
   echo "FAIL: cannot source $HERE/account_pool.sh"; exit 1; }
 
 now=$(date +%s)
-fmt_epoch() { date -u -d "@$1" '+%Y-%m-%d %H:%M UTC' 2>/dev/null || date -u -r "$1" '+%Y-%m-%d %H:%M UTC' 2>/dev/null || echo "epoch=$1"; }
+fmt_epoch() { TZ=America/Chicago date -d "@$1" '+%Y-%m-%d %H:%M %Z' 2>/dev/null || TZ=America/Chicago date -r "$1" '+%Y-%m-%d %H:%M %Z' 2>/dev/null || echo "epoch=$1"; }
 
 echo "accounts: $ACCOUNTS"
 echo "state:    $ACCOUNT_POOL_STATE_FILE"

@@ -49,7 +49,7 @@ WORKER_NAME="${FLEET_WORKER_NAME:-builder-$$}"
 KIT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 mkdir -p "$LOG_DIR"
-ts() { date '+%Y-%m-%d %H:%M:%S %Z'; }
+ts() { TZ=America/Chicago date '+%Y-%m-%d %H:%M:%S %Z'; }
 log() { echo "[$(ts)] $*" >> "$LOG"; }
 
 # Master kill switch, then this member's own switch -- both checked BEFORE anything that costs

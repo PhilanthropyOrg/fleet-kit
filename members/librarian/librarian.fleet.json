@@ -20,8 +20,8 @@
     "escalation": "a memory dir you cannot bring under cap without losing a live lesson, or a pattern gap in the scrubber: say so in the report as the one thing a human must decide. Never touch /repo, /fleet-kit or any charter."
   },
   "schedule": {
-    "daily_at": "05:15",
-    "note": "UTC; entrypoint.sh line `15 5 * * *`. Once a day on purpose (fleet-kit#784): the hourly scrub is librarian-scrub, a shell member."
+    "daily_at": "00:15",
+    "note": "America/Chicago (the container clock); entrypoint.sh line `15 0 * * *`. Once a day on purpose (fleet-kit#784): the hourly scrub is librarian-scrub, a shell member."
   },
   "timeout_s": 1800,
   "enabled": true,

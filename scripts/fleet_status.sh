@@ -33,7 +33,7 @@ fi
 # 2. deploy: what runs vs what main says
 live=$(grep -h 'deploy OK at' "$DEPLOY_LOG" 2>/dev/null | tail -1 | sed 's/.*deploy OK at //' | cut -c1-7)
 main=$(git -C "$KIT" ls-remote -q origin main 2>/dev/null | cut -c1-7)
-when=$(grep -h 'deploy OK at' "$DEPLOY_LOG" 2>/dev/null | tail -1 | cut -c2-17)
+when=$(grep -h 'deploy OK at' "$DEPLOY_LOG" 2>/dev/null | tail -1 | sed -E 's/^\[([0-9-]+ [0-9]+:[0-9]+):[0-9]+ ([A-Z]+)\].*/\1 \2/')
 if [ -n "$live" ] && [ "$live" = "$main" ]; then row OK deploy "container on $live = origin/main ($when)"
 elif [ -n "$live" ]; then row WAIT deploy "container on $live, main at $main; auto_deploy coalesces 2h, last $when"
 else row DEAD deploy "no 'deploy OK' in $DEPLOY_LOG"; fi
@@ -59,7 +59,7 @@ row "$([ -n "$pool" ] && echo OK || echo DEAD)" accounts "${pool:-no account_poo
 cl=$(grep -ah "FLEET_SHARE_CEILING_PCT=" "$LOGS"/*.log | sort | tail -1)
 ceil=$(echo "$cl" | cut -c2-17)
 cv=$(echo "$cl" | sed "s/.*CEILING_PCT=\([0-9.]*\).*/\1/")
-paced=$(grep -ah "PACED:" "$LOGS"/*.log | sort | tail -1 | cut -c2-17)
+paced=$(grep -ah "PACED:" "$LOGS"/*.log | sort | tail -1 | sed -E 's/^\[([0-9-]+ [0-9]+:[0-9]+):[0-9]+ ([A-Z]+)\].*/\1 \2/')
 if [ -z "$cv" ]; then row DEAD ceiling "no reading"
 elif awk -v v="$cv" 'BEGIN{exit !(v<0.01)}'; then row WAIT ceiling "$cv at $ceil -- members hold PACED (last $paced). Budget or fk#1169-class bug"
 else row OK ceiling "$cv %/hour at $ceil"; fi

@@ -85,8 +85,9 @@ def log(msg: str) -> None:
     # saw as a RemoteDisconnected.
     LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
     import datetime
+    from zoneinfo import ZoneInfo
 
-    ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S %Z")
+    ts = datetime.datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d %H:%M:%S %Z")
     with LOG_FILE.open("a") as fh:
         fh.write(f"[{ts}] {msg}\n")
 

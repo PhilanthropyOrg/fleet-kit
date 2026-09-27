@@ -139,21 +139,29 @@ fi
 # running the kit directly). Without the BSD arm this returns nothing on macOS and the check
 # exits quietly having measured nothing -- a dead pager that reports itself as fine, which is
 # the same class of silent failure this whole script exists to catch.
-_line_epoch() {
-  local ts
-  ts=$(grep -oE '^\[[0-9-]+ [0-9:]+' <<<"$1" | tr -d '[')
-  [ -z "$ts" ] && return 1
-  date -u -d "$ts" +%s 2>/dev/null \
-    || TZ=UTC date -j -f "%Y-%m-%d %H:%M:%S" "$ts" +%s 2>/dev/null
+# "<wall clock> <ZONE>" -> epoch. ZONE is UTC on old lines and CDT/CST since the container went
+# Central (both live in the same files); GNU date reads the suffix itself, BSD needs TZ set to
+# the zone the stamp names. A stamp with no zone is read as UTC, as before.
+_stamp_epoch() {
+  local ts="$1" fmt="$2" tz=UTC
+  date -u -d "$ts" +%s 2>/dev/null && return 0
+  case "$ts" in *" CDT"|*" CST") tz=America/Chicago ;; *" UTC") ;; *) ts="$ts UTC" ;; esac
+  TZ=$tz date -j -f "$fmt %Z" "$ts" +%s 2>/dev/null
 }
 
-# Same GNU/BSD split as _line_epoch above, for STATE_FILE's own "%Y-%m-%d %H:%M UTC" format
-# (paged_at/repaged_at below) rather than the pool log's "%Y-%m-%d %H:%M:%S" format.
+_line_epoch() {
+  local ts
+  ts=$(grep -oE '^\[[0-9-]+ [0-9:]+( [A-Z]{3})?' <<<"$1" | tr -d '[')
+  [ -z "$ts" ] && return 1
+  _stamp_epoch "$ts" "%Y-%m-%d %H:%M:%S"
+}
+
+# Same, for STATE_FILE's own "%Y-%m-%d %H:%M <ZONE>" format (paged_at/repaged_at below)
+# rather than the pool log's "%Y-%m-%d %H:%M:%S <ZONE>" format.
 _state_ts_epoch() {
   local ts="$1"
   [ -z "$ts" ] && return 1
-  date -u -d "$ts" +%s 2>/dev/null \
-    || TZ=UTC date -j -f "%Y-%m-%d %H:%M %Z" "$ts" +%s 2>/dev/null
+  _stamp_epoch "$ts" "%Y-%m-%d %H:%M"
 }
 
 now_epoch=$(date +%s)
@@ -181,7 +189,7 @@ if [ "$age_minutes" -gt "$MAX_PLAUSIBLE_OUTAGE_MINUTES" ]; then
 fi
 
 if [ "$age_minutes" -ge "$THRESHOLD_MINUTES" ] && [ -z "$already_paged" ]; then
-  paged_at="$(date -u '+%Y-%m-%d %H:%M UTC')"
+  paged_at="$(TZ=America/Chicago date '+%Y-%m-%d %H:%M %Z')"
 
   # Auto-recovery attempt, host-side, before paging a human -- but ONLY for the network-death
   # failure class, never the auth-flap class. Confirmed live 2026-08-28: a dead slirp4netns
@@ -251,8 +259,8 @@ if [ "$age_minutes" -ge "$THRESHOLD_MINUTES" ] && [ -z "$already_paged" ]; then
   reset_epoch="$(tail -20 "$POOL_LOG" 2>/dev/null \
     | sed -n 's/.*exhausted_until_\([0-9][0-9]*\).*/\1/p' | tail -1)"
   if [ -n "$reset_epoch" ]; then
-    reset_human="$(date -u -d "@$reset_epoch" '+%Y-%m-%d %H:%M UTC' 2>/dev/null \
-      || date -u -r "$reset_epoch" '+%Y-%m-%d %H:%M UTC' 2>/dev/null || echo "epoch $reset_epoch")"
+    reset_human="$(TZ=America/Chicago date -d "@$reset_epoch" '+%Y-%m-%d %H:%M %Z' 2>/dev/null \
+      || TZ=America/Chicago date -r "$reset_epoch" '+%Y-%m-%d %H:%M %Z' 2>/dev/null || echo "epoch $reset_epoch")"
     diagnosis="every account in the pool is QUOTA-GATED, not broken -- the pool's own verdict is
 \`gated:exhausted_until_$reset_epoch\` (resets $reset_human). Re-auth will not help; this fleet is
 idle until the reset, or until it is pointed at an account with headroom."
@@ -279,7 +287,7 @@ elif [ "$age_minutes" -ge "$THRESHOLD_MINUTES" ] && [ -n "$already_paged" ]; the
   [ -n "$reference_epoch" ] && since_last_page_minutes=$(( (now_epoch - reference_epoch) / 60 ))
 
   if [ "$since_last_page_minutes" -ge "$REPAGE_MINUTES" ]; then
-    repaged_at="$(date -u '+%Y-%m-%d %H:%M UTC')"
+    repaged_at="$(TZ=America/Chicago date '+%Y-%m-%d %H:%M %Z')"
     first_paged_epoch=$(_state_ts_epoch "$already_paged")
     since_first_page_minutes="$age_minutes"
     [ -n "$first_paged_epoch" ] && since_first_page_minutes=$(( (now_epoch - first_paged_epoch) / 60 ))
