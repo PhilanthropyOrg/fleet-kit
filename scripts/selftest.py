@@ -4674,6 +4674,41 @@ def _email_reply_answers_asks_and_files_backlog_without_a_model():
     assert 'f"fleet ask #{ask_id} from {member}"' in ask and "Reply to this email with one line" in ask, "ask mail does not say how to reply"
 
 
+def _email_forward_keeps_the_forwarded_body_not_just_the_signature():
+    """gh#8200 / fk#1335: a Gmail/Superhuman forward puts a signature and a
+    '---------- Forwarded message ----------' marker ahead of the forwarded mail's own
+    From:/Subject: header block. `strip_quotes` alone cut at that From: line and dropped
+    everything after it -- only Reif's signature ever reached file_backlog. `strip_forward`
+    recognizes the marker and keeps the real body, folding the header block into one
+    'Forwarded from X: Subject' line instead of cutting there."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("inbox", ROOT / "scripts" / "inbox.py")
+    ib = importlib.util.module_from_spec(spec); spec.loader.exec_module(ib)
+    forwarded = (
+        "Reif Tauati\nSent via Superhuman\n\n"
+        "---------- Forwarded message ----------\n"
+        "From: Jane Donor <jane@example.org>\n"
+        "Date: Thu, Sep 25, 2026 at 9:00 AM\n"
+        "Subject: check out this org\n"
+        "To: Reif <reif@philanthropy.org>\n\n"
+        "Hey Reif, this org looks like a great fit for the platform: https://example.org/org/123\n"
+        "Can you take a look?"
+    )
+    body = ib.strip_forward(forwarded)
+    assert body is not None and "Forwarded from Jane Donor <jane@example.org>: check out this org" in body, body
+    assert "great fit for the platform" in body and "Can you take a look" in body, body
+    assert "Sent via Superhuman" not in body, "signature should not leak into the forwarded body"
+    # a plain reply (no forward marker) is untouched -- strip_forward is a no-op, strip_quotes still applies
+    assert ib.strip_forward("go\n\nOn Mon, Sep 7, Fleet wrote:\n> everything") is None
+    with tempfile.TemporaryDirectory() as tmp:
+        ib.LOG_DIR = Path(tmp); ib.INBOX = Path(tmp) / "inbox.jsonl"; ib.DONE = Path(tmp) / "inbox.done"
+        row = ib.store({"id": "f1", "from": "reif@philanthropy.org", "subject": "Fwd: check out this org",
+                        "text": forwarded}, {})
+        assert row["kind"] == "forward", row
+        assert "great fit for the platform" in row["text"] and "Can you take a look" in row["text"], row["text"]
+        assert "Sent via Superhuman" not in row["text"], row["text"]
+
+
 def _intake_classifies_and_dedupes_alerts_by_check():
     """fk#1129 slice 1: the central input dump. FLEET_INTAKE_FROM widens who is ACCEPTED
     (hello@philanthropy.org, DigitalOcean, GitHub) without widening who can STEER -- only
@@ -15840,6 +15875,7 @@ if __name__ == "__main__":
     check("messenger brief restates the strategy and points every project step at a page (fk#558)", _messenger_brief_restates_the_strategy_and_points_at_pages)
     check("replying to the brief steers the fleet: svix, allowlist, parser, ledger, route, Reply-To (fk#669)", _reply_to_the_brief_steers_the_fleet)
     check("a reply answers asks and a backlog: mail files an issue, no model in the way (fk#1056)", _email_reply_answers_asks_and_files_backlog_without_a_model)
+    check("a forwarded email keeps its body, not just the signature above the marker (gh#8200 / fk#1335)", _email_forward_keeps_the_forwarded_body_not_just_the_signature)
     check("intake classifies seven kinds and dedupes a repeat alert by check, one issue not two (fk#1129)", _intake_classifies_and_dedupes_alerts_by_check)
     check("nerd's datadog lane reads the datafeed and every finding names a KR (fk#1042, folded fk#1195)", _signals_datadog_lane_reads_the_datafeed_and_names_a_kr)
     check("every pass reads the handoff; a Broken: instrument gets one owner issue (Reif 2026-09-16)", _every_pass_reads_the_handoff_and_a_broken_instrument_gets_an_owner)

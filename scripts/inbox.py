@@ -177,7 +177,9 @@ def fetch_received(email_id: str) -> dict:
 
 def strip_quotes(text: str) -> str:
     """Drop the quoted brief under the reply: everything from the first quote marker or
-    'On ... wrote:' line on. Keeps what Reif typed."""
+    'On ... wrote:' line on. Keeps what Reif typed. A genuine forward is handled by
+    `strip_forward` instead -- applying this function to one would cut at the forwarded
+    mail's own From: header and drop the whole forwarded body (gh#8200 / fk#1335)."""
     out = []
     for line in (text or "").splitlines():
         if line.startswith(">") or re.match(r"^On .+ wrote:\s*$", line) or line.strip() in ("-- ", "--"):
@@ -186,6 +188,37 @@ def strip_quotes(text: str) -> str:
             break
         out.append(line)
     return "\n".join(out).strip()
+
+
+FORWARD_MARKER_RE = re.compile(r"^-{5,}\s*Forwarded message\s*-{5,}\s*$", re.I)
+FORWARD_HEADER_RE = re.compile(r"^\s*(From|Sent|Date|Subject|To):\s*(.*)$", re.I)
+
+
+def strip_forward(text: str) -> str | None:
+    """None if `text` has no '---------- Forwarded message ----------' marker. Otherwise the
+    forwarded body: the From/Subject header block right after the marker folded into one
+    'Forwarded from X: Subject' line, then everything after that block verbatim. A forward
+    keeps its own content past the marker instead of being cut at the forwarded mail's own
+    From: header the way `strip_quotes` would (gh#8200 / fk#1335)."""
+    lines = (text or "").splitlines()
+    marker = next((i for i, line in enumerate(lines) if FORWARD_MARKER_RE.match(line)), None)
+    if marker is None:
+        return None
+    sender = subject = None
+    i = marker + 1
+    while i < len(lines):
+        m = FORWARD_HEADER_RE.match(lines[i])
+        if not m:
+            break
+        key, val = m.group(1).lower(), m.group(2).strip()
+        if key == "from":
+            sender = val
+        elif key == "subject":
+            subject = val
+        i += 1
+    body = "\n".join(lines[i:]).strip()
+    header = f"Forwarded from {sender or 'unknown'}: {subject or ''}".strip()
+    return f"{header}\n\n{body}".strip() if body else header
 
 
 def html_to_text(h: str) -> str:
@@ -218,7 +251,8 @@ def store(email: dict, event: dict, trusted: bool = True) -> dict:
     text = email.get("text") or html_to_text(email.get("html") or "")
     sender = email.get("from") or event.get("from")
     subject = email.get("subject") or event.get("subject")
-    mail = {"from": sender, "subject": subject, "text": strip_quotes(text)}
+    forwarded = strip_forward(text)
+    mail = {"from": sender, "subject": subject, "text": forwarded if forwarded is not None else strip_quotes(text)}
     row = {
         "id": email.get("id") or event.get("email_id"),
         "received_at": time.time(),
