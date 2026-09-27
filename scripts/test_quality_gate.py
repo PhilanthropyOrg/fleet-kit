@@ -77,6 +77,21 @@ class GateTests(unittest.TestCase):
         out = qg.gate_candidates([item(9, ["quality:solid"], comments=[VAGUE, GWT])])
         self.assertEqual(out["eligible"], [9])
 
+    def test_acceptance_heading_with_bullets_is_a_spec(self):
+        """jefe msg#29 (philanthropy#8301): a `## Acceptance` section of real bullets is a
+        complete spec even when no bullet is worded Given/When/Then."""
+        body = ("## Acceptance\n- `GET /990/?ntee=E&state=CA` returns in low single-digit seconds,\n"
+                "  like `GET /990/?state=CA` alone.\n"
+                "- The speed test asserts an index-ordered scan with no full sort.\n\n"
+                "## Evidence\n- 4 live curl samples, 13.5-23.9s")
+        self.assertEqual(qg.count_gwt(body), 2)
+        out = qg.gate_candidates([item(30, ["quality:solid"], body=body)])
+        self.assertEqual(out["eligible"], [30])
+
+    def test_acceptance_heading_with_stub_or_no_bullets_is_not(self):
+        self.assertEqual(qg.count_gwt("## Acceptance\n- tbd\n"), 0)
+        self.assertEqual(qg.count_gwt("## Acceptance\n\n## Evidence\n- a long bullet under the wrong heading here"), 0)
+
     def test_bare_template_phrase_is_not_a_criterion(self):
         """fk#765: the literal 15-char phrase `Given/When/Then` -- no clause text between the
         keywords -- must not count as an acceptance criterion. This is the exact string that

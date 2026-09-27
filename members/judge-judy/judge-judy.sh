@@ -555,9 +555,16 @@ print()' "$PR" "$HEAD_SHA" >> "$LOG_DIR/judge-judy-blocks.jsonl" 2>>"$LOG" \
     # back to an honest "none (maintenance)" rather than leaving the line off entirely.
     PR_VISION_LINK=$(grep -iE '^[[:space:]]*#{0,6}[[:space:]]*[*_]{0,2}Vision-link' "$BODY_FILE" 2>/dev/null | head -1)
     [ -z "$PR_VISION_LINK" ] && PR_VISION_LINK="Vision-link: none (maintenance)"
+    # jefe msg#23: quality_gate.py drops any item with no acceptance criterion, and this body
+    # had none -- 6 of 7 items in two gate-drops on 2026-09-27 were these fix items. Same
+    # carry-forward idea as the Vision-link above: the criterion is always "the re-review
+    # comes back clean", so write it rather than wait for a human pass to backfill it.
     FIX_BODY="judge-judy blocked PR #$PR at head ${HEAD_SHA:0:12} (fleet-code-review: failure).
 
 $FINDINGS
+
+## Acceptance
+- Given the finding above, when PR #$PR is re-pushed and re-reviewed, then fleet-code-review returns a clean verdict with no block finding.
 
 $PR_VISION_LINK"
     # fk#1154: a fix item exists so GRU'S lane picks the block up -- that only means anything

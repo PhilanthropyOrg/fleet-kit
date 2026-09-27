@@ -62,6 +62,16 @@ _GWT_RE = re.compile(r"\bgiven\b[\s\S]{1,600}?\bwhen\b[\s\S]{1,600}?\bthen\b", r
 # without requiring a non-`/` separator, which would risk rejecting an unusual-but-real
 # one-line criterion instead.
 _MIN_GWT_SPAN = 30
+# jefe msg#29 (philanthropy#8301): a spec with a `## Acceptance` heading and real, testable
+# bullets under it is complete even when no bullet is worded Given/When/Then -- sentry files
+# that shape, and _GWT_RE alone dropped it at the gate as "no acceptance criterion". Count each
+# bullet under such a heading (up to the next heading) as one criterion, with the same length
+# floor as a GWT span so a stub bullet ("- tbd") does not pass.
+_ACCEPTANCE_HEADING_RE = re.compile(
+    r"^#{1,6}[ \t]*acceptance(?:[ \t]+criteria)?[ \t]*:?[ \t]*$", re.IGNORECASE | re.MULTILINE)
+_NEXT_HEADING_RE = re.compile(r"^#{1,6}[ \t]", re.MULTILINE)
+_BULLET_RE = re.compile(r"^[ \t]*(?:[-*+]|\d+[.)])[ \t]+(.+(?:\n(?![ \t]*(?:[-*+]|\d+[.)])[ \t])[ \t]+\S.*)*)",
+                        re.MULTILINE)
 _REFERENCES_RE = re.compile(r"^\W*references?\s*:", re.IGNORECASE | re.MULTILINE)
 # "Design approved (VP review):" from members/vp/vp.md, or the older "Design approved:" form.
 _DESIGN_APPROVED_RE = re.compile(r"^\W*design approved(?:\s*\(vp review\))?\s*:", re.IGNORECASE | re.MULTILINE)
@@ -74,8 +84,19 @@ def _label_names(labels) -> list[str]:
     return out
 
 
+def count_acceptance_bullets(text: str | None) -> int:
+    n = 0
+    for head in _ACCEPTANCE_HEADING_RE.finditer(text or ""):
+        section = text[head.end():]
+        nxt = _NEXT_HEADING_RE.search(section)
+        section = section[:nxt.start()] if nxt else section
+        n += sum(1 for b in _BULLET_RE.findall(section) if len(b.strip()) >= _MIN_GWT_SPAN)
+    return n
+
+
 def count_gwt(text: str | None) -> int:
-    return sum(1 for span in _GWT_RE.findall(text or "") if len(span) >= _MIN_GWT_SPAN)
+    gwt = sum(1 for span in _GWT_RE.findall(text or "") if len(span) >= _MIN_GWT_SPAN)
+    return gwt or count_acceptance_bullets(text)
 
 
 def _criteria_text(body: str | None, comments: list[dict] | None) -> str | None:
@@ -100,7 +121,7 @@ def classify_candidate(labels, body: str | None, comments: list[dict] | None) ->
         return False, f"more than one quality label: {', '.join(quality)}"
     text = _criteria_text(body, comments)
     if text is None:
-        return False, "no Given/When/Then acceptance criterion in the PRD comment or body"
+        return False, "no Given/When/Then criterion or `## Acceptance` bullet in the PRD comment or body"
     if quality[0] == WORLD_CLASS:
         all_text = "\n".join([body or ""] + [c.get("body") or "" for c in comments or []])
         if _DESIGN_APPROVED_RE.search(all_text):
