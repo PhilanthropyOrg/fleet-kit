@@ -44,6 +44,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from worktree_guard_hook import _strip_prose  # noqa: E402  gh#715's quote/heredoc stripper
+
 RECEIPT_NAME = "fleet-test-receipt.json"
 # A push that only moves prose does not need a 12-minute suite. Anything that can change
 # behaviour -- code, config, workflow, dependency manifest -- does.
@@ -145,7 +148,9 @@ def decide(payload: dict, env: dict) -> str | None:
         return None  # not worktree-isolated: run_member.sh's own signal, same as gh#592's hook
     if payload.get("tool_name") != "Bash":
         return None
-    command = (payload.get("tool_input") or {}).get("command") or ""
+    # msg#56: a command that only QUOTES the push verb (an --answer/--body argument, a heredoc)
+    # is not a push; strip prose first, the same way worktree_guard_hook.py does (gh#715).
+    command = _strip_prose((payload.get("tool_input") or {}).get("command") or "")
     if _is_whole_suite_pytest(command):
         return (f"BLOCKED: a whole-tree pytest cannot produce the receipt the push needs and "
                 f"takes longer than this pass can wait (fk#1166). Run `bash "
