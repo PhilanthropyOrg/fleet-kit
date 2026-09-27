@@ -350,6 +350,17 @@ elif [ -n "$PREGATE" ] && [ "$DRY_RUN" -ne 1 ]; then
   PREGATE_OUT="$(bash "$KIT_DIR/$PREGATE" 2>>"$LOG")"
   printf '%s\n' "$PREGATE_OUT" > "$LOG_DIR/$MEMBER.pregate"
   export FLEET_PREGATE_OUTPUT="$PREGATE_OUT"
+  # jefe msg#110/#120: a green pregate used to exit before the INBOX block below was ever
+  # built, so a pregate member (the-fixer) never saw journey-failing/pr-idle mail and every
+  # message to it escalated after 2 cadences. Unread mail is work: spawn the model for it.
+  case "$PREGATE_OUT" in green*)
+    MAIL="$(FLEET_LOG_DIR="$LOG_DIR" python3 "$KIT_DIR/scripts/fleet_msg.py" pregate --me "$MEMBER" 2>>"$LOG")"
+    case "$MAIL" in
+      ''|green*) ;;  # empty inbox, or fleet.db unreadable: stay quiet as before
+      *) PREGATE_OUT="inbox: $MAIL (pregate: $PREGATE_OUT)"; export FLEET_PREGATE_OUTPUT="$PREGATE_OUT"
+         log "$MEMBER: pregate green but $MAIL -- proceeding to the model" ;;
+    esac ;;
+  esac
   case "$PREGATE_OUT" in
     green*)
       log "$MEMBER: pregate reported '$PREGATE_OUT' -- quiet, no model spawned"
