@@ -123,15 +123,52 @@ def test_tiles_registered_on_fleet_home() -> None:
     ids = {m["id"] for m in json.loads((HERE / "metrics.json").read_text())["metrics"]}
     # gh#8212: one resolved tile (24h), not a per-hour and a per-day tile that disagreed.
     assert not ids & {"fleet.issues_resolved_per_hour", "fleet.issues_resolved_7d"}, ids
-    for want in ["fleet.issues_resolved_24h"]:
+    for want in ["fleet.issues_resolved_24h", "fleet.reif_priority_throughput_6h"]:
         assert want in ids, f"{want} missing from metrics.json (fleet_home renders one tile per row)"
     metrics = json.loads((HERE / "metrics.json").read_text())["metrics"]
     assert metrics[0]["id"] == "fleet.issues_resolved_24h", \
         "the headline KPI must be the first row (metrics.json's own doc: order = display order)"
     src = (HERE / "fleet_view_server.py").read_text()
-    for want in ["fleet.issues_resolved_24h"]:
+    for want in ["fleet.issues_resolved_24h", "fleet.reif_priority_throughput_6h"]:
         assert f'out["{want}"]' in src, f"{want} never computed in metrics_snapshot"
     print("ok  the one resolved tile is registered first and computed")
+
+
+def test_reif_priority_events_are_tagged() -> None:
+    """philanthropy#8197 AC1: reif-priority resolutions must be separable from the rest of the
+    fleet's throughput so a stall in Reif's own named queue can be measured on its own window."""
+    issues = {
+        30: {"number": 30, "state": "CLOSED", "stateReason": "COMPLETED",
+             "labels": [{"name": "fleet:reif-priority"}, {"name": "fleet:backlog"}], "body": ""},
+        31: {"number": 31, "state": "CLOSED", "stateReason": "COMPLETED",
+             "labels": [{"name": "fleet:backlog"}], "body": ""},
+    }
+    prs = [
+        {"number": 200, "mergedAt": iso(2), "closingIssuesReferences": [{"number": 30}]},
+        {"number": 201, "mergedAt": iso(2), "closingIssuesReferences": [{"number": 31}]},
+    ]
+    deploys = [{"createdAt": iso(1), "conclusion": "success"}]
+    events = sb.resolved_events(prs, deploys, issues)
+    by_issue = {e["issue"]: e["is_reif_priority"] for e in events}
+    assert by_issue == {30: True, 31: False}, by_issue
+    print("ok  resolved_events tags fleet:reif-priority issues, and only those")
+
+
+def test_reif_priority_6h_rate_and_floor() -> None:
+    """A 6h window (not #8197's headline 24h tile) so a stall in the reif-priority queue is
+    visible within the hour it happens, matching the issue's own Given/When/Then wording."""
+    issues = {40: {"number": 40, "state": "CLOSED", "stateReason": "COMPLETED",
+                   "labels": [{"name": "fleet:reif-priority"}], "body": ""}}
+    prs = [{"number": 300, "mergedAt": iso(5), "closingIssuesReferences": [{"number": 40}]}]
+    deploys = [{"createdAt": iso(4.5), "conclusion": "success"}]
+    events = [e for e in sb.resolved_events(prs, deploys, issues) if e["is_reif_priority"]]
+    buckets6 = sb.resolved_per_hour_buckets(events, NOW, hours=6)
+    assert sum(buckets6) == 1 and sum(buckets6) / 6 < 1.0, buckets6
+    # empty reif-priority queue: nothing resolved -> rate 0, but that alone must not read as a
+    # stall (the metric's "bad" flag additionally requires an open reif-priority item to exist).
+    empty_buckets6 = sb.resolved_per_hour_buckets([], NOW, hours=6)
+    assert sum(empty_buckets6) == 0
+    print("ok  reif-priority 6h rate is computed on its own filtered window")
 
 
 if __name__ == "__main__":

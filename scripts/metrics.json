@@ -11,6 +11,15 @@
    "history": "native"
   },
   {
+   "id": "fleet.reif_priority_throughput_6h",
+   "label": "Reif-priority throughput",
+   "unit": "issues/hr",
+   "window": "6h rolling avg",
+   "source": "scoreboard.resolved_events filtered to fleet:reif-priority, merged PR + deployed (philanthropy#8197)",
+   "lane": "fleet",
+   "history": "none"
+  },
+  {
    "id": "okr.verified_claims",
    "label": "The number",
    "unit": "claims",
