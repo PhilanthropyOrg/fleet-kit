@@ -51,7 +51,7 @@ en=$(pe 'grep -h "^FLEET_ENABLED=" /fleet-kit/fleet.env | tail -1 | cut -d= -f2'
 [ "${en:-true}" = "true" ] && row OK enabled "FLEET_ENABLED=true" || row WAIT enabled "FLEET_ENABLED=$en (fleet.env) -- off on purpose?"
 
 # 5. accounts
-pool=$(grep -ah "order by week bank" "$LOGS/account-pool.log" | tail -1 | sed "s/.*order by week bank: //")
+pool=$(grep -ahE "order by (week bank|soonest reset with headroom)" "$LOGS/account-pool.log" | tail -1 | sed -E "s/.*order by (week bank|soonest reset with headroom): //")
 gated=$(cat "$LOGS/account-pool-exhausted.state" 2>/dev/null | awk -v n="$now" '$2>n {printf "%s(until %s) ", $1, strftime("%m-%d %H:%MZ",$2,1)}')
 row "$([ -n "$pool" ] && echo OK || echo DEAD)" accounts "${pool:-no account_pool line} ${gated:+| GATED: $gated}"
 
