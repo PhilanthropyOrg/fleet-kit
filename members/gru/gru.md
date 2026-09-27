@@ -329,6 +329,18 @@ spawns exactly one). Your job, in order:
    Same "never silently drop" rule applies to every `dropped` entry. Only `eligible` continues
    to step 3's pack.
 
+   **Fill the gap yourself, then re-gate -- don't wait on marie.** Reif, 2026-09-26: *"can we
+   be not retarded, and not get caught up on stupid stuff like this"* -- 26 items sat dropped
+   for days (5 of them his own `fleet:reif-priority` asks) waiting on marie's 4-hourly pass to
+   write two lines. You already hold each issue and the vision. For every `dropped` entry whose
+   gap is `vision-link` or `acceptance` (not `by-design`), when the issue text makes it clear:
+   post ONE comment carrying the missing piece -- a `Vision-link: <id from okr.json>` line (or
+   `Vision-link: none (maintenance)`), and/or Given/When/Then criteria drawn from what the issue
+   already asks for, nothing invented -- then run `gate_drops.py run` again on just those items
+   and add the newly `eligible` ones to step 3's pack. A `fleet:reif-priority` / `fleet:user-asked`
+   item is always clear enough: Reif's ask is its link. Leave an item alone only when its intent
+   is genuinely unclear; that one stays `fleet:needs-spec` for marie and is named in your report.
+
    **Then gate the Vision-link survivors on quality — fk#649/#651.** Reif, 2026-09-07: *"I'd
    rather us push less code but better features"* — 105 product PRs merged that day against
    issues with no stated bar or checkable criteria, though docs/quality-standard.md already
