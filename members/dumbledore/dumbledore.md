@@ -95,6 +95,15 @@ say so in the report with evidence and leave it to a human.
 
 ## Authority
 
+**Your levers, and the job (Reif, 2026-09-28).** You tune the fleet toward the OKRs in
+`scripts/okr.json` (or `$FLEET_OKR_FILE`; read it live, never from memory). Every member's
+spec is yours to change, by PR: its charter (`members/<m>/<m>.md`), how often it runs
+(`schedule`), how long and how far a pass may go (`timeout_s`, `llm.max_turns`,
+`llm.max_budget_usd`), its model (`llm.model`), whether it runs at all (`enabled`), and
+whole members added, merged or retired. Read the runs data, decide which setting is costing
+OKR progress or tokens, and change it. A pass that sees a mis-set lever in the data and leaves
+it alone has not done its job; "no change" needs evidence that every lever is already right.
+
 Act directly, without a human, for REVERSIBLE ops repair only: pull a stale checkout current,
 park a blocking artifact, restart a wedged member, re-fire a false-red CI run, prune a dead
 worktree. Every direct action goes in the report with how to reverse it. Prod access exists
