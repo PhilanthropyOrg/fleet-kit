@@ -107,8 +107,39 @@ def _has_marker(comments, key: str) -> bool:
     return any((c.get("body") or "").lstrip().startswith(line) for c in comments or [])
 
 
-def plan(items: list[dict], run_id: str) -> dict:
-    """Pure. Decides every label/comment/ask and the final eligible list; runs no gh."""
+def parent_refs(items: list[dict]) -> set[int]:
+    """Issue numbers named by a `Vision-link: #N` line (vision_link_gate.parent_ref)."""
+    refs = set()
+    for it in items:
+        status, raw = vision_link_gate.classify_candidate(it.get("body"), it.get("comments"))
+        n = vision_link_gate.parent_ref(raw) if status == vision_link_gate.STATUS_MISSING else None
+        if n is not None:
+            refs.add(n)
+    return refs
+
+
+def fetch_parents(items: list[dict], known: list[dict], repo: str | None, run=None) -> dict:
+    """{N: {body, comments}} for every `Vision-link: #N` parent: from `known` when it is
+    already in hand, else one `gh issue view` each. A parent that won't load is left out."""
+    have = {it["number"]: it for it in known}
+    out = {}
+    for n in parent_refs(items):
+        if n in have:
+            out[n] = have[n]
+            continue
+        r = (run or _gh)(["gh", "issue", "view", str(n), "--json", "number,body,comments",
+                          *(["--repo", repo] if repo else [])])
+        if r.returncode == 0:
+            try:
+                out[n] = json.loads(r.stdout or "{}")
+            except ValueError:
+                pass
+    return out
+
+
+def plan(items: list[dict], run_id: str, parents: dict | None = None) -> dict:
+    """Pure. Decides every label/comment/ask and the final eligible list; runs no gh.
+    `parents`: fetch_parents() output, so `Vision-link: #<epic>` inherits the epic's link."""
     actions: list[dict] = []   # {"number", "op": add_label|remove_label|comment, ...}
     fixed: set[int] = set()
     patched = []
@@ -122,7 +153,7 @@ def plan(items: list[dict], run_id: str) -> dict:
         patched.append(it)
     items = patched
     by_num = {it["number"]: it for it in items}
-    vis = vision_link_gate.gate_candidates(items)
+    vis = vision_link_gate.gate_candidates(items, parents)
     survivors = [by_num[n] for n in vis["eligible"]]
     qual = quality_gate.gate_candidates(survivors)
 
@@ -227,12 +258,13 @@ def prod_access_message(issues: list[dict]) -> dict | None:
             "body": body, "items": nums}
 
 
-def intake_plan(backlog: list[dict], prod_access: list[dict], run_id: str) -> dict:
+def intake_plan(backlog: list[dict], prod_access: list[dict], run_id: str,
+                parents: dict | None = None) -> dict:
     """Pure. plan() over every open backlog item except claimed / human-op / prod-access / epics;
     the Reif ask is replaced by one bus message (an hourly sweep of 400+ items would otherwise
     ask Reif every hour), plus hq's prod-access message."""
     todo = [i for i in backlog if not set(_names(i.get("labels"))) & INTAKE_SKIP]
-    p = plan(todo, run_id)
+    p = plan(todo, run_id, parents)
     newly = [a["number"] for a in p["actions"] if a["op"] == "add_label" and a["label"] == NEEDS_SPEC]
     p["ask"] = None
     p["message"] = intake_message(p["dropped"], newly, run_id)
@@ -352,7 +384,7 @@ def main(argv=None) -> int:
         except (RuntimeError, ValueError, subprocess.TimeoutExpired) as exc:
             print(f"gate_drops intake: {exc}", file=sys.stderr)
             return 1
-        p = intake_plan(backlog, prod, a.run_id)
+        p = intake_plan(backlog, prod, a.run_id, fetch_parents(backlog, backlog, a.repo))
         if not a.dry_run:
             p.update(apply(p, a.repo, a.run_id, db_path=a.db_path))
         summary = {k: p.get(k) for k in ("scanned", "skipped", "results", "sent")}
@@ -362,7 +394,8 @@ def main(argv=None) -> int:
         print(json.dumps(summary if not a.dry_run else dict(summary, plan_actions=p["actions"][:50],
                                                            message=p["message"], messages=p["messages"])))
         return 0
-    p = plan(load_items(a.items), a.run_id)
+    items = load_items(a.items)
+    p = plan(items, a.run_id, fetch_parents(items, items, a.repo))
     if not a.dry_run:
         p.update(apply(p, a.repo, a.run_id, db_path=a.db_path))
     print(json.dumps(p))

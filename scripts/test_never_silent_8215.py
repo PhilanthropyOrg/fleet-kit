@@ -74,6 +74,23 @@ def test_second_pass_is_idempotent_and_clears_fixed_items() -> None:
     print("ok  re-gating: no repeat comment/ask; a fixed item loses fleet:needs-spec")
 
 
+def test_epic_ref_vision_link_inherits_the_epic_and_builds() -> None:
+    # philanthropy#8538-8542: `Vision-link: #7654 (...)` was dropped as "no Vision-link line".
+    item = _item(8539, ["quality:solid"], "Vision-link: #7654 (report page rebuild)\n" + GWT)
+    epic = {"number": 7654, "body": "Vision-link: okr.conversion -- report page", "comments": []}
+    calls = []
+
+    def run(cmd):
+        calls.append(cmd)
+        return SimpleNamespace(returncode=0, stdout=json.dumps(epic), stderr="")
+
+    parents = gd.fetch_parents([item], [], None, run=run)
+    assert list(parents) == [7654] and calls[0][:4] == ["gh", "issue", "view", "7654"]
+    assert gd.plan([item], "t", parents)["eligible"] == [8539]
+    assert gd.plan([item], "t")["eligible"] == []
+    assert gd.fetch_parents([item], [epic], None, run=None) == {7654: epic}  # no gh when known
+
+
 def test_by_design_drops_are_recorded_not_labeled() -> None:
     p = gd.plan([_item(7, ["quality:solid", "fleet:epic"], f"{VL}\n\n{GWT}")], "r4")
     assert p["actions"] == [] and p["dropped"][0]["action"] == "by-design", p
