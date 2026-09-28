@@ -45,6 +45,37 @@ class OpinionsAreDecidedNotAsked(unittest.TestCase):
                 self.assertEqual(_file(d, cls), "open", cls)
 
 
+class TheRareAskStillEmailsReif(unittest.TestCase):
+    """An ask is how Reif hears about a one-way door, by email he can reply to. Opinions never page."""
+
+    def _run(self, cls):
+        import subprocess
+        from unittest import mock
+        calls = []
+        real = subprocess.run
+        def fake(cmd, *a, **kw):
+            if cmd and cmd[0] == "bash" and str(cmd[1]).endswith("fleet_alert.sh"):
+                calls.append((cmd, kw.get("env", {})))
+                return subprocess.CompletedProcess(cmd, 0, b"", b"")
+            return real(cmd, *a, **kw)
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(ask.subprocess, "run", fake), \
+                mock.patch.object(ask, "issue_for_ask", lambda *a, **k: ""):
+            rc = ask.main(["--db-path", str(Path(d) / "fleet.db"),
+                           "--authority-path", str(Path(d) / "none" / "authority.json"),
+                           "file", "--member", "gru", "--why", "rotate the leaked token?",
+                           "--class", cls])
+        self.assertEqual(rc, 0)
+        return calls
+
+    def test_one_way_door_ask_emails_reif(self):
+        calls = self._run("credential")
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][1].get("FLEET_ALERT_EMAIL_LEG"), "1")
+
+    def test_opinion_never_pages(self):
+        self.assertEqual(self._run("decision"), [])
+
+
 class SpecsSayNothingWaitsOnAHuman(unittest.TestCase):
     def read(self, rel):
         return (ROOT / rel).read_text()
@@ -53,6 +84,15 @@ class SpecsSayNothingWaitsOnAHuman(unittest.TestCase):
         law = self.read("agents/persona_law.md")
         self.assertIn("## 2b. Nothing waits on a human", law)
         self.assertIn("--class credential|money", law)
+
+    def test_asking_is_way_rare_and_fleet_owners_may_hold_a_park(self):
+        law = self.read("agents/persona_law.md")
+        self.assertIn("Asking Reif is way rare", law)
+        self.assertIn("Parking an item on a fleet owner (the-fixer, marie) is fine; on Reif, never.", law)
+        fixer = self.read("members/the-fixer/the-fixer.md")
+        self.assertIn("a `stalled-item` one", fixer)
+        marie = self.read("members/marie/marie.md")
+        self.assertIn("parked on a fleet owner, not a human", marie)
 
     def test_minion_blocked_line_is_only_a_one_way_door(self):
         minion = self.read("members/minion/minion.md")
