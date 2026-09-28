@@ -150,6 +150,18 @@ class ReceiverTests(unittest.TestCase):
     def test_missing_to_is_handled(self):
         self.assert_handled({})
 
+    def test_redelivered_webhook_is_not_applied_twice(self):
+        # 2026-09-28 13:03Z: Resend redelivered email 7382b4e2 106s later; it was stored and
+        # applied again and Reif got the same "backlog item filed" receipt twice.
+        rows = Path(self.tmp.name) / "inbox.jsonl"
+        with mock.patch.object(inbox, "INBOX", rows):
+            rows.write_text(json.dumps({"id": "e1", "text": "hi"}) + "\n")
+            self.assertEqual(self.post({"to": ["fleet@reply.philanthropy.org"]}), (200, b"duplicate"))
+            self.store.assert_not_called(); self.apply.assert_not_called(); self.launch.assert_not_called()
+            # a metadata-only row (fetch failed first time) still takes the redelivery's body
+            rows.write_text(json.dumps({"id": "e1", "text": "", "fetch_failed": True}) + "\n")
+            self.assert_handled({"to": ["fleet@reply.philanthropy.org"]})
+
     def test_env_overrides_ignored_domains(self):
         with mock.patch.dict("os.environ", {"FLEET_INBOX_IGNORE_TO_DOMAINS": "reply.philanthropy.org"}):
             self.assertEqual(self.post({"to": ["fleet@reply.philanthropy.org"]}), (200, b"ignored"))

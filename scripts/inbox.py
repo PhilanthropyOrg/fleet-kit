@@ -328,6 +328,11 @@ def untrusted_budget_ok(now: float | None = None) -> bool:
     return n < UNTRUSTED_PER_HOUR
 
 
+def already_stored(email_id: str) -> bool:
+    """A row with this id and a body is already in the inbox (a metadata-only row is not)."""
+    return bool(email_id) and any(r.get("id") == email_id and not r.get("fetch_failed") for r in _rows())
+
+
 def store(email: dict, event: dict, trusted: bool = True) -> dict:
     text = email.get("text") or html_to_text(email.get("html") or "")
     sender = email.get("from") or event.get("from")
