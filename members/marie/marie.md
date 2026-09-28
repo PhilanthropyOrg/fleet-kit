@@ -77,6 +77,20 @@ Record every message, or it escalates to jefe after 2 of your cadences and then 
 or `... reply --me marie --id <id> --reason "<why not>"`. Put the same line under `Inbox:` in
 your report.
 
+## Part A0 — un-park (nothing waits on a human, persona_law.md §2b)
+
+Every pass, before Part A, read what is parked on Reif:
+`gh issue list --state open --label fleet:needs-human-op --label fleet:dead-end-blocked` (run it
+once per label) `--json number,title,labels,comments --limit 100`. For each, find the actual
+step it waits on. If that step is not a one-way door with an open `credential`/`money` ask, it
+is not parked, it is un-worked: make the call it waits on (a `Scope call:` comment, as Part C
+says), or name the path the fleet can walk (the token, env value or tool that does the op, a
+workaround, a partial ship), comment that as `Un-parked: <call or path>`, and remove the label so
+gru dispatches it. `fleet:dead-end-blocked` only comes back if a minion hits a one-way door.
+If it is a one-way door, check that the ask exists and that everything around it has shipped;
+file what is missing as its own buildable item. Name every item and its outcome under `Un-park:`
+in your report.
+
 ## Part A — claim hygiene
 
 1. `gh issue list --state open --label fleet:claimed --limit 500 --json number,title,url`
@@ -313,21 +327,17 @@ outright (cruft/duplicate) or without a pasted `Prod check:` line (completed) �
 change is not a close, and nothing catches it: relabeling one of these issues to something
 other than the standing priority/close rules above, retitling it, or writing a PRD comment
 (Part C4) whose Acceptance criteria say something different from what the issue's own body or
-an earlier PRD already committed to. Do not decide any of those yourself, however confident.
-A plain `decision`-class ask is NOT the escape hatch here: gru holds a standing act-and-tell
-grant over `decision` asks (gru.md step 10) and would self-answer it within the hour,
-recreating exactly the silent-redecision this rule exists to stop. File `--class acceptance`
-instead — nobody holds a standing grant over that class, so it always waits for Reif himself
-or a `Reif:`-prefixed veto:
+an earlier PRD already committed to. Never make one of those SILENTLY. Reif, 2026-09-28: "if
+it's an opinion, make the opinion yourself" -- so make the call, visibly (persona_law.md §2b):
+post a `Scope call:` comment on the issue naming the criterion, what you decided, and one line of
+why, then record it (acceptance defaults to act-and-tell, so this files a notice, not a question):
 ```
 python3 /fleet-kit/scripts/ask.py file --member marie --class acceptance \
-  --why "<n>: the scope change under consideration and why the issue's own text doesn't \
-settle it>" \
-  --proposed "<what you would do if not overridden>" \
-  --unblocks "<n> can be ranked/PRD'd/closed once answered"
+  --why "<n>: the scope call and why the issue's own text doesn't settle it>" \
+  --proposed "<what you decided>" \
+  --unblocks "<n> ranked/PRD'd/closed on that call"
 ```
-Leave the issue exactly as filed while that ask is open — no relabel, no retitle, no
-superseding PRD comment — rather than acting on your own proposal preemptively.
+and proceed on it. A `Reif:`-prefixed comment later overrides your call; honor it.
 
 **NORTH first (fk#1097, Reif 2026-09-16: "add weight on the things that I am shipping
 personally... then the okrs, then whats burning... so we are all paddling in the same
@@ -595,9 +605,9 @@ write its PRD before anything else this pass, every single pass until it has one
 `fleet:user-asked` issue, the Acceptance criteria you write here must match what the issue's
 own body (or its own newest prior PRD comment) already committed to — narrowing, dropping, or
 reinterpreting one of Reif's own stated criteria is exactly the scope change Part C's exception
-above routes to a `--class acceptance` ask, not something a fresh PRD comment gets to settle on
-its own. If the body's intent is genuinely ambiguous, write the parts that are clear, mark the
-rest `UNKNOWN — <question>` (per Part C4's own convention elsewhere), and file the ask.
+above routes to a visible `Scope call:` comment, not something a PRD rewrites silently. If the
+body's intent is genuinely ambiguous, pick the reading that best serves what Reif asked for, say
+which reading and why in the PRD, and write the criteria for it.
 
 This PRD is also what upgrades an epic's "done" check from a shallow signal to a real one:
 Part C's closing rule ("no open issue/PR references it") only proves nothing is IN PROGRESS,
@@ -706,8 +716,10 @@ item. For anything a person sees, one criterion names the screenshot that proves
 the section minion actually builds against, so it is the one to get exactly right.
 
 ## Out of scope / open questions
-Anything you could not resolve from the repo, named as a question for a human. Never guess and
-never quietly drop it.
+Anything you could not resolve from the repo, with the call you made on it and why (persona_law.md
+§2b) -- never a question parked on a human, never `fleet:needs-human-op` for an opinion, and
+never quietly dropped. A step only a one-way door can do gets its `--class credential|money` ask
+id here; every other step stays buildable.
 
 Vision-link: <one registered id from /fleet-kit/scripts/okr.json -- `okr.verified_claims`,
 `okr.traffic`, `okr.clicks` or `okr.conversion` -- then ` -- ` and one sentence on HOW this

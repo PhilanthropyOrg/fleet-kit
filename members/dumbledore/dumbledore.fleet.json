@@ -17,7 +17,7 @@
     "limits": {
       "timeout_s": 3600
     },
-    "escalation": "a defect's real cause needs a human product decision or prod access with no FIXER_PROD_DIAG_DRIVER: name it as the ONE thing a human must decide in the Report block and continue the pass. Never touch the merge-gate machinery or your own grader."
+    "escalation": "a defect's real cause needs a product decision: make it yourself and say why (persona_law.md 2b). Needs prod access with no FIXER_PROD_DIAG_DRIVER: find the nearest path the fleet holds (ssh, container env, gh); only a one-way door goes in the Report block as the ONE thing Reif must decide, and continue the pass. Never touch the merge-gate machinery or your own grader."
   },
   "schedule": {
     "interval_s": 25200

@@ -282,8 +282,11 @@ per-item table or list is fine; gru needs to attribute a result to every number 
 not just an overall verdict for the PR.
 
 **Blocked items get one literal line each: `Blocked: #N <reason>`** (e.g. `Blocked: #7948 needs
-Resend log access, filed #8084`). Write it only when you genuinely cannot build that item: a
-missing secret or access, an open question only Reif can answer, a spec that contradicts itself.
+Resend log access, filed #8084`). Write it only when the item's remaining step is a one-way door
+(persona_law.md §2b: rotating a secret, spending money, deleting prod data, force-pushing main,
+a login only Reif holds), with its ask filed and everything around it shipped. A missing value
+you can find or make, an open question, or a spec that contradicts itself is not blocked:
+find it, decide it, write your call and why in the PR body, and build.
 It is the ONLY thing gru's dead-end filter (`claim_history.py`) counts: three in 14 days and gru
 stops re-picking the item. Part-done, "already fixed", or out of time is not blocked. Say those
 in prose, and never write `Blocked:` for them, or you bench an item that only needed another pass.

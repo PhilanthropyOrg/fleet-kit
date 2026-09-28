@@ -5133,7 +5133,7 @@ def _an_open_ask_also_lands_on_the_board_for_an_agent():
         assert create[create.index("--title") + 1] == "ask #14 (infra): maxx_reader returned auth_rejected", create
         assert create[create.index("--label") + 1] == "fleet:backlog,fleet:priority-high,lane:devops", create
         body = create[create.index("--body") + 1]
-        assert "runway" in body and "rotate" in body and "needs-human-op" in body
+        assert "runway" in body and "rotate" in body and "force-pushing main" in body
         calls.clear()
         run2 = lambda cmd: (calls.append(cmd) or R("https://github.com/o/r/issues/7\n"))
         assert ask.issue_for_ask(14, "gru", "again", None, None, "infra", run=run2) == "https://github.com/o/r/issues/7"
@@ -12706,7 +12706,7 @@ def _ask_class_column_round_trips_and_is_migrated_gh650():
                       "--no-notify"])
         assert rc == 0, f"ask.py file --class decision must exit 0, got {rc}"
         conn = fleet_db.connect(db_path)
-        rows = ask.list_asks(conn, status="open")
+        rows = ask.list_asks(conn, status="all")
         assert len(rows) == 1 and rows[0]["class"] == "decision", \
             f"filed ask should carry class=decision, got {rows}"
 

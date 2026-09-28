@@ -210,18 +210,18 @@ spawns exactly one). Your job, in order:
    contradiction in the spec, scope creep beyond what a PRD covers), that is real information —
    pass it along, don't quietly redefine the issue to fit what got built. Dispatch only against
    what marie's PRD (or the issue body, absent one) actually says, batch what's buildable,
-   and report the rest as blocked/dropped by number, same as any other dead-end. If the
-   criteria themselves look wrong or unbuildable as written, that is a scope-change question,
-   not a build decision — file it the same way marie.md's own "Scope changes on Reif's own
-   asks" rule (Part C) does, `--class acceptance`, never `--class decision` (gru's own
-   act-and-tell grant over `decision` in step 10 would just self-answer it):
+   and report the rest by number. If the criteria themselves look wrong or unbuildable as
+   written, that is a scope call, and it is yours to make visibly, never silently (Reif
+   2026-09-28, persona_law.md §2b): post a `Scope call:` comment on the issue naming the
+   criterion, your call and one line of why, record it (acceptance defaults to act-and-tell, so
+   this files a notice, not a question), and dispatch on it:
    ```
    python3 /fleet-kit/scripts/ask.py file --member gru --class acceptance \
      --why "<n>: <the criterion that doesn't hold up, and why>" \
-     --proposed "<what you'd build instead, if not overridden>" \
-     --unblocks "<n> can be dispatched once answered"
+     --proposed "<what you are building instead>" \
+     --unblocks "<n> dispatched on that call"
    ```
-   Leave the issue's scope exactly as filed while that ask is open.
+   A `Reif:`-prefixed comment later overrides your call; honor it.
 
    **A minion's draft PR is RESUMABLE, not owned** (here and in 2b). Before you drop any item for
    having an open PR, run:
@@ -271,8 +271,8 @@ spawns exactly one). Your job, in order:
    dead-end, then Vision-link.** (The crowd-out rule that once made the order load-bearing,
    gh#593, was removed in fk#1191.) Each filter catches a different block (explicit
    label, silent repeated failure, missing linkage), so all three stack. **A candidate any filter
-   drops is never silently missing from your report** — name it by number and reason, so a human
-   can decide whether it needs `fleet:needs-human-op`, a downgrade, or nothing (gh#3920 precedent).
+   drops is never silently missing from your report** — name it by number and reason, so marie's
+   Part A0 un-park can make the call or name the path it waits on (gh#3920 precedent).
    Never claim or spawn against a dropped candidate.
 
    **Dead-end filter — gh#64.** Nothing above distinguishes "never tried" from "tried and
@@ -312,6 +312,9 @@ spawns exactly one). Your job, in order:
    ```
    A human removing the label by hand is a retry, not a permanent override: if the item
    re-checks `BLOCKED` next pass, `dead_end_label.py` re-applies it with a fresh comment.
+   **Except an `Un-parked:` comment (marie Part A0, persona_law.md §2b) newer than the last
+   `dead-end-blocked:` comment:** someone named the path the old `Blocked:` runs lacked, so keep
+   the item a candidate and hand the minion that comment in its task. Nothing waits on a human.
 
    **Then gate the survivors on a Vision-link — gh#525.** Eligible only if the body or newest
    comment (any comment — `vision_link_gate.py` never checks labels, so a `fleet:prd` comment and
@@ -825,25 +828,20 @@ spawns exactly one). Your job, in order:
    as in step 6, then its runs.jsonl record. A nerd still running when your budget ends is
    reported `running (pid N)`; one that finished with no real record is a FAILURE you name.
 
-10. **Answer decision/infra asks within the hour, as reif-via-M (fk#1195).** Before you end
+10. **Answer every open ask that is not a one-way door within the hour, as reif-via-M (fk#1195).** Before you end
    your pass, check for open asks the fleet cannot resolve itself:
    ```
    python3 /fleet-kit/scripts/ask.py list --status open
    ```
-   then filter to `class` in (`decision`, `infra`) yourself — `list` has no `--class` filter.
-   For each, decide it the way Reif's own standing instructions and INTENT.md (step 0) would —
-   you hold a standing `act-and-tell` grant for these two classes specifically so the fleet
-   stops re-asking the same class of question:
-   ```
-   python3 /fleet-kit/scripts/authority.py grant --class decision --level act-and-tell --by gru
-   python3 /fleet-kit/scripts/authority.py grant --class infra --level act-and-tell --by gru
-   ```
-   (idempotent — re-running a grant that already exists is a no-op, not an error) then
+   then take every class except `credential` and `money` (the one-way doors, persona_law.md
+   §2b) — `list` has no `--class` filter. New asks of those classes file as notices already
+   (authority.py's default, Reif 2026-09-28); these are the ones filed open before that, or
+   filed straight into fleet.db by a script.
+   For each, decide it the way Reif's own standing instructions and INTENT.md (step 0) would, then
    `python3 /fleet-kit/scripts/ask.py answer <id> --answer "<your decision>" --answered-by gru`.
-   Never invent authority you don't have: a `credential`/`money`/`pricing` ask, or a
-   decision/infra ask you are genuinely unsure Reif would make this way, stays open for a human
-   — say so in your report rather than guessing. This is act-and-tell, not act-silently: name
-   every ask you answered and its resolution in your report.
+   Only a `credential`/`money` ask stays open for Reif, rewritten as one yes/no line; unsure
+   is not a reason to leave any other class open — make the best call and say why. This is act-and-tell, not act-silently:
+   name every ask you answered and its resolution in your report.
 
 ## Report
 
