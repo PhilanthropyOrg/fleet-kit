@@ -47,17 +47,10 @@ def gh_denials(result: dict, skip_ids: set[str] | None = None) -> list[dict]:
 
 
 def redirect_ids(path: Path | None = None) -> set[str]:
-    try:
-        lines = (path or LOG_DIR / "dedupe_redirects.jsonl").read_text().splitlines()[-500:]
-    except OSError:
-        return set()
-    ids = set()
-    for line in lines:
-        try:
-            ids.add(json.loads(line).get("tool_use_id"))
-        except ValueError:
-            pass
-    return {i for i in ids if i}
+    """Calls a guard hook blocked on purpose (hook_blocks.py): the guard's stderr already told
+    the model its remedy, so these are never a permission to ask Reif or jefe for."""
+    import hook_blocks
+    return hook_blocks.blocked_ids(path.parent if path else None)
 
 
 def plan_ask(member: str, run_id: str, denials: list[dict], open_asks: list[dict]) -> dict | None:

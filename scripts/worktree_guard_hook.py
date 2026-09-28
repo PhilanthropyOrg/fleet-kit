@@ -272,6 +272,8 @@ def main() -> int:
 
     reason = decide(payload, os.environ)
     if reason:
+        import hook_blocks
+        hook_blocks.record(payload, "worktree_guard_hook", reason)
         print(reason, file=sys.stderr)
         return 2
     return 0
