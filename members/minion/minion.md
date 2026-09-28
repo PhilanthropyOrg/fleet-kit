@@ -256,6 +256,9 @@ work done).
    fully-green PRs stuck for hours with no human or orchestrator any the wiser. A non-zero
    exit here is not a quiet detail; say so in your report the same way you would any other
    failed step.
+   `scripts/pr_arm_sweep.sh` sweeps up green kit PRs nobody armed (every 20 min) — a backstop
+   for a pass that dies mid-step, not a licence to skip this step. It waits 30 minutes first, so
+   a PR you leave unarmed is a PR that does not merge for half an hour.
 9b. **Drive your PR to green before you report — in the foreground.** (2026-09-25: #7975,
    #7982, #7986 each ended their pass at "auto-merge armed", then sat red 1-3h on ruff I001 /
    format, the repo-health ratchet and a review BLOCK, with nobody owning them.) Loop:
