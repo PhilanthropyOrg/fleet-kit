@@ -138,5 +138,36 @@ class GateCandidatesOrderingTests(unittest.TestCase):
         self.assertEqual([d["number"] for d in result["dropped"]], [3])
 
 
+class ParentRefTests(unittest.TestCase):
+    # philanthropy#8538-8542: Reif's direct asks carry `Vision-link: #<epic> (...)`.
+    ITEM = {"number": 8539, "body": "Vision-link: #7654 (report page rebuild)\nfix it", "comments": []}
+
+    def test_epic_ref_without_parent_text_is_missing(self):
+        self.assertEqual(vlg.gate_candidates([self.ITEM])["eligible"], [])
+
+    def test_epic_ref_inherits_the_parents_link(self):
+        parents = {7654: {"body": "Vision-link: okr.conversion -- report page", "comments": []}}
+        status, raw = vlg.classify_candidate(self.ITEM["body"], [], parents)
+        self.assertEqual(status, vlg.STATUS_LINKED)
+        self.assertIn("okr.conversion", raw)
+        self.assertEqual(vlg.gate_candidates([self.ITEM], parents)["eligible"], [8539])
+
+    def test_epic_ref_inherits_maintenance(self):
+        parents = {7654: {"body": "x", "comments": [{"body": "Vision-link: none (maintenance)"}]}}
+        self.assertEqual(vlg.classify_candidate(self.ITEM["body"], [], parents)[0],
+                         vlg.STATUS_MAINTENANCE)
+
+    def test_one_hop_only(self):
+        parents = {7654: {"body": "Vision-link: #1 (grandparent)", "comments": []},
+                   1: {"body": "Vision-link: okr.traffic", "comments": []}}
+        self.assertEqual(vlg.classify_candidate(self.ITEM["body"], [], parents)[0],
+                         vlg.STATUS_MISSING)
+
+    def test_parent_ref_parses_only_a_leading_ref(self):
+        self.assertEqual(vlg.parent_ref("#7654 (report page rebuild)"), 7654)
+        self.assertEqual(vlg.parent_ref("gh#12"), 12)
+        self.assertIsNone(vlg.parent_ref("helps #7654 somehow"))
+
+
 if __name__ == "__main__":
     unittest.main()
