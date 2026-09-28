@@ -145,6 +145,56 @@ NAV_TIMEOUT_MS = 30000
 # console.error() call the page's own code made, which never has this shape.
 _SUBRESOURCE_FAILURE_RE = re.compile(r"^Failed to load resource:", re.I)
 
+# RENDERS STYLED (2026-09-28): superadmin answered 200 with a correct-looking title while every
+# human staff member saw an unstyled page -- an identify <script> in <head> never closed and
+# swallowed the whole shell (sidebar, tiles, their <style> blocks) as JS text. Status and a
+# title prove nothing about that. A step that sets `renders_styled:` in journeys.yaml gets
+# these content checks after it passes: CSS actually loaded and applied, no inline <script>
+# holding page markup, every listed selector on screen, no failed same-origin CSS/JS/font.
+_ASSET_TYPES = ("stylesheet", "script", "font")
+_RENDER_PROBE_JS = r"""(selectors) => {
+  let rules = 0;
+  for (const s of document.styleSheets) { try { rules += s.cssRules.length; } catch (e) { /* cross-origin: unreadable */ } }
+  const probe = document.createElement('div');
+  probe.style.all = 'initial';
+  document.body.appendChild(probe);
+  const uaFont = getComputedStyle(probe).fontFamily;
+  probe.remove();
+  const body = getComputedStyle(document.body);
+  const swallowed = Array.from(document.scripts)
+    .filter(s => !s.src && /<\/head>|<body[\s>]/i.test(s.textContent)).length;
+  const missing = selectors.filter(sel => {
+    const el = document.querySelector(sel);
+    if (!el) return true;
+    const r = el.getBoundingClientRect();
+    return r.width === 0 || r.height === 0;
+  });
+  return {rules, unstyled: body.fontFamily === uaFont && body.marginTop === '8px', swallowed, missing};
+}"""
+
+
+def renders_styled_problems(page, spec, asset_failures) -> list[str]:
+    """What a person would see is wrong with `page`, as plain sentences; [] means it renders.
+    `spec` is the step's `renders_styled:` value -- `true`, or a mapping with `selectors:`
+    (elements that must be on screen). `asset_failures` is [(type, status, url)] recorded
+    for this page since the last step."""
+    selectors = list(spec.get("selectors") or []) if isinstance(spec, dict) else []
+    r = page.evaluate(_RENDER_PROBE_JS, selectors)
+    problems = []
+    if not r["rules"]:
+        problems.append("no CSS loaded (document.styleSheets has no rules)")
+    if r["unstyled"]:
+        problems.append("body is in the browser's default font and margin -- the page CSS did not apply")
+    if r["swallowed"]:
+        problems.append(f"{r['swallowed']} inline <script> holds page markup -- an unclosed <script> ate the rest of the page")
+    if r["missing"]:
+        problems.append("not on screen: " + ", ".join(r["missing"]))
+    host = urlsplit(page.url).netloc
+    failed = [f"{t} {s} {u}" for t, s, u in asset_failures if urlsplit(u).netloc == host]
+    if failed:
+        problems.append("failed same-origin assets: " + "; ".join(failed[:5]))
+    return problems
+
 
 def redact_secret(text: str, secret: str | None) -> str:
     """Strips a literal secret value out of free text before it is stored in a step's
@@ -327,6 +377,7 @@ class JourneyCtx:
         self.results: list[dict] = []
         self._console_errors: dict[int, list[str]] = {}
         self._console_cursor: dict[int, int] = {}
+        self._asset_failures: dict[int, list[tuple[str, object, str]]] = {}
         self.cleanup: list = []  # callables run on close(), e.g. journey_hq's QA-data reset
 
     def page(self, user: str | None = None):
@@ -362,6 +413,17 @@ class JourneyCtx:
             page_obj.on(
                 "pageerror",
                 lambda exc, _errors=errors: _errors.append(("pageerror", str(exc), None)),
+            )
+            assets = self._asset_failures.setdefault(id(page_obj), [])
+            page_obj.on(
+                "response",
+                lambda r, _a=assets: _a.append((r.request.resource_type, r.status, r.url))
+                if r.status >= 400 and r.request.resource_type in _ASSET_TYPES else None,
+            )
+            page_obj.on(
+                "requestfailed",
+                lambda r, _a=assets: _a.append((r.resource_type, r.failure or "failed", r.url))
+                if r.resource_type in _ASSET_TYPES else None,
             )
             self._contexts[key] = (context, page_obj)
         return self._contexts[key][1]
@@ -430,6 +492,20 @@ class JourneyCtx:
             status = "fail"
             detail = redact_secret(f"{type(exc).__name__}: {exc}", self.users.bypass)
         duration_ms = round((time.monotonic() - start) * 1000)
+        render_spec = step_def.get("renders_styled")
+        # the step may have opened its own first page (a persona sign-in), after shot_page was read
+        render_page = shot_page or next(iter(p for _, p in self._contexts.values()), None)
+        if render_spec and render_page is not None:
+            assets = self._asset_failures.get(id(render_page), [])
+            failures, assets[:] = list(assets), []
+            if status == "pass":
+                try:
+                    problems = renders_styled_problems(render_page, render_spec, failures)
+                except Exception as exc:  # noqa: BLE001 -- a probe that cannot run is a failed check
+                    problems = [f"render probe failed: {type(exc).__name__}: {exc}"]
+                if problems:
+                    status = "fail"
+                    detail = redact_secret("page is not usable: " + " | ".join(problems), self.users.bypass)
 
         console_entries = self._drain_console_errors(shot_page)
         console_errors_recorded: list[str] = []

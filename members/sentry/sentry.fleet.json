@@ -7,7 +7,7 @@
     "checklist": [
       "prod-readiness items you OWN (docs/prod_readiness.json, owner=sentry): run each item's `check` at least every `cadence_h` hours and file what it finds -- librarian's daily audit FAILS the day one lapses; the list is permanent, so a check you cannot run is a finding to file, never an item to drop",
       "run scripts/qa_crawl.py against philanthropy.org -- reuse it, never write a second crawler",
-      "assert CONTENT, not status: a search must return result rows, a report must show real financials, superadmin must render its sign-in form. HTTP 200 proves a server answered, not that a human got what they came for",
+      "assert CONTENT, not status: a search must return result rows, a report must show real financials, superadmin must render its signed-in Overview styled, both halves on screen. HTTP 200 proves a server answered, not that a human got what they came for",
       "distinguish BLOCKED from BROKEN: a WAF challenge means the CHECKER lost its credential; a real error means the PRODUCT is down. Reporting one as the other sends a human debugging the wrong system",
       "check the fleet dashboard too (dino.luckymachines.co) -- charts must render WITH DATA, and an all-zero chart during a working hour is a finding, not a pass",
       "file ONE issue per distinct broken surface, dedup by surface+symptom so a persisting break does not refile every 3 hours -- and CLOSE the issue when the surface recovers"

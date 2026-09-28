@@ -164,7 +164,7 @@ class CatalogCoverageTest(unittest.TestCase):
 
     def test_catalog_loads(self):
         catalog = jw.load_catalog(CATALOG_PATH)
-        self.assertEqual(len(catalog["journeys"]), 15)  # 10 + the 5 HQ persona journeys (journey_hq.py)
+        self.assertEqual(len(catalog["journeys"]), 16)  # 10 + the 6 persona journeys (journey_hq.py)
 
     def test_every_catalog_id_has_a_runner(self):
         catalog = jw.load_catalog(CATALOG_PATH)
@@ -1111,6 +1111,81 @@ class FleetConsoleActivityRowSelectorTest(unittest.TestCase):
         # gh#859 AC1: this is the case that passed before the fix -- rows exist (so the old
         # `.length > 0` selector matched) but none is within the 24h freshness bar.
         self.assertEqual(self._run(self._stale_html(), "stale-run"), ["pass", "fail"])
+
+
+_CONSOLE_HTML = """<!doctype html><html><head><title>Overview</title>
+<link rel="stylesheet" href="/{css}">
+{head_extra}</head><body>
+<div id="admin-layout"><nav id="admin-nav"><a href="/">Overview</a></nav>
+<div class="ov-two"><div class="ov-left">OBJECTIVE 3,000 orgs that claimed their page, 188 claimed</div>
+<aside id="member-rail"><div class="ln">07:40 Someone viewed a report</div></aside></div></div>
+<script>window.__ok = 1;</script>
+</body></html>
+"""
+_CONSOLE_CSS = ("body{margin:0;font-family:Helvetica,Arial,sans-serif}"
+                ".ov-two{display:grid;grid-template-columns:1fr 1fr}#member-rail{background:#0b100d;color:#c3d0c4}")
+# The exact bytes philanthropy's staff identify tag shipped on 2026-09-28: its own closing tag
+# escaped to <\\/script>, so the browser never closed it and swallowed the whole page.
+_UNCLOSED_IDENTIFY = '<script>window.posthog&&posthog.identify("ops@philanthropy.org");<\\/script>'
+
+
+class RendersStyledTest(unittest.TestCase):
+    """`renders_styled:` on a journey step (superadmin-overview-renders): a page that answers 200
+    but a person cannot use -- shell swallowed by an unclosed <script>, or its CSS 404ing --
+    fails the step with a sentence saying why; the healthy console passes. Real chromium, real
+    HTTP, the catalog's own step definition."""
+
+    @classmethod
+    def setUpClass(cls):
+        from playwright.sync_api import sync_playwright
+
+        catalog = jw.load_catalog(CATALOG_PATH)
+        cls.journey = next(j for j in catalog["journeys"] if j["id"] == "superadmin-overview-renders")
+        cls.dims = catalog["viewports"]["desktop"]
+        cls.pw = sync_playwright().start()
+        cls.browser = cls.pw.chromium.launch(args=["--no-sandbox", "--disable-dev-shm-usage"])
+        cls.tmp = tempfile.TemporaryDirectory()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.browser.close()
+        cls.pw.stop()
+        cls.tmp.cleanup()
+
+    def _walk(self, css="app.css", head_extra=""):
+        server = _StaticPageServer(_CONSOLE_HTML.format(css=css, head_extra=head_extra))
+        (Path(server.dir.name) / "app.css").write_text(_CONSOLE_CSS)
+        try:
+            ctx = jw.JourneyCtx(self.journey, "desktop", self.dims, self.browser,
+                                jw.TestUsers(env={}), Path(self.tmp.name), "renders")
+            page = ctx.page("operator")
+            ctx.step(0, lambda: page.goto(server.base_url + "/index.html"), page)
+            ctx.close()
+            return ctx.results[0]
+        finally:
+            server.stop()
+
+    def test_the_catalog_step_asks_for_the_render_check(self):
+        spec = self.journey["steps"][0]["renders_styled"]
+        self.assertIn(".ov-two .ov-left", spec["selectors"])
+        self.assertIn(".ov-two #member-rail", spec["selectors"])
+
+    def test_healthy_console_passes(self):
+        step = self._walk()
+        self.assertEqual(step["status"], "pass", step.get("detail"))
+
+    def test_shell_swallowed_by_an_unclosed_script_fails(self):
+        step = self._walk(head_extra=_UNCLOSED_IDENTIFY)
+        self.assertEqual(step["status"], "fail")
+        self.assertIn("unclosed <script>", step["detail"])
+        self.assertIn("#admin-nav", step["detail"])
+
+    def test_stylesheet_404_fails(self):
+        step = self._walk(css="missing.css")
+        self.assertEqual(step["status"], "fail")
+        self.assertIn("no CSS loaded", step["detail"])
+        self.assertIn("failed same-origin assets: stylesheet 404", step["detail"])
+        self.assertIn("default font", step["detail"])
 
 
 if __name__ == "__main__":

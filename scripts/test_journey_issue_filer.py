@@ -106,6 +106,12 @@ class BuildersTest(unittest.TestCase):
         body = jif.build_issue_body(journey, step, "r2", "cafef00d", "abc1234", jif.step_key("j", 0))
         self.assertIn("abc1234", body)
 
+    def test_body_says_what_the_walker_saw(self):
+        journey = {"id": "j", "name": "J", "steps": [{"index": 0, "action": "a", "observable_result": "o"}]}
+        step = {**journey["steps"][0], "detail": "page is not usable: not on screen: #admin-nav"}
+        body = jif.build_issue_body(journey, step, "r3", "cafef00d", None, jif.step_key("j", 0))
+        self.assertIn("**What happened instead:** page is not usable: not on screen: #admin-nav", body)
+
 
 class ProcessEndToEndTest(unittest.TestCase):
     """gh#660 AC5: a deliberately-broken-then-fixed journey files then auto-closes."""
