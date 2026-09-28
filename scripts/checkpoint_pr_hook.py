@@ -24,15 +24,39 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import minion_checkpoint as mc  # noqa: E402
 
-GH_PR = re.compile(r"\bgh\s+pr\s+(ready|merge)\b([^;&|\n]*)")
+# `gh` only where a command starts (line start, or after ; & | ( ), optionally behind VAR=val
+# prefixes, and never inside quotes. jefe msg#184: an unanchored search blocked `fleet_msg.py ack
+# --note "...gh pr ready on #8424..."` -- quoting the command back for the record. Same class as
+# fk#1360's redirect-scoping fix to worktree_guard_hook.py.
+_CMD_START = r"(?:^|(?<=[;&|(\n]))\s*(?:\w+=\S*\s+)*"
+GH_PR = re.compile(_CMD_START + r"gh\s+pr\s+(ready|merge)\b([^;&|)\n]*)")
+GH_API = re.compile(_CMD_START + r"gh\s+api\b")
 GQL_READY = re.compile(r"markPullRequestReadyForReview")
+
+
+def _mask_quotes(command: str) -> str:
+    """Same length as `command`, with every character inside '...' or "..." replaced by `_`,
+    so text an argument merely quotes can neither start a match nor end one early."""
+    out, quote = [], None
+    for ch in command:
+        if quote:
+            out.append(ch if ch in (quote, "\n") else "_")
+            if ch == quote:
+                quote = None
+        else:
+            if ch in "'\"":
+                quote = ch
+            out.append(ch)
+    return "".join(out)
 
 
 def targets(command: str) -> list[str | None]:
     """PR selectors the command would un-draft or merge: a number/branch arg, or None for "the
     current branch". Empty list = nothing to check."""
     out: list[str | None] = []
-    for verb, rest in GH_PR.findall(command or ""):
+    command = command or ""
+    for m in GH_PR.finditer(_mask_quotes(command)):
+        verb, rest = m.group(1), command[m.start(2):m.end(2)]
         if verb == "ready" and "--undo" in rest:
             continue
         if verb == "merge" and "--disable-auto" in rest:
@@ -56,7 +80,7 @@ def targets(command: str) -> list[str | None]:
 
 def decide(command: str, cwd: str, view=None) -> str | None:
     """Block message, or None to allow."""
-    if GQL_READY.search(command or ""):
+    if GQL_READY.search(command or "") and GH_API.search(_mask_quotes(command)):
         return ("Blocked: un-drafting a PR through the GraphQL API skips the checkpoint gate. "
                 "Run `python3 /fleet-kit/scripts/minion_checkpoint.py ready` instead.")
     view = view or _view

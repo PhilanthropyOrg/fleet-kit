@@ -281,12 +281,18 @@ def test_hook_blocks_raw_ready_and_merge_on_a_checkpoint_only() -> None:
     blocked = ["gh pr ready 8110",   # the exact 08:32 command
                "cd /tmp/wt; gh pr ready 8110; source merge_arm.sh; arm_pr_auto_merge 8110",
                "gh pr merge 8110 --auto --squash", "gh pr merge --squash", "gh pr ready",
+               "GH_REPO=o/r gh pr ready 8110", 'x && gh pr merge "8110" --auto',
+               "(cd /tmp/wt && gh pr ready 8110)",
                "gh api graphql -f query='mutation{markPullRequestReadyForReview(input:{})}'"]
     for c in blocked:
         assert hook.decide(c, ".", view), c
     allowed = ["gh pr ready 8200", "gh pr merge 8200 --auto --squash", "gh pr ready --undo 8110",
                "gh pr merge 8110 --disable-auto", "gh pr view 8110",
-               "python3 /fleet-kit/scripts/minion_checkpoint.py ready", "git push"]
+               "python3 /fleet-kit/scripts/minion_checkpoint.py ready", "git push",
+               # jefe msg#184: the trigger phrase quoted inside another command's argument
+               'python3 fleet_msg.py ack --me jefe --id 184 --note "refused gh pr ready 8110"',
+               "git commit -m 'x; gh pr merge 8110 --auto'", "echo run gh pr ready 8110 later",
+               "cat > /tmp/p.py <<'EOF'\nGQL = 'markPullRequestReadyForReview'\nEOF"]
     for c in allowed:
         assert hook.decide(c, ".", view) is None, c
     # end to end: stdin payload, exit 2, fake gh via FLEET_GH_BIN
