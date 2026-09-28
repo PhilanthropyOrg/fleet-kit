@@ -79,6 +79,25 @@ class OrderTest(unittest.TestCase):
         ], accounts="gmail tgp", state_lines=[f"gmail {self.now - 8000}\n"])
         self.assertEqual(got, ["gmail", "tgp"])
 
+    def test_preferred_account_goes_first_while_it_has_headroom(self):
+        # Reif, 2026-09-28: "preference is philanthropy because the client pays for this fleet".
+        # The live 18:30Z shape: tgp bank 38.4 resets sooner, philanthropy bank 100; every
+        # member ran on tgp.
+        lines = [
+            f"tgp {self.now + 200000} {self.now} 38.4\n",
+            f"philanthropy {self.now + 500000} {self.now} 100\n",
+        ]
+        os.environ["FLEET_PREFER_ACCOUNT"] = "philanthropy"
+        try:
+            self.assertEqual(order(self.tmp.name, lines, accounts="tgp philanthropy"),
+                             ["philanthropy", "tgp"])
+            # Drained, it drops back into the normal order instead of pacing everyone at 0.
+            lines[1] = f"philanthropy {self.now + 500000} {self.now} -3\n"
+            self.assertEqual(order(self.tmp.name, lines, accounts="tgp philanthropy"),
+                             ["tgp", "philanthropy"])
+        finally:
+            del os.environ["FLEET_PREFER_ACCOUNT"]
+
 
 if __name__ == "__main__":
     unittest.main()

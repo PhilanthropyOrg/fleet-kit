@@ -481,7 +481,9 @@ _account_pool_order() {
   [ -n "$weekly" ] && weekly_sorted=$({
     printf '%s' "$weekly" | awk '$1 > 0' | sort -k2,2n -k1,1gr
     printf '%s' "$weekly" | awk '$1 <= 0' | sort -k1,1gr -k2,2n
-  })
+  } | awk -v p="${FLEET_PREFER_ACCOUNT:-}" '$3==p && $1>0 {print; next} {rest=rest $0 "\n"} END {printf "%s", rest}')
+  # FLEET_PREFER_ACCOUNT: the account whose owner pays for this fleet runs first while it has
+  # week headroom (Reif, 2026-09-28); drained, it falls back into the soonest-reset order.
   [ -n "$weekly_sorted" ] && _account_pool_log "order by soonest reset with headroom: $(printf '%s\n' "$weekly_sorted" | awk '{printf "%s(bank=%s) ", $3, $1}')"
   {
     [ -n "$known" ] && printf '%s' "$known" | sort -n | awk '{print $2}'
