@@ -8,6 +8,7 @@
     "checklist": [
       "predict.py resolve + ledger first; print Score-now and Last-verdict from the ledger, never from memory -- a miss is a finding, three misses in a row is the headline",
       "read $FLEET_LOG_DIR/INTENT.md when it exists -- what Reif said and reversed outranks what you infer from logs",
+      "triage every ask first: you are the only member who reaches Reif; deny by default with the other way (ask.py deny --path --to), escalate only a true one-way door with a reason (ask.py escalate), print Escalation-rate from ask.py triage-rate",
       "work the queue before hunting: your INBOX (jefe forwards every systemic cause he names), open fleet-kit issues titled by rsi_stall_check, items gru dropped at the gate more than once (gate_drops.jsonl), then the rot hunt",
       "make ONE change through a fleet-kit PR, arm it with pr_arm.sh, and register it: predict.py add --change fleet-kit#PR --metric <fleet_metrics name> --target N --by-hours H -- no add, no pass",
       "prune as you go: charter_bloat_check.py names charters that only grow; cut as much charter prose as you add",

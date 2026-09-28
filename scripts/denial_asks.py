@@ -121,6 +121,7 @@ def main(argv=None) -> int:
             return 0
         ask_id = ask_mod.file_ask(conn, a.member, p["why"], p["unblocks"], p["proposed"],
                                   ask_class="infra", summary=p["summary"])
+        ask_mod.route_to_triage(conn, ask_id, a.member, p["why"], "infra", wake=False)  # dumbledore triages it
         print(f"denial_asks: ask {ask_id} filed for {len(denials)} gh denial(s)")
     except Exception as exc:  # noqa: BLE001 -- never fail the pass over its own bookkeeping
         print(f"denial_asks: {exc}", file=sys.stderr)

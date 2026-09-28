@@ -4671,7 +4671,7 @@ def _email_reply_answers_asks_and_files_backlog_without_a_model():
     fa = (ROOT / "scripts" / "fleet_alert.sh").read_text()
     assert 'p["reply_to"] = [os.environ["REPLY_TO"]]' in fa and 'REPLY_TO="${FLEET_REPLY_TO:-}"' in fa, "alert email has no Reply-To"
     ask = (ROOT / "scripts" / "ask.py").read_text()
-    assert 'f"fleet ask #{ask_id} from {member}"' in ask and "Reply to this email with one line" in ask, "ask mail does not say how to reply"
+    assert 'f"fleet ask #{ask_id} from {sender}"' in ask and "Reply to this email with one line" in ask, "ask mail does not say how to reply"
 
 
 def _intake_classifies_and_dedupes_alerts_by_check():
@@ -12670,9 +12670,19 @@ def _ask_file_rate_limits_ntfy_to_once_per_member_per_hour_gh568():
         script = str(ROOT / "scripts" / "ask.py")
 
         def _file(member, why):
-            return subprocess.run(
+            # Reif, 2026-09-28: "asks only from dumbledore" -- a member's ask reaches Reif only
+            # when dumbledore escalates it, so the page under test is the escalation's.
+            f = subprocess.run(
                 [sys.executable, script, "--db-path", str(db_path), "file",
-                 "--member", member, "--why", why],
+                 "--member", member, "--why", why, "--no-notify"],
+                capture_output=True, text=True, timeout=30, env=env,
+            )
+            if f.returncode:
+                return f
+            ask_id = re.search(r"ask (\d+) filed", f.stdout).group(1)
+            return subprocess.run(
+                [sys.executable, script, "--db-path", str(db_path), "escalate", ask_id,
+                 "--me", "dumbledore", "--reason", "selftest"],
                 capture_output=True, text=True, timeout=30, env=env,
             )
 
@@ -12684,10 +12694,10 @@ def _ask_file_rate_limits_ntfy_to_once_per_member_per_hour_gh568():
         assert p3.returncode == 0, f"ask.py file must exit 0: {p3.stderr[:300]}"
 
         sent = calls.read_text() if calls.exists() else ""
-        assert len(re.findall(r"fleet ask #\d+ from marie", sent)) == 1, \
+        assert len(re.findall(r"fleet ask #\d+ from dumbledore \(for marie\)", sent)) == 1, \
             f"a second ask from the same member inside the hour must not page again: " \
             f"{_redact_secrets(sent)!r}"
-        assert re.search(r"fleet ask #\d+ from gru", sent), \
+        assert re.search(r"fleet ask #\d+ from dumbledore \(for gru\)", sent), \
             f"a different member's first ask this hour must still page: {_redact_secrets(sent)!r}"
 
 

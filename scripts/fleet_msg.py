@@ -11,7 +11,7 @@ the member whose job it was to act.
 THE BUS. One `msgs` table in fleet.db (next to `asks`, same file, same connect()):
 
   send      one row per recipient; a (to, kind, key) already sent in the last 6h is not re-sent.
-            a WAKE_KINDS kind (cause/incident/pr-block/nudge) also launches the recipient's next
+            a WAKE_KINDS kind (cause/incident/pr-block/nudge/ask) also launches the recipient's next
             pass now, detached like dispatch_member.sh, coalesced to one per
             FLEET_MSG_WAKE_COOLDOWN_S -- marie having 7 unread at her next 4h cron tick is the
             gap this closes
@@ -110,7 +110,7 @@ def send(conn, sender: str, recipients, kind: str, key: str, body: str,
 # runs after it, from the CLI `send` path only.
 
 WAKE_KINDS = {k.strip() for k in os.environ.get(
-    "FLEET_MSG_WAKE_KINDS", "cause,incident,pr-block,nudge").split(",") if k.strip()}
+    "FLEET_MSG_WAKE_KINDS", "cause,incident,pr-block,nudge,ask").split(",") if k.strip()}
 WAKE_COOLDOWN_S = float(os.environ.get("FLEET_MSG_WAKE_COOLDOWN_S", 1800))
 
 
