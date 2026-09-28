@@ -262,6 +262,12 @@ def build_issue_body(
         + (last_pass_sha or "unknown -- this is the first observed failure"),
         f"**This run:** {run} (sha {deploy_sha or 'unknown'})",
         "",
+        # jefe msg#170: without this section every step-failure issue landed fleet:needs-spec
+        # (quality_gate's acceptance check); both halves are the step's own recorded fields.
+        "## Acceptance",
+        f"- Given the journey reaches this step, When {step.get('action', '').strip().rstrip('.')}, "
+        f"Then {step.get('observable_result', '').strip()}",
+        "",
         marker_for(key, profile.marker_tag),
     ]
     return "\n".join(lines)

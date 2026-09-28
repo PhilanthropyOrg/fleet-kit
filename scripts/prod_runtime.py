@@ -282,8 +282,9 @@ def issue_body(x: dict) -> str:
     return (f"**{x['title']}**\n\nRead from the live prod system by `scripts/prod_runtime.py` "
             f"(nerd lane `{LANE}`), {central_stamp('%Y-%m-%d %H:%M %Z')}.\n\n"
             f"Evidence:\n{ev}\n\n" + (f"Standard fix: {x['fix']}\n\n" if x["fix"] else "")
-            + "Done = this check passes on the next probe run (the issue gets a comment each tick "
-              "it still fails).\n\n"
+            + "## Acceptance\n"
+              f"- Given this probe next runs, When it checks `{x['check']}`, Then it passes "
+              "(the issue gets a comment each tick it still fails).\n\n"
               "Vision-link: none (maintenance)")
 
 
