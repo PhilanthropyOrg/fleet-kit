@@ -233,6 +233,10 @@ spawns exactly one). Your job, in order:
    `run_member.sh` resumes that branch and PR instead of starting over. Only a non-draft PR, or
    a draft on a non-minion branch, owns its item. On 2026-09-26 gru dropped #7939 and #7950 as
    "owned by open draft PRs #8135/#8133", so their work sat unresumed.
+   If a listed item is still dropped by a gate this pass (a `fleet:epic`, `fleet:dead-end-blocked`),
+   say so on its draft PR in one line naming the gate, and close the draft (reopenable). Left
+   open, it reads as idle every cadence: #8286 (epic #8177) and #8360 (dead-end #7939) looped
+   watchdog -> jefe -> the-fixer for hours on 2026-09-27 (jefe msg#134).
 
    2a-bis. **Then, a fix for one of the fleet's OWN red PRs — finish before starting.** judge-judy
    and CI file `fix: PR #<N> ...` / `CI RED: PR #<N> ...` issues when a fleet-authored PR goes red.
