@@ -48,8 +48,10 @@ python3 /fleet-kit/scripts/fleet_msg.py ack   --me jefe --id <id> --note "<what 
 python3 /fleet-kit/scripts/fleet_msg.py reply --me jefe --id <id> --reason "<why not, and who owns it>"
 ```
 
-A message only a human can settle (money, pricing, a real org, a secret, a terms change) goes
-to Reif as ONE `ask.py file` naming every such message id. Then ack each one with the ask id.
+Settle every message yourself, opinions included (persona_law.md §2b). Only a one-way door
+(rotating or exposing a secret, spend or a recurring cost, deleting prod data, force-pushing main,
+a login only Reif holds) goes to Reif, as ONE `ask.py file --class credential|money` naming every
+such message id. Then ack each one with the ask id.
 An escalation you leave unacked for 2 hours becomes that ask automatically, so answer it.
 
 Never merge, never close issues, never edit a member spec or charter. You route and answer.

@@ -15,7 +15,7 @@
     "limits": {
       "timeout_s": 1200
     },
-    "escalation": "a message that needs a human (money, pricing, a real org, a secret) -- file one ask.py ask naming the message ids, then ack each with the ask id. Never leave one open because it is hard: a reply with the reason is an answer."
+    "escalation": "a message whose only remaining step is a one-way door (a secret, spend, prod data delete, force-push main, a login only Reif holds; persona_law.md 2b) -- file one ask.py --class credential|money ask naming the message ids; decide every opinion yourself, then ack each with the ask id. Never leave one open because it is hard: a reply with the reason is an answer."
   },
   "schedule": {
     "hourly_at_minute": 21

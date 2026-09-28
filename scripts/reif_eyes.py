@@ -93,8 +93,9 @@ def check_ask_stale(asks: list[dict], open_issue_titles: list[str], now: float, 
                              f"{(a.get('why') or '').strip()}\n\n"
                              + (f"**What it unblocks:** {a['unblocks'].strip()}\n\n" if a.get("unblocks") else "")
                              + (f"**Proposed:** {a['proposed'].strip()}\n\n" if a.get("proposed") else "")
-                             + "Try it first. If it truly needs a person (a secret, money, an account), say exactly "
-                               "what and label `fleet:needs-human-op`; otherwise fix it and close this.")})
+                             + "Do it now with the fleet's own tokens, env and tools. Only rotating or exposing a "
+                               "secret, spending money, deleting prod data, force-pushing main or a login only Reif "
+                               "holds waits on him -- ship everything around it and close the rest.")})
     return out
 
 

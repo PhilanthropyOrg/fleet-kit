@@ -9,7 +9,7 @@ class of question stops reaching them -- Reif, on why #558 exists at all: "it's 
 me, and giving me less and less things -- because I will give it more and more authority."
 
 Three levels, named in #558's own build list:
-  ask           -- today's behavior. File and stop. The default for every class, always.
+  ask           -- File and stop. The default only for HUMAN_ONLY_CLASSES (and no class).
   act-and-tell  -- proceed, file a notice (not a question) for the record.
   act           -- proceed, fully authorized; a countable record is still filed.
 
@@ -132,13 +132,23 @@ def _write(store: Path, data: dict) -> None:
     tmp.replace(store)
 
 
+# Reif, 2026-09-28: "zero should ever wait on a human" / "if it's an opinion, make the opinion
+# yourself." Only these classes are one-way doors (rotating or exposing a secret, a login only
+# Reif holds, spending money or adding a recurring cost). Every other class -- a decision, an
+# acceptance call, an idea, copy, pricing, infra, an external merge -- is the filer's to make:
+# with no explicit grant it defaults to act-and-tell (a notice, never an open question).
+HUMAN_ONLY_CLASSES = ("credential", "money")
+
+
 def level_for(ask_class: str | None, *, store: Path | None = None) -> str:
-    """The level in force for one class. AC1: no class, no file, or no grant for this class
-    all mean 'ask' -- the only default that can never accidentally authorize an action."""
+    """The level in force for one class. An explicit grant always wins. With none: no class,
+    or a HUMAN_ONLY_CLASSES class, means 'ask'; every other class means 'act-and-tell'."""
     if not ask_class:
         return "ask"
     row = _read(store or STORE).get(ask_class)
-    return row["level"] if row else "ask"
+    if row:
+        return row["level"]
+    return "ask" if ask_class in HUMAN_ONLY_CLASSES else "act-and-tell"
 
 
 def grant(ask_class: str, level: str, *, by: str, ask_ids: list[int] | None = None,

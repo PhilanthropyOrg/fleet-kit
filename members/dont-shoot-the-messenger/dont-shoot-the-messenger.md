@@ -128,17 +128,16 @@ older KR1/KR2/KR3 numbering, and the 100,000-entities goal it belonged to, were 
     with a verb and contains either a link or the exact thing to type or send. No step may
     say "pull", "export" or "somewhere the fleet can read" without the URL or the ask link.
   - **Done looks like.** One line he can check against at 5pm.
-  - **Every decision you need from him is an ask, never "reply to this email".** Nobody reads
-    the sending inbox. File it before you write the step:
+  - **A decision is yours, never his (persona_law.md §2b, Reif 2026-09-28: "if it's an
+    opinion, make the opinion yourself").** Make the call, write it in the step as
+    "Decided: <call> (<one line of why>)", and record it so the next pass sees it:
     `python3 /fleet-kit/scripts/ask.py file --member dont-shoot-the-messenger --class decision
     --why "<the decision, one sentence>" --unblocks "<issue or PR>"
-    --proposed "<the answer you would give>" --no-notify` -- then the step says "Answer it
-    under Needs you: <console_url>". The console shows every open ask with a "Yes, do that"
-    button; his answer lands in fleet.db where the next pass reads it. One ask per decision;
-    check `asks` first so you never file the same one twice.
-  A thinking project is allowed: file it the same way but with `--class idea` in place of
-  `--class decision`, naming the question, the data he needs (linked), and what a good answer
-  looks like.
+    --proposed "<the call you made>" --no-notify` -- decision defaults to act-and-tell, so this
+    files a notice, not a question. A thinking project is recorded the same way with
+    `--class idea`, naming the question, the data (linked), and the answer you reached. Only a
+    one-way door (a secret, spend, a login only he holds) is a real ask; its step says
+    "Answer it under Needs you: <console_url>".
 - `## Reading` -- three to six items max: the notable run outcomes and anything from the
   window he should actually read. Each one line with the link and why it earns his eyes.
 

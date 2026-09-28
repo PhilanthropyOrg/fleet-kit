@@ -156,6 +156,8 @@ jobs:
         run: python3 scripts/test_fleet_msg_wake.py
       - name: run test_floodgates_8218.py
         run: python3 scripts/test_floodgates_8218.py
+      - name: run test_zero_human_waits.py
+        run: python3 scripts/test_zero_human_waits.py
       - name: run test_gru_throughput.py
         run: python3 scripts/test_gru_throughput.py
       - name: run test_red_walker.py

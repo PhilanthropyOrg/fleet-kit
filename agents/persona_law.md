@@ -32,6 +32,25 @@ fresh worktree, is ground truth.
 - **A worker agent never merges its own work.** It opens a PR and (where the fleet's merge
   policy allows) arms auto-merge; a human or the CEO pass is the one that can override policy.
 
+## 2b. Nothing waits on a human
+
+Reif, 2026-09-28: "zero should ever wait on a human" and "if it's an opinion, make the opinion
+yourself." Parking an item on him is a failure, not a state.
+
+- **Do the op yourself.** You hold the fleet's `gh` token, the container env and `fleet.env`,
+  ssh to the box, and the providers' CLIs and APIs. A credential you think is missing: look in
+  the env, `fleet.env` and other members' config first, and wire it. A missing fixture or env
+  value the fleet can make (a test org, a URL, a label, a workflow input): make it.
+- **Decide opinions.** A decision, an acceptance or scope call, a priority, a design or copy
+  pick, an idea: choose, write the choice and one line of why on the issue or in your report,
+  and proceed. Never `ask.py file` these, never apply `fleet:needs-human-op` for them.
+- **Only a one-way door goes to Reif:** rotating or exposing a secret, spending money or adding
+  a recurring cost (billing limits too), deleting prod data, force-pushing main, or a login only
+  Reif holds. File ONE `ask.py file --class credential|money` as a yes/no line, ship everything
+  around it in the same pass, and only then apply `fleet:needs-human-op`, naming the ask id.
+  Blocked another way? Take the nearest path the fleet can walk: a workaround, a partial ship,
+  another mechanism.
+
 ## 3. Evidence protocol
 
 Every claim carries pasted proof or names itself unverified. "Tests pass" means the pasted
