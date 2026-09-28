@@ -23,8 +23,78 @@ import re
 import time
 import urllib.error
 import urllib.request
+from datetime import datetime
 
 HQ = "https://philanthropy.org/network/hq"
+APPROVE_PATH = "/network/hq/ops/approve"
+
+# philanthropy#7988: Resend's send log reads with the key already mounted read-only into the
+# container for fleet_alert.sh; the env var wins if set.
+RESEND_ENV_FILE = os.environ.get("RESEND_ENV_FILE", "/home/ubuntu/.config/maxx/alert.env")
+# Mail a person triggers per event (their own sign-in link, one per message/reply) is not a
+# duplicate when it repeats; anything else to the same person with the same subject is.
+PER_EVENT_SUBJECT = re.compile(
+    r"sign-in link|confirm your email|new reply|messaged you|new question|prod alert", re.I)
+
+
+def resend_key() -> str:
+    if os.environ.get("RESEND_API_KEY"):
+        return os.environ["RESEND_API_KEY"]
+    try:
+        with open(RESEND_ENV_FILE) as fh:
+            for line in fh:
+                k, _, v = line.strip().removeprefix("export ").partition("=")
+                if k == "RESEND_API_KEY":
+                    return v.strip().strip('"').strip("'")
+    except OSError:
+        pass
+    return ""
+
+
+def _resend_ts(value) -> float | None:
+    ts = re.sub(r"([+-]\d\d)$", r"\1:00", str(value or "").replace(" ", "T"))
+    try:
+        return datetime.fromisoformat(ts).timestamp()
+    except ValueError:
+        return None
+
+
+def resend_last_24h(key: str, now: float | None = None) -> list[dict]:
+    """Every Resend send in the last 24h, newest first, paging the list API."""
+    cutoff = (now or time.time()) - 86400
+    out, query = [], "?limit=100"
+    for _ in range(50):
+        req = urllib.request.Request(f"https://api.resend.com/emails{query}", headers={
+            "Authorization": f"Bearer {key}", "User-Agent": "fleet-kit sentry"})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            page = json.loads(resp.read().decode() or "{}")
+        rows = page.get("data") or []
+        for e in rows:
+            ts = _resend_ts(e.get("created_at"))
+            if ts is not None and ts < cutoff:
+                return out
+            out.append(e)
+        if not rows or not page.get("has_more"):
+            return out
+        query = f"?limit=100&after={rows[-1]['id']}"
+    return out
+
+
+def duplicate_sends(rows: list[dict]) -> list[tuple[str, str, int]]:
+    """(masked recipient, subject, count) for each recipient+subject sent more than once,
+    per-event mail excluded. The local part is masked: the filed issue needs the pattern, not
+    a person's address."""
+    counts: dict = {}
+    for e in rows:
+        subj = e.get("subject") or ""
+        if PER_EVENT_SUBJECT.search(subj):
+            continue
+        to = ",".join(sorted(str(t).lower() for t in (e.get("to") or [])))
+        counts[(to, subj)] = counts.get((to, subj), 0) + 1
+
+    def mask(to: str) -> str:
+        return ",".join(f"{a[:2]}***@{a.partition('@')[2]}" for a in to.split(","))
+    return sorted(((mask(to), s, n) for (to, s), n in counts.items() if n > 1), key=lambda r: -r[2])
 
 
 def make_runners(jw) -> dict:
@@ -369,7 +439,60 @@ def make_runners(jw) -> dict:
             assert lines.count() > 0, "the live feed half shows no lines and no empty state"
         ctx.step(1, s1, page)
 
+    # --- Reif's own staff jobs (philanthropy#7988): he kept finding these broken by hand -------
+
+    def run_staff_approval_queue(ctx):
+        """The claim approval queue as the operator sees it, on desktop and on his phone."""
+        users = ctx.users
+        page = ctx.page("operator")
+        if not ctx.step(0, lambda: persona(ctx, "operator", next_path=APPROVE_PATH), page):
+            return
+
+        def s1():  # budgeted: a 5xx, a bounce to /login, or > 3s fails the step
+            resp = page.goto(users.url(f"https://philanthropy.org{APPROVE_PATH}"),
+                             timeout=jw.NAV_TIMEOUT_MS, wait_until="domcontentloaded")
+            assert resp is not None and resp.status < 400, \
+                f"{APPROVE_PATH} answered {resp.status if resp else 'nothing'}"
+            assert "/login" not in page.url, f"operator was sent to {page.url}"
+        if not ctx.step(1, s1, page, budget_ms=3000):
+            return
+
+        def s2():
+            page.locator("tr.vq-row, .vq-empty, table.vq").first.wait_for(state="attached", timeout=15000)
+            if ctx.viewport != "mobile_390":
+                return
+            wide = page.evaluate("() => document.documentElement.scrollWidth")
+            assert wide <= 391, f"the queue scrolls sideways at 390px (scrollWidth {wide})"
+            rows = page.locator("tr.vq-row")
+            for i in range(min(rows.count(), 5)):
+                btns = rows.nth(i).locator(".vq-acts .vq-btn")
+                boxes = [b for b in (btns.nth(j).bounding_box() for j in range(btns.count())) if b]
+                assert len({round(b["y"]) for b in boxes}) <= 1, f"row {i}: Approve/Reject/Message are not on one row"
+                assert all(b["height"] >= 44 for b in boxes), f"row {i}: a tap target is under 44px"
+        ctx.step(2, s2, page)
+
+    def run_resend_duplicates(ctx):
+        """No recipient got the same email twice in the last 24h (Resend's own send log)."""
+        key = resend_key()
+        if not key:
+            raise Blocked(f"RESEND_API_KEY is not in env or {RESEND_ENV_FILE}")
+        found: dict = {}
+
+        def s0():
+            found["rows"] = resend_last_24h(key)
+            assert found["rows"], "Resend returned no sends in 24h -- the log or the key is wrong"
+        if not ctx.step(0, s0, None):
+            return
+
+        def s1():
+            dupes = duplicate_sends(found["rows"])
+            assert not dupes, (f"{len(dupes)} recipient(s) got the same email more than once in 24h: "
+                               + "; ".join(f'{n}x {to} "{subj}"' for to, subj, n in dupes[:10]))
+        ctx.step(1, s1, None)
+
     return {
+        "staff-approval-queue": run_staff_approval_queue,
+        "resend-no-duplicate-sends": run_resend_duplicates,
         "superadmin-overview-renders": run_superadmin_overview,
         "persona-roles": run_persona_roles,
         "hq-react-picker": run_hq_react,
