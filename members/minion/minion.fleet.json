@@ -43,7 +43,8 @@
       "deny": [
         "Bash(git stash:*)",
         "Bash(git push --force:*)",
-        "Bash(gh issue edit:*)"
+        "Bash(gh issue edit:*)",
+        "ScheduleWakeup"
       ]
     },
     "capabilities": ["design_reference"]

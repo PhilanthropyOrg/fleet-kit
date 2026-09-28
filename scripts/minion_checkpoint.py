@@ -16,6 +16,9 @@ THREE SAVES, all pushing the pass's own branch and opening (once) a DRAFT PR:
                     on 2026-09-26 06:42 that killed #7938 #7939 #7941 #7950 34 min in, unsaved.
                     The push comes before the PR call, so even a save the grace window cuts off
                     leaves a branch the next pass resumes.
+  * ended        -- same as timed-out, after the pass exited rc=0 with no Outcome: line
+                    (2026-09-27: 56 minions ended "waiting for the background run"). Skipped
+                    when the branch already has an open non-draft PR.
 The first two run while the model is still working, so they never touch the index; only the
 last one (the model is dead by then) commits.
 
@@ -206,9 +209,20 @@ def open_pr_for(wt: str, branch: str) -> int | None:
     return int(out) if rc == 0 and out.strip().isdigit() else None
 
 
+def open_pr_is_ready(wt: str, branch: str) -> bool:
+    rc, out = _gh(["pr", "list", "--head", branch, "--state", "open", "--json", "isDraft",
+                   "--jq", ".[0].isDraft // empty"], cwd=wt)
+    return rc == 0 and out.strip() == "false"
+
+
 def save(wt: str, branch: str, items: list[int], reason: str) -> dict:
     res: dict = {"reason": reason, "branch": branch, "items": items, "saved": False}
-    if reason in ("timed-out", "killed"):
+    # `ended`: the pass exited on its own with no report (run_member.sh, rc=0). A non-draft PR
+    # on the branch may have auto-merge armed -- untested WIP must never land on that.
+    if reason == "ended" and open_pr_is_ready(wt, branch):
+        res["why"] = "open non-draft PR on this branch -- not pushing untested WIP under auto-merge"
+        return res
+    if reason in ("timed-out", "killed", "ended"):
         res["wip_commit"] = commit_wip(wt, items)
     res["commits"] = commits_ahead(wt)
     if res["commits"] == 0:
@@ -408,7 +422,7 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--wt", required=True)
     s.add_argument("--branch", required=True)
     s.add_argument("--items", required=True)
-    s.add_argument("--reason", required=True, choices=["green", "pre-timeout", "timed-out", "killed"])
+    s.add_argument("--reason", required=True, choices=["green", "pre-timeout", "timed-out", "killed", "ended"])
     f = sub.add_parser("find")
     f.add_argument("--items", required=True)
     f.add_argument("--repo", default=".")

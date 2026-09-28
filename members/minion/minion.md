@@ -156,7 +156,9 @@ work done).
    completion notification" instead means nobody ever sees the result; there is no later turn
    that resumes you. If you can't afford to wait for a full suite in this pass's budget, run a
    narrower, faster command you CAN wait for (targeted tests for what you touched) rather than
-   backgrounding a slow one you won't see finish.**
+   backgrounding a slow one you won't see finish.** The Stop hook refuses to end your pass
+   while any task you launched (background Bash, Monitor) is still running -- `TaskStop` the
+   ones you no longer need before your report. There is no wakeup: `ScheduleWakeup` is denied.
 3b. **A browser ships in this image — USE IT when the item touches rendered UI.** Playwright +
    headless chromium are installed and verified live; "no browser tooling" was the reason 15
    of your own self-critiques gave for missing an issue's OWN acceptance criteria. Same
