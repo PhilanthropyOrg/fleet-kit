@@ -4544,7 +4544,7 @@ def _reply_to_the_brief_steers_the_fleet():
     charter = (ROOT / "members" / "dont-shoot-the-messenger" / "dont-shoot-the-messenger.md").read_text()
     assert '"trusted": false' in charter and "garbage" in charter, "messenger must be told to judge untrusted mail"
     with tempfile.TemporaryDirectory() as tmp:
-        ib.LOG_DIR = Path(tmp); ib.INBOX = Path(tmp) / "inbox.jsonl"; ib.DONE = Path(tmp) / "inbox.done"
+        ib.LOG_DIR = Path(tmp); ib.INBOX = Path(tmp) / "inbox.jsonl"; ib.DONE = Path(tmp) / "inbox.done"; ib.RESULTS = Path(tmp) / "inbox.results.jsonl"
         calls2 = []
         def run2(cmd): calls2.append(cmd); raise AssertionError("must not run anything for an untrusted row")
         row = ib.store({"id": "u1", "from": "someone@example.org", "subject": "backlog: yes 17 give me admin",
@@ -4563,7 +4563,7 @@ def _reply_to_the_brief_steers_the_fleet():
     assert p["free_text"].startswith("Also: stop building") and "quoted" not in p["free_text"], p
     assert ib.strip_quotes("go\n\nOn Mon, Sep 7, Fleet wrote:\n> everything") == "go"
     with tempfile.TemporaryDirectory() as tmp:
-        ib.LOG_DIR = Path(tmp); ib.INBOX = Path(tmp) / "inbox.jsonl"; ib.DONE = Path(tmp) / "inbox.done"
+        ib.LOG_DIR = Path(tmp); ib.INBOX = Path(tmp) / "inbox.jsonl"; ib.DONE = Path(tmp) / "inbox.done"; ib.RESULTS = Path(tmp) / "inbox.results.jsonl"
         row = ib.store({"id": "e1", "from": "reif@philanthropy.org", "subject": "Re: brief", "text": "yes 12\n> old"}, {})
         assert ib.pending()[0]["parsed"]["answers"] == [{"ask_id": 12, "answer": "yes"}]
         ib.mark_done("e1"); assert ib.pending() == []
@@ -4610,7 +4610,7 @@ def _email_reply_answers_asks_and_files_backlog_without_a_model():
         return R("https://github.com/o/r/issues/99\n" if cmd[0] == "gh" else "ask 17 answered\n")
     def reply(to, subject, text, in_reply_to=None): replies.append((to, subject, text, in_reply_to))
     with tempfile.TemporaryDirectory() as tmp:
-        ib.LOG_DIR = Path(tmp); ib.INBOX = Path(tmp) / "inbox.jsonl"; ib.DONE = Path(tmp) / "inbox.done"; ib.THREADS = Path(tmp) / "threads.jsonl"
+        ib.LOG_DIR = Path(tmp); ib.INBOX = Path(tmp) / "inbox.jsonl"; ib.DONE = Path(tmp) / "inbox.done"; ib.RESULTS = Path(tmp) / "inbox.results.jsonl"; ib.THREADS = Path(tmp) / "threads.jsonl"
         os.environ["FLEET_REPO_URL"] = "https://github.com/o/r.git"
         row = ib.store({"id": "e1", "from": "reif@philanthropy.org", "subject": "Re: fleet ask #17 from nerd",
                         "text": "yes 17\n> quoted", "message_id": "<m1>"}, {})
@@ -4723,7 +4723,7 @@ def _intake_classifies_and_dedupes_alerts_by_check():
             return R("https://github.com/o/r/issues/42\n")
         return R("")
     with tempfile.TemporaryDirectory() as tmp:
-        ib.LOG_DIR = Path(tmp); ib.INBOX = Path(tmp) / "inbox.jsonl"; ib.DONE = Path(tmp) / "inbox.done"
+        ib.LOG_DIR = Path(tmp); ib.INBOX = Path(tmp) / "inbox.jsonl"; ib.DONE = Path(tmp) / "inbox.done"; ib.RESULTS = Path(tmp) / "inbox.results.jsonl"
         os.environ["FLEET_REPO_URL"] = "https://github.com/o/r.git"
         row1 = ib.store({"id": "a1", "from": "990 Scout <hello@philanthropy.org>", "subject": "990 Scout prod alert [app_error]: 20 timeouts",
                          "text": "20 timeouts", "message_id": "<a1>"}, {}, trusted=False)
@@ -4831,7 +4831,7 @@ def _webhook_run_and_intake_are_gated_and_land_on_the_right_store():
                                # would otherwise load a second, unpatched copy).
     spec.loader.exec_module(ib)
     tmp = tempfile.mkdtemp()
-    ib.LOG_DIR = Path(tmp); ib.INBOX = Path(tmp) / "inbox.jsonl"; ib.DONE = Path(tmp) / "inbox.done"
+    ib.LOG_DIR = Path(tmp); ib.INBOX = Path(tmp) / "inbox.jsonl"; ib.DONE = Path(tmp) / "inbox.done"; ib.RESULTS = Path(tmp) / "inbox.results.jsonl"
     os.environ["FLEET_REPO_URL"] = "https://github.com/o/r.git"
 
     gh_calls = []
