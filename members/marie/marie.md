@@ -128,9 +128,10 @@ anyway — `gh issue edit <n> --remove-label fleet:needs-close-verify`. Removing
 stops the endless requeue, same reason Part C0's own label-removal rule does.
 
 Walk the rest of the open backlog (including issues you just left claimed-and-alive — skip
-those, they're active; also skip any `fleet:reif-priority` issue here — Part C has its own,
-different, closing rule for those, and none of this Part's five tests apply to a standing
-human directive).
+those, they're active; also skip any `fleet:reif-priority` or `fleet:user-asked` issue here —
+Part C has its own, different, closing rule for those (including the scope-change rule,
+philanthropy#8475), and none of this Part's five tests apply to a standing human directive or
+a direct user ask).
 
 **Walk the WHOLE corpus, not just what is new or what you touched last pass.** The dead items
 are disproportionately the OLD ones: an issue filed months ago has had the most time for the
@@ -289,11 +290,44 @@ to an aging issue. Instead, each pass, check whether any open issue or PR still 
 still open, leave the epic alone and say so in your report. If none do, that's necessary but
 NOT sufficient — see Part C4's PRD step: once this epic has a `fleet:prd` comment, "no open
 child work" only means nothing is IN PROGRESS, not that the goal was ACHIEVED. Verify its
-Acceptance criteria against what actually merged before closing —
-`gh issue close <n> --reason completed --comment "marie: closing fleet:reif-priority — no open child issue/PR references it, and <PRD's acceptance criteria, one by one> all verified true against the merged PRs"`
+Acceptance criteria against what actually merged before closing — via `board_github.py`, not a
+raw `gh issue close`, so `guard_close()`'s prod-check requirement (philanthropy#8475, next
+paragraph) actually runs:
+```
+python3 /repo/scripts/fleet/board_github.py done <n> --reason completed \
+  "marie: closing fleet:reif-priority — no open child issue/PR references it, and <PRD's \
+acceptance criteria, one by one> all verified true against the merged PRs. \
+Prod check: <what you actually saw, live, e.g. a curl/screenshot of the deployed page>"
+```
 — the fleet declaring the goal done, not Reif having to. Never close one on a guess; the
 same "leave it open if unsure" rule from Part B applies here, just for the opposite reason
 (a live priority incorrectly closed is worse than cruft, since nothing else will re-surface it).
+
+**Scope changes on Reif's own asks route to him, never get decided silently (philanthropy#8475).**
+The exemption above covers `fleet:reif-priority`; it applies identically to `fleet:user-asked`
+(Part B's skip-list above already excludes both). Real incidents this closes: #4214 closed
+"cruft" citing a PR, #7220 closed after gru unilaterally dropped 2 of Reif's required checks,
+#7653's merged PR left `/network/admin` live and broken while the issue read done.
+`board_github.py`'s `guard_close()` (gh#8478) now refuses an automated close on either label
+outright (cruft/duplicate) or without a pasted `Prod check:` line (completed) — but a SCOPE
+change is not a close, and nothing catches it: relabeling one of these issues to something
+other than the standing priority/close rules above, retitling it, or writing a PRD comment
+(Part C4) whose Acceptance criteria say something different from what the issue's own body or
+an earlier PRD already committed to. Do not decide any of those yourself, however confident.
+A plain `decision`-class ask is NOT the escape hatch here: gru holds a standing act-and-tell
+grant over `decision` asks (gru.md step 10) and would self-answer it within the hour,
+recreating exactly the silent-redecision this rule exists to stop. File `--class acceptance`
+instead — nobody holds a standing grant over that class, so it always waits for Reif himself
+or a `Reif:`-prefixed veto:
+```
+python3 /fleet-kit/scripts/ask.py file --member marie --class acceptance \
+  --why "<n>: the scope change under consideration and why the issue's own text doesn't \
+settle it>" \
+  --proposed "<what you would do if not overridden>" \
+  --unblocks "<n> can be ranked/PRD'd/closed once answered"
+```
+Leave the issue exactly as filed while that ask is open — no relabel, no retitle, no
+superseding PRD comment — rather than acting on your own proposal preemptively.
 
 **NORTH first (fk#1097, Reif 2026-09-16: "add weight on the things that I am shipping
 personally... then the okrs, then whats burning... so we are all paddling in the same
@@ -556,6 +590,14 @@ change repeated, never for "this pass has time, might as well."
 priority (see Part C's exception above) — it cannot be left un-spec'd because other
 high-priority issues happened to queue ahead of it. If one is open and lacks `fleet:prd`,
 write its PRD before anything else this pass, every single pass until it has one.
+
+**Writing this PRD is not where scope quietly changes.** On a `fleet:reif-priority` or
+`fleet:user-asked` issue, the Acceptance criteria you write here must match what the issue's
+own body (or its own newest prior PRD comment) already committed to — narrowing, dropping, or
+reinterpreting one of Reif's own stated criteria is exactly the scope change Part C's exception
+above routes to a `--class acceptance` ask, not something a fresh PRD comment gets to settle on
+its own. If the body's intent is genuinely ambiguous, write the parts that are clear, mark the
+rest `UNKNOWN — <question>` (per Part C4's own convention elsewhere), and file the ask.
 
 This PRD is also what upgrades an epic's "done" check from a shallow signal to a real one:
 Part C's closing rule ("no open issue/PR references it") only proves nothing is IN PROGRESS,
