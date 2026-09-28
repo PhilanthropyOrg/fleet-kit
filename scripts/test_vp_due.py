@@ -127,6 +127,45 @@ class DueTests(unittest.TestCase):
         self.assertEqual(out["due"], [10])
         self.assertEqual(out["skipped"][0]["number"], 11)
 
+    def test_573_minion_running_blocks_rereview_even_with_newer_merge(self):
+        """fk#840, real #573 timeline (2026-09-11): Not yet 03:55:30Z, redo minion spawned
+        04:00:46Z, a second vp pass at 04:30:56Z rewrote the spec under the builder."""
+        it = item(573, comments=[("Not yet (VP review): 7 fixes", "2026-09-11T03:55:30Z")],
+                  merged=["2026-09-11T04:23:07Z"])
+        self.assertEqual(vp_due.is_due(it, running_minions={573}), (False, "minion already running"))
+        self.assertEqual(vp_due.is_due(it, running_minions=set()), (True, "merge newer than last verdict"))
+
+
+class EpicDueTests(unittest.TestCase):
+    """fk#840: a tracking-only epic is not due for a VP review while any real child is open."""
+
+    def _epic(self, **kw):
+        it = epic(634, **kw)
+        it["merged_prs"] = [{"number": 1, "mergedAt": T2}]
+        return it
+
+    def test_open_subissue_child_blocks(self):
+        ok, why = vp_due.is_due(self._epic(sub_issues=sub_issues((651, "OPEN"), (652, "CLOSED"))))
+        self.assertFalse(ok)
+        self.assertIn("#651", why)
+        self.assertNotIn("#652", why)
+
+    def test_all_subissues_closed_falls_through(self):
+        it = self._epic(sub_issues=sub_issues((651, "CLOSED"), (652, "CLOSED")))
+        self.assertEqual(vp_due.is_due(it), (True, "no verdict yet"))
+
+    def test_decomposed_comment_children_use_is_open(self):
+        """fk#966 review: children named only in a `decomposed into` comment must be looked up,
+        not read as open forever."""
+        it = self._epic(comments=[("marie: decomposed into #651, #652 (Part C2b)", T1)])
+        self.assertEqual(vp_due.is_due(it, is_open=lambda n: False), (True, "no verdict yet"))
+        ok, why = vp_due.is_due(it, is_open=lambda n: n == 652)
+        self.assertFalse(ok)
+        self.assertIn("#652", why)
+
+    def test_epic_with_no_children_uses_normal_rule(self):
+        self.assertEqual(vp_due.is_due(self._epic()), (True, "no verdict yet"))
+
 
 class ClaimsItemTests(unittest.TestCase):
     """gh#636 VP round-2 fix 7: `collect()` must only count a PR as a merged build slice for
