@@ -164,7 +164,7 @@ class CatalogCoverageTest(unittest.TestCase):
 
     def test_catalog_loads(self):
         catalog = jw.load_catalog(CATALOG_PATH)
-        self.assertEqual(len(catalog["journeys"]), 16)  # 10 + the 6 persona journeys (journey_hq.py)
+        self.assertEqual(len(catalog["journeys"]), 18)  # 10 + the 8 persona/staff journeys (journey_hq.py)
 
     def test_every_catalog_id_has_a_runner(self):
         catalog = jw.load_catalog(CATALOG_PATH)
