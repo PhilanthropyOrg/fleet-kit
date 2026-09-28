@@ -10,7 +10,11 @@ the member whose job it was to act.
 
 THE BUS. One `msgs` table in fleet.db (next to `asks`, same file, same connect()):
 
-  send      one row per recipient; a (to, kind, key) already sent in the last 6h is not re-sent
+  send      one row per recipient; a (to, kind, key) already sent in the last 6h is not re-sent.
+            a WAKE_KINDS kind (cause/incident/pr-block/nudge) also launches the recipient's next
+            pass now, detached like dispatch_member.sh, coalesced to one per
+            FLEET_MSG_WAKE_COOLDOWN_S -- marie having 7 unread at her next 4h cron tick is the
+            gap this closes
   inbox     a member's open messages. run_member.sh puts `inbox --render` FIRST in every pass's
             prompt, so a member reads its mail before its charter
   ack       "I did it" (status acked) -- or `reply`, "I didn't, and here is why" (status
@@ -40,6 +44,7 @@ import argparse
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -94,6 +99,103 @@ def send(conn, sender: str, recipients, kind: str, key: str, body: str,
             (sender, to, kind, key, body, json.dumps(list(items or [])), now, parent_id))
         out.append({"to": to, "id": cur.lastrowid, "deduped": False})
     conn.commit()
+    return out
+
+
+# --- wake ------------------------------------------------------------------------------------
+# THE GAP: cron cadence is the ONLY thing that reads a message before this -- marie runs every
+# 4h and had 7 unread, nerd sat on one for 7h, dumbledore's `cause` msg landed 30min after his
+# pass had already ended for the cadence. A WAKE_KINDS kind launches the recipient's next pass
+# now instead of waiting. `send()` itself stays pure (existing tests call it directly); this
+# runs after it, from the CLI `send` path only.
+
+WAKE_KINDS = {k.strip() for k in os.environ.get(
+    "FLEET_MSG_WAKE_KINDS", "cause,incident,pr-block,nudge").split(",") if k.strip()}
+WAKE_COOLDOWN_S = float(os.environ.get("FLEET_MSG_WAKE_COOLDOWN_S", 1800))
+
+
+def _log_dir(log_dir=None) -> Path:
+    return Path(log_dir or os.environ.get(
+        "FLEET_LOG_DIR", Path.home() / "Library" / "Logs" / "fleet-kit")).expanduser()
+
+
+def _wake_stamp_path(member: str, log_dir=None) -> Path:
+    return _log_dir(log_dir) / "wake" / f"{member}.last"
+
+
+def _cooling_down(member: str, now: float, cooldown_s: float, log_dir=None) -> bool:
+    try:
+        last = float(_wake_stamp_path(member, log_dir).read_text().strip())
+    except (OSError, ValueError):
+        return False
+    return (now - last) < cooldown_s
+
+
+def _stamp_wake(member: str, now: float, log_dir=None) -> None:
+    p = _wake_stamp_path(member, log_dir)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(str(now))
+
+
+def _default_launcher(member: str, reason: str) -> None:
+    """setsid nohup detached run_member.sh <member>, same shape as dispatch_member.sh's own
+    launch, appending to $FLEET_LOG_DIR/<member>.log. FLEET_RUN_MEMBER overrides the script
+    path -- same env name dispatch_member.sh reads, so a test can point it at a stub instead of
+    spawning a real pass. No FLEET_RUN_NOW=1: run_member.sh:309 uses that to bypass
+    enabled=false, and disabled members are already filtered out before a launcher is ever
+    called."""
+    log_dir = _log_dir()
+    log_dir.mkdir(parents=True, exist_ok=True)
+    run_member = os.environ.get("FLEET_RUN_MEMBER", str(HERE / "run_member.sh"))
+    env = dict(os.environ)
+    env["FLEET_FIRED_BY"] = "fleet_msg"
+    env["FLEET_FIRED_REASON"] = reason
+    if not env.get("GH_TOKEN"):
+        tok_path = Path("/root/.gh_token")
+        try:
+            if tok_path.exists():
+                env["GH_TOKEN"] = tok_path.read_text().strip()
+        except OSError:
+            pass
+    with open(log_dir / f"{member}.log", "a") as log_f:
+        subprocess.Popen(["setsid", "nohup", "bash", run_member, member], stdin=subprocess.DEVNULL,
+                         stdout=log_f, stderr=log_f, env=env, start_new_session=True)
+
+
+def wake(conn, sent: list[dict], kind: str, specs=None, now: float | None = None, launcher=None,
+         cooldown_s: float | None = None, log_dir=None) -> list[dict]:
+    """After send(): for each non-deduped row whose kind is in WAKE_KINDS, wake that recipient
+    now -- unless it's hq, has no members/<name>/ spec, is enabled=false, or was already woken
+    within cooldown_s. Returns `sent` with "woken" (bool) and "wake_reason" (why not, else
+    None) added to each row."""
+    now = time.time() if now is None else now
+    cooldown_s = WAKE_COOLDOWN_S if cooldown_s is None else cooldown_s
+    launcher = launcher or _default_launcher
+    if specs is None:
+        specs = _specs()
+    out = []
+    for row in sent:
+        row = dict(row)
+        to = row["to"]
+        if row.get("deduped"):
+            reason = "deduped"
+        elif kind not in WAKE_KINDS:
+            reason = "kind"
+        elif to == "hq":
+            reason = "hq"
+        elif to not in specs:
+            reason = "no-spec"
+        elif not specs[to].get("enabled", True):
+            reason = "disabled"
+        elif _cooling_down(to, now, cooldown_s, log_dir):
+            reason = "cooldown"
+        else:
+            reason = None
+        if reason is None:
+            launcher(to, f"msg-{row['id']}-{kind}")
+            _stamp_wake(to, now, log_dir)
+        row["woken"], row["wake_reason"] = reason is None, reason
+        out.append(row)
     return out
 
 
@@ -384,7 +486,8 @@ def main(argv=None) -> int:
 
     if a.cmd == "send":
         items = [int(x) for x in re.findall(r"\d+", a.items)]
-        print(json.dumps(send(conn, a.sender, a.to, a.kind, a.key or a.kind, a.body, items)))
+        sent = send(conn, a.sender, a.to, a.kind, a.key or a.kind, a.body, items)
+        print(json.dumps(wake(conn, sent, a.kind)))
     elif a.cmd == "inbox":
         msgs = inbox(conn, a.me)
         if a.mark_read:
