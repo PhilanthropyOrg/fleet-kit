@@ -204,8 +204,21 @@ def _fetch_live(repo: str) -> tuple[list[dict], list[dict]]:
     return issues, prs
 
 
+def _repo_slug() -> str:
+    """OWNER/REPO for `gh --repo`. In the container FLEET_REPO is the checkout path (/repo), which
+    gh rejects -- 46 marie passes logged `expected the "[HOST/]OWNER/REPO" format, got "/repo"`
+    and saw zero candidates. FLEET_REPO_URL carries the real slug; FLEET_REPO is used only when
+    it already is one."""
+    url = (os.environ.get("FLEET_REPO_URL") or "").strip()
+    slug = url.rsplit("github.com", 1)[-1].lstrip(":/").removesuffix(".git").strip("/")
+    if slug.count("/") == 1 and all(slug.split("/")):
+        return slug
+    repo = os.environ.get("FLEET_REPO", "").strip()
+    return repo if re.fullmatch(r"[\w.-]+/[\w.-]+", repo) else ""
+
+
 def main() -> int:
-    repo = os.environ.get("FLEET_REPO", "")
+    repo = _repo_slug()
     issues, prs = _fetch_live(repo)
     result = candidates(issues, prs, time.time())
     print(json.dumps(result, indent=2))

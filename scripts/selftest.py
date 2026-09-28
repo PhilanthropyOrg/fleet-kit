@@ -15669,6 +15669,25 @@ def _marie_charter_wires_fold_candidates_and_the_fold_label_fk1127():
     assert "PART C5" in md.upper(), "no PART C5 section in marie.md"
 
 
+def _fold_candidates_uses_slug_not_checkout_path():
+    """In the container FLEET_REPO=/repo (a path); `gh --repo /repo` fails, so marie's fold-in
+    saw zero candidates on 46 passes. The slug must come from FLEET_REPO_URL."""
+    import os
+    import fold_candidates
+    saved = {k: os.environ.get(k) for k in ("FLEET_REPO", "FLEET_REPO_URL")}
+    try:
+        os.environ["FLEET_REPO"] = "/repo"
+        os.environ["FLEET_REPO_URL"] = "https://github.com/PhilanthropyOrg/philanthropy.git"
+        assert fold_candidates._repo_slug() == "PhilanthropyOrg/philanthropy"
+        os.environ.pop("FLEET_REPO_URL")
+        assert fold_candidates._repo_slug() == "", "a checkout path must never reach gh --repo"
+        os.environ["FLEET_REPO"] = "PhilanthropyOrg/philanthropy"
+        assert fold_candidates._repo_slug() == "PhilanthropyOrg/philanthropy"
+    finally:
+        for k, v in saved.items():
+            os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+
+
 def _roster_is_ten_members_after_fk1195_fold():
     """fk#1195: 18 member dirs folded to 10 (Reif 2026-09-21: "keep members under 10, add tasks
     to existing members, never create new ones"). jefe, dumbledore, roomba, custodian, signals,
@@ -16157,6 +16176,7 @@ if __name__ == "__main__":
     check("worktree_builder.sh parses --onto-pr and falls back to a new PR on a queue-rejected push (fk#1127)", _worktree_builder_parses_onto_pr_flag_and_has_the_queue_fallback_fk1127)
     check("worktree_builder.sh --item claims that exact issue and the fold push is --force-with-lease (fk#1202)", _worktree_builder_pins_the_item_and_force_pushes_the_fold_fk1202)
     check("marie's charter wires fold_candidates.py and the fleet:fold-into-pr label (fk#1127)", _marie_charter_wires_fold_candidates_and_the_fold_label_fk1127)
+    check("fold_candidates reads the repo slug from FLEET_REPO_URL, never the /repo checkout path", _fold_candidates_uses_slug_not_checkout_path)
     check("roster is 10 members after fk#1195's fold, no archived member still on cron, every moved duty lands (fk#1195)", _roster_is_ten_members_after_fk1195_fold)
     for n in ok:
         print(f"  ok    {n}")
