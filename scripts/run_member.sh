@@ -1135,6 +1135,16 @@ TRAILING_LOSS_FLAG=""
 [ -s "$TRAILING_LOSS_FILE" ] && TRAILING_LOSS_FLAG="--trailing-loss"
 rm -f "$TRAILING_LOSS_FILE"
 
+# Ended on its own (rc=0) without an Outcome: line -- 2026-09-27, 56 minions ended "waiting for
+# the background run" with a build committed or typed and never pushed. The model is dead, so
+# save it like a timeout: WIP commit, push, draft PR; the next pass resumes instead of redoing it.
+if [ "$RC" -eq 0 ] && [ "$MEMBER" = "minion" ] && [ -n "$WT_PATH" ] && [ -n "$ITEM" ] && [ "${FLEET_MINION_CHECKPOINT:-1}" = "1" ] \
+   && ! printf '%s' "$OUT" | grep -qiE '^[[:space:]#*_]*Outcome[*_]*[[:space:]]*:'; then
+  timeout 300 python3 "$KIT_DIR/scripts/minion_checkpoint.py" save --wt "$WT_PATH" \
+    --branch "$WT_BRANCH" --items "$ITEM" --reason ended 2>&1 | tail -c 1500 >> "$CHECKPOINT_OUT"
+  log "checkpoint: $(tail -c 1500 "$CHECKPOINT_OUT")"
+fi
+
 CHECKPOINT_PR=$(grep '"saved": true' "$CHECKPOINT_OUT" 2>/dev/null | grep -o '"pr": [0-9][0-9]*' | tail -1 | grep -o '[0-9][0-9]*$')
 rm -f "$CHECKPOINT_OUT"
 
