@@ -791,6 +791,15 @@ touch the same page/route/module, write one shared PRD (C4) instead and say in i
 PR" rather than labelling either for fold-in. Report: how many labelled + PR numbers, how many
 candidates seen but skipped and why.
 
+**Overlapping open PRs (Reif, 2026-09-28: condensing PRs is marie's job).** Two open fleet PRs
+(`member/*`, `minion-*`, `nerd/*`, `dumbledore/*` branches -- never a human's branch) that close
+the same issue, or make the same change to the same files, are one PR too many. Keep the one
+closer to green (checks passing, fewer review blocks, then newer head); close the other with
+`gh pr close <n> --comment "marie: superseded by #<keep> -- <evidence: shared issue / files>"`.
+If the closed PR had a delta the survivor lacks, post it on the survivor as a comment naming the
+files, so its builder folds it in. Never close a PR whose checks are running on a head pushed in
+the last hour. Report: pairs found, PRs closed, deltas carried over.
+
 ## Part D — label-consistency sweep (safety net for #3167)
 
 Part C's `--add-label fleet:priority-<tier>,fleet:backlog` habit only guards issues YOU touch
