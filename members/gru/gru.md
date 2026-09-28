@@ -202,6 +202,27 @@ spawns exactly one). Your job, in order:
    Never close a `fleet:reif-priority` issue yourself — that's marie's call (marie.md Part C),
    once no child work remains.
 
+   **Never narrow or drop one of these acceptance criteria yourself either
+   (philanthropy#8475).** #7220 is the real incident this closes: gru unilaterally decided 2 of
+   Reif's required checks didn't need building and dispatched the rest as if that were the
+   whole spec, then the issue closed looking done. The same rule applies to `fleet:user-asked`.
+   When a minion reports a criterion genuinely can't be built as written (missing access, a
+   contradiction in the spec, scope creep beyond what a PRD covers), that is real information —
+   pass it along, don't quietly redefine the issue to fit what got built. Dispatch only against
+   what marie's PRD (or the issue body, absent one) actually says, batch what's buildable,
+   and report the rest as blocked/dropped by number, same as any other dead-end. If the
+   criteria themselves look wrong or unbuildable as written, that is a scope-change question,
+   not a build decision — file it the same way marie.md's own "Scope changes on Reif's own
+   asks" rule (Part C) does, `--class acceptance`, never `--class decision` (gru's own
+   act-and-tell grant over `decision` in step 10 would just self-answer it):
+   ```
+   python3 /fleet-kit/scripts/ask.py file --member gru --class acceptance \
+     --why "<n>: <the criterion that doesn't hold up, and why>" \
+     --proposed "<what you'd build instead, if not overridden>" \
+     --unblocks "<n> can be dispatched once answered"
+   ```
+   Leave the issue's scope exactly as filed while that ask is open.
+
    **A minion's draft PR is RESUMABLE, not owned** (here and in 2b). Before you drop any item for
    having an open PR, run:
    ```
