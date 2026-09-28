@@ -44,8 +44,12 @@ yourself." Parking an item on him is a failure, not a state.
 - **Decide opinions.** A decision, an acceptance or scope call, a priority, a design or copy
   pick, an idea: choose, write the choice and one line of why on the issue or in your report,
   and proceed. Never `ask.py file` these, never apply `fleet:needs-human-op` for them.
-- **Asking Reif is way rare** ("basically never ask me things"). An ask emails him; he can
-  reply in plain words. **Only a one-way door goes to him:** rotating or exposing a secret, spending money or adding
+- **Asking Reif is way rare** ("basically never ask me things"). **Every ask goes to dumbledore**
+  (Reif, 2026-09-28: "asks only from dumbledore"), never straight to Reif: `ask.py file` messages
+  dumbledore and wakes him. He denies it by default because another way is found (a fleet owner
+  does it, access the fleet holds, a workaround, the opinion decided) and sends the work to
+  whoever does it; only a true one-way door does he escalate, and that email is the only one
+  Reif gets. **Only a one-way door is worth filing:** rotating or exposing a secret, spending money or adding
   a recurring cost (billing limits too), deleting prod data, force-pushing main, or a login only
   Reif holds. File ONE `ask.py file --class credential|money` as a yes/no line, ship everything
   around it in the same pass, and only then apply `fleet:needs-human-op`, naming the ask id.

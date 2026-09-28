@@ -45,40 +45,121 @@ class OpinionsAreDecidedNotAsked(unittest.TestCase):
                 self.assertEqual(_file(d, cls), "open", cls)
 
 
-class TheRareAskStillEmailsReif(unittest.TestCase):
-    """An ask is how Reif hears about a one-way door, by email he can reply to. Opinions never page."""
+class OnlyDumbledoreReachesReif(unittest.TestCase):
+    """Reif, 2026-09-28: "asks only from dumbledore" and "dumbledore actually denies the request
+    because another way is found." Any other member's ask messages dumbledore (urgent, it wakes
+    him) and never pages Reif. dumbledore denies with a path by default; only an escalation,
+    with a reason, emails Reif under dumbledore's name, and Reif's email reply still answers it."""
 
-    def _run(self, cls):
-        import subprocess
+    def setUp(self):
+        import os, subprocess
         from unittest import mock
-        calls = []
+        import fleet_msg
+        self.d = tempfile.mkdtemp()
+        self.db = str(Path(self.d) / "fleet.db")
+        self.pages, self.woken = [], []
         real = subprocess.run
         def fake(cmd, *a, **kw):
             if cmd and cmd[0] == "bash" and str(cmd[1]).endswith("fleet_alert.sh"):
-                calls.append((cmd, kw.get("env", {})))
+                self.pages.append((cmd, kw.get("env", {})))
                 return subprocess.CompletedProcess(cmd, 0, b"", b"")
             return real(cmd, *a, **kw)
-        with tempfile.TemporaryDirectory() as d, mock.patch.object(ask.subprocess, "run", fake), \
-                mock.patch.object(ask, "issue_for_ask", lambda *a, **k: ""):
-            rc = ask.main(["--db-path", str(Path(d) / "fleet.db"),
-                           "--authority-path", str(Path(d) / "none" / "authority.json"),
-                           "file", "--member", "gru", "--why", "rotate the leaked token?",
-                           "--class", cls])
-        self.assertEqual(rc, 0)
-        return calls
+        for p in (mock.patch.object(ask.subprocess, "run", fake),
+                  mock.patch.object(ask, "issue_for_ask", lambda *a, **k: ""),
+                  mock.patch.object(fleet_msg, "_default_launcher",
+                                    lambda m, r: self.woken.append(m)),
+                  mock.patch.dict(os.environ, {"FLEET_LOG_DIR": self.d})):
+            p.start(); self.addCleanup(p.stop)
 
-    def test_one_way_door_ask_emails_reif(self):
-        calls = self._run("credential")
-        self.assertEqual(len(calls), 1)
-        self.assertEqual(calls[0][1].get("FLEET_ALERT_EMAIL_LEG"), "1")
+    def ask(self, *argv):
+        return ask.main(["--db-path", self.db, "--authority-path",
+                         str(Path(self.d) / "none" / "authority.json"), *argv])
 
-    def test_opinion_never_pages(self):
-        self.assertEqual(self._run("decision"), [])
+    def conn(self):
+        return fleet_db.connect(Path(self.db))
+
+    def file(self, member="gru", cls="credential"):
+        self.assertEqual(self.ask("file", "--member", member, "--why", "rotate the leaked token?",
+                                  "--class", cls), 0)
+        return ask.list_asks(self.conn(), status="all")[0]["id"]
+
+    def test_member_ask_messages_dumbledore_and_never_pages_reif(self):
+        import fleet_msg
+        ask_id = self.file()
+        self.assertEqual(self.pages, [])
+        box = fleet_msg.inbox(self.conn(), "dumbledore")
+        self.assertEqual(len(box), 1)
+        self.assertEqual((box[0]["kind"], box[0]["sender"], box[0]["ask_id"]), ("ask", "gru", ask_id))
+        self.assertEqual(self.woken, ["dumbledore"])
+
+    def test_credential_ask_is_denied_with_a_path_not_a_page(self):
+        import fleet_msg
+        ask_id = self.file()
+        self.assertEqual(self.ask("deny", str(ask_id), "--me", "dumbledore", "--path",
+                                  "the token is already in fleet.env; the-fixer wires it",
+                                  "--to", "the-fixer"), 0)
+        self.assertEqual(self.pages, [])
+        row = ask.list_asks(self.conn(), status="all")[0]
+        self.assertEqual((row["status"], row["answered_by"]), ("denied", "dumbledore"))
+        self.assertIn("fleet.env", row["answer"])
+        self.assertEqual(fleet_msg.inbox(self.conn(), "dumbledore"), [])
+        work = fleet_msg.inbox(self.conn(), "the-fixer")
+        self.assertEqual(len(work), 1)
+        self.assertIn(f"ask #{ask_id}", work[0]["body"])
+        self.assertEqual(len(ask.list_asks(self.conn(), status="all")), 1, "one ask id end to end")
+
+    def test_escalation_pages_reif_as_dumbledore_and_email_reply_answers(self):
+        ask_id = self.file()
+        self.assertNotEqual(self.ask("escalate", str(ask_id), "--me", "gru", "--reason", "x"), 0)
+        self.assertEqual(self.pages, [])
+        self.assertEqual(self.ask("escalate", str(ask_id), "--me", "dumbledore", "--reason",
+                                  "the token must be rotated at the provider; only Reif's login can"), 0)
+        self.assertEqual(len(self.pages), 1)
+        cmd, env = self.pages[0]
+        self.assertEqual(env.get("FLEET_ALERT_EMAIL_LEG"), "1")
+        self.assertIn(f"fleet ask #{ask_id} from dumbledore (for gru)", cmd)
+        self.assertIn(f"yes {ask_id}", cmd[-1])
+        self.assertEqual(len(ask.list_asks(self.conn(), status="all")), 1, "one ask id end to end")
+        # Reif's reply, the way webhook_receiver/inbox.py applies it.
+        import inbox
+        parsed = inbox.parse_reply(f"yes {ask_id}: rotated")
+        rc = [self.ask("answer", str(a["ask_id"]), "--answer", a["answer"],
+                       "--answered-by", "reif (email)") for a in parsed["answers"]]
+        self.assertEqual(rc, [0])
+        row = ask.list_asks(self.conn(), status="all")[0]
+        self.assertEqual((row["status"], row["answered_by"]), ("answered", "reif (email)"))
+        self.assertEqual(ask.triage_rate(self.conn())["escalated"], 1)
+
+    def test_escalation_rate_counts_escalated_over_triaged(self):
+        for _ in range(3):
+            i = self.file()
+            self.ask("deny", str(i), "--me", "dumbledore", "--path", "another way")
+        i = self.file()
+        self.ask("escalate", str(i), "--me", "dumbledore", "--reason", "only Reif's login")
+        r = ask.triage_rate(self.conn())
+        self.assertEqual((r["triaged"], r["escalated"], r["denied"]), (4, 1, 3))
+
+    def test_dumbledores_own_ask_emails_reif(self):
+        self.file(member="dumbledore")
+        self.assertEqual(len(self.pages), 1)
+        self.assertEqual(self.pages[0][1].get("FLEET_ALERT_EMAIL_LEG"), "1")
+
+    def test_opinion_never_pages_or_messages(self):
+        import fleet_msg
+        self.file(cls="decision")
+        self.assertEqual(self.pages, [])
+        self.assertEqual(fleet_msg.inbox(self.conn(), "dumbledore"), [])
 
 
 class SpecsSayNothingWaitsOnAHuman(unittest.TestCase):
     def read(self, rel):
         return (ROOT / rel).read_text()
+
+    def test_specs_route_asks_through_dumbledore(self):
+        self.assertIn("Every ask goes to dumbledore", self.read("agents/persona_law.md"))
+        d = self.read("members/dumbledore/dumbledore.md")
+        for s in ("ask.py deny", "ask.py escalate", "ask.py triage-rate", "Escalation-rate:"):
+            self.assertIn(s, d)
 
     def test_persona_law_has_the_rule(self):
         law = self.read("agents/persona_law.md")
