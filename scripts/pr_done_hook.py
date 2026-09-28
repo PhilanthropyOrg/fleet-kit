@@ -170,9 +170,10 @@ def decide(env: dict, gh=pr_ci_wait._gh, branch_of=_branch, payload: dict | None
             return (f"Not done: background task(s) {ids} are still running (stop refused "
                     f"{n}/{max_blocks(env)}). This is a one-shot `claude -p` pass: when this turn "
                     f"ends the session ends, those tasks die, and no notification ever reaches "
-                    f"you.\n1. For each: `TaskOutput(task_id, block: true, timeout: 600000)` -- "
-                    f"again if it answers `running` -- or `TaskStop` it if you no longer need it "
-                    f"(a stale Monitor or sleep).\n2. Then finish the job (push, PR, "
+                    f"you, and no tool waits on it (`TaskOutput` does not exist).\n1. `TaskStop` each "
+                    f"one, then re-run what you still need in the FOREGROUND with "
+                    f"`Bash(..., timeout: 600000)` (targeted tests if 10 minutes is not enough)."
+                    f"\n2. Then finish the job (push, PR, "
                     f"`pr_ci_wait.py` in the foreground).\n3. End with your full Report / Outcome "
                     f"/ Evidence block, with nothing left running.")
     wt = (env.get("WT_PATH") or "").strip()

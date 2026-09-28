@@ -66,7 +66,7 @@ def test_stop_refused_while_a_background_test_is_still_running() -> None:
     t = _transcript(_result(BG.format(id="bxo2kuy06")), _result(AUTO_BG.format(id="b9yrb7nd3")),
                     _say("Waiting for the `verified_test.sh` background run to complete."))
     why = pr_done_hook.decide(_env(), payload={"transcript_path": t})
-    assert why and "bxo2kuy06" in why and "b9yrb7nd3" in why and "TaskOutput" in why, why
+    assert why and "bxo2kuy06" in why and "b9yrb7nd3" in why and "TaskStop" in why and "FOREGROUND" in why and "TaskOutput(" not in why, why
     print("ok  a pass that ends its turn on a running background task is refused the stop")
 
 
