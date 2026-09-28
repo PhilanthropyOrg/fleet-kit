@@ -226,6 +226,21 @@ class ApplyForward(Env):
         inbox.apply(self.mail(text, subject="Fwd: hi"), run=self.run_, reply=self.reply)
         self.assertFalse(any(str(c[1]).endswith("ask.py") for c in self.calls if len(c) > 1), self.calls)
 
+    def test_repeat_forward_comments_on_the_open_twin_on_a_big_board(self):
+        # Live 2026-09-28: 420 open issues, the lookup read 300, so a replayed forward filed a
+        # twin (#8522) of the open #6845 instead of commenting on it.
+        board = [{"number": i, "title": f"item {i}"} for i in range(1, 420)] + [{"number": 6845, "title": "Page width"}]
+        def run(cmd):
+            self.calls.append(cmd)
+            if cmd[:3] == ["gh", "issue", "list"]:
+                return R(json.dumps(board[:int(cmd[cmd.index("--limit") + 1])]))
+            return R("https://github.com/o/r/issues/99\n")
+        inbox.apply(self.mail(PAGE_WIDTH), run=run, reply=self.reply)
+        self.assertEqual([c for c in self.calls if c[:3] == ["gh", "issue", "create"]], [])
+        (c,) = [c for c in self.calls if c[:3] == ["gh", "issue", "comment"]]
+        self.assertEqual(c[5], "6845")
+        self.assertIn("app.screencast.com", c[-1])
+
     def test_pending_shows_the_messenger_the_forward(self):
         self.mail(PAGE_WIDTH)
         (p,) = inbox.pending()

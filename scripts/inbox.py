@@ -500,7 +500,7 @@ def open_issue_titled(slug: str, title: str, run, by_signature: bool = False) ->
     A failed lookup is LOGGED (it used to fall through to `create` in silence, which is how
     the duplicates hid) and still returns None: filing a twin beats dropping a pager."""
     r = run(["gh", "issue", "list", "--repo", slug, "--state", "open",
-             "--json", "number,title,url", "--limit", "300"])
+             "--json", "number,title,url", "--limit", "2000"])
     if r.returncode != 0:
         log(f"dedupe lookup failed (rc={r.returncode}): {(r.stderr or r.stdout or '').strip()[:200]}")
         return None
