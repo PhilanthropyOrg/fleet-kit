@@ -169,6 +169,9 @@ class ApplyRecordsAlertResultTests(unittest.TestCase):
         body = creates[0][creates[0].index("--body") + 1]
         self.assertIn("fleet:severity-live", labels, labels)
         self.assertIn("Vision-link: none (maintenance)", body, body)
+        # jefe msg#202: and it must pass the acceptance half of the gate, not only Vision-link.
+        import quality_gate
+        self.assertIsNotNone(quality_gate._criteria_text(body, []), body)
 
 
 class DedupeLookupTests(unittest.TestCase):

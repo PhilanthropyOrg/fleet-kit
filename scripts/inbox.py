@@ -570,6 +570,10 @@ def file_or_comment_alert(row: dict, run=None) -> tuple[str, bool]:
              "--label", "fleet:backlog,lane:devops,fleet:priority-low,fleet:severity-live",
              "--title", title,
              "--body", f"{first_line}\n\nFiled by intake from {row.get('from') or row.get('source')} (fk#1129).\n\n"
+                       # jefe msg#202: without this, every alert item tripped needs-spec at the gate.
+                       f"## Acceptance\n- Given the `{row['check']}` probe fires again, When the next "
+                       f"probe tick runs, Then it reports healthy or this issue gets a `Fired again` "
+                       f"comment, not a duplicate.\n\n"
                        f"Vision-link: none (maintenance)"])
     if r.returncode != 0:
         raise RuntimeError((r.stderr or r.stdout).strip()[:300])
