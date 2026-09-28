@@ -77,6 +77,16 @@ goal. Left for whoever wires it in: either warm the browser with a throwaway nav
 the timed run starts, or give the first journey's first step a separate, looser budget. Neither
 is a call this sandbox (no real prod traffic to calibrate against) should make un-evidenced.
 
+NAV_TIMEOUT_MS (gh#8437 family, 2026-09-28): distinct from the soft budget_ms noise above, this
+is the HARD Playwright navigation timeout on every philanthropy.org page.goto() -- exceeding it
+throws TimeoutError and fails the step outright, unrecoverably, not just noisily. It was a flat
+15000 and lost to real Cloudflare challenge-clear latency often enough to manufacture "isn't
+working" reports for search-and-open-org, open-990-report and claim-org-through-verify-screen
+on a site that was never actually down (measured live, same warmed context, three consecutive
+navigations: 15091ms TimeoutError, 12437ms, 11088ms). Raised to 30000 with margin above the
+worst case observed so far; FLEET_CONSOLE_URL's own goto (a different host, no Cloudflare
+challenge in front of it) is deliberately left at its own literal 15000, unrelated to this.
+
 BROWSER CONSOLE (gh#636, VP round-2 fix 2): `JourneyCtx.page()` now listens for console.error
 and uncaught page errors on every page it opens, and `step()` fails a step that was otherwise
 passing (or annotates one that already failed) with what the browser itself reported -- a
@@ -118,6 +128,17 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 
 BYPASS_HEADER = "x-atlas-test"  # gh#7077: the name Cloudflare's skip rule reads; prod_health_check.CF_BYPASS_HEADER is the same string
+
+# gh#8437 family: even carrying ATLAS_TEST_BYPASS, a philanthropy.org navigation regularly
+# clears Cloudflare's own challenge in 11-21s (measured live, 3 back-to-back page.goto() calls
+# in one warmed context: 15091ms TimeoutError, then 12437ms and 11088ms real 200s) -- this is
+# NOT the JIT/process-spawn warm-up the module docstring's DURATION AND BUDGET section already
+# named (that was about budget_ms noise on a PASSING nav); this is the hard Playwright
+# navigation timeout throwing TimeoutError and failing the step outright. The old 15000 sat
+# right at the edge of that latency and lost the coin flip often enough to manufacture
+# search-and-open-org, open-990-report and claim-org-through-verify-screen "isn't working"
+# reports (#8437-#8440) for a site that was never actually down.
+NAV_TIMEOUT_MS = 30000
 
 # gh#890: the exact text Chromium's own devtools protocol logs as a console "error" when a
 # sub-resource fetch fails (a 404, a blocked request, a net:: error) -- distinct from a
@@ -258,10 +279,10 @@ def sign_in(page, users: "TestUsers", creds: dict) -> None:
     """Sign `page` in as `creds`. Magic link via the QA session endpoint when the user has no
     password; the email+password form otherwise. Ends with the browser off /login."""
     if not creds.get("password"):
-        page.goto(users.url(qa_session_url(users, creds)), timeout=15000)
+        page.goto(users.url(qa_session_url(users, creds)), timeout=NAV_TIMEOUT_MS)
         wait_path_no_longer_contains(page, "/auth/magic", timeout=10000)
         return
-    page.goto(users.url("https://philanthropy.org/990/login"), timeout=15000)
+    page.goto(users.url("https://philanthropy.org/990/login"), timeout=NAV_TIMEOUT_MS)
     email_field(page).first.fill(creds["email"])
     password_field(page).first.fill(creds["password"])
     submit_button(page).first.click()
@@ -469,7 +490,7 @@ def run_sign_in(ctx: JourneyCtx):
     page = ctx.page("alice")
 
     def s0():
-        page.goto(users.url("https://philanthropy.org/990/login"), timeout=15000)
+        page.goto(users.url("https://philanthropy.org/990/login"), timeout=NAV_TIMEOUT_MS)
         expect_visible(email_field(page))
         if alice.get("password"):
             expect_visible(password_field(page))
@@ -537,7 +558,7 @@ def run_search_and_open_org(ctx: JourneyCtx):
     page = ctx.page()
 
     def s0():
-        page.goto(ctx.users.url("https://philanthropy.org/990/?q=hospital"), timeout=15000)
+        page.goto(ctx.users.url("https://philanthropy.org/990/?q=hospital"), timeout=NAV_TIMEOUT_MS)
         page.wait_for_function(
             "() => document.querySelectorAll('a[href*=\"/990/report/\"]').length > 0", timeout=10000
         )
@@ -611,7 +632,7 @@ def run_open_990_report(ctx: JourneyCtx):
     page = ctx.page()
 
     def s0():
-        response = page.goto(ctx.users.url(f"https://philanthropy.org/990/report/{ein}"), timeout=15000)
+        response = page.goto(ctx.users.url(f"https://philanthropy.org/990/report/{ein}"), timeout=NAV_TIMEOUT_MS)
         blocked = _blocked_for_403(response, ctx.users)
         if blocked:
             raise blocked
@@ -642,7 +663,7 @@ def run_claim_org_through_verify_screen(ctx: JourneyCtx):
 
     def s0():
         sign_in_alice()
-        response = page.goto(users.url(f"https://philanthropy.org/990/report/{ein}"), timeout=15000)
+        response = page.goto(users.url(f"https://philanthropy.org/990/report/{ein}"), timeout=NAV_TIMEOUT_MS)
         blocked = _blocked_for_403(response, users)
         if blocked:
             raise blocked
@@ -676,12 +697,12 @@ def run_verified_org_checkout_to_stripe(ctx: JourneyCtx):
     page = ctx.page("alice")
 
     def s0():
-        page.goto(users.url("https://philanthropy.org/990/login"), timeout=15000)
+        page.goto(users.url("https://philanthropy.org/990/login"), timeout=NAV_TIMEOUT_MS)
         email_field(page).first.fill(alice["email"])
         password_field(page).first.fill(alice["password"])
         submit_button(page).first.click()
         wait_path_no_longer_contains(page, "/login", timeout=10000)
-        page.goto(users.url(admin_path), timeout=15000)
+        page.goto(users.url(admin_path), timeout=NAV_TIMEOUT_MS)
         page.get_by_role("button", name=re.compile("upgrade to verified|upgrade", re.I)).first.click()
         wait_text_matches(page, r"plan|checkout", timeout=8000)
 
@@ -743,12 +764,12 @@ def run_open_thread_from_notification_link_and_send(ctx: JourneyCtx):
     marker = f"sentry-reply-{ctx.run_id}-{int(time.time())}"
 
     def s0():
-        page.goto(users.url("https://philanthropy.org/990/login"), timeout=15000)
+        page.goto(users.url("https://philanthropy.org/990/login"), timeout=NAV_TIMEOUT_MS)
         email_field(page).first.fill(bob["email"])
         password_field(page).first.fill(bob["password"])
         submit_button(page).first.click()
         wait_path_no_longer_contains(page, "/login", timeout=10000)
-        page.goto(users.url(deeplink), timeout=15000)
+        page.goto(users.url(deeplink), timeout=NAV_TIMEOUT_MS)
 
     if not ctx.step(0, s0, page):
         return
@@ -792,7 +813,7 @@ def run_sign_out(ctx: JourneyCtx):
     page = ctx.page("alice")
 
     def s0():
-        page.goto(users.url("https://philanthropy.org/990/login"), timeout=15000)
+        page.goto(users.url("https://philanthropy.org/990/login"), timeout=NAV_TIMEOUT_MS)
         email_field(page).first.fill(alice["email"])
         password_field(page).first.fill(alice["password"])
         submit_button(page).first.click()
@@ -804,7 +825,7 @@ def run_sign_out(ctx: JourneyCtx):
         return
 
     def s1():
-        page.goto(users.url("https://philanthropy.org/account"), timeout=15000)
+        page.goto(users.url("https://philanthropy.org/account"), timeout=NAV_TIMEOUT_MS)
         wait_path_no_longer_contains(page, "/account", timeout=8000)
 
     ctx.step(1, s1, page)
