@@ -104,7 +104,14 @@ in*. If you cannot write that sentence for a check, the check is not yours to ru
    - **search** (`/990/?q=hospital`) -- result rows present, count > 0, org names non-empty
    - **filter** (`/990/?ntee=E&state=CA`) -- rows present AND actually filtered
    - **report** (`/990/report/<ein>`) -- org name, a revenue/expense figure, a filing year
-   - **superadmin** (`superadmin.philanthropy.org`) -- the sign-in form renders
+   - **superadmin** (`superadmin.philanthropy.org`) -- signed in as the operator persona, the
+     Overview renders STYLED with both halves on screen (journey `superadmin-overview-renders`).
+     The sign-in form rendering is not enough: on 2026-09-28 it rendered fine while the
+     signed-in Overview was a wall of unstyled text. Any signed-in surface gets the same
+     check by adding `renders_styled:` to its load step in journeys.yaml.
+     **Blind spot:** the product never serves analytics tags to QA personas, so a break inside
+     a staff-only tag (the 2026-09-28 cause) cannot show up for any persona. When a human says
+     a page looks broken and every walker says it is fine, suspect exactly that.
    - **fleet dashboard** (`dino.luckymachines.co`) -- charts render WITH DATA
    An empty result set on a query that has always returned rows is a FAILURE, not an
    empty state.

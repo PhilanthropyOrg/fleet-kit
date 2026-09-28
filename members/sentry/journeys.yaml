@@ -42,6 +42,13 @@
 #           behind a hamburger menu instead of a top bar). Fields given here replace the
 #           step's action/observable_result for that viewport only; anything not overridden
 #           is inherited unchanged.
+#         renders_styled:          # OPTIONAL. After the step passes, the walker checks the page a
+#           person is looking at is USABLE, not just answered: CSS loaded and applied (not the
+#           browser-default font+margin), no inline <script> swallowed page markup, no failed
+#           same-origin CSS/JS/font request, and each listed selector is on screen. `true`, or:
+#             selectors: ["#admin-nav", ".ov-two .ov-left"]
+#           Add it to any signed-in surface's load step; the failure files and pages the-fixer
+#           through journey_issue_filer.py like every other failed step.
 #
 # Viewport definitions:
 #   desktop     -- 1280x800
@@ -273,6 +280,30 @@ journeys:
   # closing on hover-out. Every journey below DOES the action, then reloads and checks it
   # stuck. Personas act on their own fixture org's card only; /990/api/qa/reset wipes their
   # data before and after. Implementations: scripts/journey_hq.py.
+
+  - id: superadmin-overview-renders
+    name: An operator signs in to superadmin and can use the Overview
+    description: >
+      An operator opens superadmin.philanthropy.org signed in and sees the console -- sidebar,
+      the objective and numbers on the left, the live feed on the right -- styled, not a wall
+      of unstyled text. (2026-09-28: sentry checked only the sign-in form and called it healthy
+      while the signed-in Overview rendered unstyled.)
+    preconditions: [QA_SESSION_TOKEN configured]
+    test_users: [operator]
+    viewport_invariant_reason: the two-column console is a desktop surface; below 1100px it stacks, same markup
+    viewports: [desktop]
+    steps:
+      - action: Sign in as operator and open https://superadmin.philanthropy.org/ (SUPERADMIN_URL).
+        observable_result: >
+          The page answers < 400 without bouncing to /login, and renders styled: CSS applied,
+          no failed same-origin CSS/JS/font, no console error, and the sidebar, the left half
+          and the live feed are all on screen.
+        renders_styled:
+          selectors: ["#admin-nav", ".ov-two .ov-left", ".ov-two #member-rail"]
+      - action: Read both halves of the Overview.
+        observable_result: >
+          Within 30s the left half shows its tiles (not "Loading tiles" or a failure line), and
+          the live feed shows at least one line or its empty state.
 
   - id: persona-roles
     name: Every test persona signs in and sees its role

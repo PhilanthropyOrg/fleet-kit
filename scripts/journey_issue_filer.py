@@ -236,6 +236,8 @@ def build_issue_body(
         f"**Failed step:** {step.get('action', '').strip()}",
         f"**Expected:** {step.get('observable_result', '').strip()}",
     ]
+    if step.get("detail"):  # what the walker actually saw -- the fixer's first clue
+        lines.append(f"**What happened instead:** {step['detail'].strip()[:1500]}")
     if viewports:
         lines.append(f"**Affected viewports:** {', '.join(viewports)}")
     lines += [

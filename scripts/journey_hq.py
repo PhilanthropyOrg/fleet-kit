@@ -18,6 +18,7 @@ as __main__) never loads a second copy whose Blocked class the runner loop would
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 import urllib.error
@@ -339,7 +340,37 @@ def make_runners(jw) -> dict:
                     assert r.status == 404 and "claim" in r.text().lower(), f"operator is not staff: {r.status} {r.text()[:120]}"
             ctx.step(i, s, None)
 
+    # --- the operator console, signed in, as an operator sees it ---------------------------------
+
+    def run_superadmin_overview(ctx):
+        # The sign-in form rendering proved nothing: on 2026-09-28 the signed-in Overview
+        # rendered unstyled, shell swallowed by an unclosed <script>, while sentry read it healthy.
+        url = os.environ.get("SUPERADMIN_URL", "https://superadmin.philanthropy.org/")
+        page = ctx.page("operator")  # opened up front so step 0's console, screenshot and render check see it
+
+        def s0():
+            persona(ctx, "operator", next_path="/990")
+            resp = page.goto(url, timeout=jw.NAV_TIMEOUT_MS)
+            blocked = jw._blocked_for_403(resp, ctx.users)
+            if blocked:
+                raise blocked
+            assert resp is not None and resp.status < 400, f"{url} answered {resp.status if resp else 'nothing'}"
+            assert "/login" not in page.url, f"operator was sent to {page.url}, not the Overview"
+            page.wait_for_load_state("load", timeout=jw.NAV_TIMEOUT_MS)
+        if not ctx.step(0, s0, page):
+            return
+
+        def s1():
+            left = page.locator(".ov-two .ov-left").first
+            page.wait_for_function(
+                "el => el.innerText.trim().length > 40 && !/loading tiles|tiles failed|taking too long/i.test(el.innerText)",
+                arg=left.element_handle(), timeout=30000)
+            lines = page.locator("#member-rail .ln, #member-rail .quiet")
+            assert lines.count() > 0, "the live feed half shows no lines and no empty state"
+        ctx.step(1, s1, page)
+
     return {
+        "superadmin-overview-renders": run_superadmin_overview,
         "persona-roles": run_persona_roles,
         "hq-react-picker": run_hq_react,
         "hq-reply-post-and-reload": run_hq_reply,
