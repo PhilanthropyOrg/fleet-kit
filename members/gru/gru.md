@@ -283,9 +283,15 @@ spawns exactly one). Your job, in order:
    python3 /fleet-kit/scripts/claim_history.py --item <n> --labels "<comma list of its labels>"
    # a quality:world-class item prints `ok world-class`: its research -> VP review -> redo
    # cycles are the process, not dead ends (vp.md caps them at three Not-yet rounds)
-   # exit 0 "ok count=<c> threshold=3"       -> keep in the candidate set
-   # exit 1 "BLOCKED count=<c> threshold=3"  -> drop from this pass's candidate set
+   # exit 0 "ok count=<c> threshold=3 attempts=<a> stalled=<s>"       -> keep in the candidate set
+   # exit 1 "BLOCKED count=<c> threshold=3 attempts=<a> stalled=<s>"  -> drop from this pass's candidate set
    ```
+   **A stall reads BLOCKED too (philanthropy#7942).** `stalled=` is the newest unbroken streak
+   of minion passes on the item that added no commit ("no code needed", or no report at all).
+   At the threshold, re-dispatching is the loop, not a retry: #7942 was resumed on draft #8194
+   ~40 times in two days, each pass re-verifying the same finished half. Park it like a dead
+   end (below, passing `--stalled <s>`); dead_end_label.py tells the-fixer to finish or split
+   the draft.
    Default threshold: 3 dead-end claims inside a 14-day window (reasoned default — see
    `claim_history.py`'s docstring; the exact number was left `UNKNOWN` by this issue's PRD).
    A dead-end claim is ONLY a minion run whose report said `Blocked: #<n> <reason>` (Reif,
@@ -300,7 +306,7 @@ spawns exactly one). Your job, in order:
    `claim_history.py`'s own predicate deliberately stays free of):
    ```
    python3 /fleet-kit/scripts/dead_end_label.py --item <n> --blocked \
-     --count <c> --threshold <t> --run-id <run-id-or-timestamp>
+     --count <c> --threshold <t> --stalled <s> --run-id <run-id-or-timestamp>
    ```
    It applies `fleet:dead-end-blocked` and posts one comment naming the count, threshold and
    this run — idempotent, so a still-blocked item does not accrue one comment per hour. On an
@@ -574,9 +580,14 @@ spawns exactly one). Your job, in order:
 
 4. **Claim your chosen items yourself**, serially, before spawning anything:
    ```
-   gh issue edit <n> --add-label fleet:claimed
-   gh issue comment <n> --body "claimed-by: gru (orchestrator pass <run-id-or-timestamp>)"
+   python3 /fleet-kit/scripts/board_github.py claim-item "gru (orchestrator pass <run-id-or-timestamp>)" <n>
    ```
+   It adds `fleet:claimed` and writes the issue's ONE status comment, edited in place each
+   cycle. To un-claim (a deferred item, a minion that produced nothing), use
+   `python3 /fleet-kit/scripts/board_github.py release <n> "gru: <why>"`, which edits the same
+   comment. Never post claim, un-claim or defer news as a new `gh issue comment`: per-item
+   results go in your report. philanthropy#7942 reached 96 comments, 42 of them `claimed-by:`,
+   and every later agent re-read them all.
    Claiming happens in YOUR context, one item at a time, which removes the claim-race entirely:
    two minions can never be assigned the same item, since you already decided the whole set
    before either exists.
@@ -612,8 +623,8 @@ spawns exactly one). Your job, in order:
    per batch, sends every complexity >= 5 item to its own minion (they run in PARALLEL), and
    keeps each batch's summed complexity inside minion's own `timeout_s`. Spawn exactly the
    batches it returns; `run_member.sh` refuses a minion with more items than the cap. An `area:`
-   module gets ONE batch a pass (philanthropy#8218): remove `fleet:claimed` from each item in
-   `deferred` and name it in your report with its `why`; it goes next pass. An item in
+   module gets ONE batch a pass (philanthropy#8218): release each item in `deferred`
+   (`board_github.py release <n> "gru: deferred -- <why>"`) and name it in your report with its `why`; it goes next pass. An item in
    `over_timeout` still runs solo: name it in your report as likely to need a second pass.
    A minion that times out now leaves a pushed branch + DRAFT PR (minion_checkpoint.py), and
    the next minion handed those items resumes that branch automatically — so re-claim and

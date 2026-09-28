@@ -676,6 +676,9 @@ if [ "$WORKTREE_ENABLED" = "True" ] && [ "$DRY_RUN" -ne 1 ]; then
     log "FATAL: could not create isolated worktree for $MEMBER at $WT_PATH"
     exit 1
   fi
+  # Where this pass started, so its run record can say how many real commits it added
+  # (claim_history.py: a streak of passes adding none is a stall, not progress).
+  WT_START_SHA=$(git -C "$WT_PATH" rev-parse HEAD 2>/dev/null)
   cleanup_run_worktree() {
     # Check BEFORE removing the worktree: the dirt we're looking for is in $REPO, not
     # $WT_PATH, but a leak is easiest to attribute to this exact pass while its worktree
@@ -1147,10 +1150,12 @@ fi
 
 CHECKPOINT_PR=$(grep '"saved": true' "$CHECKPOINT_OUT" 2>/dev/null | grep -o '"pr": [0-9][0-9]*' | tail -1 | grep -o '[0-9][0-9]*$')
 rm -f "$CHECKPOINT_OUT"
+PASS_COMMITS=""
+[ -n "${WT_START_SHA:-}" ] && PASS_COMMITS=$(git -C "$WT_PATH" rev-list --no-merges --count "$WT_START_SHA..HEAD" 2>/dev/null)
 
 echo "$OUT" | python3 "$KIT_DIR/scripts/run_report.py" \
   --member "$MEMBER" --run-id "$RUN_ID" --kind llm --exit-code "$RC" \
-  --pass-file - --usage-file "$USAGE_FILE" ${ITEM:+--item-id "$ITEM"} ${CHECKPOINT_PR:+--checkpoint-pr "$CHECKPOINT_PR"} $VISION_FLAG $LANE_FLAG $TRAILING_LOSS_FLAG $FIRED_FLAG $REASON_FLAG >> "$LOG_DIR/runs.jsonl" 2>>"$LOG"
+  --pass-file - --usage-file "$USAGE_FILE" ${ITEM:+--item-id "$ITEM"} ${CHECKPOINT_PR:+--checkpoint-pr "$CHECKPOINT_PR"} ${PASS_COMMITS:+--commits "$PASS_COMMITS"} $VISION_FLAG $LANE_FLAG $TRAILING_LOSS_FLAG $FIRED_FLAG $REASON_FLAG >> "$LOG_DIR/runs.jsonl" 2>>"$LOG"
 rm -f "$USAGE_FILE"
 
 SUMMARY=$(tail -c 400 <<<"$OUT" | tr '\n' ' ' | tail -c 300)

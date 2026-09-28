@@ -88,5 +88,43 @@ class ListUnclaimedTests(unittest.TestCase):
             self.assertEqual([i["id"] for i in bg.list_unclaimed()], [1])
 
 
+class StatusCommentTests(unittest.TestCase):
+    """philanthropy#7942: 96 comments, 42 of them `claimed-by:` -- one new comment per claim and
+    per release, hourly. Claim/release now edit ONE status comment per issue."""
+
+    def _fake(self, existing_ids):
+        calls = []
+
+        def run(cmd):
+            calls.append(cmd)
+            if cmd[:3] == ["gh", "api", "--paginate"]:
+                return 0, "\n".join(existing_ids)
+            return 0, "ok"
+        return run, calls
+
+    def test_claim_and_release_edit_the_existing_status_comment(self):
+        run, calls = self._fake(["111", "222"])
+        with unittest.mock.patch.object(bg, "_exec", run):
+            for cmd in bg.build_claim_cmds(7942, "gru (orchestrator pass p1)") + \
+                    bg.build_release_cmds(7942, "stale_claims: released"):
+                self.assertEqual(bg._run(cmd + ["--repo", "o/r"])[0], 0)
+        self.assertFalse([c for c in calls if c[:3] == ["gh", "issue", "comment"]], calls)
+        patches = [c for c in calls if c[:4] == ["gh", "api", "-X", "PATCH"]]
+        self.assertEqual([c[4] for c in patches], ["repos/o/r/issues/comments/222"] * 2)
+        self.assertTrue(patches[0][6].startswith("body=claimed-by: gru (orchestrator pass p1)"))
+
+    def test_first_status_is_a_new_comment(self):
+        run, calls = self._fake([])
+        with unittest.mock.patch.object(bg, "_exec", run):
+            bg._run(bg.build_claim_cmds(7942, "gru")[1])
+        self.assertEqual(calls[-1][:3], ["gh", "issue", "comment"])
+
+    def test_plain_comments_are_never_upserted(self):
+        run, calls = self._fake(["111"])
+        with unittest.mock.patch.object(bg, "_exec", run):
+            bg._run(["gh", "issue", "comment", "7942", "--body", "a real finding"])
+        self.assertEqual(calls, [["gh", "issue", "comment", "7942", "--body", "a real finding"]])
+
+
 if __name__ == "__main__":
     unittest.main()

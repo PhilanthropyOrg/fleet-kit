@@ -68,6 +68,20 @@ def test_plan_block_fresh_comment_after_manual_clear() -> None:
     print("ok  a manual clear is a real retry: re-blocked with a fresh comment")
 
 
+def test_a_fresh_stall_park_tells_the_fixer_once() -> None:
+    issue = {"number": 7942, "labels": [], "comments": []}
+    cmds = del_.plan_block(issue, count=0, threshold=3, run_id="gru-1", stalled=3)
+    msg = [c for c in cmds if "fleet_msg.py" in " ".join(c)]
+    assert len(msg) == 1 and "the-fixer" in msg[0] and "stalled-7942" in msg[0], cmds
+    assert any("stalled" in " ".join(c) for c in cmds if c[:3] == ["gh", "issue", "comment"]), cmds
+    labeled = {"number": 7942, "labels": [{"name": del_.LABEL_DEAD_END_BLOCKED}],
+               "comments": [{"body": del_.block_comment_body(0, 3, "gru-1", 3)}]}
+    assert del_.plan_block(labeled, count=0, threshold=3, run_id="gru-2", stalled=4) == [], "re-sent"
+    assert not any("fleet_msg.py" in " ".join(c) for c in
+                   del_.plan_block(issue, count=3, threshold=3, run_id="gru-1")), "dead end is not a stall"
+    print("ok  a fresh stall park tells the-fixer once; a still-parked item stays quiet")
+
+
 def test_plan_unblock_removes_label() -> None:
     issue = {"number": 2195, "labels": [{"name": del_.LABEL_DEAD_END_BLOCKED}]}
     cmds = del_.plan_unblock(issue)
@@ -87,6 +101,7 @@ def main() -> int:
         test_plan_block_idempotent_same_count_when_already_labeled()
         test_plan_block_new_comment_when_count_rises_while_labeled()
         test_plan_block_fresh_comment_after_manual_clear()
+        test_a_fresh_stall_park_tells_the_fixer_once()
         test_plan_unblock_removes_label()
         test_plan_unblock_noop_when_not_labeled()
     except AssertionError as exc:
