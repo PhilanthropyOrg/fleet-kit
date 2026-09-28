@@ -247,6 +247,9 @@ DISPATCH_LOCK_KEY="${MEMBER}${ITEM:+-item${ITEM}}${LANE:+-lane${LANE}}"
 exec 9>"$DISPATCH_LOCK_DIR/${DISPATCH_LOCK_KEY}.lock"
 if ! flock -n 9; then
   log "SKIP: another $DISPATCH_LOCK_KEY pass already holds the dispatch lock -- exiting without doing anything (gh#3220 dispatch-race guard)"
+  # A message wake that loses the lock leaves a flag; the running pass starts one follow-up
+  # when it ends (wake-followup below) instead of the message waiting for the next cron tick.
+  [ "${FLEET_FIRED_BY:-}" = "fleet_msg" ] && touch "$DISPATCH_LOCK_DIR/${DISPATCH_LOCK_KEY}.wake-pending"
   if [ "$DRY_RUN" -eq 1 ]; then
     echo "[dry-run] SKIP: $DISPATCH_LOCK_KEY already locked -- would exit without running"
     exit 0
@@ -1164,4 +1167,13 @@ if [ "$RC" -eq 0 ]; then
 else
   log "pass end rc=$RC (account=${ACCOUNT_POOL_SELECTED:-none} reason=${ACCOUNT_POOL_LAST_REASON:-}) :: $SUMMARY"
 fi
+# wake-followup-begin
+if [ -f "$DISPATCH_LOCK_DIR/${DISPATCH_LOCK_KEY}.wake-pending" ]; then
+  rm -f "$DISPATCH_LOCK_DIR/${DISPATCH_LOCK_KEY}.wake-pending"
+  exec 9>&-  # release the dispatch lock so the follow-up can take it
+  log "wake-pending: a message arrived mid-pass -- starting one follow-up pass"
+  FLEET_FIRED_BY=fleet_msg-followup setsid nohup bash "${FLEET_RUN_MEMBER:-$KIT_DIR/scripts/run_member.sh}" "$MEMBER" \
+    >> "$LOG" 2>&1 < /dev/null &
+fi
+# wake-followup-end
 exit "$RC"
