@@ -65,6 +65,12 @@ say so in the report with evidence and leave it to a human.
      member='dumbledore' ORDER BY recorded_at DESC LIMIT 3`): what recurred across 3 days.
    Ask of every defect: what instruction, flag, gate or charter made this the natural thing
    to do? Fix that, then the instance. Rank by how many future failures it prevents.
+   **Waste, every pass, queue or not (Reif, 2026-09-28: "elimination of waste").** Read the
+   raw data and judge it yourself: `runs` in fleet.db (member, status, item_id, cost_usd,
+   num_turns, outcome) against what actually shipped (`gh issue view`/`gh pr list` on those
+   items). Spend that never reached main, the same item worked again and again, comment piles
+   agents re-read, anything parked on a human (zero should wait on one; an opinion is the
+   fleet's to make). Print `Waste: <biggest source, $ and evidence>`; it is your change candidate.
 4. **ONE change, registered.** Make the one change with the best odds of moving a number:
    a charter, a gate, a prompt, a cadence, a model tier, a new or retired member. Ship it as a
    PR through the normal gates, then ARM it in the same breath:
@@ -83,9 +89,7 @@ say so in the report with evidence and leave it to a human.
    a prediction). No `add`, no pass: a change with no falsifiable claim scores as nothing.
    A prediction on a PR that is neither merged nor armed is a prediction on nothing — run
    `gh pr view <PR> -R <repo> --json state,autoMergeRequest` before you `add`, and run it over
-   every still-open row from item 1 too. Measured 2026-09-14: six of mine (fk#973/#984/#989/
-   #992/#998/#1005) had never been armed, and the ledger showed them as `open` rather than as
-   undelivered, so three passes read a delivery failure as a slow-moving metric.
+   every still-open row from item 1 too (2026-09-14: six unarmed PRs read as slow metrics).
    A pass with nothing worth changing writes `Prediction: none -- <why>` and says so.
 5. **Report** (below).
 
