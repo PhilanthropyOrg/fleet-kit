@@ -86,7 +86,9 @@ step it waits on. If that step is not a one-way door with an open `credential`/`
 is not parked, it is un-worked: make the call it waits on (a `Scope call:` comment, as Part C
 says), or name the path the fleet can walk (the token, env value or tool that does the op, a
 workaround, a partial ship), comment that as `Un-parked: <call or path>`, and remove the label so
-gru dispatches it. `fleet:dead-end-blocked` only comes back if a minion hits a one-way door.
+gru dispatches it. A `fleet:dead-end-blocked` whose comment says `stalled; the-fixer was told` is
+parked on a fleet owner, not a human: leave it to the-fixer unless the-fixer replied that it
+waits on something, then un-park that the same way.
 If it is a one-way door, check that the ask exists and that everything around it has shipped;
 file what is missing as its own buildable item. Name every item and its outcome under `Un-park:`
 in your report.

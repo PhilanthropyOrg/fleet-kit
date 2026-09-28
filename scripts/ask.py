@@ -197,8 +197,8 @@ def issue_for_ask(ask_id: int, member: str, why: str, unblocks: str | None, prop
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(
-        description="File, answer, or list fleet asks -- the structured channel for a member "
-                     "that hit a wall the fleet cannot act on (gh#568).")
+        description="File, answer, or list fleet asks -- way rare: only a one-way door the fleet "
+                     "must not walk alone. Opinion classes file as notices (gh#568, persona_law 2b).")
     ap.add_argument("--db-path", help="override fleet.db path (default: fleet_db.DB_FILE)")
     ap.add_argument("--authority-path",
                     help="override authority.json path (default: authority.STORE)")
@@ -206,7 +206,10 @@ def main(argv=None) -> int:
 
     p_file = sub.add_parser("file", help="file a new ask")
     p_file.add_argument("--member", required=True)
-    p_file.add_argument("--why", required=True, help="why this needs a human")
+    p_file.add_argument("--why", required=True,
+                        help="why this needs Reif -- way rare: only a one-way door (secret, spend, "
+                             "prod data delete, force-push main, his own login); opinions are "
+                             "yours to decide (persona_law.md 2b)")
     p_file.add_argument("--unblocks", help="what gets unstuck once this is answered")
     p_file.add_argument("--proposed", help="a proposed answer, if the filer has one")
     p_file.add_argument("--summary",
