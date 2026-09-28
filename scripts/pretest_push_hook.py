@@ -196,6 +196,8 @@ def main() -> int:
     reason = decide(payload, os.environ)
     if reason is None:
         return 0
+    import hook_blocks
+    hook_blocks.record(payload, "pretest_push_hook", reason)
     print(f"pretest_push_hook: {reason}", file=sys.stderr)
     return 2
 
