@@ -139,7 +139,9 @@ def live_numbers(proc: Path = Path("/proc")) -> set[int]:
 # --- the decision (pure) ----------------------------------------------------------------------
 
 def claim_time(issue: dict) -> float | None:
-    ts = [_ts(c.get("createdAt")) for c in issue.get("comments") or []
+    # The status comment is edited in place, so its createdAt is its FIRST claim; `at=` is this one.
+    ts = [_ts(board_github.status_at(c.get("body")) or c.get("createdAt"))
+          for c in issue.get("comments") or []
           if (c.get("body") or "").lstrip().startswith("claimed-by:")]
     ts = [t for t in ts if t]
     return max(ts) if ts else None

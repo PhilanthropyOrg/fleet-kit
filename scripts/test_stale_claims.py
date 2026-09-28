@@ -53,6 +53,15 @@ class Assess(unittest.TestCase):
             self.assertTrue(r["release"], (n, r))
             self.assertEqual(r["evidence"]["open_prs"], [7982])
 
+    def test_an_edited_status_comment_ages_from_its_at_stamp(self):
+        # philanthropy#7942: the status comment is edited in place, so createdAt is the FIRST
+        # claim. A re-claim an hour later must not read as an hour-old claim.
+        body = sc.board_github.status_body("claimed-by: gru (orchestrator pass p2)", NOW - 5 * 60)
+        it = {"number": 7942, "labels": REIF, "updatedAt": CLAIM_AT,
+              "comments": [{"createdAt": CLAIM_AT, "body": body}]}
+        self.assertEqual(sc.claim_time(it), NOW - 5 * 60)
+        self.assertEqual(sc.assess(it, [], [], set(), NOW)["kind"], "inside-lease")
+
     def test_inside_the_lease_nothing_is_released(self):
         r = sc.assess(issue(7937), [], [], set(), sc._ts(CLAIM_AT) + 59 * 60)
         self.assertFalse(r["release"])

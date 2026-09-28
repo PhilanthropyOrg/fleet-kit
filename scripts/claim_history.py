@@ -16,6 +16,15 @@ against item N only when its report carried an explicit `Blocked: #N <reason>` l
     progress the next pass resumes, not a blocker.
   - an `ok`/`quiet` run that shipped a Part-of PR and left the item open. Partial progress is
     not a dead end.
+A STALL COUNTS TOO (philanthropy#7942, 2026-09-28). A minion pass that ends having added no
+commit to its branch -- the report said "no code needed", or it reported nothing at all -- is
+neither progress nor a `Blocked:` line, so nothing counted it: #7942 was resumed on checkpoint
+draft #8194 ~40 times in two days, each pass re-verifying the same finished half while the
+other half needed prod access, and was re-claimed every hour. `stalled_run_count` is the
+newest unbroken streak of such passes (run_member.sh records `commits`); at the threshold the
+item reads BLOCKED like a dead end, gru parks it (dead_end_label.py) and the-fixer hears why.
+A pass that commits anything, or a row from before `commits` was recorded, ends the streak.
+
 Before this, every minion run against a still-open item counted, whatever its status. On
 2026-09-26 five fleet:reif-priority items (philanthropy#7939/7940/7942/7948/7950) went
 fleet:dead-end-blocked at count 3-4. Their "dead ends" were deploy-drain SIGTERMs, 5400s
@@ -113,6 +122,27 @@ def is_dead_end_blocked(run_ids: list[str], item_number: int,
     return dead_end_claim_count(run_ids, item_number) >= threshold
 
 
+def stalled_run_count(rows) -> int:
+    """Newest unbroken streak of passes that added no commit. `rows` are `_terminal_rows`
+    shapes, oldest first. Infra endings (kill, timeout, ...) with no commit are skipped: the
+    minion never got to finish. Unknown `commits` (older rows) ends the streak. Pure."""
+    n = 0
+    for _run_id, status, _exit, _blocked, _ckpt, commits in reversed(rows):
+        if commits is not None and commits > 0:
+            break
+        if (status or "") in INFRA_STATUSES:
+            continue
+        if commits is None:
+            break
+        n += 1
+    return n
+
+
+def minion_stalls_for_item(conn, item_number: int,
+                           window_days: float = DEFAULT_WINDOW_DAYS) -> int:
+    return stalled_run_count(_terminal_rows(conn, item_number, window_days))
+
+
 def minion_runs_for_item(conn, item_number: int,
                          window_days: float = DEFAULT_WINDOW_DAYS) -> list[str]:
     """DISTINCT run_ids from fleet.db: minion runs against `item_number` in the last
@@ -136,7 +166,7 @@ def minion_runs_for_item(conn, item_number: int,
     "6_164"; item 64 matches only "64" and "64_99".
     """
     out: list[str] = []
-    for run_id, status, exit_code, blocked, checkpoint_pr in _terminal_rows(
+    for run_id, status, exit_code, blocked, checkpoint_pr, _commits in _terminal_rows(
             conn, item_number, window_days):
         if run_id not in out and is_dead_end_run(status, exit_code, blocked, checkpoint_pr,
                                                  item_number):
@@ -154,7 +184,7 @@ def minion_attempts_for_item(conn, item_number: int,
 def _terminal_rows(conn, item_number: int, window_days: float):
     since = time.time() - window_days * 86400
     return conn.execute(
-        "SELECT run_id, status, exit_code, blocked, checkpoint_pr FROM runs"
+        "SELECT run_id, status, exit_code, blocked, checkpoint_pr, commits FROM runs"
         " WHERE member = 'minion' AND recorded_at >= ? AND COALESCE(status, '') != 'started'"
         " AND ('_' || item_id || '_') GLOB ('*_' || ? || '_*')"
         " ORDER BY recorded_at",
@@ -185,10 +215,11 @@ def main(argv=None) -> int:
         print(f"ok world-class (iteration is the process; vp.md caps rounds) item={a.item}")
         return 0
     count = dead_end_claim_count(run_ids, a.item)
-    blocked = is_dead_end_blocked(run_ids, a.item, threshold=a.threshold)
+    stalled = minion_stalls_for_item(conn, a.item, window_days=a.window_days)
+    blocked = is_dead_end_blocked(run_ids, a.item, threshold=a.threshold) or stalled >= a.threshold
     attempts = minion_attempts_for_item(conn, a.item, window_days=a.window_days)
     print(f"{'BLOCKED' if blocked else 'ok'} count={count} threshold={a.threshold} "
-          f"attempts={attempts}")
+          f"attempts={attempts} stalled={stalled}")
     return 1 if blocked else 0
 
 

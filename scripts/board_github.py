@@ -15,6 +15,10 @@ CONTRACT:
            has no test-and-set; single-claimer discipline comes from the caller running ONE
            sequential claim loop (see `worktree_builder.sh`'s claim step), not from this file.
            list_unclaimed() re-reads live state before every claim.
+  release -> remove <prefix>claimed + say why.
+           claim and release write ONE status comment per issue, edited in place (STATUS_MARKER),
+           not a new comment per cycle: philanthropy#7942 reached 96 comments, 42 of them
+           `claimed-by:`, and every later agent read them all.
   done  -> `gh issue close --comment`.
   list  -> open issues labeled <prefix>backlog, unclaimed first.
 
@@ -32,6 +36,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 
 PREFIX = os.environ.get("FLEET_LABEL_PREFIX", "fleet:")
 LABEL_BACKLOG = f"{PREFIX}backlog"
@@ -60,10 +65,26 @@ def build_view_cmd(number: int) -> list[str]:
     return ["gh", "issue", "view", str(number), "--json", "number,title,body,labels"]
 
 
+# The one status comment per issue. `at=` is when it was last written: an edit keeps the
+# comment's createdAt, so stale_claims.claim_time reads the claim's age from here.
+STATUS_MARKER = "<!-- fleet-status"
+_STATUS_AT = re.compile(r"<!-- fleet-status at=(\S+) -->")
+
+
+def status_body(text: str, now: float | None = None) -> str:
+    at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() if now is None else now))
+    return f"{text}\n\n{STATUS_MARKER} at={at} -->"
+
+
+def status_at(body: str) -> str | None:
+    m = _STATUS_AT.search(body or "")
+    return m.group(1) if m else None
+
+
 def build_claim_cmds(number: int, worker: str) -> list[list[str]]:
     return [
         ["gh", "issue", "edit", str(number), "--add-label", LABEL_CLAIMED],
-        ["gh", "issue", "comment", str(number), "--body", f"claimed-by: {worker}"],
+        ["gh", "issue", "comment", str(number), "--body", status_body(f"claimed-by: {worker}")],
     ]
 
 
@@ -80,7 +101,8 @@ def build_release_cmds(number: int, note: str) -> list[list[str]]:
     code_review_local.sh's findings-then-status (a state change with no explanation attached
     is worse than the stuck state)."""
     return [
-        ["gh", "issue", "comment", str(number), "--body", note or "released: build did not finish"],
+        ["gh", "issue", "comment", str(number), "--body",
+         status_body(note or "released: build did not finish")],
         ["gh", "issue", "edit", str(number), "--remove-label", LABEL_CLAIMED],
     ]
 
@@ -134,6 +156,29 @@ def to_board_item(issue: dict) -> dict:
 # --- execution ---------------------------------------------------------------------------------
 
 def _run(cmd: list[str]) -> tuple[int, str]:
+    if cmd[:3] == ["gh", "issue", "comment"] and STATUS_MARKER in " ".join(cmd):
+        return upsert_status(cmd)
+    return _exec(cmd)
+
+
+def upsert_status(cmd: list[str], run=None) -> tuple[int, str]:
+    """A status `gh issue comment` edits the issue's existing status comment instead of adding
+    one. No status comment yet, or the lookup fails: post it as a new comment (the old path)."""
+    run = run or _exec
+    n, body = cmd[3], cmd[cmd.index("--body") + 1]
+    repo = cmd[cmd.index("--repo") + 1] if "--repo" in cmd else "{owner}/{repo}"
+    rc, out = run(["gh", "api", "--paginate", f"repos/{repo}/issues/{n}/comments", "--jq",
+                   f'.[] | select(.body | contains("{STATUS_MARKER}")) | .id'])
+    ids = [x for x in out.split() if x.isdigit()] if rc == 0 else []
+    if ids:
+        rc, out = run(["gh", "api", "-X", "PATCH", f"repos/{repo}/issues/comments/{ids[-1]}",
+                       "-f", f"body={body}", "--jq", ".html_url"])
+        if rc == 0:
+            return rc, out
+    return run(cmd)
+
+
+def _exec(cmd: list[str]) -> tuple[int, str]:
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
         return p.returncode, (p.stdout or p.stderr or "").strip()

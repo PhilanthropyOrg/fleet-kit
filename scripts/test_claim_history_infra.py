@@ -132,15 +132,51 @@ def test_run_report_captures_blocked_lines_and_checkpoint_pr() -> None:
     )
     rec = run_report.build_record(member="minion", run_id="r", kind="llm", exit_code=0,
                                   pass_text=text, usage=None, vision_required=False,
-                                  item_id="7950_7948_7941", checkpoint_pr=8133)
+                                  item_id="7950_7948_7941", checkpoint_pr=8133, commits=0)
     assert rec["blocked"] == ("#7948 needs Resend log access, filed #8084\n"
                               "#7941 spec contradicts AC2 (asked on the issue)"), rec["blocked"]
-    assert rec["checkpoint_pr"] == 8133
+    assert rec["checkpoint_pr"] == 8133 and rec["commits"] == 0
     plain = run_report.build_record(member="minion", run_id="r", kind="llm", exit_code=0,
                                     pass_text="Outcome: PR #1 merged\nEvidence: `x`\n",
                                     usage=None, vision_required=False)
-    assert plain["blocked"] is None and plain["checkpoint_pr"] is None
+    assert plain["blocked"] is None and plain["checkpoint_pr"] is None and plain["commits"] is None
     print("ok  run_report records Blocked: lines and the checkpoint PR")
+
+
+def _live_7942_loop(now: float) -> list[dict]:
+    """philanthropy#7942, 2026-09-28: every pass resumed checkpoint #8194 and added nothing."""
+    h = 3600
+    return (
+        _run("minion-item7850_7942_8167-8960-1", "7850_7942_8167", "ok", 0, now - 7 * h,
+             outcome="PR #8194 updated: #7942's buildable half complete", commits=2)
+        + _run("minion-item7942-13961-2", "7942", "reported_nothing", 0, now - 3 * h, commits=0)
+        + _run("minion-item7942_7950_8167-43852-3", "7942_7950_8167", "killed", 143, now - 2 * h)
+        + _run("minion-item7942_7950_8167-43853-4", "7942_7950_8167", "reported_nothing", 0,
+               now - 90 * 60, commits=0)
+        + _run("minion-item7942_8328-12665-5", "7942_8328", "ok", 0, now - 30 * 60,
+               outcome="Re-verified #7942's build half is complete. No code changes made.",
+               commits=0)
+    )
+
+
+def test_a_streak_of_passes_that_commit_nothing_blocks() -> None:
+    now = time.time()
+    with tempfile.TemporaryDirectory() as d:
+        conn = _db(_live_7942_loop(now), Path(d))
+        assert claim_history.minion_runs_for_item(conn, 7942) == []  # no Blocked: line anywhere
+        assert claim_history.minion_stalls_for_item(conn, 7942) == 3
+        out = subprocess.run([sys.executable, str(HERE / "claim_history.py"), "--item", "7942",
+                              "--db-path", str(Path(d) / "fleet.db")],
+                             capture_output=True, text=True)
+        assert out.returncode == 1 and out.stdout.startswith("BLOCKED count=0"), out.stdout
+        assert "stalled=3" in out.stdout, out.stdout
+    # One pass that commits resets the streak; a row from before `commits` existed ends it.
+    rows = [("a", "ok", 0, None, None, 0), ("b", "ok", 0, None, None, 1),
+            ("c", "reported_nothing", 0, None, None, 0)]
+    assert claim_history.stalled_run_count(rows) == 1
+    assert claim_history.stalled_run_count([("a", "ok", 0, None, None, None)] + rows[2:]) == 1
+    assert claim_history.stalled_run_count([("a", "ok", 0, None, None, None)]) == 0
+    print("ok  #7942's loop: 3 passes in a row that committed nothing read BLOCKED stalled=3")
 
 
 def main() -> int:
@@ -150,6 +186,7 @@ def main() -> int:
         test_checkpoint_run_never_counts_even_if_it_says_blocked()
         test_blocked_line_in_a_batch_only_blocks_the_items_it_names()
         test_run_report_captures_blocked_lines_and_checkpoint_pr()
+        test_a_streak_of_passes_that_commit_nothing_blocks()
     except AssertionError as exc:
         print(f"FAIL  {exc}")
         return 1

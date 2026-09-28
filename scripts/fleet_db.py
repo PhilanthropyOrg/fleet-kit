@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS runs (
   reason                                 TEXT,
   blocked                                TEXT,
   checkpoint_pr                          INTEGER,
+  commits                                INTEGER,
   recorded_at                            REAL NOT NULL,
   -- Composite, not bare run_id (fleet-kit#212): judge-judy's run_id is `review-<pr>-<sha>`,
   -- not per-invocation, so two genuinely different concurrent reviews of the same PR head
@@ -199,6 +200,9 @@ _ADD_COLUMNS = (
     # opened during the pass (run_member.sh). NULL on every older row = not blocked.
     ("blocked", "TEXT"),
     ("checkpoint_pr", "INTEGER"),
+    # Real (non-merge) commits a minion pass added to its branch (run_member.sh). 0 = the pass
+    # ended with nothing new; claim_history.py counts a streak of those as a stall.
+    ("commits", "INTEGER"),
 )
 
 # Same expand-contract mechanism as _ADD_COLUMNS above, scoped to `asks` instead of `runs`
@@ -315,7 +319,7 @@ RUN_COLUMNS = (
     "cost_usd", "num_turns", "input_tokens", "output_tokens",
     "cache_read_tokens", "cache_creation_tokens", "duration_ms", "stop_reason", "lane",
     "fired_by", "reason",
-    "blocked", "checkpoint_pr",
+    "blocked", "checkpoint_pr", "commits",
     "recorded_at",
 )
 
@@ -339,7 +343,7 @@ def _row_from_record(rec: dict) -> tuple:
         tokens.get("duration_ms"), tokens.get("stop_reason"),
         rec.get("lane"),
         rec.get("fired_by"), rec.get("reason"),
-        rec.get("blocked"), rec.get("checkpoint_pr"),
+        rec.get("blocked"), rec.get("checkpoint_pr"), rec.get("commits"),
         rec.get("_recorded_at") or 0.0,
     )
 

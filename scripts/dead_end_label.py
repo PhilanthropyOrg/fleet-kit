@@ -21,6 +21,7 @@ import os
 import re
 import subprocess
 import sys
+from pathlib import Path
 
 PREFIX = os.environ.get("FLEET_LABEL_PREFIX", "fleet:")
 LABEL_DEAD_END_BLOCKED = f"{PREFIX}dead-end-blocked"
@@ -47,17 +48,32 @@ def _existing_counts(comments) -> set[int]:
     return counts
 
 
-def block_comment_body(count: int, threshold: int, run_id: str) -> str:
+def block_comment_body(count: int, threshold: int, run_id: str, stalled: int = 0) -> str:
+    why = (f" {stalled} minion passes in a row added no commit (stalled; the-fixer was told)."
+           if stalled else "")
     return (
         f"dead-end-blocked: count={count} threshold={threshold} run={run_id} -- gru dropped "
-        f"this item from its candidate set this pass (see `scripts/claim_history.py`). Fix the "
+        f"this item from its candidate set this pass (see `scripts/claim_history.py`).{why} Fix the "
         f"underlying blocker and remove the `{LABEL_DEAD_END_BLOCKED}` label to let the next "
         f"pass retry it -- gru re-evaluates the current count either way, so a premature clear "
         f"just re-blocks with a fresh comment instead of staying cleared."
     )
 
 
-def plan_block(issue: dict, count: int, threshold: int, run_id: str) -> list[list[str]]:
+def escalate_cmd(number: int, stalled: int) -> list[str]:
+    """philanthropy#7942: re-dispatching a stalled item just loops. Tell the-fixer, whose job is
+    pushing a stuck PR forward: finish or split the item's draft PR, or say what blocks it."""
+    return [sys.executable, str(Path(__file__).resolve().parent / "fleet_msg.py"), "send",
+            "--from", "gru", "--to", "the-fixer", "--kind", "stalled-item",
+            "--key", f"stalled-{number}", "--items", str(number), "--body",
+            f"#{number}: {stalled} minion passes in a row added no commit, so gru parked it "
+            f"({LABEL_DEAD_END_BLOCKED}) instead of re-dispatching it. If a draft PR holds its "
+            "work (`minion_checkpoint.py resumable`), finish or split it: ship what is done as "
+            "`Part of`, file what remains; or reply with what blocks it."]
+
+
+def plan_block(issue: dict, count: int, threshold: int, run_id: str,
+               stalled: int = 0) -> list[list[str]]:
     """Commands to run when claim_history.py reports BLOCKED for `issue`.
 
     Idempotent while the label is already on: a comment for this exact `count` is not repeated
@@ -73,7 +89,9 @@ def plan_block(issue: dict, count: int, threshold: int, run_id: str) -> list[lis
         cmds.append(["gh", "issue", "edit", str(number), "--add-label", LABEL_DEAD_END_BLOCKED])
     if not labeled or count not in _existing_counts(issue.get("comments")):
         cmds.append(["gh", "issue", "comment", str(number),
-                     "--body", block_comment_body(count, threshold, run_id)])
+                     "--body", block_comment_body(count, threshold, run_id, stalled)])
+    if not labeled and stalled:
+        cmds.append(escalate_cmd(number, stalled))
     return cmds
 
 
@@ -103,6 +121,8 @@ def main(argv=None) -> int:
     ap.add_argument("--count", type=int, default=0)
     ap.add_argument("--threshold", type=int, default=3)
     ap.add_argument("--run-id", default="")
+    ap.add_argument("--stalled", type=int, default=0,
+                    help="claim_history.py's stalled=<n>; a fresh park then tells the-fixer")
     a = ap.parse_args(argv)
 
     out = subprocess.run(
@@ -114,7 +134,7 @@ def main(argv=None) -> int:
         return 1
     issue = json.loads(out.stdout)
 
-    cmds = plan_block(issue, a.count, a.threshold, a.run_id) if a.blocked else plan_unblock(issue)
+    cmds = plan_block(issue, a.count, a.threshold, a.run_id, a.stalled) if a.blocked else plan_unblock(issue)
     for cmd in cmds:
         _run(cmd)
     print(f"{'blocked' if a.blocked else 'checked'} item={a.item} actions={len(cmds)}")
