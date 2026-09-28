@@ -100,6 +100,16 @@ class BuildersTest(unittest.TestCase):
         self.assertIn("qa-out/r1/journeys/send-message/desktop/0.png", body)
         self.assertIn("unknown -- this is the first observed failure", body)
 
+    def test_body_passes_the_acceptance_gate(self):
+        # jefe msg#170: step-failure bodies had no criterion, so 17+ sentry-journey issues
+        # (#8437-#8440, #8131...) sat fleet:needs-spec. The step's own fields make one.
+        import quality_gate
+        journey = {"id": "j", "name": "J", "steps": [
+            {"index": 0, "action": "Click Claim this page.", "observable_result": "the claim form loads"}]}
+        body = jif.build_issue_body(journey, journey["steps"][0], "r", "sha", None, jif.step_key("j", 0))
+        self.assertIn("When Click Claim this page, Then the claim form loads", body)
+        self.assertGreaterEqual(quality_gate.count_gwt(body), 1)
+
     def test_body_includes_last_pass_sha_when_known(self):
         journey = {"id": "j", "name": "J", "steps": [{"index": 0, "action": "a", "observable_result": "o"}]}
         step = journey["steps"][0]

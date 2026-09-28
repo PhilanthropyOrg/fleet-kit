@@ -185,5 +185,13 @@ class HqPush(unittest.TestCase):
         self.assertIn("Vision-link: none (maintenance)", body)
 
 
+    def test_issue_body_passes_the_acceptance_gate(self):
+        # jefe msg#171 (#8435): the "Done = ..." line was not gate-shaped, so every finding that
+        # survived to triage tripped needs-spec on acceptance.
+        import quality_gate
+        body = pr.issue_body({"title": "t", "evidence": ["e"], "fix": None, "check": "cron-failures"})
+        self.assertIn("When it checks `cron-failures`, Then it passes", body)
+        self.assertGreaterEqual(quality_gate.count_gwt(body), 1)
+
 if __name__ == "__main__":
     unittest.main()
