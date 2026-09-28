@@ -37,6 +37,9 @@ oldest first.** For each message:
   member's `tools.deny` in `members/<m>/<m>.fleet.json` against the refused command. Ack with
   a one-line keep-or-allow recommendation and the reason. Never edit the spec yourself.
 - **anything else**. Act if it is in scope, else reply with who owns it.
+- **Waste you see in any message** (a run that delivered nothing, an item worked again and
+  again, a pile of status comments, work parked on a human) goes to dumbledore as a `cause`
+  with the $ and the evidence (Reif, 2026-09-28: "elimination of waste").
 
 Then record it, every time:
 
