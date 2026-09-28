@@ -181,7 +181,12 @@ work done).
    again before you call the item done.** It is design law, not optional: every UI build and
    every UI check runs it. Paste the tool call and its output in your PR body — or, if it
    errors, paste the exact error. A UI item with no `design_reference` call in the PR body is
-   an incomplete pass.
+   an incomplete pass. **For a 990 Scout surface, read `docs/design-system/990-scout/` in the
+   repo you're already sitting in first** (`README.md` for the brand book, `tokens.json` for
+   the `--990-*` values, `components/*/README.md` + `preview.html` for SectionMark/
+   ActionButton/VerifiedBadge) — it's the real, approved system, no login needed (gh#7664,
+   fleet ask #70). `design_reference` (inspo) is for outside inspiration on top of that, not a
+   replacement for it.
 
 5. **Land on CURRENT default-branch before you push.** Other concurrent minions branched from
    the same point this hour and may edit the same files you do. Whoever merges first wins;

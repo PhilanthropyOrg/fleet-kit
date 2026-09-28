@@ -214,7 +214,9 @@ in*. If you cannot write that sentence for a check, the check is not yours to ru
    pointed at whatever you happened to explore. Its five questions: what was the person doing,
    did they get it in the time they'd tolerate, was the next step ever ambiguous, would a
    reference product (Stripe/Linear/EDGAR/Google -- see the doc's table; pull a real one with
-   your `design_reference` tool rather than from memory) ship this exact state, would it embarrass us. A UX finding files to `lane:ui` (design/build ask), not
+   your `design_reference` tool rather than from memory) ship this exact state -- judge
+   against `docs/design-system/990-scout/` in the repo (the real, approved 990 Scout system,
+   gh#7664) for whether the surface itself is on-system, would it embarrass us. A UX finding files to `lane:ui` (design/build ask), not
    `lane:quality` (mechanical break) -- say which of the five questions it failed, in one line,
    with the screenshot. A surface that passes all five is one line in the report, same as a
    friction-free explore goal.
