@@ -35,6 +35,11 @@ fi
 # front would certify a tree the suite never saw if a test writes into the worktree.
 rm -f "$RECEIPT"
 
+# 2026-09-29: preflight + pytest are the CPU-heavy part; at most FLEET_TEST_SLOTS run at once on
+# this box, the rest queue here in the foreground (scripts/test_slots.sh).
+. "$(dirname "$(readlink -f "$0")")/test_slots.sh"
+test_slot_acquire || exit 75
+
 # fk#1166: with no arguments this ran the WHOLE suite (12 min on philanthropy). The push hook
 # needs this receipt, so every minion ran the suite at least once, the harness backgrounded it
 # at 120s, and 103 passes in 7 days ended with "I'll wait for the background run" -- a finished
