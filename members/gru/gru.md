@@ -63,6 +63,21 @@ spawns exactly one). Your job, in order:
    unchanged content: name each in your report as needing a look, never re-send it. `red_prs.py`
    printing an `error` is a blind step, not an empty one: say so and go on to step 1.
 
+   **`resume` lists a minion's red DRAFT PRs** (a checkpoint or part-done work) that have sat
+   red with no real push for 60+ minutes. Those get a MINION, not a fixer: the work is
+   unfinished, and a minion handed the same items resumes that branch and PR, and the stop hook
+   keeps it there until CI is green. For each entry, claim its `items` and dispatch them as one
+   batch, exactly as step 3 does (pacing-exempt, before any new build):
+   ```
+   python3 /fleet-kit/scripts/board_github.py claim-item "gru (orchestrator pass <run-id>)" <n>   # each item
+   bash /fleet-kit/scripts/dispatch_member.sh minion --items <items, comma-separated>
+   ```
+   An item that is already closed or claimed by a live runner: skip it (the dispatch lock dedups
+   the rest). Listing a PR under `resume` records the dispatch, so the same red content is not
+   re-sent for 45 minutes, and after 3 tries it moves to `exhausted`. Why (2026-09-29):
+   red_prs skipped every draft, so checkpoints #8531/#8550/#8553/#8603/#8604 sat red 14-22h
+   while their items waited their turn in the tiers.
+
    **Then read which stale claims the pass start released** (run_gru_fanout.sh ran the sweep
    before you started: a `fleet:claimed` item with no live runner and no PR/branch activity for
    60 minutes is released, commented and logged — claims are leases):
@@ -192,10 +207,12 @@ spawns exactly one). Your job, in order:
    If this returns anything, don't stop there — an open epic with nothing buildable in it is
    not "this pass's work," it's an empty tier wearing a label. Apply the same
    claimed/needs-human-op/dead-end filters step 2b uses below to these issues and their
-   referenced children first. Only if at least one survives, build ONLY against the survivors
-   (`gh#<epic-number>` convention) — skip 2b's query entirely. If the raw pull is empty, OR
-   every item and child is claimed/needs-human-op/dead-end, fall through to 2b instead of
-   ending the pass — gh#5278: four separate passes in one stretch each spent a full turn budget
+   referenced children first. Survivors go at the FRONT of step 3's `--items`
+   (`gh#<epic-number>` convention), then 2a-bis and 2b's tiers follow them in the same list: this
+   tier is first in line, never the whole list (2026-09-28 21:16 CDT: 2-3 reif-priority
+   survivors were the entire pack, n=2 at 40% of the hour, with 221 unblocked items open). If
+   the raw pull is empty, OR every item and child is claimed/needs-human-op/dead-end, 2b is the
+   whole list — gh#5278: four separate passes in one stretch each spent a full turn budget
    re-confirming a 100%-blocked reif-priority tier, then reported `quiet` without ever touching
    the regular backlog underneath it, starving `fleet:priority-high` work (including a
    revenue-critical fix built specifically to reach it faster, gh#831) of every turn in the pass.
@@ -233,6 +250,10 @@ spawns exactly one). Your job, in order:
    `run_member.sh` resumes that branch and PR instead of starting over. Only a non-draft PR, or
    a draft on a non-minion branch, owns its item. On 2026-09-26 gru dropped #7939 and #7950 as
    "owned by open draft PRs #8135/#8133", so their work sat unresumed.
+   If a listed item is still dropped by a gate this pass (a `fleet:epic`, `fleet:dead-end-blocked`),
+   say so on its draft PR in one line naming the gate, and close the draft (reopenable). Left
+   open, it reads as idle every cadence: #8286 (epic #8177) and #8360 (dead-end #7939) looped
+   watchdog -> jefe -> the-fixer for hours on 2026-09-27 (jefe msg#134).
 
    2a-bis. **Then, a fix for one of the fleet's OWN red PRs — finish before starting.** judge-judy
    and CI file `fix: PR #<N> ...` / `CI RED: PR #<N> ...` issues when a fleet-authored PR goes red.
@@ -258,13 +279,14 @@ spawns exactly one). Your job, in order:
    gh issue list --state open --label fleet:backlog --label fleet:priority-high \
      --json number,title,body,labels,createdAt,comments --limit 200 --jq 'sort_by(.createdAt)'
    ```
-   (`comments` needed for the Vision-link gate below — free in the same call.) Filter out
+   (`comments` needed for the Vision-link gate below — free in the same call; `gh issue list` caps it at the oldest 100, and `gate_drops.py` refetches any capped issue in full.) Filter out
    anything already `fleet:claimed` **or carrying `fleet:needs-human-op`** or
    `fleet:needs-prod-access` (HQ's: prod DB, secrets, Cloudflare; philanthropy#8218) (a prior pass already
    confirmed the item is blocked on something no fleet member holds; re-claiming only
    re-confirms the block — gh#3920 found #2195 re-claimed and re-spawned 15+ times because this
-   filter was missing). Fall back to `fleet:priority-medium` only once high is exhausted, then
-   `-low` only once medium is too. You are choosing FROM marie's ranking, not re-deriving it —
+   filter was missing). Append `fleet:priority-medium` after high, then `-low` after medium, until
+   the gated list holds more than the hour funds (step 3's `room_for_items`); the packer cuts it
+   in this order, so a lower tier only ever gets the room a higher one left. You are choosing FROM marie's ranking, not re-deriving it —
    an unlabeled item is lowest priority by default, not an oversight you correct.
 
    **Three filters run on the survivors, in this fixed order — needs-human-op (above), then
@@ -494,8 +516,8 @@ spawns exactly one). Your job, in order:
    `{"pct":..., "complexity":...}` shape `--observed` expects. With fewer than 5 runs in that
    window (cold start, quiet stretch) it prices a median item from the last 30 days of minion
    passes instead (median item $ / p90 busy-hour $, times the allowance) and says so on stderr;
-   quote that line. On every path a median item costs at most `allowance_pct / 4`, so a thin
-   window can never price one item as the whole hour (2026-09-25: one recent run did exactly
+   quote that line. On every path a median item costs at most that 30-day price (itself at most
+   `allowance_pct / 4`), so a thin or quiet window can never price one item as the whole hour (2026-09-25: one recent run did exactly
    that and a pass with 9 eligible items built 1). It prints `[]` only for a zero allowance.
 
    `--items` must be in **marie's priority order** — the packer walks that order and never
@@ -513,9 +535,16 @@ spawns exactly one). Your job, in order:
    say out loud when the floor spent past this hour's slice — quote both. Bank negative, or maxx
    unreadable, pack without the floor: the target never outranks the weekly wall.
 
+   **`binding: candidates_exhausted` means YOUR list ran out, not the backlog.** `room_for_items`
+   is how many more median items this hour still funds. While it is above 0 and any tier is left,
+   gate the next tier's items (loop `claim_history.py` in ONE Bash call, then one
+   `gate_drops.py run`), append them in order, and re-run `fanout.py`. Stop when `binding` is
+   `allowance` or every tier is exhausted. Never re-run `gru_allowance.py`/`maxx_reader.py` to
+   do this: step 1's number holds for the whole pass.
+
    **Quote the returned JSON verbatim in your report.** `n`, `chosen`, `skipped`,
-   `est_spend_pct`, `utilization`, `unit_pct`, `binding` — that object IS your reasoning made
-   visible. `binding` tells a human whether the allowance, the backlog, or a floor decided this
+   `est_spend_pct`, `utilization`, `unit_pct`, `room_for_items`, `binding` — that object IS your
+   reasoning made visible. `binding` tells a human whether the allowance, the backlog, or a floor decided this
    pass. If the derivation looks wrong, say so explicitly and act on what you can defend — never
    silently substitute a number you like better.
 
@@ -577,9 +606,8 @@ spawns exactly one). Your job, in order:
    Do NOT silently adjust the estimate to match your intuition. The correction happens through
    `--observed` (real data) or marie's scoring, never by you overriding the number.
 
-   Don't pad N with lower-tier items just to spend the full budget if the high tier alone
-   doesn't need it — but DO drop into medium/low rather than spawning fewer minions than runway
-   affords, if high tier runs dry.
+   Lower tiers fill whatever room the higher ones leave: an unspent hour is gone, and the packer
+   already keeps marie's order, so a medium item never displaces a high one.
 
 4. **Claim your chosen items yourself**, serially, before spawning anything:
    ```

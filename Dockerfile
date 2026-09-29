@@ -36,6 +36,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 # nothing said so, because a shell command that fails still lets the pass continue.
 RUN apt-get update -qq && apt-get install -y -qq \
       git python3 python3-pip curl ca-certificates cron gnupg jq sqlite3 tzdata openssh-client \
+      eatmydata \
       python3.11-minimal libpython3.11-stdlib \
     && rm -rf /var/lib/apt/lists/*
 
@@ -97,6 +98,13 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
       > /etc/apt/sources.list.d/github-cli.list \
     && apt-get update -qq && apt-get install -y -qq gh && rm -rf /var/lib/apt/lists/*
+
+# cloudflared: the ssh ProxyCommand node_minion.sh uses to reach a worker node (node_up.sh).
+# Worker nodes sit behind a Cloudflare tunnel, not on the hub's LAN.
+ARG CLOUDFLARED_VERSION=2026.8.2
+RUN curl -fsSL -o /usr/local/bin/cloudflared \
+      "https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}/cloudflared-linux-$(dpkg --print-architecture)" \
+    && chmod +x /usr/local/bin/cloudflared
 
 # node — gh#126: without it, `which node` fails and any downstream repo's tests that shell out
 # to node (nonprofit-atlas's dock-inbox.js reconnect/PostHog coverage, for one) silently SKIP

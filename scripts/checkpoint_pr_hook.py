@@ -116,6 +116,8 @@ def main() -> int:
     cmd = (payload.get("tool_input") or {}).get("command") or ""
     msg = decide(cmd, payload.get("cwd") or ".")
     if msg:
+        import hook_blocks
+        hook_blocks.record(payload, "checkpoint_pr_hook", msg)
         print(msg, file=sys.stderr)
         return 2
     return 0

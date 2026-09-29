@@ -66,6 +66,7 @@ class OnlyDumbledoreReachesReif(unittest.TestCase):
             return real(cmd, *a, **kw)
         for p in (mock.patch.object(ask.subprocess, "run", fake),
                   mock.patch.object(ask, "issue_for_ask", lambda *a, **k: ""),
+                  mock.patch.object(ask, "settle_ask_issue", lambda *a, **k: ""),
                   mock.patch.object(fleet_msg, "_default_launcher",
                                     lambda m, r: self.woken.append(m)),
                   mock.patch.dict(os.environ, {"FLEET_LOG_DIR": self.d})):
@@ -117,7 +118,10 @@ class OnlyDumbledoreReachesReif(unittest.TestCase):
         self.assertEqual(len(self.pages), 1)
         cmd, env = self.pages[0]
         self.assertEqual(env.get("FLEET_ALERT_EMAIL_LEG"), "1")
-        self.assertIn(f"fleet ask #{ask_id} from dumbledore (for gru)", cmd)
+        # Reif, 2026-09-28: "label these as officially from dumbledore" -- every escalation
+        # email is branded so he can trust the sender at a glance: subject prefix + From name.
+        self.assertIn(f"[dumbledore] fleet ask #{ask_id} from dumbledore (for gru)", cmd)
+        self.assertEqual(env.get("MAIL_FROM"), "Dumbledore (fleet) <hello@philanthropy.org>")
         self.assertIn(f"yes {ask_id}", cmd[-1])
         self.assertEqual(len(ask.list_asks(self.conn(), status="all")), 1, "one ask id end to end")
         # Reif's reply, the way webhook_receiver/inbox.py applies it.
@@ -129,6 +133,27 @@ class OnlyDumbledoreReachesReif(unittest.TestCase):
         row = ask.list_asks(self.conn(), status="all")[0]
         self.assertEqual((row["status"], row["answered_by"]), ("answered", "reif (email)"))
         self.assertEqual(ask.triage_rate(self.conn())["escalated"], 1)
+
+    def test_escalation_email_leads_plain_and_lists_every_other_open_ask(self):
+        # Reif, 2026-09-29: "if it has a new one - append it to all that have not been
+        # resolved" and "write in plain simple English". Each escalation email opens with
+        # dumbledore's plain reason, then lists every OTHER escalated ask still unanswered.
+        first, second, answered = self.file(), self.file(), self.file()
+        for i, why in ((first, "Prod box needs a GitHub read token"),
+                       (answered, "already handled"),
+                       (second, "Resize the database disk")):
+            self.assertEqual(self.ask("escalate", str(i), "--me", "dumbledore", "--reason", why), 0)
+            if i == answered:
+                self.assertEqual(self.ask("answer", str(i), "--answer", "done",
+                                          "--answered-by", "reif (email)"), 0)
+        body = self.pages[-1][0][-1]
+        self.assertTrue(body.startswith("Resize the database disk"), body)
+        self.assertIn(f"Also still waiting on you:\n- #{first}: Prod box needs a GitHub read token", body)
+        self.assertNotIn(f"#{answered}:", body, "an answered ask is not listed")
+        self.assertNotIn(f"- #{second}:", body, "the new ask is not listed twice")
+        self.assertIn(f"yes {second}", body)
+        # With nothing else open, no list.
+        self.assertNotIn("Also still waiting", self.pages[0][0][-1])
 
     def test_escalation_rate_counts_escalated_over_triaged(self):
         for _ in range(3):

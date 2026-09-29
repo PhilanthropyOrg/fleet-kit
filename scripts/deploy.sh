@@ -205,6 +205,11 @@ run_args() {
     # identity all keyed off the wrong name forever. Strip only a trailing "-green" (anchored,
     # not a substring replace -- an instance actually named e.g. "evergreen-fleet" must be
     # unaffected) so the container's own idea of its name matches what it will be renamed TO.
+    # Worker node ssh config + key (node_up.sh). Absent: minions run on this box, as before.
+    local node_dir="${FLEET_NODE_HOST_DIR:-$HOME/.config/fleet-kit/node}"
+    if [ -f "$node_dir/config" ]; then
+        secret_mounts+=(-v "$node_dir:/root/.fleet-node:ro")
+    fi
     local instance_name="${name%-green}"
     echo -d --name "$name" \
         -e FLEET_REPO_URL="$FLEET_REPO_URL" \
@@ -774,7 +779,17 @@ drain_inflight_passes() {
         waited=$((waited + 15))
     done
 }
+# Every deploy builds a fresh ~2.3GB image and retags :latest, leaving the previous one dangling.
+# Nothing ever pruned them: 65 dangling builds (~every 2h) had dino's root at 96% on 2026-09-28
+# (fk#1345, philanthropy#8590 were the same disk-100% outage). `image prune` only removes
+# dangling images no container uses, so the stopped $RETIRED_MARKER rollback image is kept.
+# Detached: prune takes minutes on a loaded box and must not hold the deploy lock.
+prune_dangling_images() {
+    nohup podman image prune -f >/dev/null 2>&1 9>&- &
+    log "post-deploy: pruning dangling images in the background"
+}
 finish_deploy() {
+    prune_dangling_images
     log "DEPLOYED: $CONTAINER live on $VIEW_PORT/$WEBHOOK_PORT, running $(podman exec "$CONTAINER" sh -c 'cd /fleet-kit && git log -1 --oneline' 2>/dev/null)"
     log "previous build kept stopped as $RETIRED_MARKER -- roll back any time with: bash $0 --rollback"
 

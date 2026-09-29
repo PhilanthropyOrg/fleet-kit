@@ -80,8 +80,12 @@ times in the same window.
 
 So testing is YOUR job, not the gate's:
 
-    bash /fleet-kit/scripts/verified_test.sh              # the whole suite
+    bash /fleet-kit/scripts/verified_test.sh              # the tests near your diff
     bash /fleet-kit/scripts/verified_test.sh tests/x.py   # narrower, recorded as such
+
+Targeted only, never the whole suite (Reif, 2026-09-29): the full suite runs in the product
+repo's CI on your PR, and waiting for that CI (`pr_ci_wait.py`) is part of your pass. Your
+evidence names the targeted run and says the full suite runs in CI on the PR.
 
 Run it, get it green, THEN push. `pretest_push_hook.py` blocks a `git push` out of a worktree
 whose current content has no green receipt behind it — the same mechanical layer §6's worktree
@@ -551,6 +555,13 @@ for it, don't background it in the first place: run it in the foreground and let
 timeout) decide the outcome, or don't dispatch it at all and say so plainly in your report
 ("queued <n> for next pass, no budget to wait on it here"). "I'll pick this up when the
 notification lands" is never a valid way to end a fleet pass.
+
+**minion: background tasks are OFF (2026-09-28).** run_member.sh starts every minion pass with
+`CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` and a 20 min foreground Bash timeout (30 max), because
+32 of 33 minion `reported_nothing` runs in one day still ended "waiting for the background
+verified_test.sh". A minion has no `run_in_background` and no `TaskOutput` to reach for: run
+every command in the foreground, and never poll another process with `pgrep`/`ps | grep`. The
+`run_in_background` + `TaskOutput` pattern above is for members that fan out (gru, the-fixer).
 
 **The same rule applies to the WAIT ITSELF, not just the thing being waited on.** Found live
 (gh#77, 2026-08-24): `gru` backgrounded two minion builds correctly with a foreground `&`, then

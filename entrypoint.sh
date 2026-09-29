@@ -101,6 +101,14 @@ case "${1:-cron-foreground}" in
       exec sleep infinity
     fi
 
+    # A worker node (node_sync.sh sets FLEET_NODE_ROLE=worker) schedules nothing and serves
+    # nothing: the hub's gru sends it claimed minion batches through node_gate.sh. A crontab
+    # here would be a second gru racing the hub's on the same backlog.
+    if [ "${FLEET_NODE_ROLE:-}" = "worker" ]; then
+      echo "[entrypoint] FLEET_NODE_ROLE=worker -- no crontab, dashboard or webhook; minions arrive via node_gate.sh"
+      exec sleep infinity
+    fi
+
     # Start the live dashboard in the background -- this is the whole point of exposing a
     # port from the container. Without this, cron-foreground runs the loop with nothing
     # observable from outside except raw log files inside the container.
@@ -260,6 +268,9 @@ case "${1:-cron-foreground}" in
       # self-heals onto main instead of spinning on the same dead ref every 10 minutes. Still
       # writes to gitpull.log either way, so the canary above stays meaningful.
       echo "*/10 * * * * root export GH_TOKEN=\$(cat $TOKEN_FILE); date -u >> $LOG_DIR/gitpull.log 2>&1; cd $FLEET_REPO && bash /fleet-kit/scripts/git_pull_guard.sh >> $LOG_DIR/gitpull.log 2>&1"
+      # Nothing rotated member logs or access.jsonl (205MB on dino, 2026-09-28): copytruncate
+      # anything past 50MB once a day. See log_rotate.py for why in place, not rename.
+      echo "13 4 * * * root python3 /fleet-kit/scripts/log_rotate.py $LOG_DIR >> $LOG_DIR/log_rotate.log 2>&1"
       # Backstop poll widened */2 -> hourly (2026-08-22, Reif: "don't want to see it crying so
       # much, costs 20 cents a run") -- every tick spawns a real claude -p turn even on green
       # (check.sh gates the reasoning depth, not the LLM spin-up cost itself), and the webhook

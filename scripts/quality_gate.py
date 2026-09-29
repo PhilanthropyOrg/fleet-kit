@@ -50,6 +50,11 @@ from items_arg import HELP as ITEMS_HELP, load_items  # noqa: E402
 QUALITY_LABELS = ("quality:ship-it", "quality:solid", "quality:world-class")
 WORLD_CLASS = "quality:world-class"
 EPIC = "fleet:epic"
+# philanthropy#8707: a prod alert that reaches gru and is then dropped for a missing spec is the
+# same as no alert (#8695, filed by prod_health_check.py mid-outage, skipped as needs-spec). An
+# issue carrying one of these labels was filed by a probe, not a person: its acceptance is
+# "the probe goes green", so it is spec-complete by construction, whatever its body says.
+ALERT_LABELS = ("incident", "fleet:incident")
 
 # One criterion: Given ... When ... Then ..., on one line or across up to three lines, any
 # markdown wrapping (bold, list bullets, numbering).  Case-insensitive.
@@ -84,6 +89,17 @@ def _label_names(labels) -> list[str]:
     return out
 
 
+def is_alert(labels) -> bool:
+    return bool(set(_label_names(labels)) & set(ALERT_LABELS))
+
+
+def alert_spec(check: str) -> str:
+    """The templated acceptance + Vision-link every auto-filed alert carries (philanthropy#8707),
+    so it clears both gates on its own even if the alert label is ever dropped."""
+    return (f"## Acceptance\n- Given the `{check}` check, When it runs after the fix, Then it "
+            f"reports ok for 3 consecutive intervals.\n\nVision-link: none (maintenance)")
+
+
 def count_acceptance_bullets(text: str | None) -> int:
     n = 0
     for head in _ACCEPTANCE_HEADING_RE.finditer(text or ""):
@@ -114,6 +130,8 @@ def classify_candidate(labels, body: str | None, comments: list[dict] | None) ->
     """(eligible, reason)."""
     if EPIC in _label_names(labels):
         return False, "tracking-only parent (fleet:epic); gru builds its children, not the epic itself"
+    if is_alert(labels):
+        return True, "prod alert/incident: spec-complete by construction (philanthropy#8707)"
     quality = [l for l in _label_names(labels) if l in QUALITY_LABELS]
     if not quality:
         return False, "no quality: label (ship-it / solid / world-class); marie sets it in the PRD"

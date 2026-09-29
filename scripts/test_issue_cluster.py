@@ -238,3 +238,13 @@ def test_file_still_comments_on_a_twin_and_files_reif_asks(monkeypatch) -> None:
     assert rc == 0 and calls[-1][:3] == ["gh", "issue", "comment"]
     rc, calls = _cli(monkeypatch, "Reif's words", labels=["fleet:reif-asked"])
     assert rc == 0 and calls[-1][:3] == ["gh", "issue", "create"]
+
+
+def test_file_reads_an_at_path_body_instead_of_posting_the_path(monkeypatch, tmp_path) -> None:
+    # philanthropy#8610/#8625: `--body "@/tmp/body.md"` became the literal issue body.
+    f = tmp_path / "body.md"
+    f.write_text(_GOOD)
+    rc, calls = _cli(monkeypatch, f"@{f}")
+    posted = calls[-1][calls[-1].index("--body") + 1]
+    assert rc == 0 and calls[-1][:3] == ["gh", "issue", "create"]
+    assert posted.startswith("Evidence.") and "@" not in posted[:1]

@@ -128,7 +128,32 @@ def test_gh_denial_becomes_one_ask_per_verb() -> None:
     p = da.plan_ask("sentry", "run9", dn, [])
     assert p and p["why"].startswith("permission denied: gh issue create"), p
     assert da.plan_ask("sentry", "run10", dn, [{"member": "sentry", "why": p["why"]}]) is None
-    print("ok  gh denials -> one ask; already-open ask not repeated; hook redirects skipped")
+    answered = {"member": "sentry", "why": p["why"], "status": "denied", "answered_at": 1000.0}
+    assert da.plan_ask("sentry", "run11", dn, [answered], now=1000.0 + 86400) is None
+    assert da.plan_ask("sentry", "run12", dn, [answered], now=1000.0 + 15 * 86400) is not None
+    print("ok  gh denials -> one ask; open or recently answered ask not repeated; hook redirects skipped")
+
+
+def test_guard_hook_block_is_not_an_ask() -> None:
+    # asks #88/#89 (2026-09-28): pretest_push_hook and checkpoint_pr_hook blocks were filed as
+    # "sandbox refused" asks proposing a tools.deny change for a command no deny list held.
+    import hook_blocks
+    d = Path(tempfile.mkdtemp())
+    old = hook_blocks.LOG_DIR
+    hook_blocks.LOG_DIR = d
+    try:
+        hook_blocks.record({"tool_use_id": "g1"}, "checkpoint_pr_hook", "Blocked: PR #8366 is a checkpoint")
+        (d / "dedupe_redirects.jsonl").write_text(json.dumps({"tool_use_id": "r1"}) + "\n")
+        ids = hook_blocks.blocked_ids()
+        assert ids == {"g1", "r1"}, ids
+        result = {"permission_denials": [
+            {"tool_name": "Bash", "tool_use_id": "g1", "tool_input": {"command": "gh pr ready 8366"}},
+            {"tool_name": "Bash", "tool_use_id": "x", "tool_input": {"command": "gh pr merge 2"}}]}
+        dn = da.gh_denials(result, da.redirect_ids(d / "dedupe_redirects.jsonl"))
+        assert [x["verb"] for x in dn] == ["gh pr merge"], dn
+    finally:
+        hook_blocks.LOG_DIR = old
+    print("ok  a guard hook's own block never becomes a permission ask")
 
 
 def test_denial_asks_cli_files_into_fleet_db() -> None:

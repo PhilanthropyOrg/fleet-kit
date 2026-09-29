@@ -4671,7 +4671,9 @@ def _email_reply_answers_asks_and_files_backlog_without_a_model():
     fa = (ROOT / "scripts" / "fleet_alert.sh").read_text()
     assert 'p["reply_to"] = [os.environ["REPLY_TO"]]' in fa and 'REPLY_TO="${FLEET_REPLY_TO:-}"' in fa, "alert email has no Reply-To"
     ask = (ROOT / "scripts" / "ask.py").read_text()
-    assert 'f"fleet ask #{ask_id} from {sender}"' in ask and "Reply to this email with one line" in ask, "ask mail does not say how to reply"
+    assert 'f"[dumbledore] fleet ask #{ask_id} from {sender}"' in ask and "Reply to this email with one line" in ask, "ask mail does not say how to reply"
+    # Reif, 2026-09-28: "label these as officially from dumbledore" -- the From name too.
+    assert 'MAIL_FROM="Dumbledore (fleet) <hello@philanthropy.org>"' in ask, "ask mail is not branded from dumbledore"
 
 
 def _intake_classifies_and_dedupes_alerts_by_check():
@@ -4989,6 +4991,12 @@ def _reif_eyes_files_what_reif_would_have_pointed_out():
     assert urls == ["https://github.com/o/r/issues/5"] and [c[2] for c in calls] == ["create"], (urls, calls)
     assert calls[0][calls[0].index("--label") + 1] == "fleet:backlog,fleet:priority-high,lane:fleet"
     assert "reif-eyes:churn:the-fixer" in calls[0][calls[0].index("--body") + 1]
+    # jefe msg#277: a filed finding must clear both of gru's build gates on its own
+    body = calls[0][calls[0].index("--body") + 1]
+    assert "\nVision-link: none (maintenance)\n" in body, body
+    qg = importlib.util.module_from_spec(importlib.util.spec_from_file_location("quality_gate", ROOT / "scripts" / "quality_gate.py"))
+    qg.__spec__.loader.exec_module(qg)
+    assert qg.count_acceptance_bullets(body) >= 1, body
     assert state["ask-stale:7"]["url"] == "(already open)"
     calls.clear()
     assert re_.file_findings(churn, "o/r", state, [], run=run, now=now + 3600) == [] and not calls, "a key filed this week is not filed twice"
@@ -12646,8 +12654,9 @@ def _ask_answer_is_idempotent_gh568():
 
 
 def _ask_file_rate_limits_ntfy_to_once_per_member_per_hour_gh568():
-    """gh#568 AC4: filing rate-limits its page to one NTFY per instance (member) per hour,
-    routed through the existing fleet_alert.sh (and therefore its undelivered-retry queue) --
+    """gh#568 AC4, amended by fk#1386: the escalation page dedupes per ASK, not per member-hour --
+    every distinct ask dumbledore escalates reaches Reif, and re-escalating the same ask never
+    pages twice. Routed through the existing fleet_alert.sh (and therefore its undelivered-retry queue) --
     not a new state file. Exercises the real ask.py + fleet_alert.sh + alert_store.py chain,
     curl stubbed the same way `_fleet_alert_queues_an_undelivered_alarm...` above stubs it."""
     import subprocess
@@ -12680,6 +12689,9 @@ def _ask_file_rate_limits_ntfy_to_once_per_member_per_hour_gh568():
             if f.returncode:
                 return f
             ask_id = re.search(r"ask (\d+) filed", f.stdout).group(1)
+            return _escalate(ask_id)
+
+        def _escalate(ask_id):
             return subprocess.run(
                 [sys.executable, script, "--db-path", str(db_path), "escalate", ask_id,
                  "--me", "dumbledore", "--reason", "selftest"],
@@ -12692,11 +12704,15 @@ def _ask_file_rate_limits_ntfy_to_once_per_member_per_hour_gh568():
         assert p2.returncode == 0, f"ask.py file must exit 0: {p2.stderr[:300]}"
         p3 = _file("gru", "a different member, same hour")
         assert p3.returncode == 0, f"ask.py file must exit 0: {p3.stderr[:300]}"
+        first_id = re.search(r"fleet ask #(\d+) from dumbledore \(for marie\)",
+                             calls.read_text()).group(1)
+        p4 = _escalate(first_id)
+        assert p4.returncode == 0, f"re-escalate must exit 0: {p4.stderr[:300]}"
 
         sent = calls.read_text() if calls.exists() else ""
-        assert len(re.findall(r"fleet ask #\d+ from dumbledore \(for marie\)", sent)) == 1, \
-            f"a second ask from the same member inside the hour must not page again: " \
-            f"{_redact_secrets(sent)!r}"
+        assert len(set(re.findall(r"fleet ask #(\d+) from dumbledore \(for marie\)", sent))) == 2, \
+            f"two distinct asks from one member in the hour must both page, a re-escalation " \
+            f"must not: {_redact_secrets(sent)!r}"
         assert re.search(r"fleet ask #\d+ from dumbledore \(for gru\)", sent), \
             f"a different member's first ask this hour must still page: {_redact_secrets(sent)!r}"
 
@@ -16142,7 +16158,7 @@ if __name__ == "__main__":
     check("asks schema is present and reaches a pre-existing fleet.db (gh#568)", _ask_schema_presence_and_clean_migration_gh568)
     check("ask.py file/list round-trips a filed ask (gh#568)", _ask_file_and_list_roundtrip_gh568)
     check("ask.py answer sets the row once; a second call is a no-op (gh#568 AC3)", _ask_answer_is_idempotent_gh568)
-    check("ask.py file rate-limits its NTFY page to once per member per hour (gh#568 AC4)", _ask_file_rate_limits_ntfy_to_once_per_member_per_hour_gh568)
+    check("ask.py escalation pages once per ask, every distinct ask pages (gh#568 AC4, fk#1386)", _ask_file_rate_limits_ntfy_to_once_per_member_per_hour_gh568)
     check("_redact_secrets strips Bearer tokens from assertion messages (gh#682)", _redact_secrets_strips_bearer_tokens_from_assertion_messages_gh682)
     check("check() redacts secrets from every failure message it records (gh#682)", _check_redacts_secrets_from_every_failure_message_gh682)
     check("check() calls _redact_secrets (gh#682)", _check_calls_redact_secrets_gh682)

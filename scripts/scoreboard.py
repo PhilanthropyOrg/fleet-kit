@@ -114,6 +114,15 @@ def backlog_trend(series: list[dict], days: int = 7) -> float | None:
 _COMPLETED = "COMPLETED"
 _MEGA_LABEL = "fleet:mega"
 REIF_PRIORITY_LABEL = "fleet:reif-priority"
+SENTRY_JOURNEY_LABEL = "fleet:sentry-journey"
+
+# `PR #123` or a /pull/123 URL in an issue's closing comment -- the live 24h count (2026-09-28
+# audit) found 65 closed issues with no PR in closingIssuesReferences; 25 were real fixes whose
+# PR just never said "Closes #N" (closer cites it by hand instead, e.g. "Verified live on prod
+# ... PR #8605 (merged ...)"), 12 were fleet:sentry-journey auto-closes (a green check, not
+# work -- excluded by SENTRY_JOURNEY_LABEL below), 13 other/not-planned. A bare `#123` is not
+# matched -- that's as likely another issue mentioned in passing as a PR.
+_PR_COMMENT_RE = re.compile(r"PR\s*#(\d+)|/pull/(\d+)", re.IGNORECASE)
 
 
 def _labels_of(issue: dict) -> set[str]:
@@ -148,6 +157,20 @@ def resolved_weight(issue: dict) -> int:
     return len(children) if children else 1
 
 
+def closing_comment_pr_number(issue: dict) -> int | None:
+    """The PR number an issue's closing comment (its last comment -- gh returns them oldest
+    first, so [-1] is the one that closed the issue) cites as `PR #N` or a /pull/N URL. None
+    when there are no comments, or the last one cites zero or more-than-one distinct PR
+    (ambiguous -- never guess)."""
+    comments = issue.get("comments") or []
+    if not comments:
+        return None
+    last = comments[-1]
+    body = last.get("body") if isinstance(last, dict) else str(last)
+    nums = {int(a or b) for a, b in _PR_COMMENT_RE.findall(body or "")}
+    return next(iter(nums)) if len(nums) == 1 else None
+
+
 def _successful_deploy_ts(deploy_runs: list[dict]) -> list[float]:
     return sorted(t for t in (_ts(d.get("createdAt")) for d in deploy_runs
                               if d.get("conclusion") in (None, "", "success")) if t is not None)
@@ -166,9 +189,15 @@ def resolved_events(merged_prs: list[dict], deploy_runs: list[dict],
                     issues_by_number: dict[int, dict]) -> list[dict]:
     """One row per (merged PR x closed issue it references) that actually counts toward the
     KPI: {"ts": <epoch it went live>, "weight": <int>, "pr": <number>, "issue": <number>}.
-    `issues_by_number` is `{number: issue dict with state/stateReason/labels/body}` -- a PR's
-    own closingIssuesReferences doesn't always carry a fresh stateReason, so callers fetch
-    issues separately (see fleet_view_server._scoreboard_issues_by_number)."""
+    `issues_by_number` is `{number: issue dict with state/stateReason/labels/body/comments}` --
+    a PR's own closingIssuesReferences doesn't always carry a fresh stateReason, so callers
+    fetch issues separately (see fleet_view_server._scoreboard_issues_by_number).
+
+    Also credits a COMPLETED-closed issue no merged PR linked via closingIssuesReferences, when
+    its closing comment names a merged+live PR by hand (see closing_comment_pr_number) --
+    the 2026-09-28 live audit found this is 25/65 of a day's "unlinked" closes, real fixes whose
+    PR just never said "Closes #N". Never fleet:sentry-journey (auto-closed by a green check,
+    not work), and never an issue already linked (no double count when the same PR does both)."""
     deploys = _successful_deploy_ts(deploy_runs)
     out = []
     for pr in merged_prs:
@@ -188,6 +217,28 @@ def resolved_events(merged_prs: list[dict], deploy_runs: list[dict],
                 out.append({"ts": live_at, "weight": w, "pr": pr.get("number"), "issue": num,
                            "is_mega": bool(mega_child_numbers(issue)),
                            "is_reif_priority": REIF_PRIORITY_LABEL in _labels_of(issue)})
+
+    linked = resolved_referenced_numbers(merged_prs)
+    prs_by_number = {p.get("number"): p for p in merged_prs if p.get("number") is not None}
+    for num, issue in issues_by_number.items():
+        if num in linked or SENTRY_JOURNEY_LABEL in _labels_of(issue):
+            continue
+        w = resolved_weight(issue)
+        if not w:
+            continue
+        pr_num = closing_comment_pr_number(issue)
+        pr = prs_by_number.get(pr_num) if pr_num is not None else None
+        if not pr:
+            continue
+        merged_at = _ts(pr.get("mergedAt"))
+        if merged_at is None:
+            continue
+        live_at = _covering_deploy_ts(merged_at, deploys)
+        if live_at is None:
+            continue
+        out.append({"ts": live_at, "weight": w, "pr": pr_num, "issue": num,
+                   "is_mega": bool(mega_child_numbers(issue)),
+                   "is_reif_priority": REIF_PRIORITY_LABEL in _labels_of(issue)})
     return out
 
 

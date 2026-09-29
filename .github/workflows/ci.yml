@@ -42,12 +42,16 @@ jobs:
         run: python3 scripts/test_ci_required_check_gh804.py
       - name: run test_worktree_guard_redirect.py
         run: python3 scripts/test_worktree_guard_redirect.py
+      - name: run test_ask_issue_gate_lines.py
+        run: python3 scripts/test_ask_issue_gate_lines.py
       - name: run test_validate_crontab_gh5200.py
         run: python3 scripts/test_validate_crontab_gh5200.py
       - name: run test_entrypoint_env_helpers_gh5200.py
         run: python3 scripts/test_entrypoint_env_helpers_gh5200.py
       - name: run test_wake_while_busy.py
         run: python3 scripts/test_wake_while_busy.py
+      - name: run test_ask_notify_per_ask.py
+        run: python3 scripts/test_ask_notify_per_ask.py
       - name: run test_central_time.py
         run: python3 scripts/test_central_time.py
       - name: run test_vp_labels.py
@@ -62,6 +66,8 @@ jobs:
         run: python3 scripts/test_minion_resume_stale_holder.py
       - name: run test_dispatch_member.py
         run: python3 scripts/test_dispatch_member.py
+      - name: run test_worker_node.py
+        run: python3 scripts/test_worker_node.py
       - name: run test_claim_history_infra.py
         run: python3 scripts/test_claim_history_infra.py
       - name: run members/librarian/test_librarian.py
@@ -70,6 +76,8 @@ jobs:
         run: python3 scripts/test_worktree_lock.py
       - name: run test_webhook_merged_pr.py
         run: python3 scripts/test_webhook_merged_pr.py
+      - name: run test_auto_deploy_8714.py
+        run: python3 scripts/test_auto_deploy_8714.py
       - name: run test_notify_reif_hq.py
         run: python3 scripts/test_notify_reif_hq.py
       - name: run test_prod_runtime.py
@@ -78,6 +86,8 @@ jobs:
         run: python3 scripts/test_coverage_map.py
       - name: run test_webhook_prod_alert.py
         run: python3 scripts/test_webhook_prod_alert.py
+      - name: run test_box_log.py
+        run: python3 scripts/test_box_log.py
       - name: run test_webhook_inbox_ignore.py
         run: python3 scripts/test_webhook_inbox_ignore.py
       - name: run test_ci_runs_every_test_file.py
@@ -90,6 +100,8 @@ jobs:
         run: python3 scripts/test_minion_checkpoint.py
       - name: run test_reported_nothing_0927.py
         run: python3 scripts/test_reported_nothing_0927.py
+      - name: run test_minion_no_bg_tasks.py
+        run: python3 scripts/test_minion_no_bg_tasks.py
       - name: run test_issue_cluster.py
         run: python3 scripts/test_issue_cluster.py
       - name: run test_never_silent_8215.py
@@ -104,6 +116,10 @@ jobs:
         run: python3 scripts/test_fleet_db_wal.py
       - name: run test_gh_poll_survives_gh_failure.py
         run: python3 scripts/test_gh_poll_survives_gh_failure.py
+      - name: run test_startup_poll_race_1393.py
+        run: python3 scripts/test_startup_poll_race_1393.py
+      - name: run test_home_tile_fixes_1393.py
+        run: python3 scripts/test_home_tile_fixes_1393.py
       - name: run test_account_pool_config_dir.py
         run: python3 scripts/test_account_pool_config_dir.py
       - name: run test_account_pool_order.py
@@ -156,6 +172,8 @@ jobs:
         run: python3 scripts/test_prod_incident.py
       - name: run test_quality_gate.py
         run: python3 scripts/test_quality_gate.py
+      - name: run test_alert_spec_8707.py
+        run: python3 scripts/test_alert_spec_8707.py
       - name: run test_fleet_msg_8215.py
         run: python3 scripts/test_fleet_msg_8215.py
       - name: run test_fleet_msg_wake.py
@@ -204,6 +222,10 @@ jobs:
         run: python3 scripts/test_stale_claims.py
       - name: run test_deploy_health_and_retire.py
         run: python3 scripts/test_deploy_health_and_retire.py
+      - name: run test_disk_growth_cleanup.py
+        run: python3 scripts/test_disk_growth_cleanup.py
+      - name: run test_transcript_and_log_growth.py
+        run: python3 scripts/test_transcript_and_log_growth.py
       - name: run test_kpi_calendar_day_gh265.py
         run: python3 scripts/test_kpi_calendar_day_gh265.py
       - name: run test_prod_health_check.py
@@ -220,6 +242,10 @@ jobs:
         run: python3 scripts/test_judge_judy_verdict.py
       - name: run test_verified_test_diff_scoped.py
         run: python3 scripts/test_verified_test_diff_scoped.py
+      - name: run test_verified_test_slots.py
+        run: python3 scripts/test_verified_test_slots.py
+      - name: run test_verified_test_eatmydata.py
+        run: python3 scripts/test_verified_test_eatmydata.py
       - name: run test_fleet_env_lint.py
         run: python3 scripts/test_fleet_env_lint.py
       - name: run test_reaper_drops_deploy_lock.py
@@ -272,6 +298,10 @@ jobs:
         run: python3 scripts/test_run_card_reference.py
       - name: run test_fleet_home_inline_signin.py
         run: python3 scripts/test_fleet_home_inline_signin.py
+      - name: run test_member_ping_command.py
+        run: python3 scripts/test_member_ping_command.py
+      - name: run test_member_pause.py
+        run: python3 scripts/test_member_pause.py
 
       # gh#809: give the fleet a pre-merge look at its own UI. Only runs the (heavier) render
       # step when the diff actually touches a rendered surface -- criterion 3, no added latency

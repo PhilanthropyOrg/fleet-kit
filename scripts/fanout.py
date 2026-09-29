@@ -124,9 +124,13 @@ def pack(items: list[dict], allowance_pct: float, unit_pct: float,
         "unit_pct": round(unit_pct, 6),
         "forced_over_floor": forced,
         "over_allowance": spent > allowance_pct,
+        # 2026-09-29: 21 of 22 gru passes in 3 days ended "backlog_exhausted" at 12-50% of the
+        # hour with 221 unblocked items open -- the CALLER's list ran out, not the backlog. Say
+        # which, and how many more median items the hour still funds, so gru pulls the next tier.
+        "room_for_items": max(0, int((allowance_pct - spent) // unit_pct)),
         "binding": ("nothing_claimable" if not items else
                     "min_items_floor" if forced else
-                    "backlog_exhausted" if not skipped else "allowance"),
+                    "candidates_exhausted" if not skipped else "allowance"),
     }
 
 

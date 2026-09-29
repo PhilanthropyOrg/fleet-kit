@@ -45,9 +45,12 @@ landed attack becomes an issue for marie to rank and minion to fix.
 
 4. **Explore one surface by hand.** Spend your remaining turns as an attacker would on ONE
    surface the catalog does not cover well yet (a form, a query parameter, a state a URL
-   exposes). If you find something, file it the same way (a repro a builder can run, a
-   screenshot, the exact input) and add the attack to `attacks.yaml` in your report as a
-   proposed catalog addition -- do not edit the catalog mid-pass without a test.
+   exposes). If you find something, the filer above cannot take it (it reads only
+   results.json) and raw `gh issue create` is denied, so file it through the dedupe door:
+   `python3 /fleet-kit/scripts/issue_cluster.py file --repo <product repo> --title "..."
+   --label fleet:red-team --body-file /tmp/finding.md` (a repro a builder can run, the exact
+   input, plus `Vision-link:` and a `## Acceptance` bullet or it is refused). Propose the
+   attack for `attacks.yaml` in your report -- do not edit the catalog mid-pass without a test.
 
 5. **Report.**
 
