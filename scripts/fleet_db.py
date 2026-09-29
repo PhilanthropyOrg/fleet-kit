@@ -147,7 +147,10 @@ CREATE INDEX IF NOT EXISTS idx_asks_status ON asks(status);
 CREATE INDEX IF NOT EXISTS idx_asks_member ON asks(member);
 -- philanthropy#8215: member-to-member messages (gru -> marie + jefe on gate drops, a denial ->
 -- jefe, ...). Reif's channel is ask.py; msgs are for each other. scripts/fleet_msg.py is the only
--- reader/writer. status: open -> acked (did it) | replied (didn't, ack_note says why).
+-- reader/writer. status: open -> acked (did it) | replied (didn't, ack_note says why). A `command`
+-- kind (fk#1429, pinged in from POST /api/members/<name>/command) goes open -> understood (ack,
+-- not yet terminal -- still escalatable) -> done (fleet_msg.py done, ack_note+done_note between
+-- them are the record of what was promised and what was delivered).
 -- escalated_to: NULL, 'jefe' (watchdog sent jefe a pointer), or 'reif' (folded into ask_id).
 -- NOT rebuilt from runs.jsonl: this is state, not an index.
 CREATE TABLE IF NOT EXISTS msgs (
@@ -213,6 +216,15 @@ _ADD_COLUMNS = (
 _ASK_ADD_COLUMNS = (
     ("class", "TEXT"),
     ("summary", "TEXT"),
+)
+
+# Same mechanism again, scoped to `msgs`: fk#1429's `done` state (a command message's second,
+# post-ack close) needs its own note+timestamp, same shape ack_note/acked_at already has for the
+# first close -- a live fleet.db predating this column still has a `msgs` table with no
+# done_note/done_at, and CREATE TABLE IF NOT EXISTS no-ops against it.
+_MSG_ADD_COLUMNS = (
+    ("done_note", "TEXT"),
+    ("done_at", "REAL"),
 )
 
 
@@ -291,6 +303,10 @@ def _migrate(conn: sqlite3.Connection, db_path: Path) -> None:
     for name, decl in _ASK_ADD_COLUMNS:
         if name not in have_asks:
             conn.execute(f"ALTER TABLE asks ADD COLUMN {name} {decl}")
+    have_msgs = {r[1] for r in conn.execute("PRAGMA table_info(msgs)")}
+    for name, decl in _MSG_ADD_COLUMNS:
+        if name not in have_msgs:
+            conn.execute(f"ALTER TABLE msgs ADD COLUMN {name} {decl}")
 
 
 def connect(db_path: Path | None = None) -> sqlite3.Connection:

@@ -288,6 +288,10 @@ jobs:
         run: python3 scripts/test_run_card_reference.py
       - name: run test_fleet_home_inline_signin.py
         run: python3 scripts/test_fleet_home_inline_signin.py
+      - name: run test_member_ping_command.py
+        run: python3 scripts/test_member_ping_command.py
+      - name: run test_member_pause.py
+        run: python3 scripts/test_member_pause.py
 
       # gh#809: give the fleet a pre-merge look at its own UI. Only runs the (heavier) render
       # step when the diff actually touches a rendered surface -- criterion 3, no added latency
