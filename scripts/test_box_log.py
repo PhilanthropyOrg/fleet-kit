@@ -95,11 +95,27 @@ class FoldTests(unittest.TestCase):
         a2 = bi.fold(st, fail, now=2000)  # the next hourly failure: counted, no twin, no spam
         self.assertEqual(a2, [])
         self.assertEqual(st["exit:prune_api_cache"]["count"], 2)
-        ok = [_rec(level="START"), _rec(level="EXIT", exit=0, msg="EXIT 0", run_keys=[])]
+        ok = [_rec(level="START"), _rec(level="EXIT", exit=0, msg="EXIT 0", run_keys=[],
+                                        ts="2026-09-29T06:06:50Z")]  # next hourly run, clean
         a3 = bi.fold(st, ok, now=3000)
         self.assertEqual(sorted(a[1] for a in a3 if a[0] == "close"),
                          ["exit:prune_api_cache", "prune_api_cache:error-api_cache-still"])
         self.assertEqual(st, {})
+
+    def test_flapping_job_stays_one_open_item(self):
+        """Live 2026-09-29: search_filter_latency_canary failed every other 5-min run and the
+        first cut filed+closed 3 issues in one pass. A clean run < CLEAN_S after the last
+        failure must not close; the next failure is a repeat, not a new item."""
+        st: dict = {}
+        acts = []
+        for i, rc in enumerate([1, 0, 1, 0, 1]):
+            ts = f"2026-09-29T13:{i * 5:02d}:00Z"
+            recs = [_rec(job="c", level="EXIT", exit=rc, ts=ts, key="exit:c" if rc else None,
+                         run_keys=["exit:c"] if rc else [])]
+            acts += bi.fold(st, recs, now=0)
+        self.assertEqual([a[0] for a in acts], ["open"])
+        clean = [_rec(job="c", level="EXIT", exit=0, ts="2026-09-29T13:55:00Z", run_keys=[])]
+        self.assertEqual([a[0] for a in bi.fold(st, clean, now=0)], ["close"])
 
     def test_alert_still_in_run_keys_stays_open_and_comments_after_6h(self):
         st: dict = {}
@@ -113,7 +129,8 @@ class FoldTests(unittest.TestCase):
         st: dict = {}
         bi.fold(st, [_rec(job="nginx:error", level="ERROR", key="nginx:error:upstream")], now=0)
         self.assertEqual(bi.fold(st, [_rec(job="pg_health", level="EXIT", exit=0, run_keys=[])], now=10), [])
-        self.assertEqual([a[0] for a in bi.fold(st, [], now=24 * 3600 + 1)], ["close"])
+        later = bi._t(_rec(), 0) + 24 * 3600 + 1  # 24h after the box's own timestamp
+        self.assertEqual([a[0] for a in bi.fold(st, [], now=later)], ["close"])
 
     def test_info_and_keyless_lines_never_file(self):
         st: dict = {}
@@ -125,7 +142,7 @@ class ApplyTests(unittest.TestCase):
     def test_open_then_close_in_one_batch_closes_the_issue_it_filed(self):
         st: dict = {}
         recs = [_rec(level="EXIT", exit=1, key="exit:j", job="j", run_keys=["exit:j"]),
-                _rec(level="EXIT", exit=0, job="j", run_keys=[])]
+                _rec(level="EXIT", exit=0, job="j", run_keys=[], ts="2026-09-29T07:06:50Z")]
         actions = bi.fold(st, recs, now=0)
         calls = []
         with mock.patch("inbox.file_or_comment_alert",
