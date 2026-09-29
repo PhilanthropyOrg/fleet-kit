@@ -19,9 +19,14 @@ CONTAINER="${FLEET_NODE_CONTAINER:-fleet-worker}"
 INSTANCE_DIR="$KIT_DIR/instances/$INSTANCE"
 IMAGE="fleet-kit:$INSTANCE-worker"
 ts() { date '+%Y-%m-%d %H:%M:%S'; }
+# cron has no login session, so no XDG_RUNTIME_DIR: rootless podman then falls back to another
+# runtime dir, cannot see the running container, and this script "rebuilds" and --replaces it
+# every tick (lucky, 2026-09-29: killed the first boot mid-clone). node_up.sh enables linger
+# so /run/user/<uid> outlives ssh sessions.
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 
 cd "$KIT_DIR"
-exec 9>"$KIT_DIR/.git/.node_sync.lock"
+exec 9>"${TMPDIR:-/tmp}/fleet-node-sync.$(id -u).lock"
 flock -n 9 || exit 0
 
 git fetch -q origin main || { echo "$(ts) [node_sync] fetch failed -- keeping current build"; exit 0; }
@@ -30,8 +35,8 @@ have="$(podman inspect -f '{{index .Config.Labels "fleet.sha"}}' "$CONTAINER" 2>
 running="$(podman inspect -f '{{.State.Running}}' "$CONTAINER" 2>/dev/null || true)"
 [ "$want" = "$have" ] && [ "$running" = "true" ] && exit 0
 
-if [ "$running" = "true" ] && podman exec "$CONTAINER" pgrep -f "run_member.sh minion" >/dev/null 2>&1; then
-  echo "$(ts) [node_sync] ${have:0:7} -> ${want:0:7} waiting: a minion is running"
+if [ "$running" = "true" ] && podman exec "$CONTAINER" pgrep -f "run_member.sh minion|repo clone" >/dev/null 2>&1; then
+  echo "$(ts) [node_sync] ${have:0:7} -> ${want:0:7} waiting: a minion (or the first-boot clone) is running"
   exit 0
 fi
 

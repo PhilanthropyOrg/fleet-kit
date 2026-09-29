@@ -88,13 +88,14 @@ Host fleet-node
   ServerAliveInterval 30
   ServerAliveCountMax 10
 EOF
+ssh "$HUB" "chmod 600 $D/config"  # ssh rejects a group-writable config ("Bad owner or permissions")
 PUB="$(ssh "$HUB" "cat $D/id_ed25519.pub")"
 
 say "4/6 node: forced-command key"
 ssh "$NODE" "mkdir -p ~/.ssh && touch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys && { grep -qF '$(awk '{print $2}' <<<"$PUB")' ~/.ssh/authorized_keys || echo 'restrict,command=\"'\$HOME'/fleet-kit/scripts/node_gate.sh\" $PUB' >> ~/.ssh/authorized_keys; }"
 
 say "5/6 node: build + start $CONTAINER, sync cron"
-ssh "$NODE" "bash ~/fleet-kit/scripts/node_sync.sh; mkdir -p ~/fleet-kit/instances/$INSTANCE/logs; line='*/5 * * * * bash \$HOME/fleet-kit/scripts/node_sync.sh >> \$HOME/fleet-kit/instances/$INSTANCE/logs/node_sync.log 2>&1'; crontab -l 2>/dev/null | grep -qF node_sync.sh || { crontab -l 2>/dev/null; echo \"\$line\"; } | crontab -"
+ssh "$NODE" "sudo -n loginctl enable-linger \$(id -un) || echo '[node_up] WARNING: could not enable linger; cron podman calls will not see the container'; bash ~/fleet-kit/scripts/node_sync.sh; mkdir -p ~/fleet-kit/instances/$INSTANCE/logs; line='*/5 * * * * bash \$HOME/fleet-kit/scripts/node_sync.sh >> \$HOME/fleet-kit/instances/$INSTANCE/logs/node_sync.log 2>&1'; crontab -l 2>/dev/null | grep -qF node_sync.sh || { crontab -l 2>/dev/null; echo \"\$line\"; } | crontab -"
 
 say "6/6 hub -> node path (expects node-refused: the gate only runs minion batches)"
 ssh "$HUB" "ssh -F none -i $D/id_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes -o UserKnownHostsFile=$D/known_hosts -o StrictHostKeyChecking=accept-new -o 'ProxyCommand=$N_PROXY' $N_USER@$N_HOST probe" || true
