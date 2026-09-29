@@ -1040,6 +1040,14 @@ fi
 # case. Found live on dino 2026-08-21: every real member pass failed rc=1 "other" silently
 # (account_pool.sh had no pattern for this error text) until traced to this guard directly.
 export IS_SANDBOX=1
+# A minion pass has no later turn, so a background task is work it never sees finish. 2026-09-28:
+# 32 of 33 minion `reported_nothing` runs ended "waiting for the background verified_test.sh" --
+# the CLI moves any Bash call past its 120s default into the background, and the pass then ends
+# its turn on it (or polls `pgrep -f verified_test.sh`, which matches every other minion's run).
+# No background tasks, and a foreground call may run 20 min (30 with an explicit timeout).
+if [ "$MEMBER" = "minion" ]; then
+  export CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 BASH_DEFAULT_TIMEOUT_MS=1200000 BASH_MAX_TIMEOUT_MS=1800000
+fi
 # Only pass a cap the spec actually set -- an empty value must not become `--max-turns ""`,
 # which the CLI rejects, nor a silent default (see the MAX_TURNS/MAX_BUDGET note above).
 CAP_ARGS=()
