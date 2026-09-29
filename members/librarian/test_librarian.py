@@ -241,11 +241,15 @@ class WatermarkTest(unittest.TestCase):
         os.utime(path, (old, old))
 
     def test_missing_state_file_means_scan_everything(self):
-        self.assertEqual(librarian.load_watermark(self.state_file), 0.0)
+        self.assertEqual(librarian.load_done(self.state_file), [])
 
-    def test_save_then_load_roundtrips(self):
-        librarian.save_watermark(self.state_file, 12345.0)
-        self.assertEqual(librarian.load_watermark(self.state_file), 12345.0)
+    def test_save_then_load_roundtrips_and_merges(self):
+        librarian.save_done(self.state_file, [[5.0, 9.0], [1.0, 3.0], [2.0, 6.0]])
+        self.assertEqual(librarian.load_done(self.state_file), [[1.0, 9.0]])
+
+    def test_old_single_watermark_state_still_reads(self):
+        Path(self.state_file).write_text(json.dumps({"last_scrub_run_at": 12345.0}))
+        self.assertEqual(librarian.load_done(self.state_file), [[-1.0, 12345.0]])
 
     def test_unchanged_file_skipped_on_incremental_rerun(self):
         old = self.root / "old.jsonl"
@@ -262,123 +266,90 @@ class WatermarkTest(unittest.TestCase):
         found = list(librarian.iter_transcripts(self.root, since=watermark))
         self.assertIn(fresh, found)
 
-    def test_main_execute_advances_watermark_dry_run_does_not(self):
+    def test_main_execute_records_progress_dry_run_does_not(self):
         (self.root / "a.jsonl").write_text("gho_" + "I" * 36)
         script = Path(__file__).resolve().parent / "librarian.py"
         base_cmd = [sys.executable, str(script), "--root", str(self.root),
                     "--state-file", self.state_file, "--skip-retention"]
-
         subprocess.run(base_cmd, capture_output=True, text=True, timeout=30)
-        self.assertEqual(librarian.load_watermark(self.state_file), 0.0, "dry-run advanced the watermark")
-
+        self.assertEqual(librarian.load_done(self.state_file), [], "dry-run recorded progress")
         subprocess.run(base_cmd + ["--execute"], capture_output=True, text=True, timeout=30)
-        self.assertGreater(librarian.load_watermark(self.state_file), 0.0)
+        self.assertTrue(librarian.load_done(self.state_file))
 
-    def test_checkpoint_saves_progress_before_a_simulated_mid_scan_kill(self):
-        """gh#588 AC1/AC3: a run interrupted mid-loop (simulating its own SIGKILLed timeout)
-        still leaves a watermark strictly newer than what existed before the run started,
-        because run_scrub() checkpoints every checkpoint_every_files rather than only after
-        the whole loop across all roots completes."""
-        for i in range(10):
-            (self.root / f"f{i}.jsonl").write_text(f"file {i}\n")
+    def test_state_defaults_to_persistent_log_dir(self):
+        """A deploy recreates the container; ~/.cache went with it and the cursor reset to zero
+        every ~2h (dino, 2026-09-28). With FLEET_LOG_DIR set, the state lives there."""
+        code = "import sys; sys.path.insert(0, %r); import librarian; print(librarian.DEFAULT_STATE_FILE)" % str(Path(__file__).resolve().parent)
+        env = {k: v for k, v in os.environ.items() if k != "LIBRARIAN_STATE_FILE"}
+        env["FLEET_LOG_DIR"] = self.tmp.name
+        out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=env).stdout.strip()
+        self.assertEqual(out, str(Path(self.tmp.name) / ".librarian_state.json"))
 
-        before = 111.0
-        librarian.save_watermark(self.state_file, before)
+    def test_wrapper_passes_state_file_on_log_dir(self):
+        sh = (Path(__file__).resolve().parent.parent / "librarian-scrub" / "librarian-scrub.sh").read_text()
+        self.assertIn('--state-file "$LOG_DIR/.librarian_state.json"', sh)
 
-        real_scrub_file = librarian.scrub_file
-        call_count = {"n": 0}
-
-        def flaky_scrub_file(path, stats, execute):
-            call_count["n"] += 1
-            if call_count["n"] > 4:
-                raise RuntimeError("simulated kill mid-scan")
-            return real_scrub_file(path, stats, execute)
-
-        run_started = time.time()
-        with mock.patch.object(librarian, "scrub_file", side_effect=flaky_scrub_file):
-            with self.assertRaises(RuntimeError):
-                librarian.run_scrub(
-                    [self.root], since=0.0, execute=True, state_file=self.state_file,
-                    run_started=run_started, full_scan=False, checkpoint_every_files=2,
-                )
-
-        # The kill hit after file 5 (4 succeeded, then the 5th raised); a checkpoint every 2
-        # files means files 1-2 and 3-4 each triggered a checkpoint before the kill, so the
-        # on-disk watermark must already be newer than what existed before the run.
-        after_kill = librarian.load_watermark(self.state_file)
-        self.assertGreater(after_kill, before)
-
-    def test_uninterrupted_run_final_watermark_is_run_start_time_not_finish_time(self):
-        """gh#588 AC4: checkpointing must not change the final saved value for an
-        uninterrupted run -- it's still run_started (captured before the first file was
-        touched), the same value the pre-checkpointing code saved at the end."""
-        for i in range(5):
-            (self.root / f"f{i}.jsonl").write_text(f"file {i}\n")
-        run_started = time.time() - 1000.0
-        librarian.run_scrub(
-            [self.root], since=0.0, execute=True, state_file=self.state_file,
-            run_started=run_started, full_scan=False, checkpoint_every_files=2,
-        )
-        self.assertEqual(librarian.load_watermark(self.state_file), run_started)
-
-    def test_interrupted_run_watermark_does_not_orphan_unprocessed_older_files(self):
-        """The bug this file's checkpoint fix (see librarian.py's CHECKPOINTING docstring)
-        replaced: the original gh#588 shape checkpointed a constant run_started value no
-        matter how far the path-ordered walk actually got. Since every real candidate file's
-        mtime already predates run_started by definition (it's why the file was a candidate at
-        all), a kill partway through permanently orphaned every unreached file the moment that
-        checkpoint fired -- confirmed live 2026-09-07, secrets in 305 transcripts survived
-        weeks of incremental runs that each reported success. This test seeds several
-        days-old files, kills the scan after only some of them are processed, and proves a
-        second incremental run (using the watermark the killed run left behind) still reaches
-        every file the first run never got to -- the old constant-run_started checkpoint would
-        leave zero candidates for this second call."""
-        for i in range(6):
+    def _seed(self, n: int) -> list[Path]:
+        files = []
+        for i in range(n):
             f = self.root / f"f{i}.jsonl"
             f.write_text(f"file {i} token gho_" + "Q" * 36)
-            self._age(f, 6.0 - i * 0.5)  # f0 oldest (6.0d) ... f5 newest (3.5d), strictly ascending
+            self._age(f, 6.0 - i * 0.5)  # f0 oldest ... f{n-1} newest
+            files.append(f)
+        return files
 
-        real_scrub_file = librarian.scrub_file
-        call_count = {"n": 0}
+    def _killed_run(self, after: int, every: int = 2) -> list[str]:
+        seen: list[str] = []
+        real = librarian.scrub_file
 
-        def flaky_scrub_file(path, stats, execute):
-            call_count["n"] += 1
-            if call_count["n"] > 3:
+        def flaky(path, stats, execute):
+            if len(seen) >= after:
                 raise RuntimeError("simulated kill mid-scan")
-            return real_scrub_file(path, stats, execute)
+            seen.append(path.name)
+            return real(path, stats, execute)
 
-        run_started = time.time()
-        with mock.patch.object(librarian, "scrub_file", side_effect=flaky_scrub_file):
+        with mock.patch.object(librarian, "scrub_file", side_effect=flaky):
             with self.assertRaises(RuntimeError):
-                librarian.run_scrub(
-                    [self.root], since=0.0, execute=True, state_file=self.state_file,
-                    run_started=run_started, full_scan=False, checkpoint_every_files=2,
-                )
+                librarian.run_scrub([self.root], done=librarian.load_done(self.state_file), execute=True,
+                                    state_file=self.state_file, run_started=time.time(),
+                                    full_scan=False, checkpoint_every_files=every)
+        return seen
 
-        watermark_after_kill = librarian.load_watermark(self.state_file)
-        # The old (buggy) code saved run_started here -- days newer than every seeded file --
-        # which would make the assertions below fail identically to the real incident.
-        self.assertLess(watermark_after_kill, run_started)
+    def test_newest_transcripts_scrubbed_first(self):
+        """Recent transcripts are the live exposure: a run cut after 2 files must have done the
+        2 NEWEST, not the 2 oldest."""
+        self._seed(6)
+        self.assertEqual(self._killed_run(after=2), ["f5.jsonl", "f4.jsonl"])
 
-        second_stats, _ = librarian.run_scrub(
-            [self.root], since=watermark_after_kill, execute=True, state_file=self.state_file,
-            run_started=time.time(), full_scan=False,
-        )
-        # f3, f4, f5 were never reached by the killed run (only 3 succeeded); the fix's
-        # contract is that a second incremental run still finds them via the watermark left
-        # behind, instead of silently treating them as already scrubbed.
-        self.assertGreaterEqual(second_stats.files_scanned, 3, "unprocessed older files were orphaned by the interrupted run's watermark")
+    def test_cut_runs_backfill_older_without_redoing_or_orphaning(self):
+        """gh#588 + the 2026-09-07 orphan incident, newest-first: successive cut runs each pick
+        up where the last checkpoint left off, and together reach every file exactly once."""
+        files = self._seed(6)
+        first = self._killed_run(after=2)
+        second = self._killed_run(after=2)
+        self.assertEqual(second, ["f3.jsonl", "f2.jsonl"])
+        stats, _ = librarian.run_scrub([self.root], done=librarian.load_done(self.state_file), execute=True,
+                                       state_file=self.state_file, run_started=time.time(), full_scan=False)
+        self.assertEqual(stats.files_scanned, 2)
+        for f in files:
+            self.assertIn("[REDACTED:gho]", f.read_text())
+        self.assertEqual(len(first + second) + stats.files_scanned, 6)
 
-    def test_full_scan_cli_ignores_watermark_even_with_checkpointing(self):
-        """gh#588 AC5: --full-scan still ignores the on-disk watermark entirely, unaffected
-        by the new mid-loop checkpointing."""
+    def test_file_written_after_scrub_comes_back(self):
+        f = self._seed(1)[0]
+        librarian.run_scrub([self.root], done=[], execute=True, state_file=self.state_file,
+                            run_started=time.time(), full_scan=False)
+        f.write_text("new gho_" + "R" * 36)  # mtime now > the recorded range
+        stats, _ = librarian.run_scrub([self.root], done=librarian.load_done(self.state_file), execute=True,
+                                       state_file=self.state_file, run_started=time.time(), full_scan=False)
+        self.assertEqual(stats.files_scanned, 1)
+        self.assertIn("[REDACTED:gho]", f.read_text())
+
+    def test_full_scan_cli_ignores_recorded_ranges(self):
         old_file = self.root / "old.jsonl"
         old_file.write_text("gho_" + "Z" * 36)
         self._age(old_file, 5)
-        # Seed a watermark newer than old.jsonl's mtime -- an ordinary incremental run would
-        # skip it, so redaction only happens here if --full-scan truly bypasses the watermark.
-        librarian.save_watermark(self.state_file, time.time())
-
+        librarian.save_done(self.state_file, [[-1.0, time.time()]])
         script = Path(__file__).resolve().parent / "librarian.py"
         proc = subprocess.run(
             [sys.executable, str(script), "--root", str(self.root), "--execute",
@@ -387,6 +358,7 @@ class WatermarkTest(unittest.TestCase):
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("[REDACTED:gho]", old_file.read_text())
+
 
 
 class RetentionTest(unittest.TestCase):
