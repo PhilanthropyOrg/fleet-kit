@@ -1080,7 +1080,10 @@ export IS_SANDBOX=1
 # the CLI moves any Bash call past its 120s default into the background, and the pass then ends
 # its turn on it (or polls `pgrep -f verified_test.sh`, which matches every other minion's run).
 # No background tasks, and a foreground call may run 20 min (30 with an explicit timeout).
-if [ "$MEMBER" = "minion" ]; then
+# A the-fixer --item sub-pass is the same one-shot builder (2026-09-29: the fixer on #8836 spent
+# 10+ min re-polling a verified_test.sh the CLI had backgrounded; 179 of 561 --item sessions had
+# at least one command backgrounded). The-fixer's parent pass still fans out in the background.
+if [ "$MEMBER" = "minion" ] || { [ "$MEMBER" = "the-fixer" ] && [ -n "$ITEM" ]; }; then
   export CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 BASH_DEFAULT_TIMEOUT_MS=1200000 BASH_MAX_TIMEOUT_MS=1800000
 fi
 # Only pass a cap the spec actually set -- an empty value must not become `--max-turns ""`,

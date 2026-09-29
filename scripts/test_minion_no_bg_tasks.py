@@ -20,14 +20,14 @@ VARS = ("CLAUDE_CODE_DISABLE_BACKGROUND_TASKS", "BASH_DEFAULT_TIMEOUT_MS", "BASH
 
 
 def _block() -> str:
-    m = re.search(r'^if \[ "\$MEMBER" = "minion" \]; then\n  export CLAUDE_CODE_DISABLE_BACKGROUND_TASKS.*?^fi$',
+    m = re.search(r'^if \[ "\$MEMBER" = "minion" \][^\n]*; then\n  export CLAUDE_CODE_DISABLE_BACKGROUND_TASKS.*?^fi$',
                   SRC, re.M | re.S)
     assert m, "run_member.sh has no minion block exporting CLAUDE_CODE_DISABLE_BACKGROUND_TASKS"
     return m.group(0)
 
 
-def _env_after(member: str) -> dict:
-    script = f'MEMBER={member}\n{_block()}\n' + "".join(f'echo "{v}=${{{v}:-}}"\n' for v in VARS)
+def _env_after(member: str, item: str = "") -> dict:
+    script = f'MEMBER={member}\nITEM={item}\n{_block()}\n' + "".join(f'echo "{v}=${{{v}:-}}"\n' for v in VARS)
     out = subprocess.run(["bash", "-c", script], capture_output=True, text=True, check=True,
                          env={"PATH": "/usr/bin:/bin"}).stdout
     return dict(line.split("=", 1) for line in out.splitlines())
@@ -42,9 +42,16 @@ def test_minion_claude_runs_without_background_tasks() -> None:
 
 
 def test_other_members_keep_background_tasks() -> None:
-    # the-fixer fans its sub-passes out with run_in_background + TaskOutput; leave it alone.
+    # the-fixer's parent pass fans its sub-passes out with run_in_background; leave it alone.
     assert _env_after("the-fixer") == {v: "" for v in VARS}
+    assert _env_after("gru") == {v: "" for v in VARS}
     print("ok  other members' env is unchanged")
+
+
+def test_a_fixer_item_subpass_is_a_one_shot_builder_too() -> None:
+    # 2026-09-29: the fixer on #8836 re-polled a backgrounded verified_test.sh for 10+ min.
+    assert _env_after("the-fixer", "8836")["CLAUDE_CODE_DISABLE_BACKGROUND_TASKS"] == "1"
+    print("ok  a the-fixer --item sub-pass also runs with background tasks off")
 
 
 def test_set_before_claude_is_invoked() -> None:
@@ -55,4 +62,5 @@ def test_set_before_claude_is_invoked() -> None:
 if __name__ == "__main__":
     test_minion_claude_runs_without_background_tasks()
     test_other_members_keep_background_tasks()
+    test_a_fixer_item_subpass_is_a_one_shot_builder_too()
     test_set_before_claude_is_invoked()
