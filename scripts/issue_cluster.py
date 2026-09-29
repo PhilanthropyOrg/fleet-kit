@@ -371,7 +371,12 @@ def main(argv=None) -> int:
         print(signature(a.title))
         return 0
     if a.cmd == "file":
-        body = normalize_spec(open(a.body_file).read() if a.body_file else a.body)
+        body = a.body
+        # philanthropy#8610/#8625: `--body "@/tmp/body.md"` (gh's `-F` idiom) posted the path as
+        # the whole issue body. Read the file, the way the caller meant it.
+        if not a.body_file and (body or "").startswith("@") and os.path.isfile(body[1:].strip()):
+            a.body_file = body[1:].strip()
+        body = normalize_spec(open(a.body_file).read() if a.body_file else body)
         labels = [x.strip() for lab in a.label for x in lab.split(",") if x.strip()]
         try:
             open_issues = list_open(a.repo)
