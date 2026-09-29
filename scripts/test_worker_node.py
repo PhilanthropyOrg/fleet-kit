@@ -203,6 +203,37 @@ case "$*" in *fleet.sha*) echo abc123 ;; *Running*) echo true ;; esac
         self.assertFalse(any(" build " in c or " run " in c for c in calls), "same sha + running: no-op")
 
 
+class NodeSyncLock(unittest.TestCase):
+    """lucky 2026-09-29: conmon inherited node_sync's lock fd, so every later tick found the
+    lock held and exited silently; the worker never updated again."""
+
+    def test_container_does_not_keep_the_lock(self):
+        d = Path(tempfile.mkdtemp())
+        (d / "bin").mkdir()
+        (d / "sha").write_text("new1\n")
+        _sh(d / "bin" / "git", f'case "$1" in rev-parse) cat {d}/sha ;; esac\n')
+        _sh(d / "bin" / "podman", f"""echo "$@" >> {d}/podman_calls
+case "$1" in
+  inspect) case "$*" in *fleet.sha*) echo old ;; *Running*) echo false ;; esac ;;
+  run) (sleep 20 </dev/null >/dev/null 2>&1 &) ;;  # like conmon: outlives this call, inherits open fds
+esac
+""")
+        inst = HERE.parent / "instances" / "t-lock"
+        self.addCleanup(lambda: subprocess.run(["rm", "-rf", str(inst)]))
+        inst.mkdir(parents=True, exist_ok=True)
+        (inst / "fleet.env").write_text("FLEET_REPO_URL=x\n")
+        (d / "gh_token").write_text("t")
+        (d / ".config" / "fleet-kit").mkdir(parents=True)
+        (d / ".config" / "fleet-kit" / "gh_token").write_text("t")
+        (d / "node.env").write_text("FLEET_NODE_INSTANCE=t-lock\nFLEET_NODE_CONTAINER=w\n")
+        env = dict(os.environ, PATH=f"{d / 'bin'}:{os.environ['PATH']}", FLEET_NODE_ENV=str(d / "node.env"),
+                   TMPDIR=str(d), HOME=str(d))
+        for _ in range(2):
+            subprocess.run(["bash", str(HERE / "node_sync.sh")], env=env, capture_output=True, timeout=30)
+        builds = [c for c in (d / "podman_calls").read_text().splitlines() if c.startswith("build")]
+        self.assertEqual(len(builds), 2, "the second tick found the lock still held by the container")
+
+
 class HubSideLiveness(unittest.TestCase):
     def test_stale_claims_sees_a_node_run_as_live(self):
         import stale_claims
