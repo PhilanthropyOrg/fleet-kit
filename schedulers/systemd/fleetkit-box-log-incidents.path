@@ -1,0 +1,10 @@
+[Unit]
+Description=Wake fleetkit-box-log-incidents.service whenever box-logs.jsonl grows (nonprofit-atlas#8703)
+
+[Path]
+# Same shape as fleetkit-hq-prod-alert.path: every append fires; the service's offset file
+# makes repeated fires idempotent.
+PathModified={{INSTANCE_DIR}}/logs/box-logs.jsonl
+
+[Install]
+WantedBy=multi-user.target
