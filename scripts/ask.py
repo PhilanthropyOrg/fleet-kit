@@ -143,6 +143,15 @@ def _close_triage(conn, ask_id: int, member: str, note: str) -> None:
     fleet_msg.close(conn, TRIAGE, mid, note)
 
 
+def open_escalations(conn, exclude: int | None = None) -> list[tuple[int, str]]:
+    """(id, dumbledore's reason) for every escalated ask Reif has not answered yet, oldest first."""
+    rows = conn.execute(
+        "SELECT a.id, m.ack_note FROM asks a JOIN msgs m ON m.ask_id = a.id AND m.recipient = ? "
+        "AND m.kind = 'ask' WHERE a.answered_at IS NULL AND m.ack_note LIKE 'escalated:%' "
+        "ORDER BY a.id", (TRIAGE,)).fetchall()
+    return [(i, note.split(":", 1)[1].strip()) for i, note in rows if i != exclude]
+
+
 def triage_rate(conn, days: float = 7.0) -> dict:
     since = time.time() - days * 86400
     n, esc = conn.execute(
@@ -153,7 +162,8 @@ def triage_rate(conn, days: float = 7.0) -> dict:
             "rate": round(esc / n, 3) if n else 0.0}
 
 
-def _notify(member: str, ask_id: int, why: str, sender: str | None = None) -> None:
+def _notify(member: str, ask_id: int, why: str, sender: str | None = None, lead: str = "",
+            still_open: list[tuple[int, str]] = ()) -> None:
     """One NTFY (+ email) per member per rolling hour, via the fleet's shared fleet_alert.sh
     channel -- same helper every other check pages through, so a filed ask reaches a human the
     same way an alarm does and gets the same undelivered-retry queue for free (AC4).
@@ -186,9 +196,16 @@ def _notify(member: str, ask_id: int, why: str, sender: str | None = None) -> No
     title = f"[dumbledore] fleet ask #{ask_id} from {sender}" + (f" (for {member})" if sender != member else "")
     # fk#1056: the mail says how to answer it, and a reply to it reaches the fleet (Reply-To
     # is set by fleet_alert.sh; webhook_receiver.py applies the answer with no model in the way).
-    body = (f"ask #{ask_id}: {why}\n\n"
-            f"Reply to this email with one line: `yes {ask_id}`, `no {ask_id}: why`, "
-            f"or `{ask_id}: your answer`. Anything else you write goes to the messenger.")
+    # Reif, 2026-09-29: "write in plain simple English" -- dumbledore's own plain reason leads,
+    # the member's technical detail follows. And "append it to all that have not been
+    # resolved": every other escalated ask still waiting on him rides along, answerable the same way.
+    body = (f"{lead}\n\n" if lead else "") + f"ask #{ask_id}: {why}\n\n"
+    if still_open:
+        body += "Also still waiting on you:\n" + "".join(
+            f"- #{i}: {w.strip().splitlines()[0][:160] if w.strip() else ''}\n" for i, w in still_open) + "\n"
+    body += (f"Reply to this email with one line: `yes {ask_id}`, `no {ask_id}: why`, "
+             f"or `{ask_id}: your answer` (same for any number above). "
+             f"Anything else you write goes to the messenger.")
     try:
         subprocess.run(
             ["bash", str(script), "--check", "ask", "--problem", problem,
@@ -425,7 +442,8 @@ def main(argv=None) -> int:
             return 1
         member, why = row[0], row[1]
         if a.cmd == "escalate":
-            _notify(member, a.id, f"{why}\n\n{TRIAGE}: no other way -- {a.reason}", sender=TRIAGE)
+            _notify(member, a.id, f"details from {member}: {why}", sender=TRIAGE, lead=a.reason,
+                    still_open=open_escalations(conn, exclude=a.id))
             _close_triage(conn, a.id, member, f"escalated: {a.reason}")
             _settle(a.id, "escalated", a.reason)
             print(f"ask {a.id} escalated to Reif")
