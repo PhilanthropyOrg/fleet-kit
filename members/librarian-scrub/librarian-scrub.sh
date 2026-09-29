@@ -20,9 +20,11 @@ report() { # <outcome> <evidence> <self-critique> <exit-code>
     --pass-file - >> "$LOG_DIR/runs.jsonl" 2>>"$LOG"
 }
 
+# --state-file on $LOG_DIR (the host mount): the default ~/.cache lived in the container layer and
+# every deploy reset the scrub cursor to zero.
 # 840s: under the member's 900s timeout so a long cold scan is cut here, with its checkpoint
 # already banked (librarian.py checkpoints every 25 files), rather than SIGKILLed by the wrapper.
-OUT=$(timeout 840 python3 "$KIT_DIR/members/librarian/librarian.py" --execute 2>&1); RC=$?
+OUT=$(timeout 840 python3 "$KIT_DIR/members/librarian/librarian.py" --execute --state-file "$LOG_DIR/.librarian_state.json" 2>&1); RC=$?
 printf '%s\n' "$OUT" | tail -n 40 >> "$LOG"
 
 if [ "$RC" -ne 0 ] && [ "$RC" -ne 124 ]; then

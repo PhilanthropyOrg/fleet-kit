@@ -219,6 +219,10 @@ class Handler(BaseHTTPRequestHandler):
         if inbox_mod.ignored_recipient(data, ignore):
             log(f"inbox IGNORED: addressed to {ignore}")
             self.send_response(200); self.end_headers(); self.wfile.write(b"ignored"); return
+        if inbox_mod.already_stored(data.get("email_id") or ""):
+            # Resend redelivers a webhook it thinks timed out; the email id is the idempotency key.
+            log(f"inbox DUPLICATE: {data.get('email_id')} already stored")
+            self.send_response(200); self.end_headers(); self.wfile.write(b"duplicate"); return
         try:
             email = inbox_mod.fetch_received(data.get("email_id") or "")
         except Exception as exc:  # noqa: BLE001
@@ -228,7 +232,8 @@ class Handler(BaseHTTPRequestHandler):
             log(f"inbox IGNORED: addressed to {ignore}")
             self.send_response(200); self.end_headers(); self.wfile.write(b"ignored"); return
         if email is None:
-            email = {"id": data.get("email_id"), "from": sender, "subject": data.get("subject"), "text": ""}
+            email = {"id": data.get("email_id"), "from": sender, "subject": data.get("subject"), "text": "",
+                     "fetch_failed": True}
         trusted = inbox_mod.allowed_sender(sender, env_value("FLEET_INBOX_FROM"))
         # Reif 2026-09-16: "Make it open - fleet can decide if something is garbage or not."
         # An unknown sender is stored UNTRUSTED: it can never answer an ask or auto-file (that
@@ -246,7 +251,7 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as exc:  # noqa: BLE001
             log(f"inbox: apply of {row.get('id')} failed: {exc} -- messenger takes it")
             applied = {"done": False}
-        if not applied.get("done"):
+        if not applied.get("done") and not applied.get("deferred"):
             _launch_member("dont-shoot-the-messenger", ["--task", "inbox"])
         self.send_response(200); self.end_headers(); self.wfile.write(b"stored")
 

@@ -171,6 +171,30 @@ def test_intake_cli_lists_backlog_in_one_call() -> None:
     print("ok  intake CLI: one gh list of the whole backlog; run_gru_fanout runs it after stale_claims")
 
 
+def test_capped_comments_are_refetched_so_a_late_criterion_counts() -> None:
+    # philanthropy#6850: gh issue list stops at the oldest 100 comments; the GWT was #102.
+    old = [{"body": "Fired again", "createdAt": f"c{i:03d}"} for i in range(100)]
+    full = old + [{"body": GWT, "createdAt": "c101"}]
+    capped = dict(_issue(40, ["fleet:backlog", "quality:solid"]), body=VL, comments=old)
+    short = dict(_issue(41, ["fleet:backlog", "quality:solid"]), comments=old[:3])
+    views = []
+
+    def fake(cmd, timeout=60):
+        views.append(cmd)
+        return SimpleNamespace(returncode=0, stdout=json.dumps({"comments": full}), stderr="")
+
+    items = gd.fill_capped_comments([capped, short], "o/r", run=fake)
+    assert len(views) == 1 and views[0][3] == "40" and "comments" in views[0], views
+    assert items[0]["comments"][-1]["body"] == GWT and len(items[1]["comments"]) == 3
+    assert quality_ok(items[0]), "the criterion past the cap must now be visible to the gate"
+    print("ok  capped comments: an issue at gh issue list's 100-comment cap is refetched in full")
+
+
+def quality_ok(item) -> bool:
+    import quality_gate
+    return quality_gate.classify_candidate(item["labels"], item["body"], item["comments"])[0]
+
+
 # --- 4. HQ on the bus -------------------------------------------------------------------------
 
 def test_needs_prod_access_is_filtered_like_needs_human_op() -> None:

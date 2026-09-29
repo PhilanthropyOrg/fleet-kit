@@ -1040,6 +1040,14 @@ fi
 # case. Found live on dino 2026-08-21: every real member pass failed rc=1 "other" silently
 # (account_pool.sh had no pattern for this error text) until traced to this guard directly.
 export IS_SANDBOX=1
+# A minion pass has no later turn, so a background task is work it never sees finish. 2026-09-28:
+# 32 of 33 minion `reported_nothing` runs ended "waiting for the background verified_test.sh" --
+# the CLI moves any Bash call past its 120s default into the background, and the pass then ends
+# its turn on it (or polls `pgrep -f verified_test.sh`, which matches every other minion's run).
+# No background tasks, and a foreground call may run 20 min (30 with an explicit timeout).
+if [ "$MEMBER" = "minion" ]; then
+  export CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 BASH_DEFAULT_TIMEOUT_MS=1200000 BASH_MAX_TIMEOUT_MS=1800000
+fi
 # Only pass a cap the spec actually set -- an empty value must not become `--max-turns ""`,
 # which the CLI rejects, nor a silent default (see the MAX_TURNS/MAX_BUDGET note above).
 CAP_ARGS=()
@@ -1150,8 +1158,16 @@ fi
 
 CHECKPOINT_PR=$(grep '"saved": true' "$CHECKPOINT_OUT" 2>/dev/null | grep -o '"pr": [0-9][0-9]*' | tail -1 | grep -o '[0-9][0-9]*$')
 rm -f "$CHECKPOINT_OUT"
+# Only this pass's own commits: a resume that merges main pulls main's commits in too, and
+# counting those read #8194's re-verify-only passes as 28 commits of progress, so
+# claim_history.py never saw the stall (#7942: 39 attempts, stalled=0, 2026-09-28).
 PASS_COMMITS=""
-[ -n "${WT_START_SHA:-}" ] && PASS_COMMITS=$(git -C "$WT_PATH" rev-list --no-merges --count "$WT_START_SHA..HEAD" 2>/dev/null)
+if [ -n "${WT_START_SHA:-}" ]; then
+  MAIN_EXCLUDE=""
+  git -C "$WT_PATH" rev-parse -q --verify "origin/${DEFAULT_BRANCH:-main}" >/dev/null 2>&1 \
+    && MAIN_EXCLUDE="^origin/${DEFAULT_BRANCH:-main}"
+  PASS_COMMITS=$(git -C "$WT_PATH" rev-list --no-merges --count HEAD "^$WT_START_SHA" $MAIN_EXCLUDE 2>/dev/null)
+fi
 
 echo "$OUT" | python3 "$KIT_DIR/scripts/run_report.py" \
   --member "$MEMBER" --run-id "$RUN_ID" --kind llm --exit-code "$RC" \

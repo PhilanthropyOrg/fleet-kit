@@ -106,9 +106,23 @@ class Assess(unittest.TestCase):
     def test_marie_merged_pr_hold_is_honored_until_a_newer_claim(self):
         note = {"createdAt": "2026-09-25T15:00:00Z",
                 "body": "marie: fleet:claimed left in place — merged PR #7986 references this issue"}
-        self.assertEqual(sc.assess(issue(7937, extra=[note]), [], [], set(), NOW)["kind"], "marie-merged-pr")
+        now = sc._ts("2026-09-25T15:30:00Z")  # inside the lease from marie's note
+        self.assertEqual(sc.assess(issue(7937, extra=[note]), [], [], set(), now)["kind"], "marie-merged-pr")
         reclaim = {"createdAt": "2026-09-25T16:06:43Z", "body": "claimed-by: gru (orchestrator pass gru-123939)"}
         self.assertTrue(sc.assess(issue(7937, extra=[note, reclaim]), [], [], set(), NOW)["release"])
+
+    def test_marie_hold_is_a_lease_not_a_deed(self):
+        # 2026-09-28: 105 of 117 fleet:claimed items held as marie-merged-pr, some for weeks,
+        # with nothing working them and no close/verify pass draining them.
+        note = {"createdAt": "2026-09-25T15:00:00Z",
+                "body": "marie: fleet:claimed left in place — merged PR #7986 references this issue"}
+        fresh = dict(note, createdAt=sc._iso(NOW - 30 * 60))
+        self.assertEqual(sc.assess(issue(7937, extra=[fresh]), [], [], set(), NOW)["kind"], "marie-merged-pr")
+        r = sc.assess(issue(7937, extra=[note]), [], [], set(), NOW)
+        self.assertTrue(r["release"], r)
+        self.assertIn("close it as done", sc.release_note(r))
+        # A live runner still holds it.
+        self.assertFalse(sc.assess(issue(7937, extra=[note]), [], [], {7937}, NOW)["release"])
 
     def test_an_idle_checkpoint_draft_releases_inside_the_lease(self):
         # 2026-09-26 14:17 UTC: #7937/#7938/#7941 claimed behind checkpoint drafts

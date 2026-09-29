@@ -44,8 +44,12 @@ yourself." Parking an item on him is a failure, not a state.
 - **Decide opinions.** A decision, an acceptance or scope call, a priority, a design or copy
   pick, an idea: choose, write the choice and one line of why on the issue or in your report,
   and proceed. Never `ask.py file` these, never apply `fleet:needs-human-op` for them.
-- **Asking Reif is way rare** ("basically never ask me things"). An ask emails him; he can
-  reply in plain words. **Only a one-way door goes to him:** rotating or exposing a secret, spending money or adding
+- **Asking Reif is way rare** ("basically never ask me things"). **Every ask goes to dumbledore**
+  (Reif, 2026-09-28: "asks only from dumbledore"), never straight to Reif: `ask.py file` messages
+  dumbledore and wakes him. He denies it by default because another way is found (a fleet owner
+  does it, access the fleet holds, a workaround, the opinion decided) and sends the work to
+  whoever does it; only a true one-way door does he escalate, and that email is the only one
+  Reif gets. **Only a one-way door is worth filing:** rotating or exposing a secret, spending money or adding
   a recurring cost (billing limits too), deleting prod data, force-pushing main, or a login only
   Reif holds. File ONE `ask.py file --class credential|money` as a yes/no line, ship everything
   around it in the same pass, and only then apply `fleet:needs-human-op`, naming the ask id.
@@ -547,6 +551,13 @@ for it, don't background it in the first place: run it in the foreground and let
 timeout) decide the outcome, or don't dispatch it at all and say so plainly in your report
 ("queued <n> for next pass, no budget to wait on it here"). "I'll pick this up when the
 notification lands" is never a valid way to end a fleet pass.
+
+**minion: background tasks are OFF (2026-09-28).** run_member.sh starts every minion pass with
+`CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` and a 20 min foreground Bash timeout (30 max), because
+32 of 33 minion `reported_nothing` runs in one day still ended "waiting for the background
+verified_test.sh". A minion has no `run_in_background` and no `TaskOutput` to reach for: run
+every command in the foreground, and never poll another process with `pgrep`/`ps | grep`. The
+`run_in_background` + `TaskOutput` pattern above is for members that fan out (gru, the-fixer).
 
 **The same rule applies to the WAIT ITSELF, not just the thing being waited on.** Found live
 (gh#77, 2026-08-24): `gru` backgrounded two minion builds correctly with a foreground `&`, then

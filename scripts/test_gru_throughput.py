@@ -153,6 +153,67 @@ class PassReplayTest(unittest.TestCase):
         self.assertGreater(batches["n_batches"], 1)
 
 
+class SpendTheHourTest(unittest.TestCase):
+    """dino 2026-09-28 21:16 CDT: allowance 0.2143, 221 unblocked backlog items, and gru packed
+    n=2 then n=3 (utilization 0.40, then 0.11), binding "backlog_exhausted" -- as in 21 of 22
+    gru passes over 3 days. Two causes: the warm 2h window priced an item at allowance/5, 5x the
+    30-day price, and gru stopped feeding candidates after the reif-priority tier."""
+
+    ALLOWANCE = 0.2143
+    # The 21:16 window: 5 costed runs (the OBSERVED gru printed, in $ proportion).
+    WINDOW = [{"item_id": str(i), "cost_usd": c}
+              for i, c in enumerate([0.36, 0.27, 0.13, 0.79, 0.60])]
+
+    def _dino_history(self):
+        # Heavy-tailed like dino's 30 days (median $0.80, mean ~$1.5): 8 cheap items per 3 dear.
+        now = time.time()
+        costs = ([0.8] * 8 + [3.7] * 3) * 40
+        return [{"item_id": str(1000 + i), "cost_usd": c, "recorded_at": now - 3600 * (1 + i // 13)}
+                for i, c in enumerate(costs)]
+
+    def test_a_busy_window_never_prices_an_item_above_the_history_price(self):
+        hist = self._dino_history()
+        warm = fanout.calibrate(cost_bridge.observe(self.WINDOW, hist, self.ALLOWANCE))
+        history = fanout.calibrate(cost_bridge.cold_start_observed(hist, self.ALLOWANCE))
+        self.assertLessEqual(warm, history + 1e-12)
+
+    def test_history_price_is_the_mean_item_so_a_full_hour_matches_a_busy_hour(self):
+        hist = self._dino_history()
+        unit = fanout.calibrate(cost_bridge.cold_start_observed(hist, self.ALLOWANCE))
+        per_item = [h["cost_usd"] for h in hist]
+        mean = sum(per_item) / len(per_item)
+        hours = {}
+        for h in hist:
+            hours[int(h["recorded_at"] // 3600)] = hours.get(int(h["recorded_at"] // 3600), 0) + h["cost_usd"]
+        busy = sorted(hours.values())[int(0.9 * len(hours))]
+        self.assertAlmostEqual(unit, self.ALLOWANCE * mean / busy)
+        # Packing the hour to that price spends no more real $ than the p90 hour did.
+        n = int(self.ALLOWANCE // unit)
+        self.assertLessEqual(n * mean, busy + 1e-9)
+
+    def test_the_21_16_pass_packs_what_the_hour_funds_from_a_full_candidate_list(self):
+        hist = self._dino_history()
+        unit = fanout.calibrate(cost_bridge.observe(self.WINDOW, hist, self.ALLOWANCE))
+        backlog = [{"number": 8000 + i, "complexity": 5} for i in range(40)]
+        packed = fanout.pack(backlog, self.ALLOWANCE, unit)
+        self.assertGreaterEqual(packed["n"], 10)  # was 5 at allowance/5
+        self.assertEqual(packed["binding"], "allowance")
+        self.assertFalse(packed["over_allowance"])
+
+    def test_a_short_candidate_list_says_how_much_more_the_hour_funds(self):
+        packed = fanout.pack([{"number": 8581, "complexity": 5}, {"number": 5195, "complexity": 5}],
+                             self.ALLOWANCE, 0.0161)
+        self.assertEqual(packed["binding"], "candidates_exhausted")
+        self.assertEqual(packed["room_for_items"], 11)
+
+    def test_gru_md_feeds_every_tier_until_the_hour_is_full(self):
+        gru = (HERE.parent / "members" / "gru" / "gru.md").read_text()
+        self.assertNotIn("skip 2b's query entirely", gru)
+        self.assertNotIn("Don't pad N", gru)
+        self.assertIn("room_for_items", gru)
+        self.assertIn("candidates_exhausted", gru)
+
+
 class ItemsArgTest(unittest.TestCase):
     ITEMS = [{"number": 1, "labels": [{"name": "quality:solid"}],
               "body": "Vision-link: none (maintenance)\n" + "x" * 200_000,

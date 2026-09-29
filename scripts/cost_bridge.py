@@ -100,9 +100,11 @@ def cold_start_observed(history_runs: list[dict], allowance_pct: float,
     """--observed for a thin window, from the last HISTORY_HOURS of real minion passes
     ([{"item_id", "cost_usd", "recorded_at"}, ...], one per run).
 
-    unit_pct = allowance_pct * median_item_usd / busy_hour_usd: the median item's real $ cost
+    unit_pct = allowance_pct * mean_item_usd / busy_hour_usd: the average item's real $ cost
     over what minions spent in the fleet's p90 hour -- i.e. a full allowance buys what a busy
-    hour really bought (dino 2026-09-25: $0.91 / $19.87, ~22 median items). Always capped at
+    hour really bought. MEAN, not median (2026-09-29): item cost is heavy-tailed (dino 30 days:
+    median $0.80, mean $1.52, p90 $3.69), so a median price packed 25 items into an hour whose
+    real spend is ~1.9x the busy hour; the mean packs ~13, what the p90 hour really built. Always capped at
     allowance_pct / MIN_ITEMS_PER_HOUR, which is also the answer when there is no history at
     all: a cold start must still move several items, never pack one item as the whole hour.
 
@@ -125,8 +127,8 @@ def cold_start_observed(history_runs: list[dict], allowance_pct: float,
     if per_item and hours:
         busy = sorted(hours.values())
         busy_hour_usd = busy[min(len(busy) - 1, int(BUSY_HOUR_PERCENTILE * len(busy)))]
-        median_item_usd = per_item[len(per_item) // 2]
-        unit = min(cap, allowance_pct * median_item_usd / busy_hour_usd)
+        mean_item_usd = sum(per_item) / len(per_item)
+        unit = min(cap, allowance_pct * mean_item_usd / busy_hour_usd)
     return [{"pct": unit, "complexity": fanout.DEFAULT_COMPLEXITY, "source": "cold_start"}]
 
 
@@ -134,15 +136,23 @@ def observe(window_runs: list[dict], history_runs: list[dict], allowance_pct: fl
             complexity_by_item: dict[str, int] | None = None) -> list[dict]:
     """The --observed gru packs against: to_observed() over the recent window when it holds at
     least WARM_MIN_RUNS real runs, else cold_start_observed(). Either way the implied median-item
-    unit never exceeds allowance_pct / MIN_ITEMS_PER_HOUR (entries are scaled down to it)."""
+    unit never exceeds the 30-day history price (cold_start_observed, itself at most
+    allowance_pct / MIN_ITEMS_PER_HOUR); entries are scaled down to it.
+
+    Why the history price caps the window (2026-09-29): to_observed() books the window's whole
+    spend as exactly one allowance, so its unit is allowance / runs-in-the-window -- a measure of
+    how busy the last 2h were, not of what an item costs. dino 21:16 CDT: 5 runs in the window
+    priced an item at allowance/5 (0.0429), 5x the history price (0.0085), so a full candidate
+    list could only ever get 5 items, and a quiet window kept the next hour quiet too."""
     usable = [r for r in window_runs
               if isinstance(r.get("cost_usd"), (int, float)) and r["cost_usd"] > 0]
+    history = cold_start_observed(history_runs, allowance_pct, complexity_by_item)
     if len(usable) < WARM_MIN_RUNS:
-        return cold_start_observed(history_runs, allowance_pct, complexity_by_item)
+        return history
     observed = to_observed(usable, allowance_pct, complexity_by_item)
     unit = fanout.calibrate(observed)
-    cap = allowance_pct / MIN_ITEMS_PER_HOUR
-    if unit and unit > cap:
+    cap = fanout.calibrate(history) or allowance_pct / MIN_ITEMS_PER_HOUR
+    if unit and unit > cap * (1 + 1e-9):  # float noise is not a price difference
         observed = [{**o, "pct": o["pct"] * cap / unit} for o in observed]
     return observed
 

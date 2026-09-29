@@ -289,7 +289,9 @@ if [ -n "${ONTO_PR:-}" ]; then
       FOLD_FELL_BACK=1
       PR_NUM=$(cd "$WT_PATH" && gh pr create --head "$FALLBACK_BRANCH" \
         --title "item #$ITEM_ID (fold onto PR #$ONTO_PR was rejected -- opened new)" \
-        --body "Was meant to fold into #$ONTO_PR (fleet:fold-into-pr), but branch protection rejected the push to that PR's branch. Opened fresh so item #$ITEM_ID isn't lost." \
+        --body "Closes #$ITEM_ID
+
+Was meant to fold into #$ONTO_PR (fleet:fold-into-pr), but branch protection rejected the push to that PR's branch. Opened fresh so item #$ITEM_ID isn't lost." \
         2>>"$LOG" | grep -oE '[0-9]+$')
       [ -n "$PR_NUM" ] && log "item #$ITEM_ID: fold fallback opened new PR #$PR_NUM on $FALLBACK_BRANCH"
     else

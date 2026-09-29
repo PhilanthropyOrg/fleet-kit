@@ -194,29 +194,56 @@ case "${1:-cron-foreground}" in
       return 1
     }
 
+    # gh#5200: Vixie cron discards the ENTIRE crontab file the moment it sees one env
+    # assignment with an empty right-hand side -- not just the line, the whole file, all 27
+    # jobs, and silently (cron -f stays up, no log line). These two helpers are the only way
+    # anything is allowed to land in $CRONTAB's env block from here on:
+    #   emit_env_optional NAME VALUE  -- omit the line entirely when VALUE is empty/unset.
+    #   emit_env_required NAME VALUE  -- fail the render loudly (exit 1) instead of writing
+    #                                    an empty line cron would silently reject.
+    # Which of a given variable's callers needs which is a per-variable judgment call, not
+    # guessed here -- see the three FLEET_* calls below, each kept optional because their own
+    # downstream readers already document a safe unset-fallback (gh#569/gh#579/gh#581).
+    # BEGIN gh5200 env-render helpers (scripts/test_entrypoint_env_helpers_gh5200.py extracts
+    # this exact block by these markers -- keep both in sync if you touch either function).
+    emit_env_optional() {
+      local name="$1" value="$2"
+      [ -n "$value" ] && echo "${name}=${value}"
+      return 0
+    }
+    emit_env_required() {
+      local name="$1" value="$2"
+      if [ -z "$value" ]; then
+        echo "[entrypoint] FATAL: required env var '$name' is empty -- refusing to render a crontab cron would silently discard" >&2
+        exit 1
+      fi
+      echo "${name}=${value}"
+    }
+    # END gh5200 env-render helpers
+
     CRONTAB=/etc/cron.d/fleet-kit
     {
-      echo "FLEET_ENV_FILE=/fleet-kit/fleet.env"
+      emit_env_required FLEET_ENV_FILE "/fleet-kit/fleet.env"
       # Humans read Central. Debian cron fires schedules in system localtime (Dockerfile sets
       # America/Chicago), so every hour field below is a Central hour; TZ here makes the jobs
       # themselves inherit it too. Machines still keep UTC (ISO ...Z stamps, epochs, fleet.db).
-      echo "TZ=America/Chicago"
-      echo "PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-      echo "HOME=/root"
+      emit_env_required TZ "America/Chicago"
+      emit_env_required PATH "/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+      emit_env_required HOME "/root"
       # gh#569: deploy.sh's `docker run -e FLEET_SHARE_DIR=...` only reaches PID 1 and its
       # direct children -- every cron-triggered job starts from this block instead, which never
       # forwarded it, so check_share_sum.sh (and any other cron-triggered reader) silently saw
       # it unset and reported "ok: shares total 0" while the shared account was really
       # oversubscribed. Forward PID 1's own value (empty/unset falls through to
       # check_share_sum.sh's pre-gh#293 host-side scan unchanged, same as today).
-      echo "FLEET_SHARE_DIR=${FLEET_SHARE_DIR:-}"
+      emit_env_optional FLEET_SHARE_DIR "${FLEET_SHARE_DIR:-}"
       # gh#581: same env-forwarding gap as gh#569 above, sibling variable.
       # publish_share.sh resolves this container's identity as
       # `${FLEET_INSTANCE_NAME:-default}` -- unforwarded here, every cron-triggered process
       # (including check_share_sum.sh) falls back to the literal string "default" and
       # multiple real instances all publish their fraction under the same shared
       # `default.json` key, each overwriting whichever instance's cron tick ran last.
-      echo "FLEET_INSTANCE_NAME=${FLEET_INSTANCE_NAME:-}"
+      emit_env_optional FLEET_INSTANCE_NAME "${FLEET_INSTANCE_NAME:-}"
       echo
       # Canary must record that cron FIRED, independent of whether git had anything to say
       # (2026-09-04, gh#4340): the old form only touched gitpull.log when git printed output,
@@ -233,6 +260,9 @@ case "${1:-cron-foreground}" in
       # self-heals onto main instead of spinning on the same dead ref every 10 minutes. Still
       # writes to gitpull.log either way, so the canary above stays meaningful.
       echo "*/10 * * * * root export GH_TOKEN=\$(cat $TOKEN_FILE); date -u >> $LOG_DIR/gitpull.log 2>&1; cd $FLEET_REPO && bash /fleet-kit/scripts/git_pull_guard.sh >> $LOG_DIR/gitpull.log 2>&1"
+      # Nothing rotated member logs or access.jsonl (205MB on dino, 2026-09-28): copytruncate
+      # anything past 50MB once a day. See log_rotate.py for why in place, not rename.
+      echo "13 4 * * * root python3 /fleet-kit/scripts/log_rotate.py $LOG_DIR >> $LOG_DIR/log_rotate.log 2>&1"
       # Backstop poll widened */2 -> hourly (2026-08-22, Reif: "don't want to see it crying so
       # much, costs 20 cents a run") -- every tick spawns a real claude -p turn even on green
       # (check.sh gates the reasoning depth, not the LLM spin-up cost itself), and the webhook
@@ -404,8 +434,9 @@ case "${1:-cron-foreground}" in
       echo "38 * * * * root [ -f \"\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}\" ] && { set -a; . \"\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}\"; set +a; }; export GH_TOKEN=\$(cat $TOKEN_FILE) FLEET_LOG_DIR=$LOG_DIR FLEET_VIEW_PORT=${FLEET_VIEW_PORT:-8420}; python3 /fleet-kit/scripts/reif_eyes.py >> $LOG_DIR/reif_eyes.log 2>&1"
       # inbox.py resolve (fk#1105, Reif: "no response back to the thread so that I can't know if
       # there was some resolution"): every filed mail/alert gets a 'Resolved' reply on its thread
-      # once its issue closes. Deterministic, idempotent, hourly at :44.
-      echo "44 * * * * root [ -f \"\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}\" ] && { set -a; . \"\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}\"; set +a; }; export GH_TOKEN=\$(cat $TOKEN_FILE) FLEET_LOG_DIR=$LOG_DIR; python3 /fleet-kit/scripts/inbox.py resolve >> $LOG_DIR/inbox.log 2>&1"
+      # once its issue closes. Deterministic, idempotent, hourly at :44. refetch: a mail whose
+      # Resend fetch failed at arrival is fetched again and applied (never filed body-less).
+      echo "44 * * * * root [ -f \"\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}\" ] && { set -a; . \"\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}\"; set +a; }; export GH_TOKEN=\$(cat $TOKEN_FILE) FLEET_LOG_DIR=$LOG_DIR; python3 /fleet-kit/scripts/inbox.py resolve >> $LOG_DIR/inbox.log 2>&1; python3 /fleet-kit/scripts/inbox.py refetch >> $LOG_DIR/inbox.log 2>&1"
       # vp_due.sh: spawn a VP review for each due item whose newest merged PR is newer than
       # its newest VP verdict (members/vp/vp.md). Deterministic on purpose -- gru is a
       # prompt and did not spawn vp for 2.5h after a redo merged (2026-09-08).
@@ -422,6 +453,17 @@ case "${1:-cron-foreground}" in
       # A fix for "never runs" landed as "runs constantly" because the cadence was a
       # literal and the population behind it grew 25x.
       echo "${FLEET_VP_DUE_CADENCE:-*/15} * * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) FLEET_LOG_DIR=$LOG_DIR && [ -f \"\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}\" ] && { set -a; . \"\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}\"; set +a; }; bash /fleet-kit/scripts/vp_due.sh >> $LOG_DIR/vp_due.log 2>&1"
+      # pr_arm_sweep.sh: arm auto-merge on every open PR that is already green on its branch's
+      # own required checks and that nothing armed. Arming is minion.md step 9 -- a charter line,
+      # so it only happens when an LLM pass reaches the end of its checklist, and dumbledore's
+      # charter forbids merging at all. Measured 2026-09-12: all 3 open fleet-kit PRs were green
+      # on `selftest` and unarmed, two for 26h, and two of those were fixes for vp_due's own
+      # hourly-redispatch waste (61 of minion's 127 productive passes that day ended "already
+      # fixed by an open PR"). This only ARMS; the required checks still decide.
+      #
+      # 20 minutes, offset off :00 so it reads a settled check rollup rather than racing the CI
+      # that a top-of-hour cron wave just kicked off. Tunable via FLEET_PR_ARM_CADENCE.
+      echo "${FLEET_PR_ARM_CADENCE:-7,27,47} * * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) FLEET_LOG_DIR=$LOG_DIR && [ -f \"\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}\" ] && { set -a; . \"\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}\"; set +a; }; bash /fleet-kit/scripts/pr_arm_sweep.sh >> $LOG_DIR/pr_arm_sweep.log 2>&1"
       # auto_deploy_race_check.sh (gh#255): auto_deploy.sh's own guarded fetch/pull cannot
       # produce a multi-branch fast-forward error or a ref-lock race -- when auto_deploy.cron.log
       # (the HOST crontab's raw stdout/stderr capture, same bind-mounted $FLEET_LOG_DIR as this
@@ -567,6 +609,12 @@ case "${1:-cron-foreground}" in
       echo "[entrypoint] CRITICAL: crontab failed validation and could not be repaired" >&2
     fi
     echo "[entrypoint] resolved cron members (FLEET_CRON_MEMBERS=${FLEET_CRON_MEMBERS:-<unset, full list>}): ${RESOLVED_CRON_MEMBERS[*]}"
+    # gh#5200: state how many job lines actually made it into the file cron is about to read --
+    # env assignments and comments don't count, only real job lines. A "0" here (as opposed to
+    # the usual ~27) is the log line the 2026-09-10 outage never had: every other monitor read
+    # healthy while the file cron loaded had zero jobs in it.
+    JOB_LINE_COUNT=$(grep -Ev '^[[:space:]]*($|#)' "$CRONTAB" | grep -Ecv '^[A-Za-z_][A-Za-z0-9_]*[[:space:]]*=' || true)
+    echo "[entrypoint] installed $JOB_LINE_COUNT job line(s) into $CRONTAB"
     echo "[entrypoint] installed crontab (token redacted, stored separately at $TOKEN_FILE, mode 600):"
     cat "$CRONTAB"
 

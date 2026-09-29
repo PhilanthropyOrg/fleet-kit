@@ -147,18 +147,14 @@ work done).
    a pass died (563 whole-suite runs, 1,008 commands backgrounded at 120s, 103 passes that
    ended "waiting for the background run" with a finished build never pushed, 7 days to
    2026-09-19). **You are a
-   one-shot `claude -p` pass, same as gru and the-fixer (persona_law.md §12): if you background
-   that test command, use `Bash(run_in_background: true)` — never a raw shell `&` + `wait
-   "$PID"`, which gh#152/gh#283 showed silently drops the result (it either errors instantly
-   with "not a child of this shell" across separate Bash calls, or leaves the whole process
-   tree vulnerable to an external kill mid-run). Then `TaskOutput(task_id, block: true, timeout:
-   600000)` inside THIS turn before you push or report. Ending your turn to "wait for the
-   completion notification" instead means nobody ever sees the result; there is no later turn
-   that resumes you. If you can't afford to wait for a full suite in this pass's budget, run a
-   narrower, faster command you CAN wait for (targeted tests for what you touched) rather than
-   backgrounding a slow one you won't see finish.** The Stop hook refuses to end your pass
-   while any task you launched (background Bash, Monitor) is still running -- `TaskStop` the
-   ones you no longer need before your report. There is no wakeup: `ScheduleWakeup` is denied.
+   one-shot `claude -p` pass (persona_law.md §12), and a minion runs with background tasks OFF
+   (`CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`, set by run_member.sh): run `verified_test.sh`
+   and every other command in the FOREGROUND, in one Bash call. It may take up to 20 min
+   (pass `timeout: 1800000` for up to 30) and its output comes back in that same call. Never a
+   shell `&`, `nohup`, or a `pgrep -f verified_test.sh` / `ps | grep` wait loop: other minions'
+   test runs match the same pattern, and passes lost 20-50 min each polling them
+   (2026-09-28). If a full suite won't fit this pass's budget, run the targeted tests for what
+   you touched.** There is no wakeup: `ScheduleWakeup` is denied.
 3b. **A browser ships in this image — USE IT when the item touches rendered UI.** Playwright +
    headless chromium are installed and verified live; "no browser tooling" was the reason 15
    of your own self-critiques gave for missing an issue's OWN acceptance criteria. Same
@@ -181,7 +177,12 @@ work done).
    again before you call the item done.** It is design law, not optional: every UI build and
    every UI check runs it. Paste the tool call and its output in your PR body — or, if it
    errors, paste the exact error. A UI item with no `design_reference` call in the PR body is
-   an incomplete pass.
+   an incomplete pass. **For a 990 Scout surface, read `docs/design-system/990-scout/` in the
+   repo you're already sitting in first** (`README.md` for the brand book, `tokens.json` for
+   the `--990-*` values, `components/*/README.md` + `preview.html` for SectionMark/
+   ActionButton/VerifiedBadge) — it's the real, approved system, no login needed (gh#7664,
+   fleet ask #70). `design_reference` (inspo) is for outside inspiration on top of that, not a
+   replacement for it.
 
 5. **Land on CURRENT default-branch before you push.** Other concurrent minions branched from
    the same point this hour and may edit the same files you do. Whoever merges first wins;
@@ -251,6 +252,9 @@ work done).
    fully-green PRs stuck for hours with no human or orchestrator any the wiser. A non-zero
    exit here is not a quiet detail; say so in your report the same way you would any other
    failed step.
+   `scripts/pr_arm_sweep.sh` sweeps up green kit PRs nobody armed (every 20 min) — a backstop
+   for a pass that dies mid-step, not a licence to skip this step. It waits 30 minutes first, so
+   a PR you leave unarmed is a PR that does not merge for half an hour.
 9b. **Drive your PR to green before you report — in the foreground.** (2026-09-25: #7975,
    #7982, #7986 each ended their pass at "auto-merge armed", then sat red 1-3h on ruff I001 /
    format, the repo-health ratchet and a review BLOCK, with nobody owning them.) Loop:

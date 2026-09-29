@@ -14,8 +14,16 @@ THE RULE. (Also: a `Not yet` verdict with no newer merge and fewer than three ro
 the redo minion -- see redo_due.) An open `quality:world-class` item is due for a VP review when a merged PR that
 references it is newer than the newest VP verdict on it (or there is no verdict yet), unless a
 comment starting `Reif:` is newer than that merge (his veto or instruction wins), and no vp
-pass is already running for it, and it has had fewer than MAX_ROUNDS `Not yet` rounds -- the
-same cap `redo_due` puts on the builder now binds the reviewer too (see MAX_ROUNDS below).
+pass is already running for it, and no redo minion is already building it, and it has had
+fewer than MAX_ROUNDS `Not yet` rounds -- the same cap `redo_due` puts on the builder now binds
+the reviewer too (see MAX_ROUNDS below).
+
+fk#840: `is_due` only knew about running vp passes, never a redo minion in flight for the same
+item. Live on #573, 2026-09-11: `Not yet` at 03:55:30Z, redo minion spawned 04:00:46Z, and at
+04:30:56Z -- minion still mid-rewrite -- a second vp pass posted a fresh `Not yet`, which is the
+spec the builder reads, so it rewrote the spec under the builder. The guard only delays the
+review to a later tick; it never cancels one. Also: a `fleet:epic` item is a tracking-only
+parent, so it is not due while any real child (`real_children`) is still open.
 
 Pure core (`is_due`, `due_items`), thin `gh` seam (`collect`), CLI (`main`) -- same split as
 vision_link_gate.py and quality_gate.py.
@@ -60,12 +68,21 @@ def _newest(stamps):
     return max(stamps) if stamps else None
 
 
-def is_due(item: dict, running: set[int] | None = None) -> tuple[bool, str]:
-    """item = {number, comments:[{body, createdAt}], merged_prs:[{number, mergedAt}]}.
-    ISO-8601 Zulu timestamps compare correctly as strings."""
+def is_due(item: dict, running: set[int] | None = None, running_minions: set[int] | None = None,
+           is_open=None) -> tuple[bool, str]:
+    """item = {number, comments:[{body, createdAt}], merged_prs:[{number, mergedAt}],
+    labels?, subIssues?}. ISO-8601 Zulu timestamps compare correctly as strings. `is_open(n)`
+    answers for an epic child named only in a `decomposed into` comment (subIssues nodes carry
+    their own state); without it such a child counts as open."""
     n = item["number"]
     if running and n in running:
         return False, "vp already running"
+    if running_minions and n in running_minions:
+        return False, "minion already running"
+    open_kids = open_children(item, is_open) if is_epic(item) else []
+    if open_kids:
+        return False, ("tracking-only parent (fleet:epic); open child(ren) "
+                       + ", ".join(f"#{c}" for c in open_kids))
     merge = _newest(pr.get("mergedAt") for pr in item.get("merged_prs") or [])
     if not merge:
         return False, "nothing merged yet"
@@ -112,10 +129,11 @@ def running_minion_items() -> set[int]:
     return running_items(_runs_rows(), "minion")
 
 
-def due_items(items: list[dict], running: set[int] | None = None) -> dict:
+def due_items(items: list[dict], running: set[int] | None = None,
+              running_minions: set[int] | None = None, is_open=None) -> dict:
     due, skipped = [], []
     for it in items:
-        ok, why = is_due(it, running)
+        ok, why = is_due(it, running, running_minions, is_open)
         (due if ok else skipped).append({"number": it["number"], "why": why})
     return {"due": [d["number"] for d in due], "skipped": skipped}
 
@@ -144,6 +162,18 @@ def real_children(item: dict) -> tuple[list[int], str]:
         return [n["number"] for n in nodes], "subIssues"
     children = closes_gate.decomposed_children(item)
     return children, ("a `decomposed into` comment" if children else "no source")
+
+
+def open_children(item: dict, is_open=None) -> list[int]:
+    """An epic's real children that are still open. A subIssues node carries its own state; a
+    child named only in a `decomposed into` comment is asked of `is_open` (fk#966 review: an
+    empty lookup there read every such child as open forever)."""
+    sub = item.get("subIssues")
+    nodes = sub.get("nodes") if isinstance(sub, dict) else None
+    if nodes:
+        return [x["number"] for x in nodes if (x.get("state") or "OPEN").upper() != "CLOSED"]
+    is_open = is_open or (lambda _n: True)
+    return [c for c in closes_gate.decomposed_children(item) if is_open(c)]
 
 
 def redo_targets(item: dict, is_open) -> tuple[list[int], str]:
@@ -334,6 +364,14 @@ def collect(repo_dir: str) -> list[dict]:
     return items
 
 
+def _issue_open(repo_dir: str, n: int) -> bool:
+    """Is issue #n open? An unreadable issue counts as open: for the epic guard that only delays
+    a review, never loses one."""
+    out = subprocess.run(["gh", "issue", "view", str(n), "--json", "state", "-q", ".state"],
+                         cwd=repo_dir, capture_output=True, text=True, timeout=30)
+    return out.returncode != 0 or out.stdout.strip().upper() != "CLOSED"
+
+
 def _valid_redo_target(repo_dir: str, n: int) -> bool:
     """fk#634 round-2 fix 1 (widened by fk#854 AC2): is issue #n a real child a redo minion may
     safely be dispatched at -- open, AND not itself carrying `fleet:epic`. A real child of one
@@ -405,8 +443,9 @@ def main(argv=None) -> int:
     p.add_argument("--items", help="JSON list of items (skips gh; for tests)")
     a = p.parse_args(argv)
     items = json.loads(a.items) if a.items else collect(a.repo_dir)
-    out = due_items(items, running_vp_items())
-    out.update(redo_items(items, running_minion_items(),
+    minions = running_minion_items()
+    out = due_items(items, running_vp_items(), minions, is_open=lambda n: _issue_open(a.repo_dir, n))
+    out.update(redo_items(items, minions,
                           is_open=lambda n: _valid_redo_target(a.repo_dir, n),
                           dispatched=last_minion_dispatch()))
     print(json.dumps(out))

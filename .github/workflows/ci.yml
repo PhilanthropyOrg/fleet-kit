@@ -44,6 +44,12 @@ jobs:
         run: python3 scripts/test_worktree_guard_redirect.py
       - name: run test_ask_issue_gate_lines.py
         run: python3 scripts/test_ask_issue_gate_lines.py
+      - name: run test_validate_crontab_gh5200.py
+        run: python3 scripts/test_validate_crontab_gh5200.py
+      - name: run test_entrypoint_env_helpers_gh5200.py
+        run: python3 scripts/test_entrypoint_env_helpers_gh5200.py
+      - name: run test_ask_notify_per_ask.py
+        run: python3 scripts/test_ask_notify_per_ask.py
       - name: run test_central_time.py
         run: python3 scripts/test_central_time.py
       - name: run test_vp_labels.py
@@ -86,6 +92,8 @@ jobs:
         run: python3 scripts/test_minion_checkpoint.py
       - name: run test_reported_nothing_0927.py
         run: python3 scripts/test_reported_nothing_0927.py
+      - name: run test_minion_no_bg_tasks.py
+        run: python3 scripts/test_minion_no_bg_tasks.py
       - name: run test_issue_cluster.py
         run: python3 scripts/test_issue_cluster.py
       - name: run test_never_silent_8215.py
@@ -100,6 +108,10 @@ jobs:
         run: python3 scripts/test_fleet_db_wal.py
       - name: run test_gh_poll_survives_gh_failure.py
         run: python3 scripts/test_gh_poll_survives_gh_failure.py
+      - name: run test_startup_poll_race_1393.py
+        run: python3 scripts/test_startup_poll_race_1393.py
+      - name: run test_home_tile_fixes_1393.py
+        run: python3 scripts/test_home_tile_fixes_1393.py
       - name: run test_account_pool_config_dir.py
         run: python3 scripts/test_account_pool_config_dir.py
       - name: run test_account_pool_order.py
@@ -200,6 +212,10 @@ jobs:
         run: python3 scripts/test_stale_claims.py
       - name: run test_deploy_health_and_retire.py
         run: python3 scripts/test_deploy_health_and_retire.py
+      - name: run test_disk_growth_cleanup.py
+        run: python3 scripts/test_disk_growth_cleanup.py
+      - name: run test_transcript_and_log_growth.py
+        run: python3 scripts/test_transcript_and_log_growth.py
       - name: run test_kpi_calendar_day_gh265.py
         run: python3 scripts/test_kpi_calendar_day_gh265.py
       - name: run test_prod_health_check.py
@@ -226,8 +242,12 @@ jobs:
         run: python3 scripts/test_judge_judy_fix_item_gate.py
       - name: run test_inbox_came_in.py
         run: python3 scripts/test_inbox_came_in.py
+      - name: run test_inbox_forward.py
+        run: python3 scripts/test_inbox_forward.py
       - name: run test_account_readiness_names_pool.py
         run: python3 scripts/test_account_readiness_names_pool.py
+      - name: run test_pr_arm_sweep.py
+        run: python3 scripts/test_pr_arm_sweep.py
 
   # Not a required check (see selftest above for why) -- but still runs on every PR, and its
   # failures are still visible on the PR's checks tab. `--with-deps` here can still fail on an

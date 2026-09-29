@@ -74,6 +74,23 @@ def test_second_pass_is_idempotent_and_clears_fixed_items() -> None:
     print("ok  re-gating: no repeat comment/ask; a fixed item loses fleet:needs-spec")
 
 
+def test_epic_ref_vision_link_inherits_the_epic_and_builds() -> None:
+    # philanthropy#8538-8542: `Vision-link: #7654 (...)` was dropped as "no Vision-link line".
+    item = _item(8539, ["quality:solid"], "Vision-link: #7654 (report page rebuild)\n" + GWT)
+    epic = {"number": 7654, "body": "Vision-link: okr.conversion -- report page", "comments": []}
+    calls = []
+
+    def run(cmd):
+        calls.append(cmd)
+        return SimpleNamespace(returncode=0, stdout=json.dumps(epic), stderr="")
+
+    parents = gd.fetch_parents([item], [], None, run=run)
+    assert list(parents) == [7654] and calls[0][:4] == ["gh", "issue", "view", "7654"]
+    assert gd.plan([item], "t", parents)["eligible"] == [8539]
+    assert gd.plan([item], "t")["eligible"] == []
+    assert gd.fetch_parents([item], [epic], None, run=None) == {7654: epic}  # no gh when known
+
+
 def test_by_design_drops_are_recorded_not_labeled() -> None:
     p = gd.plan([_item(7, ["quality:solid", "fleet:epic"], f"{VL}\n\n{GWT}")], "r4")
     assert p["actions"] == [] and p["dropped"][0]["action"] == "by-design", p
@@ -112,6 +129,28 @@ def test_gh_denial_becomes_one_ask_per_verb() -> None:
     assert p and p["why"].startswith("permission denied: gh issue create"), p
     assert da.plan_ask("sentry", "run10", dn, [{"member": "sentry", "why": p["why"]}]) is None
     print("ok  gh denials -> one ask; already-open ask not repeated; hook redirects skipped")
+
+
+def test_guard_hook_block_is_not_an_ask() -> None:
+    # asks #88/#89 (2026-09-28): pretest_push_hook and checkpoint_pr_hook blocks were filed as
+    # "sandbox refused" asks proposing a tools.deny change for a command no deny list held.
+    import hook_blocks
+    d = Path(tempfile.mkdtemp())
+    old = hook_blocks.LOG_DIR
+    hook_blocks.LOG_DIR = d
+    try:
+        hook_blocks.record({"tool_use_id": "g1"}, "checkpoint_pr_hook", "Blocked: PR #8366 is a checkpoint")
+        (d / "dedupe_redirects.jsonl").write_text(json.dumps({"tool_use_id": "r1"}) + "\n")
+        ids = hook_blocks.blocked_ids()
+        assert ids == {"g1", "r1"}, ids
+        result = {"permission_denials": [
+            {"tool_name": "Bash", "tool_use_id": "g1", "tool_input": {"command": "gh pr ready 8366"}},
+            {"tool_name": "Bash", "tool_use_id": "x", "tool_input": {"command": "gh pr merge 2"}}]}
+        dn = da.gh_denials(result, da.redirect_ids(d / "dedupe_redirects.jsonl"))
+        assert [x["verb"] for x in dn] == ["gh pr merge"], dn
+    finally:
+        hook_blocks.LOG_DIR = old
+    print("ok  a guard hook's own block never becomes a permission ask")
 
 
 def test_denial_asks_cli_files_into_fleet_db() -> None:

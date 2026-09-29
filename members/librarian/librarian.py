@@ -27,6 +27,10 @@ mtime is newer than the watermark left by the last successful --execute run; a c
 that's already been scrubbed once never needs re-reading. --full-scan bypasses the watermark for
 the first run against a real corpus, or after the pattern list changes.
 
+NEWEST FIRST (2026-09-29): the cursor is now a list of scrubbed mtime ranges walked newest
+first -- see load_done()/run_scrub(). The ascending single-watermark history below is why
+checkpoints save a processed file's own mtime, which still holds.
+
 CHECKPOINTING: an --execute run also saves the watermark every CHECKPOINT_EVERY_FILES files,
 not only after the whole scan finishes (see run_scrub()) -- a run killed mid-scan by its own
 timeout still banks the files it got through before the kill, rather than the next tick
@@ -66,8 +70,13 @@ COMPRESS_AFTER_DAYS = float(os.environ.get("LIBRARIAN_COMPRESS_DAYS", "30"))
 DROP_AFTER_DAYS = float(os.environ.get("LIBRARIAN_DROP_DAYS", "90"))
 
 DEFAULT_ROOT_GLOB = "/root/.claude-*/projects"
+# On the persistent log dir when there is one (the host bind mount): ~/.cache is the container's
+# own layer, which every deploy (~2h) threw away, so the scrub restarted from zero each time and
+# never got past late-August transcripts (dino, 2026-09-28).
 DEFAULT_STATE_FILE = os.environ.get(
-    "LIBRARIAN_STATE_FILE", os.path.expanduser("~/.cache/fleet-kit/librarian_state.json")
+    "LIBRARIAN_STATE_FILE",
+    os.path.join(os.environ["FLEET_LOG_DIR"], ".librarian_state.json") if os.environ.get("FLEET_LOG_DIR")
+    else os.path.expanduser("~/.cache/fleet-kit/librarian_state.json"),
 )
 
 # How often (in files scanned) an --execute run checkpoints the watermark mid-loop, on top of
@@ -237,17 +246,41 @@ def iter_transcripts(root: Path, since: float = 0.0, include_compressed: bool = 
         yield p
 
 
-def load_watermark(state_file: str) -> float:
+# THE CURSOR is a list of scrubbed mtime ranges, (lo, hi]: a transcript whose mtime falls inside
+# one was scrubbed after its last write. A write moves its mtime past every range, so it comes
+# back. Ranges, not one watermark, because the scrub walks NEWEST first (the live exposure) and
+# backfills older files with leftover time -- that leaves gaps a single number cannot express.
+def load_done(state_file: str) -> list[list[float]]:
     try:
-        return float(json.loads(Path(state_file).read_text()).get("last_scrub_run_at", 0.0))
+        d = json.loads(Path(state_file).read_text())
     except (OSError, ValueError, json.JSONDecodeError):
-        return 0.0
+        return []
+    if "done" in d:
+        return [[float(lo), float(hi)] for lo, hi in d["done"]]
+    w = float(d.get("last_scrub_run_at", 0.0))  # the old single-watermark shape
+    return [[-1.0, w]] if w > 0 else []
 
 
-def save_watermark(state_file: str, ts: float) -> None:
+def _merge(ranges: list[list[float]]) -> list[list[float]]:
+    out: list[list[float]] = []
+    for lo, hi in sorted(r for r in ranges if r[1] > r[0]):
+        if out and lo <= out[-1][1]:
+            out[-1][1] = max(out[-1][1], hi)
+        else:
+            out.append([lo, hi])
+    return out
+
+
+def save_done(state_file: str, ranges: list[list[float]]) -> None:
     p = Path(state_file)
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps({"last_scrub_run_at": ts}))
+    tmp = p.with_name(p.name + ".tmp")
+    tmp.write_text(json.dumps({"done": _merge(ranges)}))
+    os.replace(tmp, p)
+
+
+def is_done(mtime: float, ranges: list[list[float]]) -> bool:
+    return any(lo < mtime <= hi for lo, hi in ranges)
 
 
 def redact_text(text: str, stats: ScrubStats, path: str) -> str:
@@ -274,16 +307,20 @@ def scrub_file(path: Path, stats: ScrubStats, execute: bool) -> bool:
     new_text = redact_text(text, stats, str(path))
     changed = new_text != text
     if changed and execute:
+        st = path.stat()
         if is_gz:
             with gzip.open(path, "wt", encoding="utf-8", errors="surrogateescape") as f:
                 f.write(new_text)
         else:
             path.write_text(new_text, encoding="utf-8", errors="surrogateescape")
+        # Keep the transcript's own mtime: a redaction is not a new session write. Bumping it
+        # made every redacted file look unscrubbed again and reset its retention age.
+        os.utime(path, (st.st_atime, st.st_mtime))
     return changed
 
 
 def _collect_candidates(
-    roots: list[Path], since: float, include_compressed: bool
+    roots: list[Path], done: list[list[float]], include_compressed: bool
 ) -> list[tuple[float, Path]]:
     """Gathers every candidate transcript across all roots combined and sorts by mtime
     ascending -- the ordering run_scrub()'s checkpoint safety depends on. Once the file at
@@ -294,53 +331,52 @@ def _collect_candidates(
     value instead of a processed file's own mtime."""
     candidates: list[tuple[float, Path]] = []
     for root in roots:
-        for p in iter_transcripts(root, since=since, include_compressed=include_compressed):
+        for p in iter_transcripts(root, include_compressed=include_compressed):
             try:
-                candidates.append((p.stat().st_mtime, p))
+                m = p.stat().st_mtime
             except OSError:
                 continue
-    candidates.sort(key=lambda t: t[0])
+            if not is_done(m, done):
+                candidates.append((m, p))
+    candidates.sort(key=lambda t: t[0], reverse=True)  # newest first
     return candidates
 
 
 def run_scrub(
     roots: list[Path],
-    since: float,
+    done: list[list[float]],
     execute: bool,
     state_file: str,
     run_started: float,
     full_scan: bool,
     checkpoint_every_files: int = CHECKPOINT_EVERY_FILES,
 ) -> tuple[ScrubStats, int]:
-    """Scans every root and, in --execute mode, checkpoints the watermark every
-    checkpoint_every_files files rather than only once the whole scan finishes -- a run
-    SIGKILLed mid-scan by its own timeout still banks the files it processed before the kill,
-    instead of the next tick restarting from since=0.0 (gh#588).
+    """Scrubs every not-yet-scrubbed transcript, NEWEST first, and in --execute mode checkpoints
+    every checkpoint_every_files files (gh#588: a run cut by its own timeout keeps what it did).
 
-    Candidates across all roots are processed in ascending mtime order (see
-    _collect_candidates()), and each checkpoint saves the mtime of the last file actually
-    finished, capped at run_started in case a file's mtime somehow lands in the future relative
-    to when this run began. That is what makes a mid-scan kill safe: every file this run has
-    not yet reached is guaranteed to have mtime >= the checkpointed value, so the next
-    incremental run's `since` filter still picks it up. Checkpointing a constant run_started
-    value regardless of how far the walk actually got is NOT safe -- see the module docstring's
-    CHECKPOINTING section for the live incident this replaced.
+    Newest-first is what makes a cut run safe AND useful: once the file with mtime m is done,
+    every candidate at or newer than m is done too, so (next candidate's mtime, run_started]
+    joins the scrubbed ranges. Files already inside a range are skipped, so a later run jumps
+    straight past them into the older backlog.
     """
     stats = ScrubStats()
     changed_files = 0
     since_checkpoint = 0
-    last_mtime = since
-    for mtime, f in _collect_candidates(roots, since, full_scan):
+    ranges = [list(r) for r in done]
+    cands = _collect_candidates(roots, [] if full_scan else ranges, full_scan)
+    for i, (_mtime, f) in enumerate(cands):
         stats.files_scanned += 1
         if scrub_file(f, stats, execute):
             changed_files += 1
-        last_mtime = mtime
         since_checkpoint += 1
         if execute and since_checkpoint >= checkpoint_every_files:
-            save_watermark(state_file, min(run_started, last_mtime))
+            # Lower bound = the NEXT candidate's mtime (open): covers this file and everything
+            # newer, and never an unprocessed tie.
+            lo = cands[i + 1][0] if i + 1 < len(cands) else -1.0
+            save_done(state_file, ranges + [[lo, run_started]])
             since_checkpoint = 0
     if execute:
-        save_watermark(state_file, run_started)
+        save_done(state_file, ranges + [[-1.0, run_started]])
     return stats, changed_files
 
 
@@ -426,23 +462,9 @@ def main() -> int:
     stats = ScrubStats()
     changed_files = 0
     run_started = time.time()
-    since = 0.0 if args.full_scan else load_watermark(args.state_file)
-    if not args.skip_scrub:
-        stats, changed_files = run_scrub(
-            roots, since=since, execute=args.execute, state_file=args.state_file,
-            run_started=run_started, full_scan=args.full_scan,
-        )
-
-    watermark_note = "" if args.full_scan or since == 0.0 else f", since={time.ctime(since)}"
-    print(f"librarian scrub [{mode}{watermark_note}]: {stats.files_scanned} file(s) scanned, "
-          f"{changed_files} redacted")
-    report_lines = stats.report_lines()
-    if report_lines:
-        for line in report_lines:
-            print(f"  {line}")
-    else:
-        print("  no secret-shaped strings found")
-
+    # Retention FIRST: it is a cheap stat() walk (~30s), while the scrub is a content scan the
+    # wrapper cuts at 840s. Run after the scrub, retention never ran once on dino -- 0 .jsonl.gz
+    # in a 11GB store with transcripts 35 days old (2026-09-28).
     retention_results: list[dict] = []
     if not args.skip_retention:
         for root in roots:
@@ -455,6 +477,24 @@ def main() -> int:
           f"{dropped} dropped (>={args.drop_days}d)")
     for r in retention_results:
         print(f"  {r['action']:>8}  {r['path']}  (age={r['age_days']}d)")
+    sys.stdout.flush()  # the wrapper's 840s cut must not eat this report with the buffer
+
+    done = load_done(args.state_file)
+    if not args.skip_scrub:
+        stats, changed_files = run_scrub(
+            roots, done=done, execute=args.execute, state_file=args.state_file,
+            run_started=run_started, full_scan=args.full_scan,
+        )
+
+    watermark_note = "" if args.full_scan or not done else f", {len(_merge(done))} scrubbed range(s) skipped"
+    print(f"librarian scrub [{mode}{watermark_note}]: {stats.files_scanned} file(s) scanned, "
+          f"{changed_files} redacted")
+    report_lines = stats.report_lines()
+    if report_lines:
+        for line in report_lines:
+            print(f"  {line}")
+    else:
+        print("  no secret-shaped strings found")
 
     return 0
 

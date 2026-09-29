@@ -1,5 +1,5 @@
 {
- "_doc": "fk#1058: the metric registry. Every console tile is a row here; the OKR file references tiles by id. A KR that names an id not in this file fails a selftest. Order = display order. gh#8212: one tile per quantity, each with as_of + cadence_s from /api/metrics.",
+ "_doc": "fk#1058: the metric registry. Every console tile is a row here; the OKR file references tiles by id. A KR that names an id not in this file fails a selftest. Order = display order. gh#8212: one tile per quantity, each with as_of + cadence_s from /api/metrics. fk#1393: `home` groups Home's tiles into sections (outcome/output/flow/health); `hidden` still computes and is still read by id (scoreboard/OKR/tests) but is folded into another tile's body on Home instead of shown on its own.",
  "metrics": [
   {
    "id": "fleet.issues_resolved_24h",
@@ -8,16 +8,18 @@
    "window": "24h; line = per day, 14d",
    "source": "scoreboard.resolved_events: merged PR closes an issue COMPLETED, carried live by a later successful FLEET_DEPLOY_WORKFLOW run",
    "lane": "fleet",
-   "history": "native"
+   "history": "native",
+   "home": "output"
   },
   {
    "id": "fleet.reif_priority_throughput_6h",
-   "label": "Reif-priority throughput",
+   "label": "Your requests",
    "unit": "issues/hr",
    "window": "6h rolling avg",
    "source": "scoreboard.resolved_events filtered to fleet:reif-priority, merged PR + deployed (philanthropy#8197)",
    "lane": "fleet",
-   "history": "none"
+   "history": "none",
+   "home": "output"
   },
   {
    "id": "okr.verified_claims",
@@ -26,7 +28,8 @@
    "window": "14 days",
    "source": "number_read (FLEET_NUMBER_URL)",
    "lane": "product",
-   "history": "daily"
+   "history": "daily",
+   "home": "outcome"
   },
   {
    "id": "okr.clicks",
@@ -35,7 +38,8 @@
    "window": "14 days",
    "source": "number_read kr1.value (FLEET_NUMBER_URL)",
    "lane": "product",
-   "history": "daily"
+   "history": "daily",
+   "home": "outcome"
   },
   {
    "id": "okr.conversion",
@@ -44,7 +48,8 @@
    "window": "14 days",
    "source": "number_read kr1.completion_rate_pct",
    "lane": "product",
-   "history": "daily"
+   "history": "daily",
+   "home": "outcome"
   },
   {
    "id": "fleet.prs_open_over_4h",
@@ -53,7 +58,8 @@
    "window": "now; line = daily, 14d",
    "source": "gh pr list --state open, createdAt older than 4h",
    "lane": "fleet",
-   "history": "daily"
+   "history": "daily",
+   "home": "hidden"
   },
   {
    "id": "fleet.runs_stuck",
@@ -62,16 +68,18 @@
    "window": "now",
    "source": "runs.jsonl: newest row still 'started' past the run's own timeout_s",
    "lane": "fleet",
-   "history": "none"
+   "history": "none",
+   "home": "flow"
   },
   {
    "id": "fleet.gate_drops_6h",
-   "label": "Gate drops",
+   "label": "Needs spec",
    "unit": "items",
    "window": "6 hours",
    "source": "gate_drops.jsonl (gru's Vision-link + quality gates, scripts/gate_drops.py)",
    "lane": "fleet",
-   "history": "none"
+   "history": "none",
+   "home": "flow"
   },
   {
    "id": "fleet.msgs_open",
@@ -80,7 +88,8 @@
    "window": "now",
    "source": "fleet.db msgs (member-to-member messages, scripts/fleet_msg.py)",
    "lane": "fleet",
-   "history": "none"
+   "history": "none",
+   "home": "flow"
   },
   {
    "id": "fleet.backlog_open",
@@ -89,7 +98,8 @@
    "window": "14 days",
    "source": "gh issue list --label fleet:backlog; 7d change from its daily history",
    "lane": "fleet",
-   "history": "daily"
+   "history": "daily",
+   "home": "flow"
   },
   {
    "id": "fleet.prs_open",
@@ -98,7 +108,8 @@
    "window": "14 days",
    "source": "gh pr list --state open",
    "lane": "fleet",
-   "history": "daily"
+   "history": "daily",
+   "home": "flow"
   },
   {
    "id": "fleet.merged_per_day",
@@ -107,7 +118,8 @@
    "window": "24h; line = per day, 14d",
    "source": "gh pr list --state merged --search merged:>=14d (up to 1000)",
    "lane": "fleet",
-   "history": "native"
+   "history": "native",
+   "home": "hidden"
   },
   {
    "id": "fleet.shipped_live_per_day",
@@ -116,7 +128,8 @@
    "window": "24h; line = per day, 14d",
    "source": "merged PRs carried by a later successful FLEET_DEPLOY_WORKFLOW run",
    "lane": "fleet",
-   "history": "native"
+   "history": "native",
+   "home": "output"
   },
   {
    "id": "fleet.prs_opened_per_hour",
@@ -125,7 +138,8 @@
    "window": "per hour, 24h",
    "source": "gh pr list head:member/",
    "lane": "fleet",
-   "history": "native"
+   "history": "native",
+   "home": "hidden"
   },
   {
    "id": "fleet.minion_spawns_per_hour",
@@ -134,7 +148,8 @@
    "window": "per hour, 24h",
    "source": "runs.jsonl",
    "lane": "fleet",
-   "history": "native"
+   "history": "native",
+   "home": "hidden"
   },
   {
    "id": "fleet.items_per_minion_run",
@@ -143,7 +158,8 @@
    "window": "median, 24h",
    "source": "runs.jsonl minion item_id (target FLEET_MINION_TARGET_ITEMS)",
    "lane": "fleet",
-   "history": "daily"
+   "history": "daily",
+   "home": "hidden"
   },
   {
    "id": "fleet.closed_per_minion_run",
@@ -152,7 +168,8 @@
    "window": "24h",
    "source": "merged member/minion-* PRs' closingIssuesReferences / executed minion runs",
    "lane": "fleet",
-   "history": "daily"
+   "history": "daily",
+   "home": "output"
   },
   {
    "id": "fleet.ok_runs_per_hour",
@@ -161,7 +178,8 @@
    "window": "per hour, 24h",
    "source": "runs.jsonl",
    "lane": "fleet",
-   "history": "native"
+   "history": "native",
+   "home": "health"
   },
   {
    "id": "fleet.accounts_live",
@@ -170,7 +188,8 @@
    "window": "14 days",
    "source": "account-pool-exhausted.state vs FLEET_ACCOUNTS",
    "lane": "fleet",
-   "history": "daily"
+   "history": "daily",
+   "home": "health"
   },
   {
    "id": "gh.actions_spend_mtd",
@@ -179,7 +198,8 @@
    "window": "month to date",
    "source": "gh api /orgs/{org}/settings/billing/usage",
    "lane": "fleet",
-   "history": "native"
+   "history": "native",
+   "home": "health"
   }
  ]
 }

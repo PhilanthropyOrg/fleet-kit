@@ -305,6 +305,42 @@ journeys:
           Within 30s the left half shows its tiles (not "Loading tiles" or a failure line), and
           the live feed shows at least one line or its empty state.
 
+  # --- Reif's own staff jobs (philanthropy#7988): "Why do I have to find this." ---------------
+  - id: staff-approval-queue
+    name: The operator opens the claim approval queue, on desktop and on a phone
+    description: >
+      Reif opens the approval queue to clear overnight claims, often from his iPhone. It must
+      answer fast and, at 390px, be one card per decision with Approve/Reject/Message on one row.
+    preconditions: [QA_SESSION_TOKEN configured]
+    test_users: [operator]
+    viewports: [desktop, mobile_390]
+    steps:
+      - action: Sign in as operator.
+        observable_result: A signed-in operator session within 15s.
+      - action: Open https://philanthropy.org/network/hq/ops/approve.
+        observable_result: >
+          It answers < 400 within 3s (to DOMContentLoaded), without bouncing to /login.
+          A 5xx or a slower load fails the step and files.
+      - action: Read the queue.
+        observable_result: >
+          Queue rows (tr.vq-row) or the empty queue render within 15s. At 390px the page does
+          not scroll sideways, and each row's buttons share one row and are >= 44px tall.
+
+  - id: resend-no-duplicate-sends
+    name: Nobody got the same email twice in the last 24 hours
+    description: >
+      Nonprofits and Reif were getting repeat emails. Reads Resend's own send log for the last
+      24h and fails on any recipient that got the same subject more than once (their own
+      sign-in links and per-message notices excepted).
+    preconditions: [RESEND_API_KEY in env or /home/ubuntu/.config/maxx/alert.env]
+    viewport_invariant_reason: an API check with no page
+    viewports: [desktop]
+    steps:
+      - action: List Resend sends from the last 24 hours.
+        observable_result: At least one send is returned.
+      - action: Group them by recipient and subject.
+        observable_result: No recipient has the same non-per-event subject more than once.
+
   - id: persona-roles
     name: Every test persona signs in and sees its role
     description: Each QA persona gets a working session and the surface its role implies.

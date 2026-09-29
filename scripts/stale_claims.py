@@ -19,9 +19,10 @@ when ALL of these hold for FLEET_CLAIM_LEASE_MIN (60) minutes:
     has a REAL commit inside the lease (auto_update_branch's merges of main do not count --
     pr_ci_wait.last_real_commit, the same definition red_prs.py uses)
   - no pushed branch naming the item has a commit inside the lease
-A claim marie deliberately left in place (a merged PR references it, marie.md Part A) and any
-fleet:needs-close-verify item are never released here: those are held for a close/verify pass,
-not for a builder, until a newer claimed-by supersedes marie's note.
+A claim marie deliberately left in place (a merged PR references it, marie.md Part A) is held
+for one lease from marie's note, then released like any idle claim (no close/verify pass ever
+drained them: 105 of 117 claims, 2026-09-28). fleet:needs-close-verify items are never released
+here.
 
   stale_claims.py release [--dry-run] [--json]   sweep; releases, comments, logs
   stale_claims.py last                           the newest sweep's result (gru step 0 reads it)
@@ -186,7 +187,12 @@ def assess(issue: dict, prs: list[dict], branches: list[dict], live: set[int], n
         return hold("close-verify", f"{CLOSE_VERIFY}: held for a close/verify pass")
     mh = marie_hold_time(issue)
     if mh and (not claimed_at or mh >= claimed_at):
-        return hold("marie-merged-pr", "marie left the claim in place (a merged PR references it)")
+        # A hold is a lease too (2026-09-28): 105 of 117 claims sat behind this note with no
+        # close/verify pass ever draining them. Past the lease it is released like any idle claim,
+        # and the release note sends the next pass to the merged PR first.
+        ev["marie_hold"] = _iso(mh)
+        if now - mh < lease:
+            return hold("marie-merged-pr", "marie left the claim in place (a merged PR references it)")
     mine = [p for p in prs if _refs(p, n)]
     ev["open_prs"] = [p["number"] for p in mine]
     idle = n not in live and not any(int(p["number"]) in live for p in mine)
@@ -232,6 +238,9 @@ def release_note(row: dict) -> str:
         # built part of #7940 and #7948, merged, and left both open on purpose).
         tail += (f" Merged PR(s) {', '.join('#%d' % p for p in merged)} reference it -- read their "
                  "`Remaining:` line and build only what remains, or close it if nothing does.")
+    if row["evidence"].get("marie_hold"):
+        tail += (" marie noted a merged PR already references it: if that PR finished the job, "
+                 "close it as done citing the PR; build only what is left.")
     if row.get("kind") == "checkpoint-idle":
         return (f"stale_claims: released fleet:claimed -- {row['why']}. "
                 f"Re-claimable by the next gru pass.{tail}")

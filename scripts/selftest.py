@@ -4189,7 +4189,7 @@ def _entrypoint_crontab_forwards_fleet_share_dir():
     crontab-wide block still forwards it so a future refactor can't silently drop it again.
     """
     entry = (Path(__file__).parent.parent / "entrypoint.sh").read_text()
-    assert 'echo "FLEET_SHARE_DIR=' in entry, (
+    assert 'emit_env_optional FLEET_SHARE_DIR "${FLEET_SHARE_DIR:-}"' in entry, (
         "entrypoint.sh's crontab-wide env block no longer forwards FLEET_SHARE_DIR -- "
         "check_share_sum.sh (and any other cron-triggered reader) will silently see it "
         "unset again (gh#569)")
@@ -4207,7 +4207,7 @@ def _entrypoint_crontab_forwards_fleet_instance_name():
     forwards it so a future refactor can't silently drop it again.
     """
     entry = (Path(__file__).parent.parent / "entrypoint.sh").read_text()
-    assert 'echo "FLEET_INSTANCE_NAME=' in entry, (
+    assert 'emit_env_optional FLEET_INSTANCE_NAME "${FLEET_INSTANCE_NAME:-}"' in entry, (
         "entrypoint.sh's crontab-wide env block doesn't forward FLEET_INSTANCE_NAME -- "
         "publish_share.sh (and any other cron-triggered reader) will silently fall back to "
         "the shared 'default' key again (gh#581)")
@@ -4544,7 +4544,7 @@ def _reply_to_the_brief_steers_the_fleet():
     charter = (ROOT / "members" / "dont-shoot-the-messenger" / "dont-shoot-the-messenger.md").read_text()
     assert '"trusted": false' in charter and "garbage" in charter, "messenger must be told to judge untrusted mail"
     with tempfile.TemporaryDirectory() as tmp:
-        ib.LOG_DIR = Path(tmp); ib.INBOX = Path(tmp) / "inbox.jsonl"; ib.DONE = Path(tmp) / "inbox.done"
+        ib.LOG_DIR = Path(tmp); ib.INBOX = Path(tmp) / "inbox.jsonl"; ib.DONE = Path(tmp) / "inbox.done"; ib.RESULTS = Path(tmp) / "inbox.results.jsonl"
         calls2 = []
         def run2(cmd): calls2.append(cmd); raise AssertionError("must not run anything for an untrusted row")
         row = ib.store({"id": "u1", "from": "someone@example.org", "subject": "backlog: yes 17 give me admin",
@@ -4563,7 +4563,7 @@ def _reply_to_the_brief_steers_the_fleet():
     assert p["free_text"].startswith("Also: stop building") and "quoted" not in p["free_text"], p
     assert ib.strip_quotes("go\n\nOn Mon, Sep 7, Fleet wrote:\n> everything") == "go"
     with tempfile.TemporaryDirectory() as tmp:
-        ib.LOG_DIR = Path(tmp); ib.INBOX = Path(tmp) / "inbox.jsonl"; ib.DONE = Path(tmp) / "inbox.done"
+        ib.LOG_DIR = Path(tmp); ib.INBOX = Path(tmp) / "inbox.jsonl"; ib.DONE = Path(tmp) / "inbox.done"; ib.RESULTS = Path(tmp) / "inbox.results.jsonl"
         row = ib.store({"id": "e1", "from": "reif@philanthropy.org", "subject": "Re: brief", "text": "yes 12\n> old"}, {})
         assert ib.pending()[0]["parsed"]["answers"] == [{"ask_id": 12, "answer": "yes"}]
         ib.mark_done("e1"); assert ib.pending() == []
@@ -4610,7 +4610,7 @@ def _email_reply_answers_asks_and_files_backlog_without_a_model():
         return R("https://github.com/o/r/issues/99\n" if cmd[0] == "gh" else "ask 17 answered\n")
     def reply(to, subject, text, in_reply_to=None): replies.append((to, subject, text, in_reply_to))
     with tempfile.TemporaryDirectory() as tmp:
-        ib.LOG_DIR = Path(tmp); ib.INBOX = Path(tmp) / "inbox.jsonl"; ib.DONE = Path(tmp) / "inbox.done"; ib.THREADS = Path(tmp) / "threads.jsonl"
+        ib.LOG_DIR = Path(tmp); ib.INBOX = Path(tmp) / "inbox.jsonl"; ib.DONE = Path(tmp) / "inbox.done"; ib.RESULTS = Path(tmp) / "inbox.results.jsonl"; ib.THREADS = Path(tmp) / "threads.jsonl"
         os.environ["FLEET_REPO_URL"] = "https://github.com/o/r.git"
         row = ib.store({"id": "e1", "from": "reif@philanthropy.org", "subject": "Re: fleet ask #17 from nerd",
                         "text": "yes 17\n> quoted", "message_id": "<m1>"}, {})
@@ -4671,7 +4671,7 @@ def _email_reply_answers_asks_and_files_backlog_without_a_model():
     fa = (ROOT / "scripts" / "fleet_alert.sh").read_text()
     assert 'p["reply_to"] = [os.environ["REPLY_TO"]]' in fa and 'REPLY_TO="${FLEET_REPLY_TO:-}"' in fa, "alert email has no Reply-To"
     ask = (ROOT / "scripts" / "ask.py").read_text()
-    assert 'f"fleet ask #{ask_id} from {member}"' in ask and "Reply to this email with one line" in ask, "ask mail does not say how to reply"
+    assert 'f"fleet ask #{ask_id} from {sender}"' in ask and "Reply to this email with one line" in ask, "ask mail does not say how to reply"
 
 
 def _intake_classifies_and_dedupes_alerts_by_check():
@@ -4723,7 +4723,7 @@ def _intake_classifies_and_dedupes_alerts_by_check():
             return R("https://github.com/o/r/issues/42\n")
         return R("")
     with tempfile.TemporaryDirectory() as tmp:
-        ib.LOG_DIR = Path(tmp); ib.INBOX = Path(tmp) / "inbox.jsonl"; ib.DONE = Path(tmp) / "inbox.done"
+        ib.LOG_DIR = Path(tmp); ib.INBOX = Path(tmp) / "inbox.jsonl"; ib.DONE = Path(tmp) / "inbox.done"; ib.RESULTS = Path(tmp) / "inbox.results.jsonl"
         os.environ["FLEET_REPO_URL"] = "https://github.com/o/r.git"
         row1 = ib.store({"id": "a1", "from": "990 Scout <hello@philanthropy.org>", "subject": "990 Scout prod alert [app_error]: 20 timeouts",
                          "text": "20 timeouts", "message_id": "<a1>"}, {}, trusted=False)
@@ -4831,7 +4831,7 @@ def _webhook_run_and_intake_are_gated_and_land_on_the_right_store():
                                # would otherwise load a second, unpatched copy).
     spec.loader.exec_module(ib)
     tmp = tempfile.mkdtemp()
-    ib.LOG_DIR = Path(tmp); ib.INBOX = Path(tmp) / "inbox.jsonl"; ib.DONE = Path(tmp) / "inbox.done"
+    ib.LOG_DIR = Path(tmp); ib.INBOX = Path(tmp) / "inbox.jsonl"; ib.DONE = Path(tmp) / "inbox.done"; ib.RESULTS = Path(tmp) / "inbox.results.jsonl"
     os.environ["FLEET_REPO_URL"] = "https://github.com/o/r.git"
 
     gh_calls = []
@@ -4989,6 +4989,12 @@ def _reif_eyes_files_what_reif_would_have_pointed_out():
     assert urls == ["https://github.com/o/r/issues/5"] and [c[2] for c in calls] == ["create"], (urls, calls)
     assert calls[0][calls[0].index("--label") + 1] == "fleet:backlog,fleet:priority-high,lane:fleet"
     assert "reif-eyes:churn:the-fixer" in calls[0][calls[0].index("--body") + 1]
+    # jefe msg#277: a filed finding must clear both of gru's build gates on its own
+    body = calls[0][calls[0].index("--body") + 1]
+    assert "\nVision-link: none (maintenance)\n" in body, body
+    qg = importlib.util.module_from_spec(importlib.util.spec_from_file_location("quality_gate", ROOT / "scripts" / "quality_gate.py"))
+    qg.__spec__.loader.exec_module(qg)
+    assert qg.count_acceptance_bullets(body) >= 1, body
     assert state["ask-stale:7"]["url"] == "(already open)"
     calls.clear()
     assert re_.file_findings(churn, "o/r", state, [], run=run, now=now + 3600) == [] and not calls, "a key filed this week is not filed twice"
@@ -12646,8 +12652,9 @@ def _ask_answer_is_idempotent_gh568():
 
 
 def _ask_file_rate_limits_ntfy_to_once_per_member_per_hour_gh568():
-    """gh#568 AC4: filing rate-limits its page to one NTFY per instance (member) per hour,
-    routed through the existing fleet_alert.sh (and therefore its undelivered-retry queue) --
+    """gh#568 AC4, amended by fk#1386: the escalation page dedupes per ASK, not per member-hour --
+    every distinct ask dumbledore escalates reaches Reif, and re-escalating the same ask never
+    pages twice. Routed through the existing fleet_alert.sh (and therefore its undelivered-retry queue) --
     not a new state file. Exercises the real ask.py + fleet_alert.sh + alert_store.py chain,
     curl stubbed the same way `_fleet_alert_queues_an_undelivered_alarm...` above stubs it."""
     import subprocess
@@ -12670,9 +12677,22 @@ def _ask_file_rate_limits_ntfy_to_once_per_member_per_hour_gh568():
         script = str(ROOT / "scripts" / "ask.py")
 
         def _file(member, why):
-            return subprocess.run(
+            # Reif, 2026-09-28: "asks only from dumbledore" -- a member's ask reaches Reif only
+            # when dumbledore escalates it, so the page under test is the escalation's.
+            f = subprocess.run(
                 [sys.executable, script, "--db-path", str(db_path), "file",
-                 "--member", member, "--why", why],
+                 "--member", member, "--why", why, "--no-notify"],
+                capture_output=True, text=True, timeout=30, env=env,
+            )
+            if f.returncode:
+                return f
+            ask_id = re.search(r"ask (\d+) filed", f.stdout).group(1)
+            return _escalate(ask_id)
+
+        def _escalate(ask_id):
+            return subprocess.run(
+                [sys.executable, script, "--db-path", str(db_path), "escalate", ask_id,
+                 "--me", "dumbledore", "--reason", "selftest"],
                 capture_output=True, text=True, timeout=30, env=env,
             )
 
@@ -12682,12 +12702,16 @@ def _ask_file_rate_limits_ntfy_to_once_per_member_per_hour_gh568():
         assert p2.returncode == 0, f"ask.py file must exit 0: {p2.stderr[:300]}"
         p3 = _file("gru", "a different member, same hour")
         assert p3.returncode == 0, f"ask.py file must exit 0: {p3.stderr[:300]}"
+        first_id = re.search(r"fleet ask #(\d+) from dumbledore \(for marie\)",
+                             calls.read_text()).group(1)
+        p4 = _escalate(first_id)
+        assert p4.returncode == 0, f"re-escalate must exit 0: {p4.stderr[:300]}"
 
         sent = calls.read_text() if calls.exists() else ""
-        assert len(re.findall(r"fleet ask #\d+ from marie", sent)) == 1, \
-            f"a second ask from the same member inside the hour must not page again: " \
-            f"{_redact_secrets(sent)!r}"
-        assert re.search(r"fleet ask #\d+ from gru", sent), \
+        assert len(set(re.findall(r"fleet ask #(\d+) from dumbledore \(for marie\)", sent))) == 2, \
+            f"two distinct asks from one member in the hour must both page, a re-escalation " \
+            f"must not: {_redact_secrets(sent)!r}"
+        assert re.search(r"fleet ask #\d+ from dumbledore \(for gru\)", sent), \
             f"a different member's first ask this hour must still page: {_redact_secrets(sent)!r}"
 
 
@@ -15749,6 +15773,95 @@ def _roster_is_ten_members_after_fk1195_fold():
         "sentry never gained the live gate-3 re-check after deploy"
 
 
+def _judge_judy_records_pool_declines_and_stops_the_walk_fk989():
+    """A tick the account pool declined is recorded as budget_declined, not as nothing at all.
+
+    MEASURED 2026-09-13 on the philanthropy instance: judge-judy.log carried 559
+    "claude -p failed rc=3 (account=none)" lines against 5 posted verdicts in one day (~28
+    attempts each on #5495/#5468/#5457/#5597/#5508/#5507), spanning a 01:00-06:59Z window where
+    account-pool.log recorded 854 "ALL accounts failed this call" and zero successes. No
+    runs.jsonl row was written for any of them, so `fleet_metrics.py signal_rate:judge-judy`
+    read 1.0 and `budget_declined_per_hr:judge-judy` read 0.0 straight through a six-hour review
+    blackout -- and a PR only gets auto-merge armed once a verdict posts, so the lane that gates
+    every merge was both dead and invisible.
+
+    Two halves, both asserted here:
+
+    1. BEHAVIOURAL, and the subtle one. run_report.py's classify() consults --exit-code ONLY
+       when the parsed outcome is empty (`if not outcome:` -> _EXIT_CODE_STATUS). So the row
+       must carry NO `Outcome:` line; adding a friendly one silently reclassifies it `ok`,
+       recreating the exact blind spot. This drives run_report.py for real and asserts
+       `budget_declined` comes back with the evidence intact.
+    2. STATIC, same style as this file's other judge-judy.sh checks: a decline must be told
+       apart from a real claude failure by the call's own result ($RAW empty and $0 spent) --
+       never by ACCOUNT_POOL_SELECTED/ACCOUNT_POOL_LAST_REASON, which are set inside the
+       `RAW=$(account_pool_run ...)` command substitution's subshell and are always empty at
+       that log line; and a confirmed decline must stop the walk rather than continue it,
+       because the gate is per-account and the next PR would be declined identically.
+    """
+    import json as _json
+    import subprocess
+
+    # --- 1. the row really classifies as budget_declined, evidence preserved ---------------
+    script_path = ROOT / "scripts" / "run_report.py"
+    proc = subprocess.run(
+        [sys.executable, str(script_path), "--member", "judge-judy",
+         "--run-id", "selftest-pool-declined", "--kind", "shell", "--exit-code", "3",
+         "--pass-file", "-"],
+        input="Evidence: account-pool.log: every account gated, $0 spent\n"
+              "Self-critique: none -- no review attempted, the account pool had no headroom\n",
+        capture_output=True, text=True, timeout=30,
+    )
+    assert proc.returncode == 0, f"run_report.py must exit 0: {proc.stderr.strip()[:300]}"
+    rows = [_json.loads(l) for l in proc.stdout.splitlines() if l.strip()]
+    assert rows, f"run_report.py wrote no row: {proc.stdout[:300]!r}"
+    row = rows[-1]
+    assert row.get("status") == "budget_declined", (
+        f"a no-Outcome row with --exit-code 3 must classify as budget_declined so "
+        f"budget_declined_per_hr:judge-judy can see a review blackout -- got {row.get('status')!r}"
+    )
+    assert "every account gated" in (row.get("evidence") or ""), (
+        f"the decline row lost its evidence: {row.get('evidence')!r}"
+    )
+
+    # --- 2. judge-judy.sh distinguishes a decline and stops the walk -----------------------
+    src = (ROOT / "members" / "judge-judy" / "judge-judy.sh").read_text()
+
+    assert "report_pool_declined()" in src, \
+        "judge-judy.sh no longer defines report_pool_declined -- a declined tick records nothing"
+    decl_i = src.index("report_pool_declined() {")
+    decl_body = src[decl_i:src.index("\n}", decl_i)]
+    assert "--exit-code 3" in decl_body, \
+        "report_pool_declined must pass --exit-code 3 or the row cannot classify as budget_declined"
+    assert "Outcome:" not in decl_body, (
+        "report_pool_declined must NOT emit an Outcome: line -- classify() then ignores "
+        "--exit-code and the row comes back `ok`, which is the blind spot this closes"
+    )
+    assert "--heartbeat" not in decl_body, (
+        "a declined tick is not a heartbeat: PRs were waiting and none got reviewed, and "
+        "heartbeat rows are excluded from fleet_metrics' executed set entirely"
+    )
+
+    rc_i = src.index('if [ "$RC" -ne 0 ]; then')
+    rc_block = src[rc_i:rc_i + 3000]
+    assert '[ -z "${RAW:-}" ]' in rc_block, (
+        "the decline test must read the call's own result ($RAW empty) -- "
+        "ACCOUNT_POOL_SELECTED/ACCOUNT_POOL_LAST_REASON are set in a command-substitution "
+        "subshell and are empty by construction at this point"
+    )
+    assert '[ "$RC" -eq 3 ]' in rc_block, (
+        "a decline is account_pool_run's own rc 3 -- a timeout (124) or a claude crash with "
+        "empty output must not count as one and abandon the tick"
+    )
+    assert "POOL_DECLINES" in rc_block and "MAX_POOL_DECLINES" in rc_block, \
+        "no consecutive-decline counter/cap in the rc!=0 branch -- the walk still burns the queue"
+    assert "report_pool_declined " in rc_block, \
+        "a capped-out decline does not record a budget_declined row"
+    decline_i = rc_block.index("POOL_DECLINES=$((POOL_DECLINES + 1))")
+    assert "break" in rc_block[decline_i:], \
+        "a confirmed pool decline must stop the walk, not continue to the next PR"
+
+
 if __name__ == "__main__":
     check("PR tile rollup reflects mergeability, not just CI (#179)", _pr_tile_rollup_reflects_mergeability_not_just_ci)
     check("member specs load and validate", _member_specs_validate)
@@ -16043,7 +16156,7 @@ if __name__ == "__main__":
     check("asks schema is present and reaches a pre-existing fleet.db (gh#568)", _ask_schema_presence_and_clean_migration_gh568)
     check("ask.py file/list round-trips a filed ask (gh#568)", _ask_file_and_list_roundtrip_gh568)
     check("ask.py answer sets the row once; a second call is a no-op (gh#568 AC3)", _ask_answer_is_idempotent_gh568)
-    check("ask.py file rate-limits its NTFY page to once per member per hour (gh#568 AC4)", _ask_file_rate_limits_ntfy_to_once_per_member_per_hour_gh568)
+    check("ask.py escalation pages once per ask, every distinct ask pages (gh#568 AC4, fk#1386)", _ask_file_rate_limits_ntfy_to_once_per_member_per_hour_gh568)
     check("_redact_secrets strips Bearer tokens from assertion messages (gh#682)", _redact_secrets_strips_bearer_tokens_from_assertion_messages_gh682)
     check("check() redacts secrets from every failure message it records (gh#682)", _check_redacts_secrets_from_every_failure_message_gh682)
     check("check() calls _redact_secrets (gh#682)", _check_calls_redact_secrets_gh682)
@@ -16178,6 +16291,7 @@ if __name__ == "__main__":
     check("marie's charter wires fold_candidates.py and the fleet:fold-into-pr label (fk#1127)", _marie_charter_wires_fold_candidates_and_the_fold_label_fk1127)
     check("fold_candidates reads the repo slug from FLEET_REPO_URL, never the /repo checkout path", _fold_candidates_uses_slug_not_checkout_path)
     check("roster is 10 members after fk#1195's fold, no archived member still on cron, every moved duty lands (fk#1195)", _roster_is_ten_members_after_fk1195_fold)
+    check("judge-judy records a pool-declined tick as budget_declined and stops the walk (fk#989)", _judge_judy_records_pool_declines_and_stops_the_walk_fk989)
     for n in ok:
         print(f"  ok    {n}")
     for n, why in skipped:

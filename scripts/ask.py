@@ -113,15 +113,53 @@ def list_asks(conn, status: str | None = "open", member: str | None = None,
     return [dict(zip(cols, row)) for row in cur.fetchall()]
 
 
-def _notify(member: str, ask_id: int, why: str) -> None:
+# Reif, 2026-09-28: "asks only from dumbledore." Any other member's ask is a message to him;
+# he denies it with the other way (a fleet owner does it, access the fleet holds, a workaround,
+# the opinion decided) -- "dumbledore actually denies the request because another way is
+# found" -- and only a true one-way door escalates to Reif, by email under his name. One ask id
+# end to end; the triage record is the closed `ask` message (its note starts denied:/escalated:).
+TRIAGE = "dumbledore"
+
+
+def route_to_triage(conn, ask_id: int, member: str, why: str, ask_class: str | None = None,
+                    wake: bool = True) -> list[dict]:
+    """Message dumbledore about ask #ask_id (kind `ask`, a wake kind: his pass starts now)."""
+    import fleet_msg
+    body = (f"ask #{ask_id} from {member} (class: {ask_class or 'unclassed'}): {why.strip()}\n\n"
+            f"Deny it with the other way: `ask.py deny {ask_id} --me dumbledore --path \"...\" "
+            f"[--to <member>]`. Only a true one-way door: `ask.py escalate {ask_id} --me "
+            f"dumbledore --reason \"why no other way exists\"`.")
+    sent = fleet_msg.send(conn, member, [TRIAGE], "ask", f"ask:{ask_id}", body)
+    conn.executemany("UPDATE msgs SET ask_id = ? WHERE id = ?", [(ask_id, r["id"]) for r in sent])
+    conn.commit()
+    return fleet_msg.wake(conn, sent, "ask") if wake else sent
+
+
+def _close_triage(conn, ask_id: int, member: str, note: str) -> None:
+    import fleet_msg
+    row = conn.execute("SELECT id FROM msgs WHERE recipient = ? AND kind = 'ask' AND ask_id = ? "
+                       "ORDER BY id DESC LIMIT 1", (TRIAGE, ask_id)).fetchone()
+    mid = row[0] if row else route_to_triage(conn, ask_id, member, note, wake=False)[0]["id"]
+    fleet_msg.close(conn, TRIAGE, mid, note)
+
+
+def triage_rate(conn, days: float = 7.0) -> dict:
+    since = time.time() - days * 86400
+    n, esc = conn.execute(
+        "SELECT COUNT(*), COALESCE(SUM(ack_note LIKE 'escalated:%'), 0) FROM msgs "
+        "WHERE recipient = ? AND kind = 'ask' AND status != 'open' AND acked_at > ?",
+        (TRIAGE, since)).fetchone()
+    return {"triaged": n, "escalated": esc, "denied": n - esc, "days": days,
+            "rate": round(esc / n, 3) if n else 0.0}
+
+
+def _notify(member: str, ask_id: int, why: str, sender: str | None = None) -> None:
     """One NTFY (+ email) per member per rolling hour, via the fleet's shared fleet_alert.sh
     channel -- same helper every other check pages through, so a filed ask reaches a human the
     same way an alarm does and gets the same undelivered-retry queue for free (AC4).
 
-    Rate limit: `problem` is keyed to the current hour bucket, so alert_store.py's own
-    (check, problem) dedupe -- not new state this module has to keep -- pages once per member
-    per hour and silently skips (`SKIP already paged`) every later ask that member files inside
-    the same hour. `severity=critical` is what makes that first page fire immediately rather
+    Dedupe: `problem` is keyed to the ask id, so alert_store.py's own (check, problem) dedupe
+    pages once per ask (a retry of the same ask is `SKIP already paged`). `severity=critical` is what makes that first page fire immediately rather
     than waiting on a debounce window: a fleet member blocked right now needs a human to see it
     now, not after a condition has "persisted."
 
@@ -131,12 +169,15 @@ def _notify(member: str, ask_id: int, why: str) -> None:
     """
     import os
     script = HERE / "fleet_alert.sh"
-    problem = f"{member}:{int(time.time() // 3600)}"
+    # fk#1383: only dumbledore's one-way-door escalations page now, so each ask gets its own
+    # page; a per-member hour bucket silently dropped a second escalation for the same member.
+    problem = f"{member}:ask{ask_id}"
     # #1049 made fleet_alert.sh's email leg opt-in and Reif has no ntfy app, so without this an
     # ask reaches nobody. Reif, 2026-09-15: the console inbox is gone; "somehow it can get me a
     # message some other way if it needs me." An ask is that message: force the email leg.
     env = dict(os.environ, FLEET_ALERT_EMAIL_LEG="1")
-    title = f"fleet ask #{ask_id} from {member}"
+    sender = sender or member
+    title = f"fleet ask #{ask_id} from {sender}" + (f" (for {member})" if sender != member else "")
     # fk#1056: the mail says how to answer it, and a reply to it reaches the fleet (Reply-To
     # is set by fleet_alert.sh; webhook_receiver.py applies the answer with no model in the way).
     body = (f"ask #{ask_id}: {why}\n\n"
@@ -203,7 +244,9 @@ def issue_for_ask(ask_id: int, member: str, why: str, unblocks: str | None, prop
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(
         description="File, answer, or list fleet asks -- way rare: only a one-way door the fleet "
-                     "must not walk alone. Opinion classes file as notices (gh#568, persona_law 2b).")
+                     "must not walk alone. Opinion classes file as notices (gh#568, persona_law 2b). "
+                     "Only dumbledore reaches Reif: any other member's ask goes to dumbledore, who "
+                     "denies it with the other way or, for a true one-way door, escalates it.")
     ap.add_argument("--db-path", help="override fleet.db path (default: fleet_db.DB_FILE)")
     ap.add_argument("--authority-path",
                     help="override authority.json path (default: authority.STORE)")
@@ -214,7 +257,8 @@ def main(argv=None) -> int:
     p_file.add_argument("--why", required=True,
                         help="why this needs Reif -- way rare: only a one-way door (secret, spend, "
                              "prod data delete, force-push main, his own login); opinions are "
-                             "yours to decide (persona_law.md 2b)")
+                             "yours to decide (persona_law.md 2b). It goes to dumbledore, not "
+                             "Reif: he denies it with the other way, or escalates a true one-way door")
     p_file.add_argument("--unblocks", help="what gets unstuck once this is answered")
     p_file.add_argument("--proposed", help="a proposed answer, if the filer has one")
     p_file.add_argument("--summary",
@@ -224,7 +268,21 @@ def main(argv=None) -> int:
     p_file.add_argument("--class", dest="ask_class", choices=ASK_CLASSES,
                         help=f"ask class: {', '.join(ASK_CLASSES)} (optional)")
     p_file.add_argument("--no-notify", action="store_true",
-                        help="skip the NTFY/email page (tests, or a caller paging separately)")
+                        help="skip the page/triage message (tests, or a caller paging separately)")
+
+    p_deny = sub.add_parser("deny", help="dumbledore: deny an open ask with the other way found")
+    p_deny.add_argument("id", type=int)
+    p_deny.add_argument("--me", required=True)
+    p_deny.add_argument("--path", required=True, help="the other way, written down")
+    p_deny.add_argument("--to", help="the member who does it (gets the work, woken now)")
+
+    p_esc = sub.add_parser("escalate", help="dumbledore: email Reif a true one-way door")
+    p_esc.add_argument("id", type=int)
+    p_esc.add_argument("--me", required=True)
+    p_esc.add_argument("--reason", required=True, help="why no other way exists")
+
+    p_rate = sub.add_parser("triage-rate", help="dumbledore's escalated / triaged")
+    p_rate.add_argument("--days", type=float, default=7.0)
 
     p_answer = sub.add_parser("answer", help="answer an open ask exactly once")
     p_answer.add_argument("id", type=int)
@@ -260,7 +318,11 @@ def main(argv=None) -> int:
                               summary=a.summary)
             print(f"ask {ask_id} filed")
             if not a.no_notify:
-                _notify(a.member, ask_id, a.why)
+                if a.member == TRIAGE:
+                    _notify(a.member, ask_id, a.why)
+                else:
+                    route_to_triage(conn, ask_id, a.member, a.why, a.ask_class)
+                    print(f"ask {ask_id} sent to {TRIAGE} to triage")
                 try:
                     url = issue_for_ask(ask_id, a.member, a.why, a.unblocks, a.proposed, a.ask_class)
                     if url:
@@ -301,6 +363,36 @@ def main(argv=None) -> int:
             print(f"ask.py: answer {a.id}: {reason}", file=sys.stderr)
             return 1
         print(f"ask {a.id} answered")
+        return 0
+
+    if a.cmd in ("deny", "escalate"):
+        if a.me != TRIAGE:
+            print(f"ask.py: only {TRIAGE} triages asks", file=sys.stderr)
+            return 2
+        row = conn.execute("SELECT member, why, answered_at FROM asks WHERE id = ?", (a.id,)).fetchone()
+        if not row or row[2] is not None:
+            print(f"ask.py: {a.cmd} {a.id}: {'already answered' if row else 'no such ask'}", file=sys.stderr)
+            return 1
+        member, why = row[0], row[1]
+        if a.cmd == "escalate":
+            _notify(member, a.id, f"{why}\n\n{TRIAGE}: no other way -- {a.reason}", sender=TRIAGE)
+            _close_triage(conn, a.id, member, f"escalated: {a.reason}")
+            print(f"ask {a.id} escalated to Reif")
+            return 0
+        answer_ask(conn, a.id, f"denied, another way: {a.path}", TRIAGE, status="denied")
+        _close_triage(conn, a.id, member, f"denied: {a.path}")
+        if a.to:
+            import fleet_msg
+            sent = fleet_msg.send(conn, TRIAGE, [a.to], "nudge", f"ask:{a.id}",
+                                  f"ask #{a.id} from {member} was denied because another way "
+                                  f"exists, and it is yours: {a.path}\n\nOriginal: {why}")
+            fleet_msg.wake(conn, sent, "nudge")
+        print(f"ask {a.id} denied" + (f", sent to {a.to}" if a.to else ""))
+        return 0
+
+    if a.cmd == "triage-rate":
+        r = triage_rate(conn, a.days)
+        print(f"Escalation-rate: {r['escalated']}/{r['triaged']} ({r['rate']:.0%}) over {a.days:g}d")
         return 0
 
     if a.cmd == "list":

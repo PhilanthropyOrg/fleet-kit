@@ -26,6 +26,12 @@ comments superseding an earlier one: the newest comment carrying the line wins o
 comment, which wins over the body. Reuses run_report._vision_claim's regex (tolerates markdown
 heading/bold wrapping) rather than a second parser for the same field.
 
+A LINE THAT POINTS AT A PARENT. `Vision-link: #7654 (report page rebuild)` names the epic the
+item belongs to, not a KR (philanthropy#8538-8542: five of Reif's own direct asks, all gated
+out 2026-09-28 though the filer clearly linked them). When the caller passes that parent's
+text in `parents`, the item inherits the parent's own classification -- one hop only, so a
+chain of epic refs never recurses. No parent text given: MISSING, as before.
+
 Pure core (`classify_candidate`/`gate_candidates`), thin CLI (`main`) -- same split as
 claim_history.py and cost_bridge.py.
 """
@@ -63,13 +69,34 @@ def _normalize(value: str) -> str:
     return "".join(value.lower().split())
 
 
-def classify_candidate(body: str | None, comments: list[dict] | None) -> tuple[str, str | None]:
+_PARENT_REF_RE = re.compile(r"^\s*(?:gh)?#(\d+)\b")
+
+
+def parent_ref(raw: str | None) -> int | None:
+    """The issue number a Vision-link value points at (`#7654 (...)`), or None."""
+    m = _PARENT_REF_RE.match(raw or "")
+    return int(m.group(1)) if m else None
+
+
+def classify_candidate(body: str | None, comments: list[dict] | None,
+                       parents: dict | None = None) -> tuple[str, str | None]:
     """(status, raw Vision-link value) for one candidate.
 
     `comments` should be in `createdAt` order (ascending), same shape `gh issue list --json
     number,...,comments` returns. Newest comment carrying a `Vision-link:` line wins over an
     older one, which wins over the body -- a re-scored PRD supersedes what it superseded.
+    `parents` ({number: {"body", "comments"}}) resolves a `Vision-link: #N` value to #N's own.
     """
+    status, raw = _classify_own(body, comments)
+    n = parent_ref(raw) if status == STATUS_MISSING else None
+    if n is not None and n in (parents or {}):
+        p_status, p_raw = _classify_own(parents[n].get("body"), parents[n].get("comments"))
+        if p_status != STATUS_MISSING:
+            return p_status, f"{raw} -> #{n}: {p_raw}"
+    return status, raw
+
+
+def _classify_own(body: str | None, comments: list[dict] | None) -> tuple[str, str | None]:
     for comment in reversed(comments or []):
         claim = run_report._vision_claim(comment.get("body") or "")
         if claim is not None:
@@ -109,7 +136,7 @@ def _classify_value(raw: str) -> tuple[str, str]:
     return STATUS_MISSING, raw
 
 
-def gate_candidates(candidates: list[dict]) -> dict:
+def gate_candidates(candidates: list[dict], parents: dict | None = None) -> dict:
     """candidates: [{"number": int, "body": str, "comments": [...]}, ...], already in the
     order gru.md step 2b/2c produced (tier, then oldest-createdAt-first within a tier).
     `labels` is optional (gh#726) -- a candidate dict with no `labels` key at all behaves
@@ -119,7 +146,8 @@ def gate_candidates(candidates: list[dict]) -> dict:
     "reason"}, ...]} -- gh#525 AC3: every drop is named, never a silent absence.
     """
     classified = [
-        (c["number"], *classify_candidate(c.get("body"), c.get("comments")), c.get("labels"))
+        (c["number"], *classify_candidate(c.get("body"), c.get("comments"), parents),
+         c.get("labels"))
         for c in candidates
     ]
     eligible: list[int] = []

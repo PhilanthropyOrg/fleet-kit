@@ -171,6 +171,48 @@ def test_reif_priority_6h_rate_and_floor() -> None:
     print("ok  reif-priority 6h rate is computed on its own filtered window")
 
 
+def test_unlinked_issue_credited_via_closing_comment_pr() -> None:
+    """philanthropy#8606: closed COMPLETED, no PR's closingIssuesReferences named it, but the
+    closer's last comment cites the merged+live PR by hand ("... PR #8605 (merged ...")."""
+    issues = {8606: {"number": 8606, "state": "CLOSED", "stateReason": "COMPLETED", "labels": [], "body": "",
+                     "comments": [
+                         {"body": "needs-spec: vision-link", "createdAt": iso(1)},
+                         {"body": "Verified live on prod ... PR #8605 (merged 2026-09-29T01:42:39Z) shipped this.",
+                          "createdAt": iso(0.5)},
+                     ]}}
+    prs = [{"number": 8605, "mergedAt": iso(1), "closingIssuesReferences": []}]
+    deploys = [{"createdAt": iso(0.5), "conclusion": "success"}]
+    events = sb.resolved_events(prs, deploys, issues)
+    assert sum(e["weight"] for e in events) == 1, events
+    assert events[0]["pr"] == 8605 and events[0]["issue"] == 8606, events
+    print("ok  unlinked COMPLETED close credited via its closing comment's PR #N")
+
+
+def test_sentry_journey_auto_close_never_credited_via_comment() -> None:
+    """fleet:sentry-journey auto-closes ("Passing again as of run ...") are a green check, not
+    work -- must never be picked up by the comment-PR fallback even if a PR number appears."""
+    issues = {8594: {"number": 8594, "state": "CLOSED", "stateReason": "COMPLETED",
+                     "labels": [{"name": "fleet:sentry-journey"}], "body": "",
+                     "comments": [{"body": "Passing again as of run PR #900.", "createdAt": iso(0.5)}]}}
+    prs = [{"number": 900, "mergedAt": iso(1), "closingIssuesReferences": []}]
+    deploys = [{"createdAt": iso(0.5), "conclusion": "success"}]
+    events = sb.resolved_events(prs, deploys, issues)
+    assert sum(e["weight"] for e in events) == 0, events
+    print("ok  fleet:sentry-journey auto-close never credited via a comment-cited PR")
+
+
+def test_comment_pr_not_double_counted_when_pr_also_links_issue() -> None:
+    """The same PR both links the issue via closingIssuesReferences AND its comment cites
+    itself -- must count once, not twice."""
+    issues = {50: {"number": 50, "state": "CLOSED", "stateReason": "COMPLETED", "labels": [], "body": "",
+                  "comments": [{"body": "Shipped in PR #500.", "createdAt": iso(0.5)}]}}
+    prs = [{"number": 500, "mergedAt": iso(1), "closingIssuesReferences": [{"number": 50}]}]
+    deploys = [{"createdAt": iso(0.5), "conclusion": "success"}]
+    events = sb.resolved_events(prs, deploys, issues)
+    assert sum(e["weight"] for e in events) == 1, events
+    print("ok  linked + self-citing comment counts once, not twice")
+
+
 if __name__ == "__main__":
     fails = 0
     for fn in [v for k, v in dict(globals()).items() if k.startswith("test_")]:
