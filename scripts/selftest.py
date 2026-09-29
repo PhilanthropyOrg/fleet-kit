@@ -5620,7 +5620,7 @@ def _console_v2_is_one_phone_first_page_with_five_blocks():
     assert 'if path in ("/", "/classic"):' in sv and "PAGE_V2" in sv, "root must serve v2 and /classic the old page"
     for route in ('if path == "/api/asks":', 'if path == "/api/build":', 'if path == "/api/plan":', 'if path == "/api/asks/answer":', 'if path == "/api/metrics":'):
         assert route in sv, f"server lacks {route}"
-    gate = sv.index("if not self._authorized():")
+    gate = sv.index("who = self._authorized()")
     assert sv.index('if path == "/api/asks/answer":') > gate, "answering an ask must sit behind the sign-in gate"
     assert sv.index('if path == "/api/asks":') < gate, "listing asks is a read, before the gate"
 
@@ -9952,7 +9952,7 @@ def _write_routes_are_authenticated():
 
     # Fail closed: no key configured must mean no remote writes, never "auth disabled".
     auth = src.split("def _authorized", 1)[1].split("\n    def ", 1)[0]
-    assert "return False" in auth, "_authorized never denies -- cannot be failing closed"
+    assert "return False" in auth or 'return ""' in auth, "_authorized never denies -- cannot be failing closed"
     assert "compare_digest" in auth, "key compared without hmac.compare_digest (timing leak)"
 
 

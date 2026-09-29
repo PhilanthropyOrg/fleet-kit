@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ask the fleet</title>
+<!--
+  fleet_chat.html -- ask Claude about this fleet (fleet_chat.py). Signed-in operators only:
+  every question is a write (POST /api/chat) and is logged under their name, and so is any
+  action the answer takes. Same look as fleet_home.html, no framework, no build step.
+-->
+<style>
+  :root{--ink:#1a1c19;--muted:#6b736b;--faint:#8b9188;--paper:#fff;--tint:#f5f7f3;--rule:#e6e9e4;
+    --accent:#635bff;--accent-soft:#f0ebff;--bad:#c13a2e;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;--mono:ui-monospace,"SF Mono",Menlo,monospace}
+  @media (prefers-color-scheme: dark){:root{--ink:#eceef2;--muted:#a2a8b3;--faint:#7d838e;--paper:#1b1d21;--tint:#15171b;--rule:#2f333a;--accent:#8f88ff;--accent-soft:#2a2750}}
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--tint);color:var(--ink);font:15px/1.5 var(--sans)}
+  a{color:var(--accent)}
+  .wrap{max-width:760px;margin:0 auto;padding:16px;display:flex;flex-direction:column;min-height:100vh;gap:12px}
+  header{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+  h1{font:600 18px var(--sans);margin:0}
+  #who{font:500 12px var(--mono);color:var(--faint)}
+  header a{margin-left:auto;font-size:13px}
+  #log{flex:1;display:flex;flex-direction:column;gap:12px}
+  .msg{border-radius:8px;padding:10px 14px;white-space:pre-wrap;overflow-wrap:anywhere}
+  .q{background:var(--accent-soft);align-self:flex-end;max-width:85%}
+  .a{background:var(--paper);border:1px solid var(--rule)}
+  .a.wait{color:var(--muted);font-style:italic}
+  .a.err{color:var(--bad)}
+  code{font:13px var(--mono);background:var(--tint);padding:1px 4px;border-radius:4px}
+  .hint{color:var(--muted);font-size:14px}
+  form{display:flex;gap:8px;position:sticky;bottom:0;background:var(--tint);padding:8px 0 16px}
+  textarea{flex:1;min-height:48px;max-height:200px;resize:vertical;font:15px var(--sans);padding:10px;border:1px solid var(--rule);border-radius:8px;background:var(--paper);color:var(--ink)}
+  button{font:600 14px var(--sans);padding:0 18px;border:0;border-radius:8px;background:var(--accent);color:#fff;cursor:pointer;min-height:44px}
+  button:disabled{opacity:.5;cursor:default}
+  .signin{position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;padding:16px}
+  .signin[hidden]{display:none}
+  .signin div{background:var(--paper);border-radius:10px;padding:20px;display:flex;flex-direction:column;gap:10px;width:100%;max-width:380px}
+  .signin input{font:15px var(--sans);padding:10px;border:1px solid var(--rule);border-radius:6px;background:var(--paper);color:var(--ink)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header><h1>Ask the fleet</h1><span id="who"></span><a id="home" href="./">Back to the dashboard</a></header>
+  <div id="log"><p class="hint">Ask anything about the fleet: what a member does, why a run failed, what is stuck. You can also ask it to act, for example "pause nerd" or "release the claim on #123". Every question and action is logged under your name.</p></div>
+  <form id="ask"><textarea id="q" placeholder="Ask a question" required></textarea><button id="send">Ask</button></form>
+</div>
+<div id="signin" class="signin" hidden role="dialog" aria-label="sign in">
+  <div><b>Sign in</b><small>Paste your fleet key. It becomes a cookie; the page does not keep it.</small>
+    <input id="key" type="password" autocomplete="off" placeholder="your fleet key">
+    <button id="go">Sign in</button><span id="msg" style="color:var(--bad)"></span></div>
+</div>
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+// Served at <base>/chat behind a path prefix; every API URL resolves from <base>/.
+const BASE = location.pathname.replace(/chat\/?$/, '');
+const url = p => BASE + p.replace(/^\//, '');
+$('home').href = BASE;
+let HISTORY = [];
+
+function signIn() {
+  return new Promise(resolve => {
+    $('signin').hidden = false; $('key').value = ''; $('msg').textContent = ''; $('key').focus();
+    const go = async () => {
+      const r = await fetch(url('/api/login'), {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({key: $('key').value})});
+      const j = await r.json().catch(() => ({})); $('key').value = '';
+      if (j.ok) { $('signin').hidden = true; resolve(); } else { $('msg').textContent = j.error || 'that key was not accepted'; }
+    };
+    $('go').onclick = go; $('key').onkeydown = ev => { if (ev.key === 'Enter') go(); };
+  });
+}
+async function post(path, body) {
+  for (;;) {
+    const r = await fetch(url(path), {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+    if (r.status === 401) { await signIn(); continue; }
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || j.ok === false) throw new Error(j.error || `${path} ${r.status}`);
+    return j;
+  }
+}
+// Answers are markdown-ish: escape everything, then allow only **bold** and `code`.
+const fmt = t => String(t).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))
+  .replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>').replace(/`([^`\n]+)`/g, '<code>$1</code>');
+function add(cls, text) { const d = document.createElement('div'); d.className = 'msg ' + cls; d.textContent = text; $('log').appendChild(d); d.scrollIntoView({block: 'end'}); return d; }
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+$('ask').onsubmit = async ev => {
+  ev.preventDefault();
+  const q = $('q').value.trim(); if (!q) return;
+  $('send').disabled = true; $('q').value = '';
+  add('q', q);
+  const a = add('a wait', 'Thinking… this can take a minute or two.');
+  try {
+    const {id} = await post('/api/chat', {question: q, history: HISTORY});
+    for (;;) {
+      await sleep(3000);
+      const j = await post('/api/chat/poll', {id});
+      if (j.status === 'running') continue;
+      if (j.status === 'done') { a.className = 'msg a'; a.innerHTML = fmt(j.answer); HISTORY.push({q, a: j.answer}); }
+      else { a.className = 'msg a err'; a.textContent = 'No answer: ' + (j.error || 'unknown error'); }
+      break;
+    }
+  } catch (e) { a.className = 'msg a err'; a.textContent = e.message; }
+  $('send').disabled = false; $('q').focus();
+};
+$('q').onkeydown = ev => { if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); $('ask').requestSubmit(); } };
+post('/api/whoami', {}).then(j => { $('who').textContent = 'signed in as ' + j.who; }).catch(() => {});
+</script>
+</body>
+</html>

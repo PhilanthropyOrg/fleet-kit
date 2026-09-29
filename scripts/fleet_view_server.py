@@ -1289,6 +1289,28 @@ def api_key() -> str:
     return (read_env_values().get("FLEET_API_KEY") or os.environ.get("FLEET_API_KEY") or "").strip()
 
 
+def operator_keys() -> list[tuple[str, str]]:
+    """Every (name, key) allowed to sign in: FLEET_API_KEY as FLEET_API_KEY_OWNER (default
+    "owner"), plus one key per person from FLEET_OPERATOR_KEYS="name:key,name:key".
+
+    One key per person so a write can be logged with a name and one person's access removed
+    without changing the key for everyone. A malformed entry (no name, no key) is skipped,
+    never treated as "no key needed" -- an empty list still fails closed in _authorized().
+    """
+    values = read_env_values()
+    keys = []
+    owner = api_key()
+    if owner:
+        name = (values.get("FLEET_API_KEY_OWNER") or os.environ.get("FLEET_API_KEY_OWNER") or "owner").strip()
+        keys.append((name or "owner", owner))
+    raw = values.get("FLEET_OPERATOR_KEYS") or os.environ.get("FLEET_OPERATOR_KEYS") or ""
+    for entry in raw.split(","):
+        name, _, key = entry.strip().partition(":")
+        if name.strip() and key.strip():
+            keys.append((name.strip(), key.strip()))
+    return keys
+
+
 def subprocess_env() -> dict:
     """os.environ overlaid with fleet.env's values, for any child process this server spawns.
 
@@ -1936,6 +1958,7 @@ PAGE = (KIT_DIR / "scripts" / "fleet_view.html")
 # fk#645: Console v2 -- one page, phone first -- is the landing page; the previous console stays
 # reachable at /classic until Reif accepts v2 on his phone (docs/quality-standard.md rule 5).
 PAGE_V2 = (KIT_DIR / "scripts" / "fleet_home.html")
+PAGE_CHAT = KIT_DIR / "scripts" / "fleet_chat.html"   # ask Claude about the fleet (fleet_chat.py)
 PROCESS_STARTED_AT = time.time()
 
 
@@ -2009,8 +2032,9 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", "0")
         self.end_headers()
 
-    def _authorized(self) -> bool:
-        """True if this request may perform a write. See the gate in do_POST for the why.
+    def _authorized(self) -> str:
+        """Who is making this write -- a name, truthy -- or "" if nobody is allowed. See the
+        gate in do_POST for the why.
 
         FAILS CLOSED for anything off-box. With no FLEET_API_KEY set, a remote POST is refused
         rather than allowed -- an unset key must never silently mean "no authentication", which
@@ -2021,13 +2045,14 @@ class Handler(BaseHTTPRequestHandler):
         """
         client = self.client_address[0] if self.client_address else ""
         if client in ("127.0.0.1", "::1", "localhost"):
-            return True
-        key = api_key()
-        if not key:
-            return False   # fail closed: no key configured => no remote writes, ever
+            # The chat agent acts through localhost on a signed-in person's behalf
+            # (fleet_chat_act.py); only a caller already on the box can set this header.
+            behalf = (self.headers.get("X-Fleet-On-Behalf") or "").strip()[:60].removesuffix(" (chat)")
+            return f"{behalf} (chat)" if behalf else "localhost"
+        keys = operator_keys()
+        if not keys:
+            return ""   # fail closed: no key configured => no remote writes, ever
         sent = (self.headers.get("X-Fleet-Key") or "").strip()
-        if sent and hmac.compare_digest(sent, key):
-            return True
         # Same-origin session cookie -- the ONLY credential a browser can actually present.
         # _cors deliberately keeps X-Fleet-Key out of Allow-Headers so a page cannot send the
         # write key; without this branch that made every POST route unreachable from the very
@@ -2036,7 +2061,13 @@ class Handler(BaseHTTPRequestHandler):
         # Safe against a cross-site caller for the same reasons the header path is: Allow-Origin
         # `*` forbids credentials, only GET is advertised in Allow-Methods, and the cookie is
         # SameSite=Strict so a third-party page's POST never carries it.
-        return hmac.compare_digest(self._session_cookie(), _session_token(key))
+        cookie = self._session_cookie()
+        for name, key in keys:
+            if sent and hmac.compare_digest(sent, key):
+                return name
+            if cookie and hmac.compare_digest(cookie, _session_token(key)):
+                return name
+        return ""
 
     def _handle_login(self, body: dict) -> None:
         """Exchange FLEET_API_KEY for a same-origin session cookie.
@@ -2057,8 +2088,8 @@ class Handler(BaseHTTPRequestHandler):
         but an operator on the box hits plain http://localhost and a Secure cookie would be
         silently dropped there.
         """
-        key = api_key()
-        if not key:
+        keys = operator_keys()
+        if not keys:
             # Fail closed, and say why -- an operator staring at a dead Save button deserves
             # the actual reason rather than a generic 401.
             self._json({"ok": False,
@@ -2066,13 +2097,16 @@ class Handler(BaseHTTPRequestHandler):
                                  "fleet.env and restart the container to enable writes"}, 503)
             return
         sent = str(body.get("key", "")).strip()
-        if not sent or not hmac.compare_digest(sent, key):
+        match = [(name, key) for name, key in keys if sent and hmac.compare_digest(sent, key)]
+        if not match:
             client = self.client_address[0] if self.client_address else "?"
             print(f"[fleet-view] LOGIN FAILED from {client}", flush=True)
             self._json({"ok": False, "error": "wrong key"}, 401)
             return
+        name, key = match[0]
+        print(f"[fleet-view] LOGIN {name}", flush=True)
         secure = "; Secure" if (self.headers.get("X-Forwarded-Proto") or "").lower() == "https" else ""
-        body_bytes = json.dumps({"ok": True}).encode()
+        body_bytes = json.dumps({"ok": True, "who": name}).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body_bytes)))
@@ -2081,6 +2115,20 @@ class Handler(BaseHTTPRequestHandler):
                          f"Path=/; Max-Age=31536000{secure}")
         self.end_headers()
         self.wfile.write(body_bytes)
+
+    def _write_log(self, path: str, who: str, body: dict) -> None:
+        """One line per allowed write: who did what. Reads stay in access.jsonl; this is the
+        record a second operator's actions are checked against."""
+        ip = (self.headers.get("CF-Connecting-IP") or
+              (self.client_address[0] if self.client_address else ""))
+        print(f"[fleet-view] WRITE {path} by {who}", flush=True)
+        entry = {"ts": time.time(), "path": path, "who": who, "ip": ip,
+                 "body": {k: v for k, v in body.items() if k not in ("key", "history")}}
+        try:
+            with (LOG_DIR / "writes.jsonl").open("a") as fh:
+                fh.write(json.dumps(entry, default=str)[:4000] + "\n")
+        except OSError:
+            pass  # logging must never take the server down
 
     def _session_cookie(self) -> str:
         """This request's fleet_session cookie value, or "" -- never raises on junk input."""
@@ -2109,6 +2157,15 @@ class Handler(BaseHTTPRequestHandler):
                         "to render: <code>%s</code></p>" % type(exc).__name__).encode()
                 code = 503
             self.send_response(code)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if path == "/chat":
+            body = (PAGE_CHAT.read_text() if PAGE_CHAT.exists() else "<h1>fleet_chat.html missing</h1>").encode()
+            self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
@@ -2485,11 +2542,39 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_login(body)
             return
 
-        if not self._authorized():
+        who = self._authorized()
+        if not who:
             client = self.client_address[0] if self.client_address else "?"
             print(f"[fleet-view] DENIED {path} from {client} (bad or missing X-Fleet-Key)",
                   flush=True)
             self._json({"ok": False, "error": "unauthorized -- sign in on the Settings page"}, 401)
+            return
+        if path not in ("/api/whoami", "/api/chat/poll"):   # reads that need a sign-in
+            self._write_log(path, who, body)
+
+        if path == "/api/whoami":
+            self._json({"ok": True, "who": who})
+            return
+
+        # --- chat: a signed-in person asks Claude about this fleet (fleet_chat.py). Answers
+        # come back by polling, not one long request: a Claude pass outlives the tunnel's
+        # 100s response limit. Only the person who asked can read the answer. -------------
+        if path == "/api/chat":
+            import fleet_chat
+            try:
+                job = fleet_chat.start(who, str(body.get("question") or ""), body.get("history") or [])
+            except ValueError as exc:
+                self._json({"ok": False, "error": str(exc)}, 400)
+                return
+            self._json({"ok": True, "id": job}, 202)
+            return
+        if path == "/api/chat/poll":
+            import fleet_chat
+            job = fleet_chat.get(str(body.get("id") or ""))
+            if not job or job.get("who") != who:
+                self._json({"ok": False, "error": "no such chat"}, 404)
+                return
+            self._json({"ok": True, **job})
             return
 
         # --- steer: throttle/disable/re-tune a member, via overrides.py (dials only, by design
@@ -2503,7 +2588,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"ok": False, "error": "member and key required"}, 400)
                 return
             cmd = [sys.executable, str(KIT_DIR / "scripts" / "overrides.py"), member,
-                   "--set", key, json.dumps(value), "--by", "fleet-view", "--why", why]
+                   "--set", key, json.dumps(value), "--by", f"fleet-view:{who}", "--why", why]
             p = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
             self._json({"ok": p.returncode == 0, "out": p.stdout, "err": p.stderr})
             return
@@ -2685,7 +2770,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"ok": False, "error": "answer is empty"}, 400)
                 return
             p = subprocess.run([sys.executable, str(KIT_DIR / "scripts" / "ask.py"), "answer", str(ask_id),
-                                "--answer", answer, "--answered-by", "reif (fleet-home)"],
+                                "--answer", answer, "--answered-by", f"{who} (fleet-home)"],
                                capture_output=True, text=True, timeout=20)
             if p.returncode != 0:
                 self._json({"ok": False, "error": (p.stderr or p.stdout).strip()[:300]}, 409)
@@ -2730,7 +2815,7 @@ class Handler(BaseHTTPRequestHandler):
             if len(text) > 8000:
                 self._json({"ok": False, "error": "text too long (max 8000 chars)"}, 400)
                 return
-            sender = str(body.get("from") or "reif").strip() or "reif"
+            sender = who  # the signed-in person, never a name the caller supplies
             db = fleet_db.connect()
             sent = fleet_msg.send(db, sender, [name], "command", f"command:{text[:120]}", text)
             woken = fleet_msg.wake(db, sent, "command")
@@ -2750,7 +2835,7 @@ class Handler(BaseHTTPRequestHandler):
             if name not in MEMBERS:
                 self._json({"ok": False, "error": f"unknown member {name!r}"}, 400)
                 return
-            by = str(body.get("by") or "reif (fleet-view)").strip() or "reif (fleet-view)"
+            by = f"{who} (fleet-view)"
             rec = member_pause.pause(name, by, log_dir=LOG_DIR)
             self._json({"ok": True, "paused": True, "since": rec["since"], "by": rec["by"]})
             return
