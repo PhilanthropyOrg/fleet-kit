@@ -50,6 +50,9 @@ Fix that PR, nothing else, and do not fan out:
    and resolve (both sides read, file still parses).
 3. Fix EVERY failing check AND every review finding (a BLOCK is as red as a failing test; a
    repo-health RATCHET means split or shrink the file that grew, never raise the baseline).
+   A `Re-land #X` PR (pull_bad_bag.py pulled #X off main for breaking the tests on its
+   `Must pass:` line) is fixed by changing the code, or the test if the test is what is wrong
+   -- never by deleting ids from that line. Run them: `verified_test.sh <those ids>`.
 4. `bash /fleet-kit/scripts/verified_test.sh` (lint autofix + repo gates + diff tests; the push
    hook needs its receipt), stage explicit paths, commit, `git push origin HEAD:<headRefName>`.
    Never build your own venv: the test interpreter is `bash /fleet-kit/scripts/test_python.sh`
