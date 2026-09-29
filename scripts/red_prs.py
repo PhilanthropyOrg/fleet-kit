@@ -31,6 +31,13 @@ report instead of being re-sent every hour.
 
 A "fleet PR" is one on a `member/...` or `minion/...` branch -- the convention run_member.sh
 stamps and auto_update_branch.sh already keys on. A human's branch is never touched.
+
+`--kit` (2026-09-29) watches fleet-kit's OWN repo ($KIT_REPO_SLUG) the same way, with its own
+ledger. #1436/#1421/#1392/#1388 sat stuck 2-20h: kit PRs come from dumbledore/ and session
+branches, which the rule above never matched, and this only ever scanned the product repo. In
+kit mode every open non-draft PR is the fleet's (Reif: every bag is delivered), except one
+labelled `fleet:hands-off`. A CONFLICTING PR counts as stuck in both modes: GitHub runs no
+checks on it, so it never looked red and sat forever.
 """
 from __future__ import annotations
 
@@ -68,10 +75,19 @@ STALL_MIN = _env_int("FLEET_RED_PR_STALL_MIN", 60)
 REDISPATCH_MIN = _env_int("FLEET_RED_PR_REDISPATCH_MIN", 45)
 MAX_ATTEMPTS = _env_int("FLEET_RED_PR_MAX_ATTEMPTS", 3)
 PRIORITY_LABEL = os.environ.get("FLEET_REIF_PRIORITY_LABEL", "fleet:reif-priority")
+HANDS_OFF_LABEL = "fleet:hands-off"
 
 
-def ledger_path() -> Path:
-    return Path(os.environ.get("FLEET_LOG_DIR", "/var/log/fleet-kit")) / "red_pr_dispatch.json"
+def ledger_path(kit: bool = False) -> Path:
+    name = "red_pr_dispatch.kit.json" if kit else "red_pr_dispatch.json"
+    return Path(os.environ.get("FLEET_LOG_DIR", "/var/log/fleet-kit")) / name
+
+
+def ours(head: str, draft: bool, kit: bool) -> bool:
+    """Is this open PR the fleet's to fix? Kit: every non-draft one. Product: fleet branches."""
+    if kit:
+        return not draft
+    return bool(FLEET_BRANCH.match(head)) and (not draft or bool(MINION_BRANCH.match(head)))
 
 
 def items_of(branch: str) -> list[int]:
@@ -88,17 +104,19 @@ def _ts(iso: str) -> float | None:
         return None
 
 
-def describe(pr: dict, priority_issues: set[int], now: float) -> dict | None:
-    """One red/blocked fleet PR as a row, or None if it is not one. Pure."""
+def describe(pr: dict, priority_issues: set[int], now: float, kit: bool = False) -> dict | None:
+    """One red/blocked/conflicting fleet PR as a row, or None if it is not one. Pure."""
     head = pr.get("headRefName") or ""
     draft = bool(pr.get("isDraft"))
-    if not FLEET_BRANCH.match(head) or (draft and not MINION_BRANCH.match(head)):
+    labels = {lb.get("name") for lb in pr.get("labels") or [] if isinstance(lb, dict)}
+    if not ours(head, draft, kit) or HANDS_OFF_LABEL in labels:
         return None
-    info = pr_ci_wait.classify(pr)
-    if info["state"] not in ("RED", "BLOCK"):
+    info = conflict_aware(pr)
+    # A minion draft counts whatever its checks say: philanthropy CI skips drafts (2026-09-29,
+    # Actions minutes), so an idle checkpoint never turns red -- it is unfinished work either way.
+    if info["state"] not in ("RED", "BLOCK", "CONFLICT") and not draft:
         return None
     items = items_of(pr.get("headRefName") or "")
-    labels = {lb.get("name") for lb in pr.get("labels") or [] if isinstance(lb, dict)}
     reif = PRIORITY_LABEL in labels or any(i in priority_issues for i in items)
     since = _ts(info["last_real_commit_at"]) or _ts(pr.get("createdAt") or "") or now
     quiet_min = int((now - since) // 60)
@@ -119,6 +137,14 @@ def describe(pr: dict, priority_issues: set[int], now: float) -> dict | None:
         "content": info["last_real_commit"] or info["head"],
         "url": pr.get("url") or "",
     }
+
+
+def conflict_aware(pr: dict) -> dict:
+    """pr_ci_wait.classify, plus CONFLICT for a PR GitHub will not even test. Pure."""
+    info = pr_ci_wait.classify(pr)
+    if info["state"] in ("PENDING", "GREEN") and (pr.get("mergeStateStatus") or "").upper() == "DIRTY":
+        info["state"] = "CONFLICT"
+    return info
 
 
 # --- the dispatch ledger -------------------------------------------------------------------
@@ -236,7 +262,7 @@ def plan(rows: list[dict], ledger: dict, now: float, limit: int,
 
 # --- gh ---------------------------------------------------------------------------------------
 
-def _open_prs(repo: str | None, gh=pr_ci_wait._gh) -> list[dict] | None:
+def _open_prs(repo: str | None, gh=pr_ci_wait._gh, kit: bool = False) -> list[dict] | None:
     args = ["pr", "list", "--state", "open", "--limit", "60", "--json", LIST_FIELDS]
     if repo:
         args += ["--repo", repo]
@@ -248,8 +274,7 @@ def _open_prs(repo: str | None, gh=pr_ci_wait._gh) -> list[dict] | None:
     except json.JSONDecodeError:
         return None
     wanted = [int(p["number"]) for p in light
-              if FLEET_BRANCH.match(p.get("headRefName") or "")
-              and (not p.get("isDraft") or MINION_BRANCH.match(p.get("headRefName") or ""))]
+              if ours(p.get("headRefName") or "", bool(p.get("isDraft")), kit)]
     # In parallel: one `gh pr view` per fleet PR serially took >120s in the container on
     # 2026-09-25 and gru's Bash call was backgrounded mid-step.
     from concurrent.futures import ThreadPoolExecutor
@@ -287,13 +312,14 @@ def mark_superseded(rows: list[dict], prs: list[dict]) -> list[dict]:
     return rows
 
 
-def rows_now(repo: str | None, gh=pr_ci_wait._gh, now: float | None = None) -> list[dict] | None:
-    prs = _open_prs(repo, gh)
+def rows_now(repo: str | None, gh=pr_ci_wait._gh, now: float | None = None, *,
+             kit: bool = False) -> list[dict] | None:
+    prs = _open_prs(repo, gh, kit)
     if prs is None:
         return None
-    pri = _priority_issues(repo, gh)
+    pri = set() if kit else _priority_issues(repo, gh)
     t = time.time() if now is None else now
-    return mark_superseded([r for r in (describe(p, pri, t) for p in prs) if r], prs)
+    return mark_superseded([r for r in (describe(p, pri, t, kit) for p in prs) if r], prs)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -303,8 +329,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--repo", default=os.environ.get("FLEET_REPO_SLUG") or None)
     ap.add_argument("--limit", type=int, default=_env_int("FLEET_GRU_MAX_FIXERS", 6))
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--kit", action="store_true",
+                    help="fleet-kit's own PRs ($KIT_REPO_SLUG), every non-draft branch, own ledger")
     a = ap.parse_args(argv)
     now = time.time()
+    if a.kit:
+        a.repo = os.environ.get("KIT_REPO_SLUG") or "PhilanthropyOrg/fleet-kit"
 
     if a.cmd == "claim":
         if not a.pr:
@@ -313,13 +343,13 @@ def main(argv: list[str] | None = None) -> int:
         if raw is None:
             print(f"red_prs: could not read PR #{a.pr} -- allowing the dispatch (fail open)")
             return 0
-        info = pr_ci_wait.classify(raw)
-        if info["state"] not in ("RED", "BLOCK"):
+        info = conflict_aware(raw)
+        if info["state"] not in ("RED", "BLOCK", "CONFLICT"):
             print(f"red_prs: PR #{a.pr} is {info['state']} -- not a red-PR dispatch, not recorded")
             return 0
         content = info["last_real_commit"] or info["head"]
-        with _locked_ledger(ledger_path()) as box:
-            kills = killed_fixer_runs(ledger_path().parent).get(a.pr, [])
+        with _locked_ledger(ledger_path(a.kit)) as box:
+            kills = killed_fixer_runs(ledger_path(a.kit).parent).get(a.pr, [])
             v = verdict(effective(box["data"].get(str(a.pr)), kills), content, now)
             if v != "go":
                 e = effective(box["data"].get(str(a.pr)), kills) or {}
@@ -331,7 +361,7 @@ def main(argv: list[str] | None = None) -> int:
               f"at content {content[:12]}")
         return 0
 
-    rows = rows_now(a.repo)
+    rows = rows_now(a.repo, kit=a.kit)
     if rows is None:
         print(json.dumps({"error": "gh pr list failed -- red PRs unknown this pass"}))
         return 2
@@ -341,8 +371,8 @@ def main(argv: list[str] | None = None) -> int:
                         f"quiet {r['minutes_since_real_push']}m failed={','.join(r['failed']) or '-'}"
                         f"{' review-BLOCK' if r['review_blocked'] else ''}" for r in rows) or "none")
         return 0
-    with _locked_ledger(ledger_path()) as box:
-        out = plan(rows, box["data"], now, max(0, a.limit), killed_fixer_runs(ledger_path().parent),
+    with _locked_ledger(ledger_path(a.kit)) as box:
+        out = plan(rows, box["data"], now, max(0, a.limit), killed_fixer_runs(ledger_path(a.kit).parent),
                    resume_limit=_env_int("FLEET_GRU_MAX_RESUMES", 3))
         # A resume goes out through dispatch_member.sh, which never calls `claim`: listing it
         # here is its dispatch record, so the same red content is not re-sent inside the window.

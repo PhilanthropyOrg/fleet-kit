@@ -65,6 +65,18 @@ Fix that PR, nothing else, and do not fan out:
 6. If it cannot be fixed in this budget, comment on the PR naming the exact blocker and say so
    in your report; red_prs.py re-routes it (at most 3 fixer passes per unchanged content).
 
+**`FIRE assigned-pr kit#<N>`: the PR is fleet-kit's OWN** (gru's `red_prs.py due --kit`; any
+branch, dumbledore's or a session's). Same steps, in a kit clone instead of your worktree, with
+`--repo "$KIT_REPO_SLUG"` on every `gh` and `pr_ci_wait.py` call:
+`gh repo clone "$KIT_REPO_SLUG" "$TMPDIR/kit-$N" -- -q && cd "$TMPDIR/kit-$N" && gh pr checkout <N>`.
+A CONFLICT (GitHub runs no checks until it is gone): `git merge origin/main`, then
+`python3 /fleet-kit/scripts/ci_list_merge.py .github/workflows/ci.yml` settles a ci.yml
+conflict that is only two lists of added test steps (keeps both); anything else, resolve by
+hand. Kit tests are `python3 scripts/test_<x>.py` for what you touched plus
+`python3 scripts/test_ci_runs_every_test_file.py` (not verified_test.sh, which is the
+product's), then `git push origin HEAD:<headRefName>` and arm with
+`bash /fleet-kit/scripts/pr_arm.sh <N> "$KIT_REPO_SLUG"`.
+
 ## Step 1, every run, no exceptions: read what your checker already said
 
 `/fleet-kit/members/the-fixer/check.sh` has ALREADY run, in shell, before you were spawned

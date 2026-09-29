@@ -39,6 +39,17 @@ set -uo pipefail
 # failing "OAuth session expired" for 2+ hours -- the token was correctly in fleet.env the
 # whole time, just never reached the process that needed it).
 [ -f "${FLEET_ENV_FILE:-./fleet.env}" ] && { set -a; . "${FLEET_ENV_FILE:-./fleet.env}"; set +a; }
+# A worker node running a hub's batch (node_gate.sh): the hub's accounts and tokens win over
+# this node's own fleet.env, which sourcing above just re-applied.
+if [ -n "${FLEET_NODE_ACCOUNTS:-}" ]; then
+  export FLEET_ACCOUNTS="$FLEET_NODE_ACCOUNTS"
+  for _a in $FLEET_NODE_ACCOUNTS; do
+    _v="$(echo "$_a" | tr '[:lower:]-' '[:upper:]_')"
+    _t="FLEET_NODE_TOKEN_$_v"
+    [ -n "${!_t:-}" ] && export "CLAUDE_CODE_OAUTH_TOKEN_$_v=${!_t}"
+  done
+  unset _a _v _t
+fi
 
 # FLEET_API_KEY is the fleet-view write key -- it authorizes POST /api/run_now, which spawns
 # `claude -p --dangerously-skip-permissions` on this box. Sourcing fleet.env above exports it,
@@ -362,14 +373,15 @@ PREGATE=$(jget "['llm'].get('pregate', '')")
 # per-item FIXER_STATE_FILE override further down was meant to prevent exactly this but is set
 # AFTER this block, so it never reached the pregate. The dispatch replaces the pregate instead.
 if [ -n "$PREGATE" ] && [ -n "$ITEM" ] && [ "$DRY_RUN" -ne 1 ]; then
-  export FLEET_PREGATE_OUTPUT="FIRE assigned-pr #$ITEM (dispatched --item sub-pass; pregate skipped)"
+  # FLEET_FIXER_KIT=1 (dispatch_fixer.sh kit:N): the PR is fleet-kit's own, not the product's.
+  export FLEET_PREGATE_OUTPUT="FIRE assigned-pr ${FLEET_FIXER_KIT:+kit}#$ITEM (dispatched --item sub-pass; pregate skipped)"
   printf '%s\n' "$FLEET_PREGATE_OUTPUT" > "$LOG_DIR/$MEMBER-item$ITEM.pregate"
   log "$MEMBER: --item $ITEM is a dispatch -- pregate skipped, proceeding to the model"
   # One gate for every red-PR dispatch, whoever sent it (the-fixer's fan-out or gru's step 0):
   # red_prs.py dedups on the PR's last real commit, so the same unfixed content is not handed
   # to a fresh fixer every hour by two dispatchers. Fails open on any read error.
   if [ "$MEMBER" = "the-fixer" ]; then
-    CLAIM_OUT="$(cd "$REPO" 2>/dev/null && python3 "$KIT_DIR/scripts/red_prs.py" claim "$ITEM" 2>>"$LOG")"
+    CLAIM_OUT="$(cd "$REPO" 2>/dev/null && python3 "$KIT_DIR/scripts/red_prs.py" claim "$ITEM" ${FLEET_FIXER_KIT:+--kit} 2>>"$LOG")"
     CLAIM_RC=$?
     log "$MEMBER: $CLAIM_OUT"
     if [ "$CLAIM_RC" -eq 1 ]; then
@@ -1080,7 +1092,10 @@ export IS_SANDBOX=1
 # the CLI moves any Bash call past its 120s default into the background, and the pass then ends
 # its turn on it (or polls `pgrep -f verified_test.sh`, which matches every other minion's run).
 # No background tasks, and a foreground call may run 20 min (30 with an explicit timeout).
-if [ "$MEMBER" = "minion" ]; then
+# A the-fixer --item sub-pass is the same one-shot builder (2026-09-29: the fixer on #8836 spent
+# 10+ min re-polling a verified_test.sh the CLI had backgrounded; 179 of 561 --item sessions had
+# at least one command backgrounded). The-fixer's parent pass still fans out in the background.
+if [ "$MEMBER" = "minion" ] || { [ "$MEMBER" = "the-fixer" ] && [ -n "$ITEM" ]; }; then
   export CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 BASH_DEFAULT_TIMEOUT_MS=1200000 BASH_MAX_TIMEOUT_MS=1800000
 fi
 # Only pass a cap the spec actually set -- an empty value must not become `--max-turns ""`,

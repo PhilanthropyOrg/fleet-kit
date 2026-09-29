@@ -188,7 +188,10 @@ def decide(env: dict, gh=pr_ci_wait._gh, branch_of=_branch, payload: dict | None
         used = 0
     if used >= max_blocks(env):
         return None
-    raw = pr_ci_wait.fetch(pr, env.get("FLEET_REPO_SLUG") or None, gh)
+    # A kit sub-pass (dispatch_fixer.sh kit:N) fixes fleet-kit's own PR N, not the product's.
+    repo = (env.get("KIT_REPO_SLUG") or "PhilanthropyOrg/fleet-kit") if env.get("FLEET_FIXER_KIT") \
+        else env.get("FLEET_REPO_SLUG") or None
+    raw = pr_ci_wait.fetch(pr, repo, gh)
     if raw is None:
         return None
     info = pr_ci_wait.classify(raw)
@@ -198,7 +201,7 @@ def decide(env: dict, gh=pr_ci_wait._gh, branch_of=_branch, payload: dict | None
         counter.write_text(str(used + 1))
     except OSError:
         pass
-    detail = pr_ci_wait.render(info, env.get("FLEET_REPO_SLUG") or None, gh,
+    detail = pr_ci_wait.render(info, repo, gh,
                                with_logs=info["state"] == "RED")
     return (f"Not done: your PR #{pr} is {info['state']} "
             f"(stop refused {used + 1}/{max_blocks(env)}). A pass ends at a green PR, not at "
