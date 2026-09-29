@@ -34,6 +34,9 @@ Svix secret, its own scheme, so a canary or a CI job never needs a GitHub-shaped
                            same inbox.py apply() triage runs.
   POST /webhook/prod-alert -- a prod box's START/RESOLVE for one alert signature, deduped on
                            idempotency_key, appended to prod-alerts.jsonl for Reif HQ.
+  POST /webhook/box-log -- the ONE log area (nonprofit-atlas#8703): a prod box's batch of
+                           structured log lines (scripts/box/log_ship.py), appended to
+                           box-logs.jsonl (rotated); box_log_incidents.py files the incidents.
   POST /webhook/run     -- fire one fleet member now, off-cron, with the caller's own
                            credential (fk#1124) -- same Popen path /api/run_now uses, factored
                            into one function so there is ONE spawn path, not two.
@@ -63,6 +66,9 @@ LOG_DIR = Path(os.environ.get("FLEET_LOG_DIR", Path.home() / "Library" / "Logs" 
 LOG_FILE = LOG_DIR / "webhook_receiver.log"
 MERGED_PRS_FILE = LOG_DIR / "merged-prs.jsonl"
 PROD_ALERTS_FILE = LOG_DIR / "prod-alerts.jsonl"
+BOX_LOGS_FILE = LOG_DIR / "box-logs.jsonl"
+BOX_LOGS_MAX_BYTES = int(os.environ.get("FLEET_BOX_LOGS_MAX_BYTES", 50 * 1024 * 1024))
+BOX_LOGS_KEEP = 6  # box-logs.jsonl + .1 .. .5 -- ~300 MB, weeks of box logs
 SECRET = os.environ.get("FLEET_WEBHOOK_SECRET", "")
 # Which workflows count as a "the-fixer should look at this" failure. Space-separated
 # filenames, matched against workflow_run.path's basename -- same env-var convention as
@@ -121,6 +127,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path.endswith("/webhook/prod-alert"):
             self._handle_prod_alert(body)
+            return
+        if path.endswith("/webhook/box-log"):
+            self._handle_box_log(body)
             return
         sig = self.headers.get("X-Hub-Signature-256", "")
 
@@ -348,6 +357,22 @@ class Handler(BaseHTTPRequestHandler):
             f"{record['signature']} caller={caller} key={record['idempotency_key']}")
         self._json(200, {"ok": True, "duplicate": not fresh})
 
+    def _handle_box_log(self, body: bytes) -> None:
+        """POST /webhook/box-log -- nonprofit-atlas#8703: one batch of structured box log lines
+        (scripts/box/log_ship.py, every minute). Same per-caller bearer tokens as prod-alert.
+        Appended to box-logs.jsonl -- the one place every box log lands -- which
+        box_log_incidents.py (host side, systemd .path) turns into deduped board items."""
+        caller = self._caller()
+        if not caller:
+            log(f"box-log REJECTED: bad or missing token from {self.client_address[0]}")
+            self.send_response(401); self.end_headers(); return
+        try:
+            lines = box_log_lines(json.loads(body), caller)
+        except (json.JSONDecodeError, ValueError) as exc:
+            self._json(400, {"ok": False, "error": str(exc)[:200]}); return
+        fresh = record_box_logs(lines, self.headers.get("Idempotency-Key") or "")
+        self._json(200, {"ok": True, "stored": len(lines) if fresh else 0, "duplicate": not fresh})
+
     def _caller(self) -> str | None:
         import webhook_auth
         return webhook_auth.caller_for(self.headers.get("Authorization"),
@@ -515,6 +540,75 @@ def record_prod_alert(record: dict) -> bool:
         if any(needle in line for line in fh):
             return False
         fh.write(json.dumps(record) + "\n")
+    return True
+
+
+BOX_LOG_LEVELS = {"START", "EXIT", "ALERT", "ERROR", "WARN", "INFO"}
+BOX_LOG_MAX_RECORDS = 5000
+
+
+def box_log_lines(payload, caller: str) -> list[dict]:
+    """Validated, clipped records from one log_ship.py batch. Raises ValueError on a bad shape.
+    Only known fields, bounded -- these lines feed issue titles and bodies."""
+    if not isinstance(payload, dict) or not isinstance(payload.get("records"), list):
+        raise ValueError("body must be a JSON object with a records list")
+    recs = payload["records"]
+    if len(recs) > BOX_LOG_MAX_RECORDS:
+        raise ValueError(f"at most {BOX_LOG_MAX_RECORDS} records per batch")
+    host = str(payload.get("host") or "")[:100]
+    now = int(time.time())
+    out = []
+    for r in recs:
+        if not isinstance(r, dict):
+            raise ValueError("each record must be an object")
+        level = str(r.get("level") or "INFO").upper()
+        row = {
+            "received_at": now,
+            "caller": caller,
+            "host": str(r.get("host") or host)[:100],
+            "ts": str(r.get("ts") or "")[:40],
+            "source": str(r.get("source") or "")[:20],
+            "job": str(r.get("job") or "")[:100],
+            "level": level if level in BOX_LOG_LEVELS else "INFO",
+            "msg": str(r.get("msg") or "")[:2000],
+        }
+        if isinstance(r.get("exit"), int) and not isinstance(r.get("exit"), bool):
+            row["exit"] = r["exit"]
+        key = str(r.get("key") or "")
+        if re.fullmatch(r"[\w.:-]{1,200}", key):
+            row["key"] = key
+        if isinstance(r.get("run_keys"), list):
+            row["run_keys"] = [str(k)[:200] for k in r["run_keys"][:100]]
+        out.append(row)
+    return out
+
+
+def _rotate(path: Path, keep: int) -> None:
+    """path -> path.1 -> ... -> path.<keep-1>; the oldest falls off."""
+    for i in range(keep - 1, 0, -1):
+        src = path.with_name(f"{path.name}.{i - 1}") if i > 1 else path
+        if src.exists():
+            src.replace(path.with_name(f"{path.name}.{i}"))
+
+
+def record_box_logs(lines: list[dict], idem_key: str = "") -> bool:
+    """Append one batch under a lock, rotating past BOX_LOGS_MAX_BYTES. False = this
+    Idempotency-Key was the last batch stored (the box retried after a lost ack)."""
+    import fcntl
+
+    BOX_LOGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    lock = BOX_LOGS_FILE.with_name(BOX_LOGS_FILE.name + ".lock")
+    last = BOX_LOGS_FILE.with_name(BOX_LOGS_FILE.name + ".lastkey")
+    with open(lock, "a") as lk:
+        fcntl.flock(lk, fcntl.LOCK_EX)
+        if idem_key and last.exists() and last.read_text().strip() == idem_key:
+            return False
+        if BOX_LOGS_FILE.exists() and BOX_LOGS_FILE.stat().st_size > BOX_LOGS_MAX_BYTES:
+            _rotate(BOX_LOGS_FILE, BOX_LOGS_KEEP)
+        with open(BOX_LOGS_FILE, "a") as fh:
+            fh.write("".join(json.dumps(r) + "\n" for r in lines))
+        if idem_key:
+            last.write_text(idem_key)
     return True
 
 
