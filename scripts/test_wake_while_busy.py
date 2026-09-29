@@ -25,7 +25,8 @@ class WakeWhileBusyTests(unittest.TestCase):
         self.tmp = Path(tempfile.mkdtemp(prefix="fleet-wake-busy-"))
         self.locks = self.tmp / "fleet-kit-member-locks"
         self.locks.mkdir()
-        self.env = dict(os.environ, TMPDIR=str(self.tmp), FLEET_LOG_DIR=str(self.tmp / "logs"))
+        self.env = dict(os.environ, TMPDIR=str(self.tmp), FLEET_LOG_DIR=str(self.tmp / "logs"),
+                        FLEET_REPO=os.environ.get("FLEET_REPO", "acme/product"))
 
     def run_while_locked(self, fired_by):
         lock = self.locks / "marie.lock"
