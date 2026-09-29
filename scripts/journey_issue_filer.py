@@ -220,6 +220,9 @@ def _repro_steps(steps: list[dict], up_to_index: int) -> str:
     return "\n".join(lines)
 
 
+DEFAULT_VISION_LINK = "none (maintenance) -- auto-filed from a failing journey; re-link to the KR it blocks"
+
+
 def build_issue_body(
     journey: dict,
     step: dict,
@@ -267,6 +270,12 @@ def build_issue_body(
         "## Acceptance",
         f"- Given the journey reaches this step, When {step.get('action', '').strip().rstrip('.')}, "
         f"Then {step.get('observable_result', '').strip()}",
+        "",
+        # jefe msg#326: with no Vision-link line every filed issue was dropped by
+        # vision_link_gate (#8628/#8629/#8631) until marie hand-added one. A journey may name
+        # its KR in journeys.yaml (`vision_link:`); otherwise it files as maintenance, which
+        # the gate accepts and marie's restamp can raise to a KR.
+        f"Vision-link: {journey.get('vision_link') or DEFAULT_VISION_LINK}",
         "",
         marker_for(key, profile.marker_tag),
     ]

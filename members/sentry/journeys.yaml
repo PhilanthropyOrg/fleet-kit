@@ -74,6 +74,7 @@ viewports:
 journeys:
   - id: sign-in
     name: Sign in
+    vision_link: okr.conversion -- the sign-in gate every claim passes through
     description: A returning person signs in with their email (magic link; the product has no password).
     preconditions:
       - signed out
@@ -133,6 +134,7 @@ journeys:
 
   - id: claim-org-through-verify-screen
     name: Claim an org through to the verify screen
+    vision_link: okr.conversion -- the claim flow itself
     description: >
       A person who represents a nonprofit starts the claim flow and reaches the identity
       verification step. (Scope per #656: through the verify screen, not completing it.)
