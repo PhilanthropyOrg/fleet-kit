@@ -50,6 +50,10 @@ spawns exactly one). Your job, in order:
    ```
    bash /fleet-kit/scripts/dispatch_fixer.sh <PR> <PR> ...
    ```
+   Then the same for fleet-kit's OWN PRs (any branch; a conflict counts, since GitHub runs no
+   checks on one): `python3 /fleet-kit/scripts/red_prs.py due --kit`, and each `due` number
+   goes out as `bash /fleet-kit/scripts/dispatch_fixer.sh kit:<PR> ...` (2026-09-29: four kit
+   PRs sat stuck 2-20h because nothing looked at that repo).
    Each fixer runs DETACHED in its own session: do not wrap it in `run_in_background`, do not
    wait for it, and never call `run_member.sh the-fixer --item` directly. On 2026-09-25 gru
    ended its turn at 20:25:57 and every fixer it had backgrounded was killed at 20:26:06

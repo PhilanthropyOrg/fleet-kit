@@ -362,14 +362,15 @@ PREGATE=$(jget "['llm'].get('pregate', '')")
 # per-item FIXER_STATE_FILE override further down was meant to prevent exactly this but is set
 # AFTER this block, so it never reached the pregate. The dispatch replaces the pregate instead.
 if [ -n "$PREGATE" ] && [ -n "$ITEM" ] && [ "$DRY_RUN" -ne 1 ]; then
-  export FLEET_PREGATE_OUTPUT="FIRE assigned-pr #$ITEM (dispatched --item sub-pass; pregate skipped)"
+  # FLEET_FIXER_KIT=1 (dispatch_fixer.sh kit:N): the PR is fleet-kit's own, not the product's.
+  export FLEET_PREGATE_OUTPUT="FIRE assigned-pr ${FLEET_FIXER_KIT:+kit}#$ITEM (dispatched --item sub-pass; pregate skipped)"
   printf '%s\n' "$FLEET_PREGATE_OUTPUT" > "$LOG_DIR/$MEMBER-item$ITEM.pregate"
   log "$MEMBER: --item $ITEM is a dispatch -- pregate skipped, proceeding to the model"
   # One gate for every red-PR dispatch, whoever sent it (the-fixer's fan-out or gru's step 0):
   # red_prs.py dedups on the PR's last real commit, so the same unfixed content is not handed
   # to a fresh fixer every hour by two dispatchers. Fails open on any read error.
   if [ "$MEMBER" = "the-fixer" ]; then
-    CLAIM_OUT="$(cd "$REPO" 2>/dev/null && python3 "$KIT_DIR/scripts/red_prs.py" claim "$ITEM" 2>>"$LOG")"
+    CLAIM_OUT="$(cd "$REPO" 2>/dev/null && python3 "$KIT_DIR/scripts/red_prs.py" claim "$ITEM" ${FLEET_FIXER_KIT:+--kit} 2>>"$LOG")"
     CLAIM_RC=$?
     log "$MEMBER: $CLAIM_OUT"
     if [ "$CLAIM_RC" -eq 1 ]; then

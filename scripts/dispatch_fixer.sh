@@ -35,13 +35,15 @@ LIVE="$(live_items)"
 [ $# -gt 0 ] || { echo "usage: dispatch_fixer.sh <pr> [<pr> ...]" >&2; exit 2; }
 for pr in "$@"; do
   pr="${pr#\#}"
+  # `kit:N` is fleet-kit's own PR N (red_prs.py due --kit): the fixer works it in a kit clone.
+  KIT=""; case "$pr" in kit:*) KIT=1; pr="${pr#kit:}" ;; esac
   case "$pr" in (""|*[!0-9]*) echo "dispatch_fixer: skipping '$pr' (not a PR number)" >&2; continue ;; esac
   if [ "$LIVE" -ge "$MAX" ]; then
     echo "deferred the-fixer --item $pr ($LIVE fixers already running, cap FLEET_FIXER_ITEM_MAX=$MAX; next hourly pass picks it up)"
     continue
   fi
   LIVE=$((LIVE + 1))
-  setsid nohup bash "$RUN_MEMBER" the-fixer --item "$pr" \
-    >>"$LOG_DIR/the-fixer-item$pr.dispatch.log" 2>&1 </dev/null &
-  echo "dispatched the-fixer --item $pr (detached, pid $!, log $LOG_DIR/the-fixer-item$pr.dispatch.log)"
+  FLEET_FIXER_KIT="$KIT" setsid nohup bash "$RUN_MEMBER" the-fixer --item "$pr" \
+    >>"$LOG_DIR/the-fixer-item${KIT:+kit}$pr.dispatch.log" 2>&1 </dev/null &
+  echo "dispatched the-fixer --item ${KIT:+kit:}$pr (detached, pid $!, log $LOG_DIR/the-fixer-item${KIT:+kit}$pr.dispatch.log)"
 done
