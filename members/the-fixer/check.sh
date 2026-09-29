@@ -374,6 +374,21 @@ fi
 FIRE_SHA=""
 FIRE_WHAT=""
 if [ "$DEP_CONC" = "failure" ]; then FIRE_SHA="$DEP_SHA"; FIRE_WHAT="${FIXER_DEPLOY_WORKFLOW:-deploy.yml}"; fi
+# Baggage claim (Reif, 2026-09-29): a red deploy gate first goes to scripts/pull_bad_bag.py, which
+# pulls the merge that broke it off main (revert PR) and re-lands it as a PR that must pass the
+# broken tests -- the other merges ship meanwhile. The-fixer fixes forward only once it hands off
+# (infra red, revert conflict, no culprit found) or its claim goes stale.
+PBB="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/scripts/pull_bad_bag.py"
+if [ "$DEP_CONC" = "failure" ] && [ -f "$PBB" ]; then
+  python3 "$PBB" --owns "$DEP_SHA" 2>>"$LOG"; PBB_RC=$?
+  if [ "$PBB_RC" = "2" ]; then
+    log "deploy red at ${DEP_SHA:0:12} -- starting pull_bad_bag.py (pull the bad merge off main)"
+    python3 "$PBB" --claim "$DEP_SHA" 2>>"$LOG"
+    setsid nohup python3 "$PBB" >/dev/null 2>&1 < /dev/null &
+    PBB_RC=0
+  fi
+  if [ "$PBB_RC" = "0" ]; then FIRE_SHA=""; FIRE_WHAT=""; fi
+fi
 if [ "$CI_CONC" = "failure" ]; then FIRE_SHA="$CI_SHA"; FIRE_WHAT="${FIRE_WHAT:+$FIRE_WHAT+}${FIXER_CI_WORKFLOW:-ci.yml}(${FIXER_DEFAULT_BRANCH:-main})"; fi
 if [ "$PR_NUM" != "none" ] && [ -z "$FIRE_SHA" ]; then
   # main/deploy fires outrank stale PRs -- a red main is the bigger emergency either way.
