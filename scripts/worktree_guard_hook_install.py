@@ -52,6 +52,12 @@ def _stop_hook_commands() -> list[str]:
 
 STOP_TIMEOUT_S = 180  # pr_done_hook reads the PR and, when red, the failing job logs
 
+# Claude Code deletes session transcripts older than cleanupPeriodDays (default 30) at startup.
+# At fleet volume that is ~0.66GB/day across three accounts, 11GB of dino's 83GB root
+# (2026-09-28). The longest fleet reader of raw transcripts is intent_capture.py's 3-day scan;
+# librarian's scrub is incremental (hourly). 7 days keeps both with margin.
+TRANSCRIPT_KEEP_DAYS = 7
+
 
 def merge_one(path: Path, hook_cmds: list[str] | str, stop_cmds: list[str] | None = None) -> bool:
     """Registers every hook command in path's settings.json. True iff the file changed."""
@@ -78,8 +84,11 @@ def merge_one(path: Path, hook_cmds: list[str] | str, stop_cmds: list[str] | Non
         stop_present = {h.get("command") for entry in stop_list for h in entry.get("hooks", [])}
         stop_missing = [c for c in stop_cmds if c not in stop_present]
 
-    if not missing and not stop_missing:
+    keep_stale = settings.get("cleanupPeriodDays") != TRANSCRIPT_KEEP_DAYS
+    if not missing and not stop_missing and not keep_stale:
         return False  # already registered, nothing to do
+
+    settings["cleanupPeriodDays"] = TRANSCRIPT_KEEP_DAYS
 
     for cmd in missing:
         pre_list.append({"matcher": MATCHER, "hooks": [{"type": "command", "command": cmd}]})

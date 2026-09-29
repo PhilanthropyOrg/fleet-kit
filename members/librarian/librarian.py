@@ -426,6 +426,23 @@ def main() -> int:
     stats = ScrubStats()
     changed_files = 0
     run_started = time.time()
+    # Retention FIRST: it is a cheap stat() walk (~30s), while the scrub is a content scan the
+    # wrapper cuts at 840s. Run after the scrub, retention never ran once on dino -- 0 .jsonl.gz
+    # in a 11GB store with transcripts 35 days old (2026-09-28).
+    retention_results: list[dict] = []
+    if not args.skip_retention:
+        for root in roots:
+            retention_results.extend(
+                retention_sweep(root, args.execute, args.compress_days, args.drop_days)
+            )
+    compressed = sum(1 for r in retention_results if r["action"] == "compress")
+    dropped = sum(1 for r in retention_results if r["action"] == "drop")
+    print(f"librarian retention [{mode}]: {compressed} compressed (>={args.compress_days}d), "
+          f"{dropped} dropped (>={args.drop_days}d)")
+    for r in retention_results:
+        print(f"  {r['action']:>8}  {r['path']}  (age={r['age_days']}d)")
+    sys.stdout.flush()  # the wrapper's 840s cut must not eat this report with the buffer
+
     since = 0.0 if args.full_scan else load_watermark(args.state_file)
     if not args.skip_scrub:
         stats, changed_files = run_scrub(
@@ -442,19 +459,6 @@ def main() -> int:
             print(f"  {line}")
     else:
         print("  no secret-shaped strings found")
-
-    retention_results: list[dict] = []
-    if not args.skip_retention:
-        for root in roots:
-            retention_results.extend(
-                retention_sweep(root, args.execute, args.compress_days, args.drop_days)
-            )
-    compressed = sum(1 for r in retention_results if r["action"] == "compress")
-    dropped = sum(1 for r in retention_results if r["action"] == "drop")
-    print(f"librarian retention [{mode}]: {compressed} compressed (>={args.compress_days}d), "
-          f"{dropped} dropped (>={args.drop_days}d)")
-    for r in retention_results:
-        print(f"  {r['action']:>8}  {r['path']}  (age={r['age_days']}d)")
 
     return 0
 
