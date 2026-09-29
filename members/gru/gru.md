@@ -63,6 +63,21 @@ spawns exactly one). Your job, in order:
    unchanged content: name each in your report as needing a look, never re-send it. `red_prs.py`
    printing an `error` is a blind step, not an empty one: say so and go on to step 1.
 
+   **`resume` lists a minion's red DRAFT PRs** (a checkpoint or part-done work) that have sat
+   red with no real push for 60+ minutes. Those get a MINION, not a fixer: the work is
+   unfinished, and a minion handed the same items resumes that branch and PR, and the stop hook
+   keeps it there until CI is green. For each entry, claim its `items` and dispatch them as one
+   batch, exactly as step 3 does (pacing-exempt, before any new build):
+   ```
+   python3 /fleet-kit/scripts/board_github.py claim-item "gru (orchestrator pass <run-id>)" <n>   # each item
+   bash /fleet-kit/scripts/dispatch_member.sh minion --items <items, comma-separated>
+   ```
+   An item that is already closed or claimed by a live runner: skip it (the dispatch lock dedups
+   the rest). Listing a PR under `resume` records the dispatch, so the same red content is not
+   re-sent for 45 minutes, and after 3 tries it moves to `exhausted`. Why (2026-09-29):
+   red_prs skipped every draft, so checkpoints #8531/#8550/#8553/#8603/#8604 sat red 14-22h
+   while their items waited their turn in the tiers.
+
    **Then read which stale claims the pass start released** (run_gru_fanout.sh ran the sweep
    before you started: a `fleet:claimed` item with no live runner and no PR/branch activity for
    60 minutes is released, commented and logged — claims are leases):
