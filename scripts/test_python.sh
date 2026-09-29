@@ -33,7 +33,8 @@ mkdir -p "$ROOT" 2>/dev/null || { command -v python3; exit 0; }
 KEY=$(cd "$WT" && cat pyproject.toml $(ls requirements*.txt uv.lock 2>/dev/null) | sha256sum | cut -c1-16)
 VENV="$ROOT/$KEY"
 
-if [ -f "$VENV/.ready" ] && [ -x "$VENV/bin/python" ]; then echo "$VENV/bin/python"; exit 0; fi
+# Touch .ready on every hit: its mtime is "last used", which eviction below reads.
+if [ -f "$VENV/.ready" ] && [ -x "$VENV/bin/python" ]; then touch "$VENV/.ready" 2>/dev/null; echo "$VENV/bin/python"; exit 0; fi
 
 exec 7>"$ROOT/$KEY.lock"
 flock -w "${FLEET_TEST_VENV_LOCK_WAIT_S:-900}" 7 || { echo "test_python: another build of $KEY still running -- using python3" >&2; command -v python3; exit 0; }
@@ -57,6 +58,14 @@ else
 fi
 if [ "$ok" -eq 1 ] && "$VENV/bin/python" -c "import pytest" 2>/dev/null; then
   touch "$VENV/.ready"
+  # Each dependency change builds a new ~900MB venv and nothing removed the old ones: five dead
+  # keys held 4.1GB on dino (2026-09-28). Evict siblings unused for FLEET_TEST_VENV_KEEP_MIN
+  # (default a day, far past any pass) whose build lock is free.
+  for old in "$ROOT"/????????????????; do
+    [ "$old" = "$VENV" ] || [ ! -d "$old" ] && continue
+    [ -n "$(find "$old/.ready" -mmin -"${FLEET_TEST_VENV_KEEP_MIN:-1440}" 2>/dev/null)" ] && continue
+    flock -n "$old.lock" rm -rf "$old" && rm -f "$old.lock"
+  done
   echo "$VENV/bin/python"
 else
   echo "test_python: build FAILED for $KEY -- falling back to python3; tests needing the repo's deps will fail" >&2
