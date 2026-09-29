@@ -12646,8 +12646,9 @@ def _ask_answer_is_idempotent_gh568():
 
 
 def _ask_file_rate_limits_ntfy_to_once_per_member_per_hour_gh568():
-    """gh#568 AC4: filing rate-limits its page to one NTFY per instance (member) per hour,
-    routed through the existing fleet_alert.sh (and therefore its undelivered-retry queue) --
+    """gh#568 AC4, amended by fk#1386: the escalation page dedupes per ASK, not per member-hour --
+    every distinct ask dumbledore escalates reaches Reif, and re-escalating the same ask never
+    pages twice. Routed through the existing fleet_alert.sh (and therefore its undelivered-retry queue) --
     not a new state file. Exercises the real ask.py + fleet_alert.sh + alert_store.py chain,
     curl stubbed the same way `_fleet_alert_queues_an_undelivered_alarm...` above stubs it."""
     import subprocess
@@ -12680,6 +12681,9 @@ def _ask_file_rate_limits_ntfy_to_once_per_member_per_hour_gh568():
             if f.returncode:
                 return f
             ask_id = re.search(r"ask (\d+) filed", f.stdout).group(1)
+            return _escalate(ask_id)
+
+        def _escalate(ask_id):
             return subprocess.run(
                 [sys.executable, script, "--db-path", str(db_path), "escalate", ask_id,
                  "--me", "dumbledore", "--reason", "selftest"],
@@ -12692,11 +12696,15 @@ def _ask_file_rate_limits_ntfy_to_once_per_member_per_hour_gh568():
         assert p2.returncode == 0, f"ask.py file must exit 0: {p2.stderr[:300]}"
         p3 = _file("gru", "a different member, same hour")
         assert p3.returncode == 0, f"ask.py file must exit 0: {p3.stderr[:300]}"
+        first_id = re.search(r"fleet ask #(\d+) from dumbledore \(for marie\)",
+                             calls.read_text()).group(1)
+        p4 = _escalate(first_id)
+        assert p4.returncode == 0, f"re-escalate must exit 0: {p4.stderr[:300]}"
 
         sent = calls.read_text() if calls.exists() else ""
-        assert len(re.findall(r"fleet ask #\d+ from dumbledore \(for marie\)", sent)) == 1, \
-            f"a second ask from the same member inside the hour must not page again: " \
-            f"{_redact_secrets(sent)!r}"
+        assert len(set(re.findall(r"fleet ask #(\d+) from dumbledore \(for marie\)", sent))) == 2, \
+            f"two distinct asks from one member in the hour must both page, a re-escalation " \
+            f"must not: {_redact_secrets(sent)!r}"
         assert re.search(r"fleet ask #\d+ from dumbledore \(for gru\)", sent), \
             f"a different member's first ask this hour must still page: {_redact_secrets(sent)!r}"
 
@@ -16142,7 +16150,7 @@ if __name__ == "__main__":
     check("asks schema is present and reaches a pre-existing fleet.db (gh#568)", _ask_schema_presence_and_clean_migration_gh568)
     check("ask.py file/list round-trips a filed ask (gh#568)", _ask_file_and_list_roundtrip_gh568)
     check("ask.py answer sets the row once; a second call is a no-op (gh#568 AC3)", _ask_answer_is_idempotent_gh568)
-    check("ask.py file rate-limits its NTFY page to once per member per hour (gh#568 AC4)", _ask_file_rate_limits_ntfy_to_once_per_member_per_hour_gh568)
+    check("ask.py escalation pages once per ask, every distinct ask pages (gh#568 AC4, fk#1386)", _ask_file_rate_limits_ntfy_to_once_per_member_per_hour_gh568)
     check("_redact_secrets strips Bearer tokens from assertion messages (gh#682)", _redact_secrets_strips_bearer_tokens_from_assertion_messages_gh682)
     check("check() redacts secrets from every failure message it records (gh#682)", _check_redacts_secrets_from_every_failure_message_gh682)
     check("check() calls _redact_secrets (gh#682)", _check_calls_redact_secrets_gh682)
