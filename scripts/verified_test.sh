@@ -61,21 +61,28 @@ else
   exit 1
 fi
 
+# 2026-09-29: the product's tests write ~900 MB of throwaway SQLite per run and fsync every
+# commit; on dino's shared disk they sat blocked on the journal at ~17% CPU. eatmydata turns
+# fsync into a no-op for the test process only (the test DBs are deleted afterwards anyway):
+# 109 tests, same box and load, 1159s/1169s -> 443s/464s. Absent binary = run as before.
+EMD=()
+if command -v eatmydata >/dev/null 2>&1; then EMD=(eatmydata); echo "verified_test: fsync off for the test run (eatmydata)"; fi
+
 ARGS="${*:-full}"
 if [ $# -eq 0 ] && [ -f scripts/tests_for_diff.py ]; then
   echo "verified_test: diff-scoped -- python3 scripts/tests_for_diff.py --run in $WT"
-  python3 scripts/tests_for_diff.py --run
+  ${EMD[@]+"${EMD[@]}"} python3 scripts/tests_for_diff.py --run
   code=$?
   ARGS="tests_for_diff"
   if [ "$code" -eq 3 ]; then
     echo "verified_test: diff too wide to scope (rc=3) -- falling back to the full suite"
-    python3 -m pytest -q -n "$WORKERS"
+    ${EMD[@]+"${EMD[@]}"} python3 -m pytest -q -n "$WORKERS"
     code=$?
     ARGS="full (tests_for_diff rc=3)"
   fi
 else
   echo "verified_test: pytest -n $WORKERS ${*:-<full suite>} in $WT"
-  python3 -m pytest -q -n "$WORKERS" "$@"
+  ${EMD[@]+"${EMD[@]}"} python3 -m pytest -q -n "$WORKERS" "$@"
   code=$?
 fi
 
