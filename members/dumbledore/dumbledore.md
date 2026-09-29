@@ -88,7 +88,9 @@ say so in the report with evidence and leave it to a human.
    `gh issue list --label fleet:backlog --state all --search "created:>=<7d ago>"`: filed per
    day vs closed COMPLETED per day, and per filer (lane/label/body marker) the share closed
    NOT_PLANNED or DUPLICATE. Print `Backlog: <filed>/d in, <done>/d out, worst filer <x> <junk%>`.
-   Filed > done for 3 days is your change candidate: a junk-heavy filer gets its charter or
+   The bar (Reif, 2026-09-28): done beats filed by a few EVERY day -- "it makes no sense that
+   we would not pump out a bunch of work, given we have the issues". Any day below it is your
+   change candidate: a junk-heavy filer gets its charter or
    script fixed at the cause (twins that `issue_cluster.find_existing` missed are a matcher
    bug; findings nobody builds are a filer bug); real work outrunning done gets a throughput
    lever. Never an intake gate on judgment.
