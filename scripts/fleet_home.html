@@ -10,15 +10,12 @@
   template that is pretty good"), operator purple, Inter, tabular numbers.
 
   Three pages, one file, no framework, no build step: Home (tiles + agents + landed today),
-  Roster (every member in unison, plain English, grouped by the value stage it serves, so a
-  hole shows up as a stage with nobody in it), and the run panel (fk#748). Every tile is a
+  Roster (every member in unison, plain English, grouped by value stage -- an empty stage
+  shows as a hole), and the run panel (fk#748). Every tile is a
   row in scripts/metrics.json with a real id, a value and a hoverable sparkline; the OKR file
-  references tiles by id. No inbox block (#1054): an ask pages Reif.
-
-  Tiles only (gh#8212): each shows its source's as-of time, stale past 2x cadence.
-
-  Polls the existing JSON endpoints every 30s. Served behind a path prefix; every URL goes
-  through withBase() (gh#553).
+  references tiles by id. No inbox block (#1054): an ask pages Reif. Each shows its source's
+  as-of time, stale past 2x cadence (gh#8212). Polls the JSON endpoints every 30s, behind a
+  path prefix; every URL goes through withBase() (gh#553).
 -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -84,6 +81,7 @@
 .stat .asof.stale{color:var(--bad);font-weight:600}
 .stat.stale{border-color:var(--bad)}
 .stat-sec{grid-column:1/-1;font:600 11px var(--sans);text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.stat[data-metric-id="okr.verified_claims"] .v{font-size:36px}
 .card{background:var(--paper);border:1px solid var(--rule);border-radius:8px;box-shadow:var(--shadow);overflow:hidden;min-width:0}
 .card-head{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--rule)}
 .card-head h2{font:600 14px var(--sans);margin:0}
@@ -366,7 +364,8 @@ function sparkHtml(m) {
 }
 function fmtValue(m) {
   if (m.value === null || m.value === undefined) return '--';
-  return m.unit === 'USD' ? money(m.value) : num(m.value);
+  if (m.unit === 'USD') return money(m.value);
+  return m.unit === '%' ? `${Math.round(m.value)}%` : num(m.value);
 }
 // gh#8212: stale = older than 2x its source's cadence, re-evaluated on every render.
 function isStale(m) { return !!m.stale || !m.as_of || (!!m.cadence_s && Date.now() / 1000 - m.as_of > 2 * m.cadence_s); }

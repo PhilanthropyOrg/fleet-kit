@@ -518,6 +518,27 @@ def pool_pause(now: float | None = None) -> dict:
     return {"paused": paused, "pool": pool, "gated": gated, "resumes_at": resumes}
 
 
+_ACCOUNT_CALL_OK_RE = re.compile(r"account=(\S+) call succeeded")
+
+
+def _active_account() -> str | None:
+    """gh#1393: which Claude account the fleet is actually running calls on right now, from
+    account_pool.sh's own "account=<name> call succeeded" line -- the last one written. Reads
+    only the log's tail so a long-lived file doesn't cost a full read on every /api/metrics poll."""
+    path = Path(os.environ.get("ACCOUNT_POOL_LOG_FILE") or (LOG_DIR / "account-pool.log"))
+    try:
+        with path.open("rb") as fh:
+            fh.seek(0, os.SEEK_END)
+            fh.seek(max(0, fh.tell() - 65536))
+            tail = fh.read().decode("utf-8", errors="ignore")
+    except OSError:
+        return None
+    match = None
+    for match in _ACCOUNT_CALL_OK_RE.finditer(tail):
+        pass
+    return match.group(1) if match else None
+
+
 # ---------------------------------------------------------------------------------------------
 # fk#1058: the metric registry behind the console's stat tiles. Each tile = one id in
 # scripts/metrics.json; /api/metrics returns, per id, the current value, a one-line sub, and a
@@ -792,15 +813,34 @@ def metrics_snapshot() -> dict:
             fetched = float((nr.get("payload") or {}).get("fetched_at") or 0) or None
             for mid in ("okr.verified_claims", "okr.clicks", "okr.conversion"):
                 fresh[mid] = (fetched, NUMBER_FETCH_S)
+            # gh#1393: the hero tile's pace -- "+60 7d" says the trend, "need N/wk" says whether
+            # that trend clears the target by its own deadline (target.by, e.g. "2026-12-31").
+            # Falls back to the plain name when there's no target/deadline/value to pace against.
+            delta7 = n.get("delta_7d")
+            delta_txt = f"{'+' if delta7 >= 0 else ''}{delta7} 7d" if delta7 is not None else ""
+            pace_txt = ""
+            by = tgt.get("by")
+            if val is not None and tgt.get("value") is not None and by:
+                try:
+                    deadline = datetime.datetime.strptime(str(by), "%Y-%m-%d").replace(tzinfo=datetime.timezone.utc)
+                    weeks_left = (deadline - datetime.datetime.now(datetime.timezone.utc)).total_seconds() / (7 * 86400)
+                    remaining = float(tgt["value"]) - float(val)
+                    if weeks_left > 0 and remaining > 0:
+                        pace_txt = f"need {remaining / weeks_left:.0f}/wk to hit {tgt['value']:,.0f}"
+                except (ValueError, TypeError):
+                    pace_txt = ""
             out["okr.verified_claims"] = {"value": val, "unit": n.get("unit") or "", "target": tgt.get("value"),
-                                          "sub": (f"{n.get('name', '')}" + (f" · {'+' if (n.get('delta_7d') or 0) >= 0 else ''}{n.get('delta_7d')} 7d" if n.get("delta_7d") is not None else "")).strip(" ·"),
+                                          "sub": " · ".join(x for x in (delta_txt, pace_txt) if x) or n.get("name", ""),
                                           "series": daily_series("okr.verified_claims"), "stale": bool(nr.get("stale"))}
             k1 = ((nr.get("payload") or {}).get("kr1") or {}) if nr.get("present") else {}
             upsert("okr.clicks", k1.get("value"))
             out["okr.clicks"] = {"value": k1.get("value"), "unit": k1.get("unit") or "", "sub": (k1.get("name") or "") + (f" · {'+' if (k1.get('delta_7d') or 0) >= 0 else ''}{k1.get('delta_7d')} 7d" if k1.get("delta_7d") is not None else ""),
                                  "series": daily_series("okr.clicks"), "stale": bool(nr.get("stale"))}
             upsert("okr.conversion", k1.get("completion_rate_pct"))
-            out["okr.conversion"] = {"value": k1.get("completion_rate_pct"), "unit": "%", "sub": f"{k1.get('pending')} pending · median {k1.get('median_pending_age_days')}d" if k1.get("pending") is not None else "claims started that reached verified",
+            # gh#1393: "90.7" with no unit read as a raw count, not a rate; the sub's own median-age
+            # clause pushed it past the caption budget -- the pending count alone is the thing to
+            # act on (the median age is still in the number-read payload for anyone who wants it).
+            out["okr.conversion"] = {"value": k1.get("completion_rate_pct"), "unit": "%", "sub": f"{k1.get('pending')} pending" if k1.get("pending") is not None else "claims started that reached verified",
                                      "series": daily_series("okr.conversion"), "stale": bool(nr.get("stale"))}
         except Exception as exc:  # noqa: BLE001
             out["okr.verified_claims"] = {"value": None, "sub": f"unreadable: {type(exc).__name__}", "series": []}
@@ -870,7 +910,11 @@ def metrics_snapshot() -> dict:
         gated = {a: g for a, g in (pp.get("gated") or {}).items() if a in pool}
         live = len(pool) - len(gated)
         upsert("fleet.accounts_live", live)
+        # gh#1393 (Reif): name which account is actually running now -- "3 of 3" alone doesn't
+        # say whether that's philanthropy (the client-paid one, fk#1384) or a shared account.
+        active = _active_account()
         gsub = ", ".join(f"{a} gated to {_central_fmt(g['until'])}" for a, g in gated.items()) or "all live"
+        gsub = f"running on {active} · {gsub}" if active else gsub
         out["fleet.accounts_live"] = {"value": live, "of": len(pool), "sub": gsub, "paused": bool(pp.get("paused")),
                                       "series": daily_series("fleet.accounts_live")}
         fresh["fleet.accounts_live"] = (now, 60)
@@ -1005,16 +1049,16 @@ def metrics_snapshot() -> dict:
             "series": [{"day": d, "value": live[d]} for d in days]}
         fresh["fleet.shipped_live_per_day"] = (sb_at, 1800)
 
-        # philanthropy#8215: items gru's build gates dropped in the last 6h. Before this a drop
-        # lived only in gru.log (26 of 30 priority-high items on 2026-09-26, nobody told).
-        # Red while any dropped item still needs a spec; gate_drops.py labels + asks for those.
-        gd = gate_drops.count(6)
+        # gh#1393 (Reif): "Needs spec" is the STOCK waiting on marie right now (open issues
+        # labeled fleet:needs-spec, gate_drops.py's own label), not gru's 6h drop flow -- a flow
+        # reads as "51" forever even once marie clears the queue, which looked like a stall.
+        needs_spec_n = (gh.get("needs_spec") or {}).get("count")
         out["fleet.gate_drops_6h"] = {
-            "value": gd["items"], "bad": gd.get("needs-spec", 0) > 0,
-            "sub": (f"{gd.get('needs-spec', 0)} need a spec (labeled {gate_drops.NEEDS_SPEC}) · "
-                    f"{gd.get('fixed', 0)} auto-fixed · {gd.get('by-design', 0)} by design"),
+            "value": needs_spec_n if gh.get("issues_at") else None, "bad": bool(needs_spec_n),
+            "sub": (f"{needs_spec_n} need a spec, waiting on marie" if gh.get("issues_at")
+                    else "waiting for the first GitHub read"),
             "series": []}
-        fresh["fleet.gate_drops_6h"] = (now, 60)  # gate_drops.jsonl, read on this request
+        fresh["fleet.gate_drops_6h"] = (gh.get("issues_at"), gh_cad)
 
         # philanthropy#8215 amendment: members message each other (fleet_msg.py). Open messages
         # by member and the oldest unacked one; red once anything has escalated past its owner.
@@ -1027,14 +1071,14 @@ def metrics_snapshot() -> dict:
             ms = None
         if ms is not None:
             o = ms["oldest"]
-            who = ", ".join(f"{m} {n}" for m, n in ms["by_member"].items()) or "none open"
-            oldest = (f" · oldest #{o['id']} to {o['to']} ({o['kind']}), "
-                      f"{o['age_s'] // 3600}h{(o['age_s'] % 3600) // 60:02d}m"
-                      + (f", escalated to {o['escalated_to']}" if o["escalated_to"] else "")
-                      if o else "")
+            # gh#1393: the old sub (every member's count + the oldest's full detail + the 24h
+            # answered count) ran past 100 chars on a busy queue. Home's caption budget is ~50
+            # chars; the full breakdown is still in the metric's own title on hover.
+            sub = (f"{ms['open']} waiting · oldest {o['age_s'] // 3600}h{(o['age_s'] % 3600) // 60:02d}m ({o['to']})"
+                   if o else "none open")
             out["fleet.msgs_open"] = {
                 "value": ms["open"], "bad": ms["escalated"] > 0,
-                "sub": f"{who}{oldest} · {ms['closed_24h']} answered in 24h",
+                "sub": sub,
                 "series": []}
             fresh["fleet.msgs_open"] = (now, 60)  # fleet.db, read on this request
 
@@ -1064,30 +1108,31 @@ def metrics_snapshot() -> dict:
         resolved7d = sum(e["weight"] for e in events if now - e["ts"] < 7 * 86400)
         out["fleet.issues_resolved_24h"] = {
             "value": resolved24 if deploys and merged14 else None,
-            "sub": (f"merged PR + deployed, 24h · {resolved7d} in 7d ({resolved7d / 7:.0f}/day) · "
-                    f"{closed_no_pr24} closed with no PR don't count" if deploys and merged14
+            # gh#1393: Home's caption budget is ~50 chars -- the old sub ("merged PR + deployed,
+            # 24h · N in 7d (R/day) · M closed with no PR don't count") ran to ~85. The window
+            # and definition live in the tile's title on hover; the no-PR count moves to `note`.
+            "sub": (f"{resolved7d} in 7d · {resolved7d / 7:.0f}/day" if deploys and merged14
                     else "unavailable (merged PR read failed)" if deploys
                     else f"unavailable (no successful {_deploy_workflow()} runs read)"),
+            "note": (f"{closed_no_pr24} closed with no PR don't count" if deploys and merged14 else None),
             "series": [{"day": d, "value": day_resolved[d]} for d in days]}
         fresh["fleet.issues_resolved_24h"] = (min(sb_at, _cached_at(f"scoreboard_issues:{days[0]}")), 1800)
 
-        # fleet.reif_priority_throughput_6h (philanthropy#8197 AC1): "Given the fleet's
-        # reif-priority queue has items, When an hour passes, Then at least 1 of them is merged
-        # and deployed (rolling 6h avg >= 1/hr), shown on the console." A 6h window (not 24h)
-        # so a stall in Reif's own named top-priority queue surfaces within the hour, per the
-        # issue's own wording -- issues_resolved_24h's 24h window would hide exactly the kind
-        # of multi-hour stall #8197 was filed over.
+        # fleet.reif_priority_throughput_6h, shown on Home as "Your requests" (gh#1393, philanthropy#8197
+        # AC1): are Reif's own asks moving. A count, not a rate -- "0.67/hr" makes someone do the
+        # arithmetic; "2 done in 6h, N waiting" is the same fact read at a glance. 6h (not 24h) so a
+        # stall in Reif's own named queue surfaces within the hour, per #8197's own wording.
         reif_events = [e for e in events if e.get("is_reif_priority")]
         reif_buckets6 = scoreboard.resolved_per_hour_buckets(reif_events, now, hours=6)
-        reif_rate6 = sum(reif_buckets6) / 6
-        reif_queue_has_items = any(scoreboard.REIF_PRIORITY_LABEL in {
+        reif_done6 = sum(reif_buckets6)
+        reif_waiting = sum(1 for i in issues if scoreboard.REIF_PRIORITY_LABEL in {
             (lab.get("name") if isinstance(lab, dict) else str(lab)) for lab in (i.get("labels") or [])
-        } for i in issues)
+        })
         out["fleet.reif_priority_throughput_6h"] = {
-            "value": round(reif_rate6, 2) if deploys and merged14 else None,
-            "bad": bool(deploys and merged14 and reif_queue_has_items and reif_rate6 < 1.0),
-            "sub": (f"{sum(reif_buckets6)} in 6h · {'queue has open items' if reif_queue_has_items else 'queue empty'}"
-                    if deploys and merged14 else "unavailable (merged PR read failed)" if deploys
+            "value": reif_done6 if deploys and merged14 else None,
+            "bad": bool(deploys and merged14 and reif_waiting and not reif_done6),
+            "sub": (f"{reif_waiting} waiting" if deploys and merged14
+                    else "unavailable (merged PR read failed)" if deploys
                     else f"unavailable (no successful {_deploy_workflow()} runs read)"),
             "series": []}
         fresh["fleet.reif_priority_throughput_6h"] = (min(sb_at, _cached_at(f"scoreboard_issues:{days[0]}")), 1800)
@@ -1354,6 +1399,10 @@ def poll_gh_state() -> dict:
     # the backlog-scoped list would silently miss one filed without that pairing.
     needs_human_op_raw = _gh("issue", "list", "--state", "open", "--label", "fleet:needs-human-op",
                               "--json", "number,title,createdAt", "--limit", "500", timeout=GH_POLL_TIMEOUT_S)
+    # gh#1393: the "Needs spec" tile is a STOCK (how many are waiting on marie right now), not
+    # the 6h gate_drops.py flow -- same independent-call reasoning as needs_human_op above.
+    needs_spec_raw = _gh("issue", "list", "--state", "open", "--label", gate_drops.NEEDS_SPEC,
+                          "--json", "number", "--limit", "500", timeout=GH_POLL_TIMEOUT_S)
     # Recently merged: plain feed, whatever's most recent -- what just shipped, any branch.
     merged_raw = _gh("pr", "list", "--state", "merged", "--json",
                       "number,title,mergedAt,url,author,files,headRefName", "--limit", "30", timeout=GH_POLL_TIMEOUT_S)
@@ -1393,6 +1442,10 @@ def poll_gh_state() -> dict:
         needs_human_op_issues = json.loads(needs_human_op_raw) if needs_human_op_raw else []
     except json.JSONDecodeError:
         needs_human_op_issues = []
+    try:
+        needs_spec_issues = json.loads(needs_spec_raw) if needs_spec_raw else []
+    except json.JSONDecodeError:
+        needs_spec_issues = []
     try:
         self_evolution_raw = (
             (json.loads(jefe_raw) if jefe_raw else []) +
@@ -1447,13 +1500,14 @@ def poll_gh_state() -> dict:
             continue
         oldest_age_hours = max(oldest_age_hours, age_hours)
     needs_human_op = {"count": len(needs_human_op_issues), "oldest_age_hours": oldest_age_hours}
+    needs_spec = {"count": len(needs_spec_issues)}
     # gh#1287-followup: every _gh call above swallows its own failure into "" -> []. If ALL of
     # them came back empty in the same tick, that's not "zero open PRs and zero merges today" --
     # it's `gh` itself down on this host (auth/rate-limit/network). Report it so the caller can
     # keep the last-good snapshot instead of overwriting it with a false all-zero one.
     ok = bool(prs_raw or issues_raw or needs_human_op_raw or merged_raw)
     return {"prs": prs, "issues": issues, "issues_truncated": issues_truncated, "merged": merged,
-            "self_evolution": self_evolution, "needs_human_op": needs_human_op,
+            "self_evolution": self_evolution, "needs_human_op": needs_human_op, "needs_spec": needs_spec,
             "prs_ok": bool(prs_raw), "issues_ok": bool(issues_raw), "merged_ok": bool(merged_raw),
             "poll_s": round(time.time() - started, 1),
             "polled_at": time.time(), "ok": ok, "error": "" if ok else _LAST_GH_ERROR["msg"]}
@@ -1671,7 +1725,7 @@ class State:
         self.runs: list[dict] = []
         self.gh = {"prs": [], "issues": [], "issues_truncated": False, "merged": [],
                    "self_evolution": [], "needs_human_op": {"count": 0, "oldest_age_hours": 0.0},
-                   "polled_at": 0, "ok": True, "error": ""}
+                   "needs_spec": {"count": 0}, "polled_at": 0, "ok": True, "error": ""}
         self._seen_offset = 0
 
     def load_existing_runs(self):
