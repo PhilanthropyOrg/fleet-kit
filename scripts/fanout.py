@@ -182,7 +182,7 @@ def cluster_by_area(items: list[dict]) -> list[dict]:
 def pack_batches(items: list[dict], turn_budget: float, unit_turns: float,
                  base: float = COMPLEXITY_BASE, safety_margin: float = 0.7,
                  solo_complexity_floor: int = 5, target_items: int = 0,
-                 timeout_s: float = 0, unit_seconds: float = 0) -> dict:
+                 timeout_s: float = 0, unit_seconds: float = 0, min_items: int = 0) -> dict:
     """Group an already-chosen, priority-ordered item list into minion batches, sized by real
     complexity-weighted turn cost against `turn_budget` -- NOT a fixed item count.
 
@@ -304,6 +304,16 @@ def pack_batches(items: list[dict], turn_budget: float, unit_turns: float,
     if current:
         batches.append(current)
 
+    # 2026-09-29, Reif: "make the minimum 10 issues" per PR -- every PR is a full CI run per push,
+    # and a model, not a human, fixes what a big PR breaks. A batch under `min_items` waits for
+    # the next pass (its items in `deferred`), unless no batch reaches it: a thin backlog ships.
+    if min_items and any(len(b) >= min_items for b in batches):
+        for b in [b for b in batches if len(b) < min_items]:
+            for e in b:
+                _defer(e, f"its batch had {len(b)} issue(s), under the {min_items}-issue minimum "
+                          "per PR; next pass")
+        batches = [b for b in batches if len(b) >= min_items]
+
     return {
         "n_items": len(items),
         "n_batches": len(batches),
@@ -315,6 +325,7 @@ def pack_batches(items: list[dict], turn_budget: float, unit_turns: float,
         "turn_budget": turn_budget,
         "effective_turn_budget": round(effective_budget, 2),
         "target_items": int(target_items),
+        "min_items": int(min_items),
         "solo_complexity_floor": int(solo_complexity_floor),
         "timeout_s": timeout_s,
         "unit_seconds": unit_seconds,
@@ -360,7 +371,7 @@ def _capped_target_items(asked: int | None) -> int:
     asked = int(asked or 0)
     if env and asked:
         return min(env, asked)
-    return env or asked or 8
+    return env or asked or 10
 
 
 def _minion_timeout_s() -> float:
@@ -395,7 +406,8 @@ def _run_pack_batches(a) -> int:
                               safety_margin=a.safety_margin,
                               solo_complexity_floor=a.solo_complexity_floor,
                               target_items=_capped_target_items(a.target_items),
-                              timeout_s=a.timeout_s, unit_seconds=a.unit_seconds)
+                              timeout_s=a.timeout_s, unit_seconds=a.unit_seconds,
+                              min_items=a.min_items)
     except ValueError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
@@ -445,17 +457,22 @@ def main(argv=None) -> int:
                                 "AND never put more items than this in one batch; "
                                 "$FLEET_MINION_TARGET_ITEMS is a ceiling on it (default: that, else 8)")
     batches_p.add_argument("--solo-complexity-floor", type=int,
-                           default=int(os.environ.get("FLEET_MINION_SOLO_COMPLEXITY") or 5),
+                           default=int(os.environ.get("FLEET_MINION_SOLO_COMPLEXITY") or 11),
                            help="an item at or above this complexity is always its own batch "
-                                "(default $FLEET_MINION_SOLO_COMPLEXITY, else 5)")
+                                "(default $FLEET_MINION_SOLO_COMPLEXITY, else 11 = none: 10 issues per PR, 2026-09-29)")
+    batches_p.add_argument("--min-items", type=int,
+                           default=int(os.environ.get("FLEET_MINION_MIN_ITEMS") or 10),
+                           help="fewest issues per minion PR (default $FLEET_MINION_MIN_ITEMS, else "
+                                "10; 0 = none): a smaller batch waits a pass unless none reaches it")
     batches_p.add_argument("--timeout-s", type=float, default=None,
                            help="minion's wall-clock timeout (default $FLEET_MINION_TIMEOUT_S, "
                                 "else members/minion/minion.fleet.json timeout_s; 0 = no ceiling)")
     batches_p.add_argument("--unit-seconds", type=float,
-                           default=float(os.environ.get("FLEET_MINION_UNIT_SECONDS") or 1800),
+                           default=float(os.environ.get("FLEET_MINION_UNIT_SECONDS") or 600),
                            help="wall-clock of one complexity-5 item inside a minion pass, CI "
-                                "loop included (default $FLEET_MINION_UNIT_SECONDS, else 1800: "
-                                "single c5 runs took up to ~2500s on dino, 09-19..09-26)")
+                                "loop included (default $FLEET_MINION_UNIT_SECONDS, else 600: in a 10-issue "
+                                "batch the ~9 min run overhead is paid once; tests ~2.5x faster "
+                                "since 09-29 eatmydata + targeted-only)")
 
     # Backward compatible: no subcommand and --allowance-pct present -> old `pack` behavior,
     # unchanged interface for any existing caller that predates the `pack`/`batches` split.

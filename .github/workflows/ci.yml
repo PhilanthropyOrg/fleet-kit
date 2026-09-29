@@ -96,6 +96,8 @@ jobs:
         run: python3 scripts/test_pack_batches_area.py
       - name: run test_minion_packing_timeout.py
         run: python3 scripts/test_minion_packing_timeout.py
+      - name: run test_ten_issues_per_pr.py
+        run: python3 scripts/test_ten_issues_per_pr.py
       - name: run test_minion_checkpoint.py
         run: python3 scripts/test_minion_checkpoint.py
       - name: run test_reported_nothing_0927.py

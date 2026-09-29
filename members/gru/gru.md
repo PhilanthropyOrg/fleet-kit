@@ -657,8 +657,11 @@ spawns exactly one). Your job, in order:
    a pass typed `--target-items 8` on an instance set to 3 and packed #7938 #7939 #7941 #7950,
    four complexity-5 items, into ONE minion; it hit its 5400s timeout with no PR, ~90 min lost,
    same as 09-25 09:19). The packer reads `$FLEET_MINION_TARGET_ITEMS` as a hard cap on items
-   per batch, sends every complexity >= 5 item to its own minion (they run in PARALLEL), and
-   keeps each batch's summed complexity inside minion's own `timeout_s`. Spawn exactly the
+   per batch and keeps each batch's summed complexity inside minion's own `timeout_s`. **At
+   least 10 issues per PR (Reif, 2026-09-29: a model, not a human, fixes what a big PR breaks,
+   and every PR is a full CI run per push):** batches pack 10 (`$FLEET_MINION_MIN_ITEMS`), no
+   item goes solo by size, and a batch under 10 comes back in `deferred` for the next pass
+   unless no batch reached 10 this pass. Spawn exactly the
    batches it returns; `run_member.sh` refuses a minion with more items than the cap. An `area:`
    module gets ONE batch a pass (philanthropy#8218): release each item in `deferred`
    (`board_github.py release <n> "gru: deferred -- <why>"`) and name it in your report with its `why`; it goes next pass. An item in
