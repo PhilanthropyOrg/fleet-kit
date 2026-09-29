@@ -118,7 +118,10 @@ class OnlyDumbledoreReachesReif(unittest.TestCase):
         self.assertEqual(len(self.pages), 1)
         cmd, env = self.pages[0]
         self.assertEqual(env.get("FLEET_ALERT_EMAIL_LEG"), "1")
-        self.assertIn(f"fleet ask #{ask_id} from dumbledore (for gru)", cmd)
+        # Reif, 2026-09-28: "label these as officially from dumbledore" -- every escalation
+        # email is branded so he can trust the sender at a glance: subject prefix + From name.
+        self.assertIn(f"[dumbledore] fleet ask #{ask_id} from dumbledore (for gru)", cmd)
+        self.assertEqual(env.get("MAIL_FROM"), "Dumbledore (fleet) <hello@philanthropy.org>")
         self.assertIn(f"yes {ask_id}", cmd[-1])
         self.assertEqual(len(ask.list_asks(self.conn(), status="all")), 1, "one ask id end to end")
         # Reif's reply, the way webhook_receiver/inbox.py applies it.

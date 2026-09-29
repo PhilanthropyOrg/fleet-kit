@@ -4671,7 +4671,9 @@ def _email_reply_answers_asks_and_files_backlog_without_a_model():
     fa = (ROOT / "scripts" / "fleet_alert.sh").read_text()
     assert 'p["reply_to"] = [os.environ["REPLY_TO"]]' in fa and 'REPLY_TO="${FLEET_REPLY_TO:-}"' in fa, "alert email has no Reply-To"
     ask = (ROOT / "scripts" / "ask.py").read_text()
-    assert 'f"fleet ask #{ask_id} from {sender}"' in ask and "Reply to this email with one line" in ask, "ask mail does not say how to reply"
+    assert 'f"[dumbledore] fleet ask #{ask_id} from {sender}"' in ask and "Reply to this email with one line" in ask, "ask mail does not say how to reply"
+    # Reif, 2026-09-28: "label these as officially from dumbledore" -- the From name too.
+    assert 'MAIL_FROM="Dumbledore (fleet) <hello@philanthropy.org>"' in ask, "ask mail is not branded from dumbledore"
 
 
 def _intake_classifies_and_dedupes_alerts_by_check():
