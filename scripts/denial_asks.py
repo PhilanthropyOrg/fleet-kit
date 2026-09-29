@@ -9,7 +9,9 @@ run_member.sh pipes each pass's final `result` event (stream-json, carries
 `permission_denials: [{tool_name, tool_use_id, tool_input}]`) into this script after the pass.
 Every denied Bash call that runs `gh` becomes ONE ask for that pass (no page: the next brief and
 the console's asks carry it), unless an open ask from the same member already names the same
-gh verb -- a member denied every hour asks once, not 24 times. Dedupe redirects from
+gh verb, or one answered in the last 14 days (asks #71/#92/#104/#107/#109: minion re-filed
+`gh issue edit` five times, each answered "the deny is right") -- a member denied every hour
+asks once, not 24 times, and an answered deny is not re-asked. Dedupe redirects from
 issue_create_hook.py (an open twin, not a permission) are skipped by tool_use_id.
 
 Best-effort by design: anything unreadable exits 0 and never fails the pass.
@@ -21,6 +23,7 @@ import json
 import os
 import re
 import sys
+import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -29,6 +32,7 @@ sys.path.insert(0, str(HERE))
 GH_VERB = re.compile(r"(?:^|[\s;&|(])gh\s+([a-z-]+)(?:\s+([a-z-]+))?")
 LOG_DIR = Path(os.environ.get("FLEET_LOG_DIR", Path.home() / "Library" / "Logs" / "fleet-kit")).expanduser()
 TAG = "permission denied:"
+ANSWERED_WINDOW_S = 14 * 86400
 
 
 def gh_denials(result: dict, skip_ids: set[str] | None = None) -> list[dict]:
@@ -53,9 +57,13 @@ def redirect_ids(path: Path | None = None) -> set[str]:
     return hook_blocks.blocked_ids(path.parent if path else None)
 
 
-def plan_ask(member: str, run_id: str, denials: list[dict], open_asks: list[dict]) -> dict | None:
-    """The one ask this pass files, or None (nothing denied, or already asked)."""
-    already = {a.get("why", "") for a in open_asks if a.get("member") == member}
+def plan_ask(member: str, run_id: str, denials: list[dict], asks: list[dict],
+             now: float | None = None) -> dict | None:
+    """The one ask this pass files, or None (nothing denied, already asked, or already answered
+    within ANSWERED_WINDOW_S -- the answer stands until someone changes the deny list)."""
+    cutoff = (now if now is not None else time.time()) - ANSWERED_WINDOW_S
+    already = {a.get("why", "") for a in asks if a.get("member") == member
+               and (a.get("status", "open") == "open" or (a.get("answered_at") or 0) >= cutoff)}
     fresh, seen = [], set()
     for d in denials:
         head = f"{TAG} {d['verb']}"
@@ -105,7 +113,7 @@ def main(argv=None) -> int:
                            f"{a.member}:{','.join(verbs)}",
                            f"{a.member}'s sandbox refused {', '.join(verbs)} in pass {a.run_id}. "
                            f"First refused command: {denials[0]['command'][:240]}")
-        p = plan_ask(a.member, a.run_id, denials, ask_mod.list_asks(conn, status="open", limit=500))
+        p = plan_ask(a.member, a.run_id, denials, ask_mod.list_asks(conn, status="all", member=a.member, limit=500))
         if not p:
             print(f"denial_asks: {len(denials)} gh denial(s), already asked")
             return 0

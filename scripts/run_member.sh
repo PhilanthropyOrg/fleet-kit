@@ -213,6 +213,38 @@ fi
 . "$KIT_DIR/scripts/fleet_enabled.sh"
 fleet_enabled_or_exit "$MEMBER"
 
+# --- pause (fk#1429, POST /api/members/<name>/pause): skip a SCHEDULED or WOKEN pass; a pass
+# already in flight when the flag was set is untouched -- this only gates the next dispatch.
+# FLEET_RUN_NOW (an explicit manual run_now click) bypasses it, same as enabled=false below --
+# pause is scoped to "scheduled and woken", not a deliberate manual run. Recorded the same way
+# the dispatch-lock skip just below is (--dispatch-skipped), not silently like enabled=false, so
+# an operator watching runs.jsonl sees why nothing ran.
+if [ "${FLEET_RUN_NOW:-0}" != "1" ]; then
+  PAUSED_BY=$(python3 - "$MEMBER" "$LOG_DIR" "$KIT_DIR" <<'PYEOF' 2>/dev/null
+import sys
+member, log_dir, kit_dir = sys.argv[1], sys.argv[2], sys.argv[3]
+sys.path.insert(0, kit_dir + "/scripts")
+import member_pause
+r = member_pause.get(member, log_dir)
+print(r.get("by", "") if r and r.get("paused") else "")
+PYEOF
+  )
+  if [ -n "$PAUSED_BY" ]; then
+    log "$MEMBER: paused (by $PAUSED_BY) -- exiting without doing anything"
+    if [ "$DRY_RUN" -eq 1 ]; then
+      echo "[dry-run] SKIP: $MEMBER is paused (by $PAUSED_BY) -- would exit without running"
+      exit 0
+    fi
+    PAUSE_RUN_ID="${MEMBER}-paused-$$-$(date +%s)"
+    printf "Outcome: dispatch skipped -- %s is paused (by %s, fleet-view pause)\nEvidence: %s/paused/%s.json exists\n" \
+        "$MEMBER" "$PAUSED_BY" "$LOG_DIR" "$MEMBER" \
+      | python3 "$KIT_DIR/scripts/run_report.py" \
+          --member "$MEMBER" --run-id "$PAUSE_RUN_ID" --kind llm --exit-code 0 --dispatch-skipped \
+          --pass-file - ${ITEM:+--item-id "$ITEM"} $LANE_FLAG >> "$LOG_DIR/runs.jsonl" 2>>"$LOG"
+    exit 0
+  fi
+fi
+
 # --- per-member dispatch lock: one pass per (member, item) at a time ------------------------
 # gh#3220 (first observed 2026-08-25, recurring and worsening through 2026-09-08: 2 concurrent
 # top-level instances -> 4 -> 5 -> 7+, and spreading from the-fixer to gru to jefe): nothing

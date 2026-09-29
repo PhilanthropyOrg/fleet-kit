@@ -45,6 +45,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+import quality_gate  # noqa: E402
 import run_report  # noqa: E402
 from items_arg import HELP as ITEMS_HELP, load_items  # noqa: E402
 
@@ -153,7 +154,8 @@ def gate_candidates(candidates: list[dict], parents: dict | None = None) -> dict
     eligible: list[int] = []
     dropped: list[dict] = []
     for number, status, raw, labels in classified:
-        if status in (STATUS_LINKED, STATUS_MAINTENANCE):
+        # philanthropy#8707: a prod alert is maintenance by construction; never drop it here.
+        if status in (STATUS_LINKED, STATUS_MAINTENANCE) or quality_gate.is_alert(labels):
             eligible.append(number)
         else:
             dropped.append({

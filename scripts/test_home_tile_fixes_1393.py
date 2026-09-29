@@ -19,9 +19,11 @@ RED without the fix / GREEN with it, per case:
 
 Run: python3 scripts/test_home_tile_fixes_1393.py
 """
+import datetime
 import importlib
 import json
 import os
+import re
 import sys
 import tempfile
 import time
@@ -182,7 +184,13 @@ class HomeTileFixes1393(unittest.TestCase):
     def test_the_number_sub_carries_a_weekly_pace_to_the_deadline(self):
         _, by = self._snap(number_payload=self.NUMBER_PAYLOAD)
         sub = by["okr.verified_claims"]["sub"]
-        self.assertEqual(sub, "+60 7d · need 211/wk to hit 3,000", sub)
+        # The pace depends on today's date (weeks left to 2026-12-31): pin the shape, and the
+        # number to the same formula, not a constant that went stale a day after it was written.
+        m = re.fullmatch(r"\+60 7d · need (\d+)/wk to hit 3,000", sub)
+        self.assertIsNotNone(m, sub)
+        left = (datetime.datetime(2026, 12, 31, tzinfo=datetime.timezone.utc)
+                - datetime.datetime.now(datetime.timezone.utc)).total_seconds() / (7 * 86400)
+        self.assertLessEqual(abs(int(m.group(1)) - (3000 - 201) / left), 1, sub)
 
     def test_the_number_falls_back_to_delta_only_with_no_deadline(self):
         payload = json.loads(json.dumps(self.NUMBER_PAYLOAD))

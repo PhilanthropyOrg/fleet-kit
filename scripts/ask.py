@@ -143,6 +143,15 @@ def _close_triage(conn, ask_id: int, member: str, note: str) -> None:
     fleet_msg.close(conn, TRIAGE, mid, note)
 
 
+def open_escalations(conn, exclude: int | None = None) -> list[tuple[int, str]]:
+    """(id, dumbledore's reason) for every escalated ask Reif has not answered yet, oldest first."""
+    rows = conn.execute(
+        "SELECT a.id, m.ack_note FROM asks a JOIN msgs m ON m.ask_id = a.id AND m.recipient = ? "
+        "AND m.kind = 'ask' WHERE a.answered_at IS NULL AND m.ack_note LIKE 'escalated:%' "
+        "ORDER BY a.id", (TRIAGE,)).fetchall()
+    return [(i, note.split(":", 1)[1].strip()) for i, note in rows if i != exclude]
+
+
 def triage_rate(conn, days: float = 7.0) -> dict:
     since = time.time() - days * 86400
     n, esc = conn.execute(
@@ -153,7 +162,8 @@ def triage_rate(conn, days: float = 7.0) -> dict:
             "rate": round(esc / n, 3) if n else 0.0}
 
 
-def _notify(member: str, ask_id: int, why: str, sender: str | None = None) -> None:
+def _notify(member: str, ask_id: int, why: str, sender: str | None = None, lead: str = "",
+            still_open: list[tuple[int, str]] = ()) -> None:
     """One NTFY (+ email) per member per rolling hour, via the fleet's shared fleet_alert.sh
     channel -- same helper every other check pages through, so a filed ask reaches a human the
     same way an alarm does and gets the same undelivered-retry queue for free (AC4).
@@ -175,14 +185,27 @@ def _notify(member: str, ask_id: int, why: str, sender: str | None = None) -> No
     # #1049 made fleet_alert.sh's email leg opt-in and Reif has no ntfy app, so without this an
     # ask reaches nobody. Reif, 2026-09-15: the console inbox is gone; "somehow it can get me a
     # message some other way if it needs me." An ask is that message: force the email leg.
-    env = dict(os.environ, FLEET_ALERT_EMAIL_LEG="1")
+    # Reif, 2026-09-28: "label these as officially from dumbledore" -- this is the one place
+    # in the fleet that pages Reif for an ask, so it brands both ends: the From name (MAIL_FROM,
+    # read by fleet_alert.sh's _send_email) and a "[dumbledore]" subject prefix. inbox.py's reply
+    # matching keys off the message BODY ("yes N"/"no N: ...") and only checks the subject for a
+    # leading Re:/Fwd:, never the literal "fleet ask #N" text, so the prefix cannot break a reply.
+    env = dict(os.environ, FLEET_ALERT_EMAIL_LEG="1",
+              MAIL_FROM="Dumbledore (fleet) <hello@philanthropy.org>")
     sender = sender or member
-    title = f"fleet ask #{ask_id} from {sender}" + (f" (for {member})" if sender != member else "")
+    title = f"[dumbledore] fleet ask #{ask_id} from {sender}" + (f" (for {member})" if sender != member else "")
     # fk#1056: the mail says how to answer it, and a reply to it reaches the fleet (Reply-To
     # is set by fleet_alert.sh; webhook_receiver.py applies the answer with no model in the way).
-    body = (f"ask #{ask_id}: {why}\n\n"
-            f"Reply to this email with one line: `yes {ask_id}`, `no {ask_id}: why`, "
-            f"or `{ask_id}: your answer`. Anything else you write goes to the messenger.")
+    # Reif, 2026-09-29: "write in plain simple English" -- dumbledore's own plain reason leads,
+    # the member's technical detail follows. And "append it to all that have not been
+    # resolved": every other escalated ask still waiting on him rides along, answerable the same way.
+    body = (f"{lead}\n\n" if lead else "") + f"ask #{ask_id}: {why}\n\n"
+    if still_open:
+        body += "Also still waiting on you:\n" + "".join(
+            f"- #{i}: {w.strip().splitlines()[0][:160] if w.strip() else ''}\n" for i, w in still_open) + "\n"
+    body += (f"Reply to this email with one line: `yes {ask_id}`, `no {ask_id}: why`, "
+             f"or `{ask_id}: your answer` (same for any number above). "
+             f"Anything else you write goes to the messenger.")
     try:
         subprocess.run(
             ["bash", str(script), "--check", "ask", "--problem", problem,
@@ -239,6 +262,49 @@ def issue_for_ask(ask_id: int, member: str, why: str, unblocks: str | None, prop
             + "Vision-link: none (maintenance) -- a provisioning ask, not a direct KR mover")
     r = run(["gh", "issue", "create", "--repo", slug, "--title", title, "--label", ",".join(labels), "--body", body])
     return r.stdout.strip().splitlines()[-1] if r.returncode == 0 and r.stdout.strip() else ""
+
+
+def settle_ask_issue(ask_id: int, outcome: str, note: str, run=None) -> str:
+    """jefe msgs #342/#351: the issue issue_for_ask mirrored used to outlive its ask. A denied or
+    answered ask left an open priority-high backlog item that gru's gates bounced to
+    fleet:needs-spec and marie backfilled by hand (philanthropy 8648-8652 and 8677: all denied, all still
+    cycling). Now the answer settles the mirror: escalated -> fleet:needs-human-op (the
+    NOT_FOR_MINIONS label gate_drops.py skips), anything else -> closed with the answer as the
+    closing comment. Returns the issue URL it touched, or ''."""
+    import os
+    if os.environ.get("FLEET_ASK_ISSUES") != "1":
+        return ""
+    run = run or (lambda cmd: subprocess.run(cmd, capture_output=True, text=True, timeout=60))
+    slug = _repo_slug()
+    if not slug:
+        return ""
+    found = run(["gh", "issue", "list", "--repo", slug, "--state", "open", "--search",
+                 f'"ask #{ask_id} " in:title', "--json", "number,title,url"])
+    if found.returncode != 0:
+        return ""
+    hits = [i for i in json.loads(found.stdout or "[]") if i["title"].startswith(f"ask #{ask_id} ")]
+    if not hits:
+        return ""
+    num = str(hits[0]["number"])
+    if outcome == "escalated":
+        run(["gh", "issue", "edit", num, "--repo", slug, "--add-label", "fleet:needs-human-op",
+             "--remove-label", "fleet:needs-spec"])
+        run(["gh", "issue", "comment", num, "--repo", slug, "--body",
+             f"Ask #{ask_id} escalated to Reif (a true one-way door): {note}"])
+    else:
+        run(["gh", "issue", "close", num, "--repo", slug, "--reason", "not planned", "--comment",
+             f"Ask #{ask_id} {outcome}: {note}\n\nThe work, if any, went to the member named "
+             "there; this mirror has nothing left to build."])
+    return hits[0]["url"]
+
+
+def _settle(ask_id: int, outcome: str, note: str) -> None:
+    try:
+        url = settle_ask_issue(ask_id, outcome, note)
+        if url:
+            print(f"ask {ask_id} board issue settled ({outcome}): {url}")
+    except Exception:  # noqa: BLE001 -- best-effort, the ask row is already answered
+        pass
 
 
 def main(argv=None) -> int:
@@ -362,6 +428,7 @@ def main(argv=None) -> int:
             reason = "already answered" if exists else "no such ask"
             print(f"ask.py: answer {a.id}: {reason}", file=sys.stderr)
             return 1
+        _settle(a.id, a.status, a.answer)
         print(f"ask {a.id} answered")
         return 0
 
@@ -375,12 +442,15 @@ def main(argv=None) -> int:
             return 1
         member, why = row[0], row[1]
         if a.cmd == "escalate":
-            _notify(member, a.id, f"{why}\n\n{TRIAGE}: no other way -- {a.reason}", sender=TRIAGE)
+            _notify(member, a.id, f"details from {member}: {why}", sender=TRIAGE, lead=a.reason,
+                    still_open=open_escalations(conn, exclude=a.id))
             _close_triage(conn, a.id, member, f"escalated: {a.reason}")
+            _settle(a.id, "escalated", a.reason)
             print(f"ask {a.id} escalated to Reif")
             return 0
         answer_ask(conn, a.id, f"denied, another way: {a.path}", TRIAGE, status="denied")
         _close_triage(conn, a.id, member, f"denied: {a.path}")
+        _settle(a.id, "denied", a.path)
         if a.to:
             import fleet_msg
             sent = fleet_msg.send(conn, TRIAGE, [a.to], "nudge", f"ask:{a.id}",

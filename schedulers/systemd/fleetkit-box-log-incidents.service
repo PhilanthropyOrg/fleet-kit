@@ -1,0 +1,13 @@
+[Unit]
+Description=File/comment/close deduped 'prod alert [<key>]' items from the box log area (box-logs.jsonl)
+
+[Service]
+Type=oneshot
+User={{USER}}
+Environment=PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+# inbox.file_or_comment_alert files into this repo, with the host's gh auth.
+Environment=FLEET_REPO_URL={{FLEET_REPO_URL}}
+Environment=FLEET_LOG_DIR={{INSTANCE_DIR}}/logs
+# Coalesce: the box ships every minute; one pass per ~30s batch of appends is plenty.
+ExecStartPre=/bin/sleep 30
+ExecStart=/usr/bin/env python3 {{KIT_PATH}}/scripts/box_log_incidents.py {{INSTANCE_DIR}}/logs/box-logs.jsonl

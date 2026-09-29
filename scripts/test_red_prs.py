@@ -146,9 +146,29 @@ class Detector(unittest.TestCase):
     def test_green_draft_and_human_branches_are_ignored(self):
         self.assertIsNone(red_prs.describe(pr(checks=GREEN), {7942}, NOW))
         self.assertIsNone(red_prs.describe(pr(branch="fix/reif-hand-edit", checks=self.RED_LINT), set(), NOW))
-        d = pr(checks=self.RED_LINT)
+        d = pr(branch="member/ui-lane-1-2", checks=self.RED_LINT)
         d["isDraft"] = True
-        self.assertIsNone(red_prs.describe(d, set(), NOW))
+        self.assertIsNone(red_prs.describe(d, set(), NOW), "a non-minion draft is still nobody's to touch")
+
+    def test_a_red_minion_draft_idle_for_an_hour_gets_a_resuming_minion(self):
+        # 2026-09-29: checkpoint drafts #8531/#8550/#8553/#8603/#8604 sat red 14-22h: red_prs
+        # skipped every draft, so no fixer and no priority resume ever came for them.
+        def draft(n, mins):
+            d = pr(number=n, branch=f"member/minion-item{n}-1-2", checks=self.RED_LINT,
+                   commits=[commit("WIP checkpoint", mins)])
+            d["isDraft"] = True
+            return red_prs.describe(d, {n}, NOW)
+        idle, busy = draft(8553, 20 * 60), draft(8554, 10)
+        self.assertEqual((idle["kind"], busy["kind"]), ("resume", "resume"))
+        out = red_prs.plan([idle, busy], {}, NOW, 6)
+        self.assertEqual([r["number"] for r in out["resume"]], [8553])
+        self.assertEqual(out["due"], [], "a checkpoint gets a minion, not a fixer")
+        self.assertEqual(out["not_yet_stalled"], [8554], "a minion mid-build is left alone")
+        # Same red content: not re-sent inside the window; given up after three resumes.
+        held = red_prs.plan([idle], {"8553": {"content": idle["content"], "attempts": 1, "last": NOW}}, NOW, 6)
+        self.assertEqual((held["resume"], held["held"]), ([], [{"number": 8553, "why": "recent"}]))
+        gone = red_prs.plan([idle], {"8553": {"content": idle["content"], "attempts": 3, "last": 0}}, NOW, 6)
+        self.assertEqual(gone["exhausted"], [8553])
 
     def test_reif_first_then_oldest(self):
         rows = [red_prs.describe(pr(number=n, branch=f"member/minion-item{i}-1-2", checks=self.RED_LINT,

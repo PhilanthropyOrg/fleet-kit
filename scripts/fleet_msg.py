@@ -34,6 +34,7 @@ Usage:
   fleet_msg.py inbox --me marie [--render] [--mark-read] [--json]   (--me hq: HQ on the host)
   fleet_msg.py ack   --me marie --id 12 --note "labeled #1 #2 quality:solid"
   fleet_msg.py reply --me marie --id 12 --reason "#3 is an epic; nothing to label"
+  fleet_msg.py done  --me marie --id 12 --note "PR #4021 -- fk#1429: closes an acked `command`"
   fleet_msg.py watchdog [--dry-run]
   fleet_msg.py summary
   fleet_msg.py pregate --me jefe
@@ -52,6 +53,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import fleet_db  # noqa: E402
+import member_pause  # noqa: E402  (fk#1429: a paused member is never woken)
 
 DEDUPE_S = float(os.environ.get("FLEET_MSG_DEDUPE_S", 6 * 3600))
 ESCALATE_AFTER_CADENCES = 2
@@ -64,7 +66,7 @@ HOST_MEMBERS_CADENCE_S = {"hq": 1800.0}
 REIF_TAG = "unacked member messages:"
 MSG_COLUMNS = ("id", "sender", "recipient", "kind", "key", "body", "items", "status", "sent_at",
                "read_at", "acked_at", "ack_note", "escalated_to", "escalated_at", "parent_id",
-               "ask_id")
+               "ask_id", "done_note", "done_at")
 
 
 def _rows(cur) -> list[dict]:
@@ -110,7 +112,7 @@ def send(conn, sender: str, recipients, kind: str, key: str, body: str,
 # runs after it, from the CLI `send` path only.
 
 WAKE_KINDS = {k.strip() for k in os.environ.get(
-    "FLEET_MSG_WAKE_KINDS", "cause,incident,pr-block,nudge,ask").split(",") if k.strip()}
+    "FLEET_MSG_WAKE_KINDS", "cause,incident,pr-block,nudge,ask,command").split(",") if k.strip()}
 WAKE_COOLDOWN_S = float(os.environ.get("FLEET_MSG_WAKE_COOLDOWN_S", 1800))
 
 
@@ -187,6 +189,8 @@ def wake(conn, sent: list[dict], kind: str, specs=None, now: float | None = None
             reason = "no-spec"
         elif not specs[to].get("enabled", True):
             reason = "disabled"
+        elif (member_pause.get(to, log_dir) or {}).get("paused"):
+            reason = "paused"
         elif _cooling_down(to, now, cooldown_s, log_dir):
             reason = "cooldown"
         else:
@@ -220,7 +224,12 @@ def mark_read(conn, ids, now: float | None = None) -> None:
 def close(conn, me: str, msg_id: int, note: str, acted: bool = True,
           now: float | None = None) -> dict:
     """ack (acted) or reply (did not act, with the reason). Only the recipient may close its own
-    message. Closing a jefe escalation closes the message it points at too."""
+    message. Closing a jefe escalation closes the message it points at too.
+
+    fk#1429: an ack of a `command`-kind message (POST /api/members/<name>/command) does NOT go
+    terminal -- it goes to `understood`, which watchdog still treats as escalatable, because
+    "Understood" is a promise, not the work. `mark_done` below is the only thing that closes it
+    for good. A reply (declining the command) is unaffected -- there is nothing to finish."""
     now = time.time() if now is None else now
     note = (note or "").strip()
     if not note:
@@ -232,13 +241,42 @@ def close(conn, me: str, msg_id: int, note: str, acted: bool = True,
         raise ValueError(f"message {msg_id} is to {m['recipient']}, not {me}")
     if m["status"] != "open":
         return m
-    status = "acked" if acted else "replied"
+    if acted and m["kind"] == "command":
+        status = "understood"
+    else:
+        status = "acked" if acted else "replied"
     conn.execute("UPDATE msgs SET status = ?, acked_at = ?, ack_note = ?, "
                  "read_at = COALESCE(read_at, ?) WHERE id = ?", (status, now, note, now, msg_id))
     if m["parent_id"] and m["kind"] == "escalation":
+        # fk#1429: the escalated original can be `open` OR `understood` (a command acked but
+        # not yet done can still be escalated) -- either way, closing the escalation closes it.
         conn.execute("UPDATE msgs SET status = ?, acked_at = ?, ack_note = ? "
-                     "WHERE id = ? AND status = 'open'",
+                     "WHERE id = ? AND status IN ('open', 'understood')",
                      (status, now, f"{me} (escalation #{msg_id}): {note}", m["parent_id"]))
+    conn.commit()
+    return get(conn, msg_id)
+
+
+def mark_done(conn, me: str, msg_id: int, note: str, now: float | None = None) -> dict:
+    """fk#1429: the second close of a `command` message, after `close(..., acted=True)` has
+    already moved it to `understood`. `note` is the evidence (PR/issue/commit URL) -- what was
+    promised in the ack is what `done` is closing out. Only the recipient may close its own
+    message, and only from `understood` -- a message still `open` was never acked, and one
+    already `done` cannot be re-closed."""
+    now = time.time() if now is None else now
+    note = (note or "").strip()
+    if not note:
+        raise ValueError("a note is required: what you did, with evidence")
+    m = get(conn, msg_id)
+    if not m:
+        raise ValueError(f"no message {msg_id}")
+    if m["recipient"] != me:
+        raise ValueError(f"message {msg_id} is to {m['recipient']}, not {me}")
+    if m["status"] != "understood":
+        raise ValueError(f"message {msg_id} is {m['status']}, not understood -- ack it first "
+                          "with `fleet_msg.py ack`")
+    conn.execute("UPDATE msgs SET status = 'done', done_at = ?, done_note = ? WHERE id = ?",
+                 (now, note, msg_id))
     conn.commit()
     return get(conn, msg_id)
 
@@ -315,8 +353,11 @@ def watchdog(conn, now: float | None = None, cadence=None, dry_run: bool = False
     if cadence is None:
         specs = _specs()
         cadence = lambda m: cadence_s(m, specs)  # noqa: E731
+    # fk#1429: `understood` (a command that was acked but not yet closed `done`) is still
+    # escalatable -- "Understood" is a promise, not the work. Same cadence-age rule as `open`.
     open_msgs = _rows(conn.execute(
-        f"SELECT {', '.join(MSG_COLUMNS)} FROM msgs WHERE status = 'open' ORDER BY sent_at"))
+        f"SELECT {', '.join(MSG_COLUMNS)} FROM msgs WHERE status IN ('open', 'understood') "
+        "ORDER BY sent_at"))
     p = watchdog_plan(open_msgs, cadence, now)
     out = {"escalated_to_jefe": [], "escalated_to_reif": [], "ask_id": None}
     if dry_run:
@@ -324,10 +365,15 @@ def watchdog(conn, now: float | None = None, cadence=None, dry_run: bool = False
         out["escalated_to_reif"] = [m["id"] for m in p["to_reif"]]
         return out
     for m in p["to_jefe"]:
-        body = (f"{m['recipient']} has not acked message #{m['id']} ({m['kind']} from "
-                f"{m['sender']}) after {_age(now - m['sent_at'])} -- 2 of its cadences. Get it "
-                f"done (or get it answered) and ack this; acking closes #{m['id']} too.\n\n"
-                f"Original:\n{m['body']}")
+        if m["status"] == "understood":
+            verb = "acked but has not marked done"
+            hint = "finish it and close it with `fleet_msg.py done`"
+        else:
+            verb = "has not acked"
+            hint = "get it done (or get it answered) and ack this"
+        body = (f"{m['recipient']} {verb} message #{m['id']} ({m['kind']} from "
+                f"{m['sender']}) after {_age(now - m['sent_at'])} -- 2 of its cadences. {hint}; "
+                f"closing it closes #{m['id']} too.\n\nOriginal:\n{m['body']}")
         send(conn, "watchdog", [JEFE], "escalation", f"msg:{m['id']}", body,
              items=m["items"], parent_id=m["id"], now=now)
         conn.execute("UPDATE msgs SET escalated_to = ?, escalated_at = ? WHERE id = ?",
@@ -435,8 +481,12 @@ def render(msgs: list[dict], me: str, now: float | None = None) -> str:
         "with issue/PR numbers>\"",
         "or, if you will not act, say why (a reply is a real answer; silence is not) --",
         f"  python3 /fleet-kit/scripts/fleet_msg.py reply --me {me} --id <id> --reason \"<why not>\"",
-        "An unacked message escalates to jefe after 2 of your cadences, then to Reif. List what "
-        "you acked under `Inbox:` in your report.",
+        "A `command` kind (pinged in from outside the fleet) is acked with a note starting "
+        "\"Understood: <what you will do>\", then closed for good once finished with "
+        f"`python3 /fleet-kit/scripts/fleet_msg.py done --me {me} --id <id> --note \"<evidence: "
+        "PR/issue/commit URL>\"`.",
+        "An unacked (or acked-but-not-done) message escalates to jefe after 2 of your cadences, "
+        "then to Reif. List what you acked under `Inbox:` in your report.",
     ]
     for m in msgs:
         items = ", ".join(f"#{i}" for i in m.get("items") or [])
@@ -473,6 +523,10 @@ def main(argv=None) -> int:
         c.add_argument("--me", required=True)
         c.add_argument("--id", type=int, required=True)
         c.add_argument("--note" if name == "ack" else "--reason", dest="note", required=True)
+    d = sub.add_parser("done", help="fk#1429: close a `command` message that is understood, with evidence")
+    d.add_argument("--me", required=True)
+    d.add_argument("--id", type=int, required=True)
+    d.add_argument("--note", required=True)
     w = sub.add_parser("watchdog")
     w.add_argument("--dry-run", action="store_true")
     sub.add_parser("summary")
@@ -496,6 +550,12 @@ def main(argv=None) -> int:
     elif a.cmd in ("ack", "reply"):
         try:
             print(json.dumps(close(conn, a.me, a.id, a.note, acted=a.cmd == "ack")))
+        except ValueError as exc:
+            print(f"fleet_msg: {exc}", file=sys.stderr)
+            return 2
+    elif a.cmd == "done":
+        try:
+            print(json.dumps(mark_done(conn, a.me, a.id, a.note)))
         except ValueError as exc:
             print(f"fleet_msg: {exc}", file=sys.stderr)
             return 2
