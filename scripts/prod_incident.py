@@ -38,6 +38,11 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import quality_gate  # noqa: E402
 
 INCIDENT_LABEL = "incident"
 INCIDENT_REPO = "The-Good-Project-Team/philanthropy"
@@ -85,11 +90,20 @@ def _extract_target(body: str) -> str | None:
     return m.group(1) if m else None
 
 
+def with_alert_spec(check: str, body: str, labels: list[str]) -> tuple[str, list[str]]:
+    """philanthropy#8707: every auto-filed alert carries a Given/When/Then, a Vision-link and
+    exactly one quality:* label, so gru's intake gate never skips it as needs-spec."""
+    if not set(labels) & set(quality_gate.QUALITY_LABELS):
+        labels = [*labels, "quality:solid"]
+    return f"{body}\n\n{quality_gate.alert_spec(check)}", labels
+
+
 def build_create_cmd(repo: str, title: str, body: str, labels: list[str],
                       target: str = "") -> list[str]:
     marker = INCIDENT_MARKER
     if target:
         marker = f"{marker}\n{_target_marker(target)}"
+    body, labels = with_alert_spec(target or title, body, labels)
     cmd = ["gh", "issue", "create", "--repo", repo, "--title", title,
            "--body", f"{body}\n\n{marker}"]
     for label in labels:

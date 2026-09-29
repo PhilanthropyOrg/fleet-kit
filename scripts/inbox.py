@@ -700,7 +700,7 @@ def file_or_comment_alert(row: dict, run=None) -> tuple[str, bool]:
     # is what keeps a genuinely firing alert visible despite the low tier (gh#726's escape
     # hatch keys off severity-live + a linked candidate, not off priority).
     r = run(["gh", "issue", "create", "--repo", slug,
-             "--label", "fleet:backlog,lane:devops,fleet:priority-low,fleet:severity-live",
+             "--label", "fleet:backlog,lane:devops,fleet:priority-low,fleet:severity-live,quality:solid",
              "--title", title,
              "--body", f"{first_line}\n\nFiled by intake from {row.get('from') or row.get('source')} (fk#1129).\n\n"
                        # jefe msg#202: without this, every alert item tripped needs-spec at the gate.
