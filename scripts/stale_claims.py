@@ -55,7 +55,7 @@ HUMAN_BLOCKED = board_github.LABEL_HUMAN_BLOCKED
 PRIORITY_LABEL = os.environ.get("FLEET_REIF_PRIORITY_LABEL", f"{PREFIX}reif-priority")
 TIER_LABELS = {f"{PREFIX}priority-{t}" for t in ("high", "medium", "low")}
 MARIE_HOLD = "fleet:claimed left in place"
-RUNNERS = ("run_member.sh", "worktree_builder.sh", "dispatch_fixer.sh")
+RUNNERS = ("run_member.sh", "worktree_builder.sh", "dispatch_fixer.sh", "node_minion.sh")
 ITEMS_IN_BRANCH = re.compile(r"-item(\d+(?:_\d+)*)")
 
 

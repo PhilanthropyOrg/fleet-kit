@@ -47,6 +47,11 @@ case "$member" in
           tag="$(printf '%s' "$3" | sed -n 's/^lane=\([A-Za-z0-9_-]*\).*/\1/p')"; tag="lane-${tag:-x}" ;;
   *)      echo "$USAGE" >&2; exit 2 ;;
 esac
+# A worker node is configured (node_up.sh): minions go through node_minion.sh, which runs the
+# batch on the node or, if the node does not accept it, here. Claims stay with gru on this box.
+if [ "$member" = minion ] && [ -f "${FLEET_NODE_DIR:-/root/.fleet-node}/config" ]; then
+  RUN_MEMBER="${FLEET_NODE_MINION:-$KIT_DIR/scripts/node_minion.sh}"
+fi
 log="$LOG_DIR/$member-$tag.dispatch.log"
 FLEET_RUN_NOW=1 setsid nohup bash "$RUN_MEMBER" "$@" >>"$log" 2>&1 </dev/null &
 echo "dispatched $member ${3:-} (detached, pid=$!, log $log)"

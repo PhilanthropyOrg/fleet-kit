@@ -101,6 +101,14 @@ case "${1:-cron-foreground}" in
       exec sleep infinity
     fi
 
+    # A worker node (node_sync.sh sets FLEET_NODE_ROLE=worker) schedules nothing and serves
+    # nothing: the hub's gru sends it claimed minion batches through node_gate.sh. A crontab
+    # here would be a second gru racing the hub's on the same backlog.
+    if [ "${FLEET_NODE_ROLE:-}" = "worker" ]; then
+      echo "[entrypoint] FLEET_NODE_ROLE=worker -- no crontab, dashboard or webhook; minions arrive via node_gate.sh"
+      exec sleep infinity
+    fi
+
     # Start the live dashboard in the background -- this is the whole point of exposing a
     # port from the container. Without this, cron-foreground runs the loop with nothing
     # observable from outside except raw log files inside the container.
