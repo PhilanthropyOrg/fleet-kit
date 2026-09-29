@@ -39,6 +39,36 @@ STATE="$HOME/.cache/fleet-kit/auto_deploy.last_sha.${INSTANCE_KEY}"
 mkdir -p "$LOG_DIR" "$(dirname "$STATE")"
 log() { echo "[$(TZ=America/Chicago date '+%Y-%m-%d %H:%M:%S %Z')] $*" >> "$LOG"; }
 
+# philanthropy#8714: every stop below used to be a log line nobody read -- dino sat 5 commits
+# behind main (and the container 2h behind a merged receiver fix, 1220 box-log records 401'd)
+# with nothing paging. auto_deploy_race_check.sh was meant to escalate repeated ABORTs, but it
+# runs in the container and reads the container's log dir, not the host's $FLEET_LOG_DIR this
+# tick writes to. So the tick pages for itself: fleet_alert.sh + alert_store dedup = one page per
+# open problem, resolved on the next successful deploy. Never fatal -- an alert helper failing
+# must not change what the tick does.
+alert() {  # <problem> <body>
+  [ -f "$KIT_DIR/scripts/fleet_alert.sh" ] || return 0
+  bash "$KIT_DIR/scripts/fleet_alert.sh" --check auto_deploy --problem "$1" --severity degraded \
+    "fleet-kit auto-deploy stuck ($INSTANCE_KEY): $1" "$2" >/dev/null 2>&1 || true
+}
+# ...and says what it did where the fleet reads (nonprofit-atlas#8703's one log area,
+# box-logs.jsonl), not only in a host file: deployed SHA, deferrals, stops. Written through the
+# receiver's own record_box_logs (same lock, same rotation) into the instance log dir the
+# container mounts as /var/log/fleet-kit. Unkeyed on purpose -- box_log_incidents.py files
+# keyed lines, and alert() above is already this tick's pager; one problem, one page.
+ship() {  # <level> <msg>
+  [ -f "$KIT_DIR/scripts/webhook_receiver.py" ] && [ -d "${FLEET_INSTANCE_DIR:-/nonexistent}/logs" ] || return 0
+  FLEET_LOG_DIR="$FLEET_INSTANCE_DIR/logs" BOX_LEVEL="$1" BOX_MSG="$2" BOX_JOB="auto_deploy:$INSTANCE_KEY" \
+    python3 -c '
+import os, socket, sys, time
+sys.path.insert(0, sys.argv[1])
+import webhook_receiver as w
+w.record_box_logs(w.box_log_lines({"host": socket.gethostname(), "records": [{
+    "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "source": "fleet-kit",
+    "job": os.environ["BOX_JOB"], "level": os.environ["BOX_LEVEL"], "msg": os.environ["BOX_MSG"]}]},
+    "auto_deploy"))' "$KIT_DIR/scripts" >/dev/null 2>&1 || true
+}
+
 cd "$KIT_DIR"
 
 # gh#278: source the instance's fleet.env so host-side dials (FLEET_AUTO_DEPLOY_SELF_HEAL below)
@@ -92,6 +122,7 @@ if command -v flock >/dev/null 2>&1; then
         held_age="$(ps -o etimes= -p "${held_by:-0}" 2>/dev/null | tr -d ' ')"
         if [ -n "$held_age" ] && [ "$held_age" -gt "$(( ${FLEET_DRAIN_MAX_S:-1800} + 900 ))" ]; then
             log "STALE LOCK: pid $held_by has held $LOCKFILE for ${held_age}s, longer than any real deploy -- DEPLOYS ARE BLOCKED. If that pid is a container helper (conmon/slirp4netns), the flock fd leaked into podman run; deploy.sh must close it with 9>&-."
+            alert stale_lock "pid $held_by has held $LOCKFILE for ${held_age}s -- deploys are blocked."
         fi
         exit 0
     fi
@@ -145,6 +176,8 @@ fi
 PORCELAIN="$(git status --porcelain)"
 if [ -n "$PORCELAIN" ]; then
   log "ABORT: working tree dirty -- refusing to pull over local changes. Resolve by hand. Dirty entries: $(echo "$PORCELAIN" | tr '\n' '|')"
+  alert dirty_tree "$KIT_DIR has local changes, so merged fleet-kit PRs are not pulled or deployed. Dirty: $(echo "$PORCELAIN" | head -5 | tr '\n' ' ')"
+  ship WARN "ABORT: host checkout dirty, not pulling/deploying"
   exit 1
 fi
 
@@ -171,27 +204,7 @@ if [ "$REMOTE_SHA" = "$LOCAL_SHA" ] && [ "$REMOTE_SHA" = "$LAST_DEPLOYED" ]; the
   exit 0  # quiet no-op tick -- nothing moved, nothing to log
 fi
 
-# gh#619: coalesce deploys. Every deploy cordons the fleet (FLEET_ENABLED=false) while in-flight
-# passes drain -- median 270s, p90 990s, ~18 times a day -- so main moving every few minutes cost
-# the fleet 4-17% of every day with no new passes starting. A runtime move that lands inside
-# FLEET_DEPLOY_MIN_INTERVAL_S of the last SUCCESSFUL deploy is deferred (logged once), and the
-# first tick after the window deploys everything that landed meanwhile in one drain. A failed
-# deploy does not stamp the window, so its retry is as immediate as before. Manual deploy.sh is
-# untouched. Set FLEET_DEPLOY_MIN_INTERVAL_S=0 in fleet.env to get the old deploy-every-move.
-DEPLOY_MIN_INTERVAL_S="${FLEET_DEPLOY_MIN_INTERVAL_S:-7200}"
-DEPLOYED_AT_FILE="$STATE.deployed_at"
-DEFER_FLAG="$STATE.deferring"
-LAST_DEPLOYED_AT="$(cat "$DEPLOYED_AT_FILE" 2>/dev/null || echo "")"
-NOW_S="$(date +%s)"
-if [[ "$LAST_DEPLOYED_AT" =~ ^[0-9]+$ ]] && [ $((NOW_S - LAST_DEPLOYED_AT)) -lt "$DEPLOY_MIN_INTERVAL_S" ]; then
-  if [ ! -f "$DEFER_FLAG" ]; then
-    log "main moved: remote=$REMOTE_SHA only $((NOW_S - LAST_DEPLOYED_AT))s after the last deploy -- COALESCING: deferring until FLEET_DEPLOY_MIN_INTERVAL_S=${DEPLOY_MIN_INTERVAL_S}s has elapsed; anything else that lands meanwhile rides the same deploy (gh#619)"
-    : > "$DEFER_FLAG"
-  fi
-  exit 0
-fi
-rm -f "$DEFER_FLAG"
-log "main moved: local=$LOCAL_SHA remote=$REMOTE_SHA -- pulling + deploying"
+[ "$LOCAL_SHA" != "$REMOTE_SHA" ] && log "main moved: local=$LOCAL_SHA remote=$REMOTE_SHA -- pulling"
 # --ff-only, not a plain pull: this host checkout should never have local commits of its own
 # (it's a deploy target, not a dev workspace) -- if it ever diverges, that's a "stop and look",
 # not something to auto-merge/rebase past. Same "loud stop over a guess" rule as the dirty-tree
@@ -231,11 +244,40 @@ if ! git merge-base --is-ancestor "$LOCAL_SHA" "$REMOTE_SHA"; then
       DIVERGED_BEHIND="?"
     fi
     log "ABORT: local HEAD is not an ancestor of origin/main -- host checkout has diverged. Resolve by hand, not auto-merged. branch=$DIVERGED_BRANCH local=${LOCAL_SHA:0:7} remote=${REMOTE_SHA:0:7} ahead=$DIVERGED_AHEAD behind=$DIVERGED_BEHIND"
+    alert diverged "$KIT_DIR is not an ancestor of origin/main (branch=$DIVERGED_BRANCH local=${LOCAL_SHA:0:7} remote=${REMOTE_SHA:0:7}) -- merged PRs are not deployed until resolved by hand."
+    ship WARN "ABORT: host checkout diverged from origin/main, not deploying"
     exit 1
   fi
 fi
-git pull --ff-only origin main -q
+# philanthropy#8714: pull BEFORE the gh#619 coalescing gate, not after it. The host checkout is
+# what every host-side cron runs from (control_plane.py, prod_health_check.py, the box-log
+# listener, this script), and none of those cordon the fleet -- only the container rebuild does.
+# Gating the pull behind the 2h deploy window kept merged host-side fixes dark for up to 2h.
+[ "$LOCAL_SHA" != "$REMOTE_SHA" ] && git pull --ff-only origin main -q
 exec 8>&-  # release the shared git lock before the (potentially half-hour) deploy below
+
+# gh#619: coalesce deploys. Every deploy cordons the fleet (FLEET_ENABLED=false) while in-flight
+# passes drain -- median 270s, p90 990s, ~18 times a day -- so main moving every few minutes cost
+# the fleet 4-17% of every day with no new passes starting. A runtime move that lands inside
+# FLEET_DEPLOY_MIN_INTERVAL_S of the last SUCCESSFUL deploy is deferred (logged once), and the
+# first tick after the window deploys everything that landed meanwhile in one drain. A failed
+# deploy does not stamp the window, so its retry is as immediate as before. Manual deploy.sh is
+# untouched. Set FLEET_DEPLOY_MIN_INTERVAL_S=0 in fleet.env to get the old deploy-every-move.
+DEPLOY_MIN_INTERVAL_S="${FLEET_DEPLOY_MIN_INTERVAL_S:-7200}"
+DEPLOYED_AT_FILE="$STATE.deployed_at"
+DEFER_FLAG="$STATE.deferring"
+LAST_DEPLOYED_AT="$(cat "$DEPLOYED_AT_FILE" 2>/dev/null || echo "")"
+NOW_S="$(date +%s)"
+if [[ "$LAST_DEPLOYED_AT" =~ ^[0-9]+$ ]] && [ $((NOW_S - LAST_DEPLOYED_AT)) -lt "$DEPLOY_MIN_INTERVAL_S" ]; then
+  if [ ! -f "$DEFER_FLAG" ]; then
+    log "main moved: remote=$REMOTE_SHA only $((NOW_S - LAST_DEPLOYED_AT))s after the last deploy -- COALESCING: deferring until FLEET_DEPLOY_MIN_INTERVAL_S=${DEPLOY_MIN_INTERVAL_S}s has elapsed; anything else that lands meanwhile rides the same deploy (gh#619)"
+    ship INFO "host checkout at ${REMOTE_SHA:0:7}; container stays at ${LAST_DEPLOYED:0:7} until the deploy window opens in $((DEPLOY_MIN_INTERVAL_S - (NOW_S - LAST_DEPLOYED_AT)))s (gh#619)"
+    : > "$DEFER_FLAG"
+  fi
+  exit 0
+fi
+rm -f "$DEFER_FLAG"
+log "deploying $REMOTE_SHA (container was at ${LAST_DEPLOYED:-nothing recorded})"
 
 # fk#1149: a key assigned twice in the instance env means the live value is whichever line
 # comes last, and a reader (or a handoff) quotes the wrong one. Warn on every deploy; never
@@ -251,7 +293,12 @@ if FLEET_INSTANCE_DIR="${FLEET_INSTANCE_DIR:?set FLEET_INSTANCE_DIR}" bash "$KIT
   echo "$REMOTE_SHA" > "$STATE"
   date +%s > "$DEPLOYED_AT_FILE"
   log "deploy OK at $REMOTE_SHA"
+  ship INFO "deployed $REMOTE_SHA to $INSTANCE_KEY"
+  [ -f "$KIT_DIR/scripts/fleet_alert.sh" ] && bash "$KIT_DIR/scripts/fleet_alert.sh" --resolve --check auto_deploy \
+    "fleet-kit auto-deploy recovered ($INSTANCE_KEY)" "deployed $REMOTE_SHA" >/dev/null 2>&1 || true
 else
   log "DEPLOY FAILED at $REMOTE_SHA -- deploy.sh's own rollback already ran (blue untouched); see $LOG above for detail. NOT recording as last-deployed, will retry next tick."
+  alert deploy_failed "deploy.sh failed at $REMOTE_SHA (container still on ${LAST_DEPLOYED:0:7}); see auto_deploy.log."
+  ship WARN "DEPLOY FAILED at ${REMOTE_SHA:0:7}; container still on ${LAST_DEPLOYED:0:7}"
   exit 1
 fi
