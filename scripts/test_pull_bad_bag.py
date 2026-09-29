@@ -62,6 +62,14 @@ class Pure(unittest.TestCase):
         self.assertIn("Must pass: tests/test_a.py::t tests/test_b.py", pbb.pull_body("1", "s", t, "u"))
         self.assertIn("Must pass: tests/test_a.py::t tests/test_b.py", pbb.reland_body("1", "2", "s", t))
 
+    def test_pytest_that_never_ran_is_not_green(self):
+        t = ["tests/test_a.py::t"]
+        with self.assertRaises(RuntimeError):
+            pbb.read_result(t, 1, "/usr/bin/python3: No module named pytest")
+        self.assertEqual(pbb.read_result(t, 0, "1 passed in 0.1s"), set())
+        self.assertEqual(pbb.read_result(t, 1, "FAILED tests/test_a.py::t - boom\n1 failed"), set(t))
+        self.assertEqual(pbb.read_result(t, 4, "ERROR: not found\nno tests ran in 0.01s"), set(t))
+
     def test_owns(self):
         with tempfile.TemporaryDirectory() as d:
             pbb.STATE = Path(d) / "s.json"
@@ -118,10 +126,15 @@ class EndToEnd(unittest.TestCase):
         runs = []
 
         def fake_run_tests(wt, tests):
+            # CI's python has no pytest: call each test function directly.
             runs.append(git(wt, "rev-parse", "HEAD"))
-            p = subprocess.run([sys.executable, "-m", "pytest", "-q", "-rfE", "-p", "no:cacheprovider", *tests],
-                               cwd=wt, capture_output=True, text=True)
-            return set(pbb.failed_tests(p.stdout) or [])
+            bad = set()
+            for t in tests:
+                f, fn = t.split("::")
+                code = f"import runpy; runpy.run_path({f!r})[{fn!r}]()"
+                if subprocess.run([sys.executable, "-c", code], cwd=wt, capture_output=True).returncode:
+                    bad.add(t)
+            return bad
 
         pbb.run_tests = fake_run_tests
         wt = tempfile.mkdtemp()

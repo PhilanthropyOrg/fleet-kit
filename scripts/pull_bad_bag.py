@@ -177,9 +177,20 @@ def run_tests(wt: str, tests: list[str]) -> set[str]:
          *present],
         cwd=wt, capture_output=True, text=True, timeout=1800, env=env,
     )
-    out = r.stdout + r.stderr
+    return read_result(present, r.returncode, r.stdout + r.stderr)
+
+
+_PYTEST_SUMMARY = re.compile(r"\b\d+ (?:passed|failed|errors?|skipped|deselected)\b|no tests ran")
+
+
+def read_result(present: list[str], rc: int, out: str) -> set[str]:
+    """Failing subset of `present` from one pytest run. No pytest summary line means pytest never
+    ran (missing module, broken interpreter): raise, so the caller hands off instead of reading
+    silence as green and standing down on a red main."""
+    if not _PYTEST_SUMMARY.search(out):
+        raise RuntimeError(f"pytest did not run (rc={rc}): {out.strip()[-300:]}")
     bad = {t for t in present if any(f.startswith(t) or t.startswith(f) for f in failed_tests(out) or [])}
-    if r.returncode not in (0, 1) and not bad:
+    if rc not in (0, 1) and not bad:
         # pytest itself broke (collection error, rc 2-4): count every requested test as failing.
         bad = set(present)
     return bad
