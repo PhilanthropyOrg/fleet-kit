@@ -128,7 +128,10 @@ def test_gh_denial_becomes_one_ask_per_verb() -> None:
     p = da.plan_ask("sentry", "run9", dn, [])
     assert p and p["why"].startswith("permission denied: gh issue create"), p
     assert da.plan_ask("sentry", "run10", dn, [{"member": "sentry", "why": p["why"]}]) is None
-    print("ok  gh denials -> one ask; already-open ask not repeated; hook redirects skipped")
+    answered = {"member": "sentry", "why": p["why"], "status": "denied", "answered_at": 1000.0}
+    assert da.plan_ask("sentry", "run11", dn, [answered], now=1000.0 + 86400) is None
+    assert da.plan_ask("sentry", "run12", dn, [answered], now=1000.0 + 15 * 86400) is not None
+    print("ok  gh denials -> one ask; open or recently answered ask not repeated; hook redirects skipped")
 
 
 def test_guard_hook_block_is_not_an_ask() -> None:

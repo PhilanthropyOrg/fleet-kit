@@ -155,6 +155,8 @@ work done).
    test runs match the same pattern, and passes lost 20-50 min each polling them
    (2026-09-28). If a full suite won't fit this pass's budget, run the targeted tests for what
    you touched.** There is no wakeup: `ScheduleWakeup` is denied.
+   `gh issue edit` is denied by design: board labels are gru's and marie's. Name the label
+   you would set in your `Outcome:` line and move on; never re-ask for it (asks #71-#109).
 3b. **A browser ships in this image — USE IT when the item touches rendered UI.** Playwright +
    headless chromium are installed and verified live; "no browser tooling" was the reason 15
    of your own self-critiques gave for missing an issue's OWN acceptance criteria. Same
