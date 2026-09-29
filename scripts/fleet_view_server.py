@@ -52,6 +52,7 @@ import scoreboard        # noqa: E402  (2026-09-24 throughput scoreboard: items/
 import issues_per_hour_chart  # noqa: E402  (full-width 7d graph on top of scoreboard.resolved_events)
 import member_spec       # noqa: E402
 import overrides as ov   # noqa: E402  ('overrides' shadows nothing here; keep the module name clear)
+import member_pause      # noqa: E402  (fk#1429: POST /api/members/<name>/pause + /resume)
 
 REPO = os.environ.get("FLEET_REPO", "")
 LOG_DIR = Path(os.environ.get("FLEET_LOG_DIR", Path.home() / "Library" / "Logs" / "fleet-kit")).expanduser()
@@ -227,6 +228,52 @@ def next_fires() -> list[dict]:
         })
     out.sort(key=lambda m: (m["in_s"] is None, m["in_s"]))
     return out
+
+
+def _member_runs(name: str) -> list[dict]:
+    """Every runs.jsonl record for `name`, one per run_id (its own newest row) -- same tail
+    read + last-per-run_id collapse open_runs.py's own helpers do, just not filtered down to
+    "open" or "minion" only. Cheap: one bounded tail read of the shared log, no gh, no LLM."""
+    last: dict[str, dict] = {}
+    for r in open_runs._tail_records(RUNS_FILE):
+        rid = r.get("run_id")
+        if rid:
+            last[rid] = r
+    return [r for r in last.values() if r.get("member") == name]
+
+
+def _member_ping(name: str, spec: dict) -> dict:
+    """fk#1429: GET /api/members/<name>/ping's payload. `running` reuses open_runs.py's own
+    "a started row with no terminal row yet, within FLEET_OPEN_RUN_MAX_S" rule; `next_due`
+    reuses next_fires()'s pure schedule math. No gh call, no LLM -- everything here is a local
+    file/db read."""
+    eff, _ = ov.apply(spec)
+    now = time.time()
+    mine = _member_runs(name)
+    running_rows = [r for r in mine if r.get("status") == "started"
+                    and now - open_runs._row_ts(r) <= open_runs.MAX_AGE_S]
+    running_since = max((open_runs._row_ts(r) for r in running_rows), default=None)
+    terminal_rows = [r for r in mine if r.get("status") != "started"]
+    last_run = None
+    if terminal_rows:
+        t = max(terminal_rows, key=open_runs._row_ts)
+        last_run = {"status": t.get("status"), "at": open_runs._row_ts(t)}
+    next_due = next((f["next_at"] for f in next_fires() if f["member"] == name), None)
+    db = fleet_db.connect()
+    inbox_open = len(fleet_msg.inbox(db, name))
+    paused = member_pause.get(name, LOG_DIR)
+    return {
+        "member": name,
+        "enabled": bool(eff.get("enabled")),
+        "running": running_since is not None,
+        "running_since": running_since,
+        "last_run": last_run,
+        "next_due": next_due,
+        "inbox_open": inbox_open,
+        "paused": bool(paused and paused.get("paused")),
+        "paused_since": (paused or {}).get("since"),
+        "paused_by": (paused or {}).get("by"),
+    }
 
 
 _LAST_GH_ERROR: dict[str, str] = {"msg": ""}  # last `gh` failure reason, so a caller can tell
@@ -2373,6 +2420,34 @@ class Handler(BaseHTTPRequestHandler):
                     if q in _subscribers:
                         _subscribers.remove(q)
             return
+        # fk#1429: GET /api/members/<name>/ping -- cheap liveness + command surface for one
+        # member. Unauthenticated read, same as every other GET route on this dashboard.
+        ping_match = re.fullmatch(r"/api/members/([^/]+)/ping", path)
+        if ping_match:
+            try:
+                specs = {s["name"]: s for s in member_spec.load_all()}
+            except Exception as exc:  # noqa: BLE001
+                self._json({"error": f"{type(exc).__name__}: {exc}"}, 500)
+                return
+            name = ping_match.group(1)
+            if name not in specs:
+                self._json({"error": f"unknown member {name!r}"}, 404)
+                return
+            self._json(_member_ping(name, specs[name]))
+            return
+        # fk#1429: GET /api/messages/<id> -- the ack/done readback for a command sent through
+        # POST /api/members/<name>/command (or any fleet_msg message, by id).
+        msg_match = re.fullmatch(r"/api/messages/(\d+)", path)
+        if msg_match:
+            db = fleet_db.connect()
+            msg = fleet_msg.get(db, int(msg_match.group(1)))
+            if not msg:
+                self._json({"error": "no such message"}, 404)
+                return
+            self._json({"id": msg["id"], "state": msg["status"], "ack_text": msg["ack_note"],
+                       "acked_at": msg["acked_at"], "done_text": msg["done_note"],
+                       "done_at": msg["done_at"]})
+            return
         self.send_response(404)
         self.end_headers()
 
@@ -2633,6 +2708,61 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"ok": False, "error": str(exc)}, 500)
                 return
             self._json({"ok": True, "started": name})
+            return
+
+        # fk#1429: POST /api/members/<name>/command -- write a fleet_msg (kind `command`) to
+        # that member and trigger the existing wake path (fleet_msg.py send()+wake(), the same
+        # mechanism a `cause`/`incident` send already uses to launch the recipient's next pass
+        # now instead of waiting for its cron cadence). `woke` is literally true, or the string
+        # "queued-busy" for every non-woken reason (cooldown, disabled, paused, ...) -- the
+        # message is queued in the inbox either way; wake_reason distinguishes why on `send`'s
+        # own JSON, this route just needs "did it fire right now".
+        cmd_match = re.fullmatch(r"/api/members/([^/]+)/command", path)
+        if cmd_match:
+            name = cmd_match.group(1)
+            if name not in MEMBERS:
+                self._json({"ok": False, "error": f"unknown member {name!r}"}, 400)
+                return
+            text = str(body.get("text") or "").strip()
+            if not text:
+                self._json({"ok": False, "error": "text required"}, 400)
+                return
+            if len(text) > 8000:
+                self._json({"ok": False, "error": "text too long (max 8000 chars)"}, 400)
+                return
+            sender = str(body.get("from") or "reif").strip() or "reif"
+            db = fleet_db.connect()
+            sent = fleet_msg.send(db, sender, [name], "command", f"command:{text[:120]}", text)
+            woken = fleet_msg.wake(db, sent, "command")
+            row = woken[0]
+            self._json({"ok": True, "msg_id": row["id"], "woke": True if row["woken"] else
+                       "queued-busy"}, 202)
+            return
+
+        # fk#1429: POST /api/members/<name>/pause and /resume -- run_member.sh skips that
+        # member's scheduled AND woken passes until resumed (a pass already in flight is not
+        # touched); fleet_msg.wake() also refuses to wake a paused member. Persisted as a file
+        # under FLEET_LOG_DIR, so it survives a container redeploy the same way the wake
+        # cooldown stamp does.
+        pause_match = re.fullmatch(r"/api/members/([^/]+)/pause", path)
+        if pause_match:
+            name = pause_match.group(1)
+            if name not in MEMBERS:
+                self._json({"ok": False, "error": f"unknown member {name!r}"}, 400)
+                return
+            by = str(body.get("by") or "reif (fleet-view)").strip() or "reif (fleet-view)"
+            rec = member_pause.pause(name, by, log_dir=LOG_DIR)
+            self._json({"ok": True, "paused": True, "since": rec["since"], "by": rec["by"]})
+            return
+
+        resume_match = re.fullmatch(r"/api/members/([^/]+)/resume", path)
+        if resume_match:
+            name = resume_match.group(1)
+            if name not in MEMBERS:
+                self._json({"ok": False, "error": f"unknown member {name!r}"}, 400)
+                return
+            resumed = member_pause.resume(name, log_dir=LOG_DIR)
+            self._json({"ok": True, "paused": False, "resumed": resumed})
             return
 
         self.send_response(404)

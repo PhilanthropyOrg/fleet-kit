@@ -409,7 +409,11 @@ curl -X POST https://<your-host>/api/run_now \
 ```
 
 Write routes: `run_now`, `fleet_toggle`, `steer`, `prune`, `close_pr`, `create_issue`,
-`comment_issue`, `close_issue`.
+`comment_issue`, `close_issue`, `members/<name>/command`, `members/<name>/pause`,
+`members/<name>/resume`.
+
+**Pinging one member** (its status, sending it a command, reading back whether it understood
+and finished, pause/resume) has its own short writeup: `docs/member-api.md`.
 
 ### Read routes (GET, no key)
 
@@ -431,6 +435,8 @@ from the dashboard URL. All of these return JSON and send
 | `/api/fleet_state` | small | env flags: `FLEET_ENABLED`, `REPO_URL`, per-member on/off |
 | `/api/pass_log?member=` | varies | tail of one member's log |
 | `/api/stream` | SSE | live event stream |
+| `/api/members/<name>/ping` | small | one member's liveness: `enabled`, `running`, `last_run`, `next_due`, `inbox_open`, `paused`. 404 for an unknown member. See `docs/member-api.md` |
+| `/api/messages/<id>` | tiny | a `fleet_msg` message's state: `open`\|`understood`\|`done`\|`acked`\|`replied`, `ack_text`, `done_text`. See `docs/member-api.md` |
 
 **Shipped work** is `gh.merged[]` — each entry has `number`, `title`, `url`, `mergedAt`,
 `headRefName`, `author`, and `files[]` with per-file `additions`/`deletions`.
