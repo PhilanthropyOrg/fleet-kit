@@ -731,12 +731,14 @@ def _scoreboard_deploy_runs() -> list[dict]:
 
 
 def _scoreboard_issues_by_number(since_day: str) -> dict[int, dict]:
-    """Closed issues since `since_day`, keyed by number -- state/stateReason/labels/body/closedAt,
-    what scoreboard.resolved_weight needs to score a closingIssuesReferences hit. Cached 30 min,
-    same window as _scoreboard_merged_prs so every merged PR's closed refs resolve to a real row."""
+    """Closed issues since `since_day`, keyed by number --
+    state/stateReason/labels/body/closedAt/comments, what scoreboard.resolved_weight needs to
+    score a closingIssuesReferences hit, plus `comments` for scoreboard.closing_comment_pr_number
+    (an unlinked issue's closer citing a PR by hand). Cached 30 min, same window as
+    _scoreboard_merged_prs so every merged PR's closed refs resolve to a real row."""
     def produce():
         raw = _gh("issue", "list", "--state", "closed", "--search", f"closed:>={since_day}", "--limit", "1000",
-                  "--json", "number,state,stateReason,labels,body,closedAt", timeout=90)
+                  "--json", "number,state,stateReason,labels,body,closedAt,comments", timeout=90)
         try:
             rows = json.loads(raw) if raw else []
         except ValueError:
