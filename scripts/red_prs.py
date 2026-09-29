@@ -15,6 +15,9 @@ red half of the stall detector lives here, next to the one member that acts on i
                                       a Reif-priority item's PR as soon as it is red, any other
                                       fleet PR once it has been red with no real push for
                                       FLEET_RED_PR_STALL_MIN (60) minutes
+                                      `resume`: a minion's red DRAFT (checkpoint / part-done
+                                      work) with no real push for STALL_MIN -- gru sends a minion
+                                      to resume its items, which fixes CI on that branch
   red_prs.py claim <pr>               the dedup gate every fixer dispatch goes through
                                       (run_member.sh calls it for `the-fixer --item <pr>`):
                                       exit 0 = go (recorded), exit 1 = already sent for this
@@ -46,6 +49,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import pr_ci_wait  # noqa: E402 -- one definition of "red" for detector, router and fixer
 
 FLEET_BRANCH = re.compile(r"^(member|minion)/")
+# A minion's own branch: its DRAFT PR is unfinished work the next minion resumes, not a human's.
+MINION_BRANCH = re.compile(r"^member/minion-item\d")
 ITEMS_IN_BRANCH = re.compile(r"-item(\d+(?:_\d+)*)")
 # `commits`/`comments` on a 60-PR list call exceeds GitHub's GraphQL node limit ("requesting up
 # to 600,000 possible nodes"), so the list is light and each fleet PR is then read in full.
@@ -85,7 +90,9 @@ def _ts(iso: str) -> float | None:
 
 def describe(pr: dict, priority_issues: set[int], now: float) -> dict | None:
     """One red/blocked fleet PR as a row, or None if it is not one. Pure."""
-    if not FLEET_BRANCH.match(pr.get("headRefName") or "") or pr.get("isDraft"):
+    head = pr.get("headRefName") or ""
+    draft = bool(pr.get("isDraft"))
+    if not FLEET_BRANCH.match(head) or (draft and not MINION_BRANCH.match(head)):
         return None
     info = pr_ci_wait.classify(pr)
     if info["state"] not in ("RED", "BLOCK"):
@@ -97,6 +104,11 @@ def describe(pr: dict, priority_issues: set[int], now: float) -> dict | None:
     quiet_min = int((now - since) // 60)
     return {
         "number": pr.get("number"),
+        # 2026-09-29: a red minion DRAFT was nobody's -- red_prs skipped drafts, and gru ranked
+        # its item like any new one, so checkpoints #8531/#8550/#8553/#8603/#8604 sat red 14-22h.
+        # It gets a minion (resume the branch, which the stop hook keeps on it until CI is green),
+        # not a fixer: a checkpoint is unfinished work, not a finished build with a red check.
+        "kind": "resume" if draft else "fix",
         "state": info["state"],
         "failed": info["failed"],
         "review_blocked": info["review_blocked"],
@@ -197,21 +209,25 @@ def record(ledger: dict, pr: int, content: str, now: float, killed: list[float] 
 
 
 def plan(rows: list[dict], ledger: dict, now: float, limit: int,
-         killed: dict[int, list[float]] | None = None) -> dict:
-    """Which red PRs get a fixer this pass. Reif-priority first, then oldest quiet. Pure."""
-    due, held, exhausted = [], [], []
-    wanted = [r for r in rows if r["reif_priority"] or r["stalled"]]
+         killed: dict[int, list[float]] | None = None, resume_limit: int = 3) -> dict:
+    """Which red PRs get a fixer (`due`) or a resuming minion (`resume`, red minion drafts) this
+    pass. Reif-priority first, then oldest quiet. Pure."""
+    due, held, exhausted, resume = [], [], [], []
+    # A red draft may be a minion mid-build: only an idle one (stalled) is resumed.
+    wanted = [r for r in rows if r["stalled"] or (r["reif_priority"] and r.get("kind") != "resume")]
     wanted.sort(key=lambda r: (0 if r["reif_priority"] else 1, -r["minutes_since_real_push"]))
     for r in wanted:
         v = verdict(effective(ledger.get(str(r["number"])), (killed or {}).get(r["number"], [])),
                     r["content"], now)
-        if v == "go" and len(due) < limit:
+        if v == "go" and r.get("kind") == "resume" and len(resume) < resume_limit:
+            resume.append(r)
+        elif v == "go" and r.get("kind") != "resume" and len(due) < limit:
             due.append(r)
         elif v == "exhausted":
             exhausted.append(r["number"])
         else:
             held.append({"number": r["number"], "why": v if v != "go" else "over this pass's limit"})
-    return {"due": due, "held": held, "exhausted": exhausted,
+    return {"due": due, "resume": resume, "held": held, "exhausted": exhausted,
             "not_yet_stalled": [r["number"] for r in rows if r not in wanted]}
 
 
@@ -229,7 +245,8 @@ def _open_prs(repo: str | None, gh=pr_ci_wait._gh) -> list[dict] | None:
     except json.JSONDecodeError:
         return None
     wanted = [int(p["number"]) for p in light
-              if not p.get("isDraft") and FLEET_BRANCH.match(p.get("headRefName") or "")]
+              if FLEET_BRANCH.match(p.get("headRefName") or "")
+              and (not p.get("isDraft") or MINION_BRANCH.match(p.get("headRefName") or ""))]
     # In parallel: one `gh pr view` per fleet PR serially took >120s in the container on
     # 2026-09-25 and gru's Bash call was backgrounded mid-step.
     from concurrent.futures import ThreadPoolExecutor
@@ -305,9 +322,16 @@ def main(argv: list[str] | None = None) -> int:
                         f"{' review-BLOCK' if r['review_blocked'] else ''}" for r in rows) or "none")
         return 0
     with _locked_ledger(ledger_path()) as box:
-        out = plan(rows, box["data"], now, max(0, a.limit), killed_fixer_runs(ledger_path().parent))
-    out["due"] = [{k: r[k] for k in ("number", "state", "failed", "review_blocked", "items",
-                                     "reif_priority", "minutes_since_real_push")} for r in out["due"]]
+        out = plan(rows, box["data"], now, max(0, a.limit), killed_fixer_runs(ledger_path().parent),
+                   resume_limit=_env_int("FLEET_GRU_MAX_RESUMES", 3))
+        # A resume goes out through dispatch_member.sh, which never calls `claim`: listing it
+        # here is its dispatch record, so the same red content is not re-sent inside the window.
+        for r in out["resume"]:
+            record(box["data"], r["number"], r["content"], now)
+    keys = ("number", "state", "failed", "review_blocked", "items", "reif_priority",
+            "minutes_since_real_push")
+    out["due"] = [{k: r[k] for k in keys} for r in out["due"]]
+    out["resume"] = [{k: r[k] for k in keys} for r in out["resume"]]
     print(json.dumps(out, indent=1))
     return 0
 
