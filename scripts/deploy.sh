@@ -205,6 +205,11 @@ run_args() {
     # identity all keyed off the wrong name forever. Strip only a trailing "-green" (anchored,
     # not a substring replace -- an instance actually named e.g. "evergreen-fleet" must be
     # unaffected) so the container's own idea of its name matches what it will be renamed TO.
+    # Worker node ssh config + key (node_up.sh). Absent: minions run on this box, as before.
+    local node_dir="${FLEET_NODE_HOST_DIR:-$HOME/.config/fleet-kit/node}"
+    if [ -f "$node_dir/config" ]; then
+        secret_mounts+=(-v "$node_dir:/root/.fleet-node:ro")
+    fi
     local instance_name="${name%-green}"
     echo -d --name "$name" \
         -e FLEET_REPO_URL="$FLEET_REPO_URL" \

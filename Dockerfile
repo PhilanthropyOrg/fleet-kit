@@ -98,6 +98,13 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
       > /etc/apt/sources.list.d/github-cli.list \
     && apt-get update -qq && apt-get install -y -qq gh && rm -rf /var/lib/apt/lists/*
 
+# cloudflared: the ssh ProxyCommand node_minion.sh uses to reach a worker node (node_up.sh).
+# Worker nodes sit behind a Cloudflare tunnel, not on the hub's LAN.
+ARG CLOUDFLARED_VERSION=2026.8.2
+RUN curl -fsSL -o /usr/local/bin/cloudflared \
+      "https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}/cloudflared-linux-$(dpkg --print-architecture)" \
+    && chmod +x /usr/local/bin/cloudflared
+
 # node — gh#126: without it, `which node` fails and any downstream repo's tests that shell out
 # to node (nonprofit-atlas's dock-inbox.js reconnect/PostHog coverage, for one) silently SKIP
 # instead of running, so no pass in this sandbox ever exercises that real client-side behavior.
