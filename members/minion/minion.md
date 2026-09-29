@@ -147,18 +147,14 @@ work done).
    a pass died (563 whole-suite runs, 1,008 commands backgrounded at 120s, 103 passes that
    ended "waiting for the background run" with a finished build never pushed, 7 days to
    2026-09-19). **You are a
-   one-shot `claude -p` pass, same as gru and the-fixer (persona_law.md §12): if you background
-   that test command, use `Bash(run_in_background: true)` — never a raw shell `&` + `wait
-   "$PID"`, which gh#152/gh#283 showed silently drops the result (it either errors instantly
-   with "not a child of this shell" across separate Bash calls, or leaves the whole process
-   tree vulnerable to an external kill mid-run). Then `TaskOutput(task_id, block: true, timeout:
-   600000)` inside THIS turn before you push or report. Ending your turn to "wait for the
-   completion notification" instead means nobody ever sees the result; there is no later turn
-   that resumes you. If you can't afford to wait for a full suite in this pass's budget, run a
-   narrower, faster command you CAN wait for (targeted tests for what you touched) rather than
-   backgrounding a slow one you won't see finish.** The Stop hook refuses to end your pass
-   while any task you launched (background Bash, Monitor) is still running -- `TaskStop` the
-   ones you no longer need before your report. There is no wakeup: `ScheduleWakeup` is denied.
+   one-shot `claude -p` pass (persona_law.md §12), and a minion runs with background tasks OFF
+   (`CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`, set by run_member.sh): run `verified_test.sh`
+   and every other command in the FOREGROUND, in one Bash call. It may take up to 20 min
+   (pass `timeout: 1800000` for up to 30) and its output comes back in that same call. Never a
+   shell `&`, `nohup`, or a `pgrep -f verified_test.sh` / `ps | grep` wait loop: other minions'
+   test runs match the same pattern, and passes lost 20-50 min each polling them
+   (2026-09-28). If a full suite won't fit this pass's budget, run the targeted tests for what
+   you touched.** There is no wakeup: `ScheduleWakeup` is denied.
 3b. **A browser ships in this image — USE IT when the item touches rendered UI.** Playwright +
    headless chromium are installed and verified live; "no browser tooling" was the reason 15
    of your own self-critiques gave for missing an issue's OWN acceptance criteria. Same
