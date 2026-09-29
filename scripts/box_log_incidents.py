@@ -13,7 +13,10 @@ machine per incident key -- the key the box already put on every actionable line
                                              same inbox.file_or_comment_alert the email pager uses
                                              (so a box-log key and a mailed page never twin)
   same key again                           -> counted; at most one comment per REPEAT_COMMENT_S
-  the job's next EXIT without the key      -> closed ("recovered"), with the clean run's line
+  the job's next EXIT without the key      -> closed ("recovered"), with the clean run's line --
+    at least CLEAN_S after the key was last seen    only once the key has been gone CLEAN_S (box
+                                             time), so a canary that fails every other run stays
+                                             ONE open item instead of filing/closing all day
   nginx:/journal: keys (no run frames)     -> closed after QUIET_CLOSE_S with no repeat
 
 State: logs/box-log-incidents.json ({key: {issue, job, first, last, count, commented}}).
@@ -22,6 +25,7 @@ Usage: box_log_incidents.py <box-logs.jsonl>
 """
 from __future__ import annotations
 
+import calendar
 import json
 import re
 import subprocess
@@ -34,11 +38,21 @@ from notify_reif_hq import read_new_records  # noqa: E402
 
 REPEAT_COMMENT_S = 6 * 3600
 QUIET_CLOSE_S = 24 * 3600
+CLEAN_S = 30 * 60
 UNFRAMED = ("nginx:", "journal:")
 
 
 def actionable(r: dict) -> bool:
     return bool(r.get("key")) and (r.get("level") in ("ERROR", "ALERT") or bool(r.get("exit")))
+
+
+def _t(r: dict, now: float) -> float:
+    """The box's own timestamp for a record (a backlog arrives in one batch; `now` would
+    squash an hour of runs into one instant). Falls back to `now`."""
+    try:
+        return float(calendar.timegm(time.strptime(str(r.get("ts"))[:19], "%Y-%m-%dT%H:%M:%S")))
+    except ValueError:
+        return now
 
 
 def fold(state: dict, records: list[dict], now: float) -> list[tuple]:
@@ -50,18 +64,19 @@ def fold(state: dict, records: list[dict], now: float) -> list[tuple]:
             k = r["key"]
             inc = state.get(k)
             if inc is None:
-                state[k] = {"issue": None, "job": r.get("job", ""), "first": now, "last": now,
-                            "count": 1, "commented": now}
+                state[k] = {"issue": None, "job": r.get("job", ""), "first": now,
+                            "last": _t(r, now), "count": 1, "commented": now}
                 actions.append(("open", k, r))
             else:
                 inc["count"] += 1
-                inc["last"] = now
+                inc["last"] = _t(r, now)
                 if now - inc["commented"] >= REPEAT_COMMENT_S:
                     inc["commented"] = now
                     actions.append(("repeat", k, r, inc["count"]))
         if r.get("level") == "EXIT":
-            ran = set(r.get("run_keys") or [])
-            for k in [k for k, v in state.items() if v["job"] == r.get("job") and k not in ran]:
+            ran, at = set(r.get("run_keys") or []), _t(r, now)
+            for k in [k for k, v in state.items() if v["job"] == r.get("job") and k not in ran
+                      and at - v["last"] >= CLEAN_S]:
                 del state[k]
                 actions.append(("close", k, f"recovered: {r.get('msg', '')}"))
     for k in [k for k, v in state.items()
