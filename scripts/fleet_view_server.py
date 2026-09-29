@@ -830,21 +830,25 @@ def metrics_snapshot() -> dict:
                                      "series": daily_series("fleet.backlog_open")}
         fresh["fleet.backlog_open"] = (gh.get("issues_at"), gh_cad)
 
-        # fleet.prs_open
+        # fleet.prs_open (gh#1393: folds fleet.prs_open_over_4h's own age/bad signal into this
+        # tile's sub on Home -- Reif: "merge with PRs open > 4h" -- that hidden id still
+        # computes and registers below for anything else reading it by id).
         prs = gh.get("prs") or []
         drafts = sum(1 for p in prs if p.get("isDraft"))
         if gh.get("prs_at"):
             upsert("fleet.prs_open", len(prs))
         _backfill_daily(db, "fleet.prs_open", days, lambda: _gh_dates("pr"))
-        out["fleet.prs_open"] = {"value": len(prs) if gh.get("prs_at") else None,
-                                 "sub": f"{drafts} draft · {len(prs) - drafts} ready for review" if gh.get("prs_at") else "waiting for the first GitHub read",
-                                 "series": daily_series("fleet.prs_open")}
-        fresh["fleet.prs_open"] = (gh.get("prs_at"), gh_cad)
-
         # fleet.prs_open_over_4h (gh#8212): the tile that would have caught 2026-09-26's stall --
         # PRs sitting open with nobody landing them. Age is from createdAt.
         aged = sorted(((now - t, p) for p in prs if (t := _iso_ts(p.get("createdAt"))) is not None
                        and now - t > PR_STUCK_S), key=lambda x: -x[0])
+        out["fleet.prs_open"] = {"value": len(prs) if gh.get("prs_at") else None,
+                                 "bad": bool(aged),
+                                 "sub": (f"{len(aged)} older than {PR_STUCK_S // 3600}h · oldest #{aged[0][1].get('number')}, open {_age_words(aged[0][0])}"
+                                         if aged else f"{drafts} draft · {len(prs) - drafts} ready for review") if gh.get("prs_at") else "waiting for the first GitHub read",
+                                 "series": daily_series("fleet.prs_open")}
+        fresh["fleet.prs_open"] = (gh.get("prs_at"), gh_cad)
+
         if gh.get("prs_at"):
             upsert("fleet.prs_open_over_4h", len(aged))
         out["fleet.prs_open_over_4h"] = {
@@ -978,9 +982,14 @@ def metrics_snapshot() -> dict:
         fresh["fleet.merged_per_day"] = (_cached_at(f"scoreboard_merged:{days[0]}"), 1800)
         cpr = scoreboard.closed_per_run(merged14, all_runs, now)
         upsert("fleet.closed_per_minion_run", cpr)
+        # gh#1393: shown on Home as "Minion yield" -- one tile in place of PRs opened, Spawns
+        # (minion), Items/run and Closed/run, which still compute and register below for
+        # anything else reading them by id.
         out["fleet.closed_per_minion_run"] = {
             "value": None if cpr is None or not merged14 else round(cpr, 2),
-            "sub": "issues closed by merged minion PRs per minion run, 24h" if merged14 else "unavailable (merged PR read failed)",
+            "label": "Minion yield",
+            "sub": (f"{spawns24} runs → {opened24 if opened_ok else '?'} PRs · {ipr if ipr is not None else '?'} item/run"
+                    + (f" (target {target})" if target.isdigit() else "")) if merged14 else "unavailable (merged PR read failed)",
             "series": daily_series("fleet.closed_per_minion_run")}
         fresh["fleet.closed_per_minion_run"] = (min(sb_at, _cached_at("scoreboard_runs")), 1800)
         deploys = _scoreboard_deploy_runs()
@@ -988,7 +997,9 @@ def metrics_snapshot() -> dict:
         live24 = sum(1 for t in scoreboard.live_merges(merged14, deploys) if now - t < 86400)
         out["fleet.shipped_live_per_day"] = {
             "value": live24 if deploys and merged14 else None,
-            "sub": (f"merged + deployed, 24h · {sum(live.values())} in 14d" if deploys and merged14
+            # gh#1393: folds fleet.merged_per_day's own count in rather than showing it as its
+            # own tile -- the gap between the two is the deploy lag.
+            "sub": (f"{merged24} merged · {sum(live.values())} in 14d" if deploys and merged14
                     else "unavailable (merged PR read failed)" if deploys
                     else f"unavailable (no successful {_deploy_workflow()} runs read)"),
             "series": [{"day": d, "value": live[d]} for d in days]}
@@ -2581,7 +2592,14 @@ def main() -> int:
     threading.Thread(target=STATE.poll_gh_forever, daemon=True).start()
     threading.Thread(target=STATE.tail_member_logs_forever, daemon=True).start()
     threading.Thread(target=watch_and_broadcast, daemon=True).start()
-    STATE.gh = poll_gh_state()  # one synchronous poll so the first page load isn't empty
+    # gh#1393: apply_gh (not a bare re-assignment of STATE.gh) so this one-time synchronous poll
+    # -- which races poll_gh_forever's own first tick, both doing the same ~7 gh calls -- always
+    # merges through merge_gh_poll and sets issues_at/prs_at/merged_at. Overwriting STATE.gh
+    # outright here could win that race with a dict that has no _at keys at all (only
+    # merge_gh_poll adds them), leaving Backlog/Open PRs/PRs open>4h reading "stale · source
+    # never read" until poll_gh_forever's NEXT tick landed, up to GH_POLL_S later -- live on
+    # dino right after every restart, which is exactly when a human looks at the page.
+    STATE.apply_gh(poll_gh_state())
 
     # gh#553 VP review round 1, fix 3: same reasoning, for backlog_history's own gh calls --
     # warm the cache once before serving so the very first Stats page load never pays the
