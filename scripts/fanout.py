@@ -468,11 +468,11 @@ def main(argv=None) -> int:
                            help="minion's wall-clock timeout (default $FLEET_MINION_TIMEOUT_S, "
                                 "else members/minion/minion.fleet.json timeout_s; 0 = no ceiling)")
     batches_p.add_argument("--unit-seconds", type=float,
-                           default=float(os.environ.get("FLEET_MINION_UNIT_SECONDS") or 600),
+                           default=float(os.environ.get("FLEET_MINION_UNIT_SECONDS") or 400),
                            help="wall-clock of one complexity-5 item inside a minion pass, CI "
-                                "loop included (default $FLEET_MINION_UNIT_SECONDS, else 600: in a 10-issue "
-                                "batch the ~9 min run overhead is paid once; tests ~2.5x faster "
-                                "since 09-29 eatmydata + targeted-only)")
+                                "loop included (default $FLEET_MINION_UNIT_SECONDS, else 400: real runs "
+                                "1 item 794s, 3 items 1312s -> ~260s marginal per item once the "
+                                "~9 min overhead is paid; 10 c5 items fit minion's 6600s)")
 
     # Backward compatible: no subcommand and --allowance-pct present -> old `pack` behavior,
     # unchanged interface for any existing caller that predates the `pack`/`batches` split.

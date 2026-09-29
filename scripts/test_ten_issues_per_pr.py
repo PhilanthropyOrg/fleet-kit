@@ -63,7 +63,7 @@ class TenPerPr(unittest.TestCase):
         self.assertEqual(timeout, spec["timeout_s"])
         r = fanout.pack_batches([{"number": i, "complexity": 5} for i in range(10)], 0, 30,
                                 solo_complexity_floor=11, target_items=10, timeout_s=timeout,
-                                unit_seconds=600, min_items=10)
+                                unit_seconds=400, min_items=10)
         self.assertEqual(_sizes(r), [10], r["max_batch_weight"])
 
 
