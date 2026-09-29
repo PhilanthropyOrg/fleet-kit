@@ -292,21 +292,31 @@ def _migrate(conn: sqlite3.Connection, db_path: Path) -> None:
     # `runs`, raising a raw `sqlite3.OperationalError: no such table: main.runs`. Applying
     # SCHEMA here, inside the flock, closes that window the same way _migrate_composite_pk's
     # own internal window was already closed.
+    # fk#1429: the three ADD-COLUMN loops below used to run AFTER this `with` exited -- a plain
+    # PRAGMA table_info() read followed by an unlocked ALTER TABLE. Two threads racing
+    # connect() against the same not-yet-migrated db could both read "column missing" before
+    # either had added it, then both issue the same ALTER TABLE ... ADD COLUMN and the second
+    # raises a raw `sqlite3.OperationalError: duplicate column name` -- selftest.py's own
+    # "fleet.db composite-PK migration is lock-serialized" check (8 concurrent connect() calls
+    # against one legacy db) caught it live the moment a third pair of columns (msgs'
+    # done_note/done_at) widened the race window enough to land in CI. Same fix as
+    # _migrate_composite_pk just above: move it inside the SAME lock, so only one thread's
+    # PRAGMA-then-ALTER sequence ever runs against a given db at a time.
     with _migration_lock(db_path):
         conn.executescript(SCHEMA)
         _migrate_composite_pk(conn)
-    have = {r[1] for r in conn.execute("PRAGMA table_info(runs)")}
-    for name, decl in _ADD_COLUMNS:
-        if name not in have:
-            conn.execute(f"ALTER TABLE runs ADD COLUMN {name} {decl}")
-    have_asks = {r[1] for r in conn.execute("PRAGMA table_info(asks)")}
-    for name, decl in _ASK_ADD_COLUMNS:
-        if name not in have_asks:
-            conn.execute(f"ALTER TABLE asks ADD COLUMN {name} {decl}")
-    have_msgs = {r[1] for r in conn.execute("PRAGMA table_info(msgs)")}
-    for name, decl in _MSG_ADD_COLUMNS:
-        if name not in have_msgs:
-            conn.execute(f"ALTER TABLE msgs ADD COLUMN {name} {decl}")
+        have = {r[1] for r in conn.execute("PRAGMA table_info(runs)")}
+        for name, decl in _ADD_COLUMNS:
+            if name not in have:
+                conn.execute(f"ALTER TABLE runs ADD COLUMN {name} {decl}")
+        have_asks = {r[1] for r in conn.execute("PRAGMA table_info(asks)")}
+        for name, decl in _ASK_ADD_COLUMNS:
+            if name not in have_asks:
+                conn.execute(f"ALTER TABLE asks ADD COLUMN {name} {decl}")
+        have_msgs = {r[1] for r in conn.execute("PRAGMA table_info(msgs)")}
+        for name, decl in _MSG_ADD_COLUMNS:
+            if name not in have_msgs:
+                conn.execute(f"ALTER TABLE msgs ADD COLUMN {name} {decl}")
 
 
 def connect(db_path: Path | None = None) -> sqlite3.Connection:
