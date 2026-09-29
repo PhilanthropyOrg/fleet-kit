@@ -104,6 +104,8 @@ jobs:
         run: python3 scripts/test_gh_poll_survives_gh_failure.py
       - name: run test_startup_poll_race_1393.py
         run: python3 scripts/test_startup_poll_race_1393.py
+      - name: run test_home_tile_fixes_1393.py
+        run: python3 scripts/test_home_tile_fixes_1393.py
       - name: run test_account_pool_config_dir.py
         run: python3 scripts/test_account_pool_config_dir.py
       - name: run test_account_pool_order.py
