@@ -241,6 +241,49 @@ def issue_for_ask(ask_id: int, member: str, why: str, unblocks: str | None, prop
     return r.stdout.strip().splitlines()[-1] if r.returncode == 0 and r.stdout.strip() else ""
 
 
+def settle_ask_issue(ask_id: int, outcome: str, note: str, run=None) -> str:
+    """jefe msgs #342/#351: the issue issue_for_ask mirrored used to outlive its ask. A denied or
+    answered ask left an open priority-high backlog item that gru's gates bounced to
+    fleet:needs-spec and marie backfilled by hand (philanthropy 8648-8652 and 8677: all denied, all still
+    cycling). Now the answer settles the mirror: escalated -> fleet:needs-human-op (the
+    NOT_FOR_MINIONS label gate_drops.py skips), anything else -> closed with the answer as the
+    closing comment. Returns the issue URL it touched, or ''."""
+    import os
+    if os.environ.get("FLEET_ASK_ISSUES") != "1":
+        return ""
+    run = run or (lambda cmd: subprocess.run(cmd, capture_output=True, text=True, timeout=60))
+    slug = _repo_slug()
+    if not slug:
+        return ""
+    found = run(["gh", "issue", "list", "--repo", slug, "--state", "open", "--search",
+                 f'"ask #{ask_id} " in:title', "--json", "number,title,url"])
+    if found.returncode != 0:
+        return ""
+    hits = [i for i in json.loads(found.stdout or "[]") if i["title"].startswith(f"ask #{ask_id} ")]
+    if not hits:
+        return ""
+    num = str(hits[0]["number"])
+    if outcome == "escalated":
+        run(["gh", "issue", "edit", num, "--repo", slug, "--add-label", "fleet:needs-human-op",
+             "--remove-label", "fleet:needs-spec"])
+        run(["gh", "issue", "comment", num, "--repo", slug, "--body",
+             f"Ask #{ask_id} escalated to Reif (a true one-way door): {note}"])
+    else:
+        run(["gh", "issue", "close", num, "--repo", slug, "--reason", "not planned", "--comment",
+             f"Ask #{ask_id} {outcome}: {note}\n\nThe work, if any, went to the member named "
+             "there; this mirror has nothing left to build."])
+    return hits[0]["url"]
+
+
+def _settle(ask_id: int, outcome: str, note: str) -> None:
+    try:
+        url = settle_ask_issue(ask_id, outcome, note)
+        if url:
+            print(f"ask {ask_id} board issue settled ({outcome}): {url}")
+    except Exception:  # noqa: BLE001 -- best-effort, the ask row is already answered
+        pass
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(
         description="File, answer, or list fleet asks -- way rare: only a one-way door the fleet "
@@ -362,6 +405,7 @@ def main(argv=None) -> int:
             reason = "already answered" if exists else "no such ask"
             print(f"ask.py: answer {a.id}: {reason}", file=sys.stderr)
             return 1
+        _settle(a.id, a.status, a.answer)
         print(f"ask {a.id} answered")
         return 0
 
@@ -377,10 +421,12 @@ def main(argv=None) -> int:
         if a.cmd == "escalate":
             _notify(member, a.id, f"{why}\n\n{TRIAGE}: no other way -- {a.reason}", sender=TRIAGE)
             _close_triage(conn, a.id, member, f"escalated: {a.reason}")
+            _settle(a.id, "escalated", a.reason)
             print(f"ask {a.id} escalated to Reif")
             return 0
         answer_ask(conn, a.id, f"denied, another way: {a.path}", TRIAGE, status="denied")
         _close_triage(conn, a.id, member, f"denied: {a.path}")
+        _settle(a.id, "denied", a.path)
         if a.to:
             import fleet_msg
             sent = fleet_msg.send(conn, TRIAGE, [a.to], "nudge", f"ask:{a.id}",

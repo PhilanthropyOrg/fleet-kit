@@ -35,5 +35,47 @@ class AskIssueGateLines(unittest.TestCase):
         self.assertNotEqual(status, "MISSING")
 
 
+class AskIssueSettles(unittest.TestCase):
+    """jefe msgs #342/#351: a denied ask's mirror issue closes; an escalated one leaves the gates."""
+
+    def settle(self, outcome, listed):
+        calls = []
+
+        def run(cmd):
+            calls.append(cmd)
+            if cmd[:3] == ["gh", "issue", "list"]:
+                return SimpleNamespace(returncode=0, stdout=listed)
+            return SimpleNamespace(returncode=0, stdout="")
+
+        env = {"FLEET_ASK_ISSUES": "1", "FLEET_REPO_URL": "https://github.com/o/r"}
+        old = {k: os.environ.get(k) for k in env}
+        os.environ.update(env)
+        try:
+            url = ask.settle_ask_issue(7, outcome, "the other way", run=run)
+        finally:
+            for k, v in old.items():
+                os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+        return url, calls
+
+    HIT = '[{"number": 9, "title": "ask #7 (credential): x", "url": "https://github.com/o/r/issues/9"}]'
+
+    def test_denied_closes(self):
+        url, calls = self.settle("denied", self.HIT)
+        self.assertEqual(url, "https://github.com/o/r/issues/9")
+        self.assertEqual(calls[-1][:4], ["gh", "issue", "close", "9"])
+
+    def test_escalated_goes_human_op(self):
+        _, calls = self.settle("escalated", self.HIT)
+        edit = calls[1]
+        self.assertEqual(edit[:4], ["gh", "issue", "edit", "9"])
+        self.assertIn("fleet:needs-human-op", edit)
+        self.assertFalse(any(c[:3] == ["gh", "issue", "close"] for c in calls))
+
+    def test_prefix_twin_untouched(self):
+        url, calls = self.settle("denied", '[{"number": 3, "title": "ask #70 (infra): y", "url": "u"}]')
+        self.assertEqual(url, "")
+        self.assertEqual(len(calls), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
