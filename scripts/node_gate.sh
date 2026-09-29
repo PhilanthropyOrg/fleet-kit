@@ -58,8 +58,25 @@ relay() {  # complete lines only: wc -l never counts a half-written last line
   seen=$total
 }
 
-echo "node-accepted host=$(hostname) slot=$got/$SLOTS items=$items"
-"$PODMAN" exec -e FLEET_RUN_NOW=1 "$CONTAINER" \
+# The hub's accounts (node_minion.sh sends `acct <name> <token>` lines on stdin, never argv): each
+# goes in as FLEET_NODE_TOKEN_<ACCT> and FLEET_NODE_ACCOUNTS keeps the hub's order; podman gets
+# the variable NAMES only, so no token is in any process's argv. run_member.sh prefers them over
+# the node's own fleet.env accounts. An old hub sends nothing: the node's own accounts, as before.
+EXTRA=()
+accts=""
+while IFS=' ' read -r -t "${FLEET_NODE_STDIN_WAIT_S:-10}" kw name tok; do
+  [ "$kw" = "acct" ] && [[ "$name" =~ ^[a-z0-9-]{1,40}$ ]] && [[ "$tok" =~ ^sk-ant-[A-Za-z0-9_-]+$ ]] || continue
+  var="FLEET_NODE_TOKEN_$(echo "$name" | tr '[:lower:]-' '[:upper:]_')"
+  export "$var=$tok"
+  EXTRA+=(-e "$var")
+  accts="${accts:+$accts }$name"
+done
+if [ -n "$accts" ]; then
+  export FLEET_NODE_ACCOUNTS="$accts"
+  EXTRA+=(-e FLEET_NODE_ACCOUNTS)
+fi
+echo "node-accepted host=$(hostname) slot=$got/$SLOTS items=$items${accts:+ accounts=${accts// /,}}"
+"$PODMAN" exec -e FLEET_RUN_NOW=1 ${EXTRA[@]+"${EXTRA[@]}"} "$CONTAINER" \
   bash /fleet-kit/scripts/run_member.sh minion --items "$items" >/dev/null 2>&1 </dev/null &
 pid=$!
 while kill -0 "$pid" 2>/dev/null; do

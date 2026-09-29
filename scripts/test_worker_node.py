@@ -109,6 +109,25 @@ class NodeMinion(unittest.TestCase):
         r = self._run("exit 0\n", items="1;id")
         self.assertEqual(r.returncode, 2)
 
+    def test_sends_the_hubs_accounts_on_stdin_never_argv(self):
+        """Reif 2026-09-29: lucky can use every account, as long as it comes from dino. A refreshing
+        login sends only its access token, and only with time left for a batch."""
+        home = self.d / "home"
+        now = time.time()
+        for acct, tok, left_min in (("gmail", "sk-ant-oat01-gm", 300), ("philanthropy", "sk-ant-oat01-ph", 30)):
+            (home / f".claude-{acct}").mkdir(parents=True)
+            (home / f".claude-{acct}" / ".credentials.json").write_text(json.dumps(
+                {"claudeAiOauth": {"accessToken": tok, "refreshToken": "sk-ant-ort01-SECRET",
+                                   "expiresAt": int((now + left_min * 60) * 1000)}}))
+        self.env.update(HOME=str(home), FLEET_ACCOUNTS="gmail tgp philanthropy bad/name",
+                        CLAUDE_CODE_OAUTH_TOKEN_TGP="sk-ant-oat01-long")
+        r = self._run(f"cat > {self.d}/stdin\necho 'node-accepted host=lucky'\necho 'node-done rc=0'\n")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual((self.d / "stdin").read_text(),
+                         "acct gmail sk-ant-oat01-gm\nacct tgp sk-ant-oat01-long\n",
+                         "philanthropy's token expires in 30 min: not sent; refresh tokens never")
+        self.assertNotIn("sk-ant", (self.d / "ssh_args").read_text())
+
 
 class NodeGate(unittest.TestCase):
     """The node side: the hub's key can run a claimed minion batch and nothing else."""
@@ -134,9 +153,9 @@ esac
                         FLEET_NODE_LOG_DIR=str(self.logs), FLEET_NODE_SLOT_DIR=str(self.d / "slots"),
                         FLEET_NODE_CONTAINER="worker", FLEET_NODE_SLOTS="1", FLEET_NODE_POLL_S="0.2")
 
-    def _gate(self, cmd: str):
+    def _gate(self, cmd: str, stdin: str = ""):
         return subprocess.run(["bash", str(NODE_GATE)], env=dict(self.env, SSH_ORIGINAL_COMMAND=cmd),
-                              capture_output=True, text=True, timeout=30)
+                              input=stdin, capture_output=True, text=True, timeout=30)
 
     def _podman_calls(self):
         f = self.d / "podman_calls"
@@ -160,6 +179,39 @@ esac
         self.assertEqual(lines[-1], "node-done rc=0")
         self.assertIn("exec -e FLEET_RUN_NOW=1 worker bash /fleet-kit/scripts/run_member.sh minion --items 5,6",
                       self._podman_calls())
+
+    def test_hub_accounts_reach_the_container_by_name_only(self):
+        (self.d / "podman").write_text((self.d / "podman").read_text().replace(
+            "exec) sleep 0.5", f'exec) env | grep -E "^FLEET_NODE_(ACCOUNTS|TOKEN_)" | sort > {self.d}/exec_env\n        sleep 0.5'))
+        r = self._gate("minion --items 5,6",
+                       "acct gmail sk-ant-oat01-gm\nacct claude-reif sk-ant-oat01-cr\n"
+                       "acct ../x sk-ant-oat01-bad\nacct tgp not-a-token\n")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("accounts=gmail,claude-reif", r.stdout)
+        calls = self._podman_calls()
+        self.assertNotIn("sk-ant", calls, "tokens never in argv")
+        self.assertIn("exec -e FLEET_RUN_NOW=1 -e FLEET_NODE_TOKEN_GMAIL -e FLEET_NODE_TOKEN_CLAUDE_REIF "
+                      "-e FLEET_NODE_ACCOUNTS worker bash", calls)
+        self.assertEqual((self.d / "exec_env").read_text().splitlines(), [
+            "FLEET_NODE_ACCOUNTS=gmail claude-reif",
+            "FLEET_NODE_TOKEN_CLAUDE_REIF=sk-ant-oat01-cr",
+            "FLEET_NODE_TOKEN_GMAIL=sk-ant-oat01-gm",
+        ])
+
+    def test_run_member_prefers_the_hubs_accounts(self):
+        d = Path(tempfile.mkdtemp())
+        (d / "fleet.env").write_text("FLEET_ACCOUNTS=tgp\nCLAUDE_CODE_OAUTH_TOKEN_TGP=node-own\n")
+        rm = (HERE / "run_member.sh").read_text()
+        start = rm.index('[ -f "${FLEET_ENV_FILE:-./fleet.env}" ]')
+        block = rm[start:rm.index("unset _a _v _t", start)] + "unset _a _v _t\nfi\n"
+        probe = block + 'echo "$FLEET_ACCOUNTS|${CLAUDE_CODE_OAUTH_TOKEN_GMAIL:-}|$CLAUDE_CODE_OAUTH_TOKEN_TGP"\n'
+        env = dict(os.environ, FLEET_ENV_FILE=str(d / "fleet.env"), FLEET_NODE_ACCOUNTS="gmail tgp",
+                   FLEET_NODE_TOKEN_GMAIL="sk-gm", FLEET_NODE_TOKEN_TGP="sk-hub-tgp")
+        out = subprocess.run(["bash", "-c", probe], env=env, capture_output=True, text=True).stdout.strip()
+        self.assertEqual(out, "gmail tgp|sk-gm|sk-hub-tgp")
+        env.pop("FLEET_NODE_ACCOUNTS")
+        out = subprocess.run(["bash", "-c", probe], env=env, capture_output=True, text=True).stdout.strip()
+        self.assertEqual(out, "tgp||node-own", "no hub accounts: the node's own, as before")
 
     def test_busy_node_refuses(self):
         (self.d / "slots").mkdir()
