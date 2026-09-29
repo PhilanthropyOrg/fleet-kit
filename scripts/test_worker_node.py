@@ -180,6 +180,29 @@ esac
         self.assertNotIn("exec", self._podman_calls())
 
 
+class NodeSync(unittest.TestCase):
+    """cron has no XDG_RUNTIME_DIR; rootless podman then cannot see the running worker and
+    node_sync replaced it every tick (lucky 2026-09-29: killed its first boot mid-clone)."""
+
+    def test_podman_gets_the_login_runtime_dir_under_cron(self):
+        d = Path(tempfile.mkdtemp())
+        (d / "bin").mkdir()
+        _sh(d / "bin" / "git", 'case "$1" in rev-parse) echo abc123 ;; esac\n')
+        _sh(d / "bin" / "podman", f"""echo "XDG=${{XDG_RUNTIME_DIR:-unset}} $@" >> {d}/podman_calls
+case "$*" in *fleet.sha*) echo abc123 ;; *Running*) echo true ;; esac
+""")
+        (d / "node.env").write_text("FLEET_NODE_INSTANCE=x\nFLEET_NODE_CONTAINER=w\n")
+        env = {k: v for k, v in os.environ.items() if k != "XDG_RUNTIME_DIR"}
+        env.update(PATH=f"{d / 'bin'}:{env['PATH']}", FLEET_NODE_ENV=str(d / "node.env"), TMPDIR=str(d))
+        r = subprocess.run(["bash", str(HERE / "node_sync.sh")], env=env, capture_output=True, text=True,
+                           timeout=30)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        calls = (d / "podman_calls").read_text().splitlines()
+        self.assertTrue(calls)
+        self.assertTrue(all(c.startswith(f"XDG=/run/user/{os.getuid()} ") for c in calls), calls)
+        self.assertFalse(any(" build " in c or " run " in c for c in calls), "same sha + running: no-op")
+
+
 class HubSideLiveness(unittest.TestCase):
     def test_stale_claims_sees_a_node_run_as_live(self):
         import stale_claims
