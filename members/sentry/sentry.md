@@ -112,6 +112,10 @@ in*. If you cannot write that sentence for a check, the check is not yours to ru
      **Blind spot:** the product never serves analytics tags to QA personas, so a break inside
      a staff-only tag (the 2026-09-28 cause) cannot show up for any persona. When a human says
      a page looks broken and every walker says it is fine, suspect exactly that.
+   - **Reif's morning** (journey `staff-daily-jobs`, 1440px and 390px) -- as the operator: the
+     Overview, the approve queue and one claim (opened, never decided), the inbox and one
+     conversation, HQ home. A 4xx/5xx or a server time over 3s files one issue with URL, time
+     and screenshot. `resend-no-duplicate-sends` files a repeat email as an `incident`.
    - **fleet dashboard** (`dino.luckymachines.co`) -- charts render WITH DATA
    An empty result set on a query that has always returned rows is a FAILURE, not an
    empty state.

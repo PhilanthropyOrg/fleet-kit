@@ -27,6 +27,11 @@ from datetime import datetime
 
 HQ = "https://philanthropy.org/network/hq"
 APPROVE_PATH = "/network/hq/ops/approve"
+INBOX = "https://philanthropy.org/network/hq/messages"
+# superadmin.philanthropy.org now 301s here; the staff walk opens the Overview where it lives.
+OPS_OVERVIEW = "https://philanthropy.org/network/hq/ops/status"
+# philanthropy#7988: a staff page whose server takes longer than this to answer files an issue.
+SERVER_BUDGET_MS = 3000
 
 # philanthropy#7988: Resend's send log reads with the key already mounted read-only into the
 # container for fleet_alert.sh; the env var wins if set.
@@ -95,6 +100,18 @@ def duplicate_sends(rows: list[dict]) -> list[tuple[str, str, int]]:
     def mask(to: str) -> str:
         return ",".join(f"{a[:2]}***@{a.partition('@')[2]}" for a in to.split(","))
     return sorted(((mask(to), s, n) for (to, s), n in counts.items() if n > 1), key=lambda r: -r[2])
+
+
+def server_ms(resp) -> int | None:
+    """The server's share of a page load: request sent to first byte back (Playwright's own
+    timing of the main document), or None when the browser did not time it."""
+    try:
+        t = resp.request.timing
+        if t["requestStart"] >= 0 and t["responseStart"] >= t["requestStart"]:
+            return round(t["responseStart"] - t["requestStart"])
+    except (AttributeError, KeyError, TypeError):
+        pass
+    return None
 
 
 def make_runners(jw) -> dict:
@@ -471,6 +488,82 @@ def make_runners(jw) -> dict:
                 assert all(b["height"] >= 44 for b in boxes), f"row {i}: a tap target is under 44px"
         ctx.step(2, s2, page)
 
+    def timed_open(ctx, page, url: str):
+        """Open url and put its URL, status and server time on the step. Fails on a 4xx/5xx, a
+        bounce to /login, or a server slower than SERVER_BUDGET_MS. A server answer is the same
+        at every width, so both widths share one filed issue (same_at_every_width)."""
+        ctx.evidence.update(url=url, same_at_every_width=True)
+        start = time.monotonic()
+        try:
+            resp = page.goto(url, timeout=jw.NAV_TIMEOUT_MS, wait_until="domcontentloaded")
+        except Exception:
+            ctx.evidence["server_ms"] = round((time.monotonic() - start) * 1000)  # at least this long
+            raise
+        blocked = jw._blocked_for_403(resp, ctx.users)
+        if blocked:
+            raise blocked
+        ms = server_ms(resp)
+        ctx.evidence["server_ms"] = ms if ms is not None else round((time.monotonic() - start) * 1000)
+        if resp is not None:
+            ctx.evidence["response"] = {"status": resp.status}
+        assert resp is not None and resp.status < 400, f"{url} answered {resp.status if resp else 'nothing'}"
+        assert "/login" not in page.url, f"operator was sent to {page.url}"
+        assert ctx.evidence["server_ms"] <= SERVER_BUDGET_MS, \
+            f"the server took {ctx.evidence['server_ms']}ms to answer {url} (budget {SERVER_BUDGET_MS}ms)"
+
+    def run_staff_daily_jobs(ctx):
+        """Reif's morning, as the operator persona: Overview, the approve queue and one claim,
+        the inbox and one conversation, HQ home. Read-only: a claim is opened, never decided."""
+        users = ctx.users
+        # The product sends a "HeadlessChrome" visitor to /login on the inbox (bots.BOT_UA, gh#5912);
+        # Reif's browser is plain Chrome, so the operator walks as plain Chrome, same version.
+        version = getattr(ctx.browser, "version", "") or "131.0.0.0"
+        ctx.user_agent = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+                          f"(KHTML, like Gecko) Chrome/{version} Safari/537.36")
+        page = ctx.page("operator")
+        if not ctx.step(0, lambda: persona(ctx, "operator"), page):
+            return
+
+        def overview():
+            timed_open(ctx, page, users.url(OPS_OVERVIEW))
+        ctx.step(1, overview, page)
+
+        def only_slow() -> bool:  # a page that loaded, just slowly, is still usable for the next step
+            return (ctx.results[-1].get("detail") or "").startswith("AssertionError: the server took")
+
+        def queue():
+            timed_open(ctx, page, users.url(f"https://philanthropy.org{APPROVE_PATH}"))
+            page.locator("tr.vq-row, .vq-empty, table.vq").first.wait_for(state="attached", timeout=15000)
+
+        def open_claim():  # the row's own keyboard toggle: no Approve/Reject button is touched
+            row = page.locator("tr.vq-row").first
+            if page.locator("tr.vq-row").count() == 0:
+                return  # an empty queue has no claim to open
+            row.press("Enter")
+            assert row.get_attribute("aria-expanded") == "true", "the claim row did not open"
+            page.locator("tr.vq-row-open + tr.vq-detail-row").first.wait_for(state="visible", timeout=5000)
+        if ctx.step(2, queue, page) or only_slow():
+            ctx.step(3, open_claim, page)
+
+        found = {}
+
+        def inbox():
+            timed_open(ctx, page, users.url(INBOX))
+            page.locator(".conv[data-tid], #conv-empty").first.wait_for(state="attached", timeout=15000)
+            found["tid"] = page.locator(".conv[data-tid]").first.get_attribute("data-tid")
+            assert found["tid"], "the operator's inbox shows no conversation (the team DM is always there)"
+
+        def conversation():
+            timed_open(ctx, page, users.url(f"{INBOX}/{found['tid']}"))
+            page.locator("#thread-open").first.wait_for(state="visible", timeout=15000)
+        if ctx.step(4, inbox, page) or only_slow():
+            ctx.step(5, conversation, page)
+
+        def home():
+            timed_open(ctx, page, users.url(HQ))
+            page.locator("#hqf-feed-list").first.wait_for(state="attached", timeout=15000)
+        ctx.step(6, home, page)
+
     def run_resend_duplicates(ctx):
         """No recipient got the same email twice in the last 24h (Resend's own send log)."""
         key = resend_key()
@@ -492,6 +585,7 @@ def make_runners(jw) -> dict:
 
     return {
         "staff-approval-queue": run_staff_approval_queue,
+        "staff-daily-jobs": run_staff_daily_jobs,
         "resend-no-duplicate-sends": run_resend_duplicates,
         "superadmin-overview-renders": run_superadmin_overview,
         "persona-roles": run_persona_roles,

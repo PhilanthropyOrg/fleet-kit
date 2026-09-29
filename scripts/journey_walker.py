@@ -144,6 +144,10 @@ NAV_TIMEOUT_MS = 30000
 # sub-resource fetch fails (a 404, a blocked request, a net:: error) -- distinct from a
 # console.error() call the page's own code made, which never has this shape.
 _SUBRESOURCE_FAILURE_RE = re.compile(r"^Failed to load resource:", re.I)
+# philanthropy#7988: the bypass header rides on page requests (the route hook) but never on a
+# WebSocket handshake, so Cloudflare challenges the live feed's socket (403, cf-mitigated:
+# challenge) for the walker only; a person's browser holds the challenge cookie. Recorded, not failed.
+_WS_BYPASS_GAP_RE = re.compile(r"^WebSocket connection to .* Unexpected response code: 403", re.I)
 
 # RENDERS STYLED (2026-09-28): superadmin answered 200 with a correct-looking title while every
 # human staff member saw an unstyled page -- an identify <script> in <head> never closed and
@@ -379,12 +383,15 @@ class JourneyCtx:
         self._console_cursor: dict[int, int] = {}
         self._asset_failures: dict[int, list[tuple[str, object, str]]] = {}
         self.cleanup: list = []  # callables run on close(), e.g. journey_hq's QA-data reset
+        self.evidence: dict = {}  # what a step saw (url, response, server_ms), merged into its result
+        self.user_agent: str | None = None  # set before page(): the product's bot filter reads the UA
 
     def page(self, user: str | None = None):
         key = user or "_anon"
         if key not in self._contexts:
             context = self.browser.new_context(
                 viewport={"width": self.dims["width"], "height": self.dims["height"]},
+                **({"user_agent": self.user_agent} if self.user_agent else {}),
             )
             if self.users.bypass:
                 # Per-request, host-scoped injection (gh#729 AC3) -- NOT extra_http_headers on
@@ -483,6 +490,7 @@ class JourneyCtx:
         shot_page = page or next(iter(p for _, p in self._contexts.values()), None)
 
         status, detail = "pass", None
+        self.evidence = {}
         start = time.monotonic()
         try:
             fn()
@@ -524,6 +532,8 @@ class JourneyCtx:
                 # resource failed, only that one did.
                 recorded_text = f"{redacted_text} ({location_url})" if location_url else redacted_text
                 console_errors_recorded.append(recorded_text)
+                if self.users.bypass and _WS_BYPASS_GAP_RE.match(text):
+                    continue
                 if self._console_error_is_related(kind, text, location_url, target_url):
                     related.append(redacted_text)
             # AC4: an assertion that already threw keeps ITS OWN message as `detail` -- a
@@ -538,7 +548,7 @@ class JourneyCtx:
             detail = f"took {duration_ms}ms, exceeding {budget_ms}ms budget"
 
         result = {"index": index, "action": action, "observable_result": observable,
-                  "status": status, "duration_ms": duration_ms}
+                  "status": status, "duration_ms": duration_ms, **self.evidence}
         if detail:
             result["detail"] = detail
         if console_errors_recorded:
@@ -1001,6 +1011,8 @@ def run_all(catalog: dict, users: TestUsers, browser, base_out: Path, run_id: st
             out = {"id": out_id, "name": out_name, "steps": ctx.results}
             if journey.get("vision_link"):  # carried to journey_issue_filer's Vision-link line
                 out["vision_link"] = journey["vision_link"]
+            if journey.get("labels"):  # extra labels on the filed issue, e.g. `incident`
+                out["labels"] = journey["labels"]
             journeys_out.append(out)
     return journeys_out, blocked
 

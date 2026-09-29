@@ -22,6 +22,7 @@
 #     test_users: [alice, bob]     # OPTIONAL. Named test users this journey needs, per the
 #                                   # #4507 audit's alice/bob fixtures and ATLAS_TEST_BYPASS.
 #                                   # Omit for journeys that need no authenticated user.
+#     labels: [incident]           # OPTIONAL. Extra labels on the issue a failure files.
 #     viewports: [desktop, mobile_390]   # which of the two defined below this journey runs
 #                                   # at. Both unless viewport_invariant_reason is set.
 #     viewport_invariant_reason: >       # REQUIRED instead of a two-entry viewports list
@@ -52,6 +53,7 @@
 #
 # Viewport definitions:
 #   desktop     -- 1280x800
+#   desktop_1440 -- 1440x900 (Reif's own staff screen, philanthropy#7988)
 #   mobile_390  -- 390x844 (iPhone 12/13/14 width; matches sentry's existing desktop+mobile
 #                  screenshot convention in qa_crawl.py and the messenger scroll bug #4604,
 #                  which only reproduced at this width)
@@ -67,6 +69,9 @@ viewports:
   desktop:
     width: 1280
     height: 800
+  desktop_1440:
+    width: 1440
+    height: 900
   mobile_390:
     width: 390
     height: 844
@@ -328,6 +333,32 @@ journeys:
           Queue rows (tr.vq-row) or the empty queue render within 15s. At 390px the page does
           not scroll sideways, and each row's buttons share one row and are >= 44px tall.
 
+  - id: staff-daily-jobs
+    name: The operator's morning -- Overview, approve queue, inbox, HQ home
+    description: >
+      Reif's daily jobs in order, as the operator persona, at his desk and on his phone. Each
+      page load records its server time; a 4xx/5xx or a server slower than 3s fails the step
+      and files one issue for both widths, with the URL, the time and a screenshot. Read-only:
+      a claim is opened, never approved or rejected.
+    preconditions: [QA_SESSION_TOKEN configured]
+    test_users: [operator]
+    viewports: [desktop_1440, mobile_390]
+    steps:
+      - action: Sign in as operator.
+        observable_result: A signed-in operator session within 15s.
+      - action: Open the operator Overview, https://philanthropy.org/network/hq/ops/status (where superadmin.philanthropy.org now redirects).
+        observable_result: It answers < 400 with server time <= 3s, without bouncing to /login.
+      - action: Open https://philanthropy.org/network/hq/ops/approve.
+        observable_result: It answers < 400 with server time <= 3s, and queue rows or the empty queue render within 15s.
+      - action: Open the first claim in the queue (Enter on the row; no Approve/Reject).
+        observable_result: The row reads aria-expanded=true and its detail panel is visible within 5s (skipped when the queue is empty).
+      - action: Open the HQ inbox, https://philanthropy.org/network/hq/messages.
+        observable_result: It answers < 400 with server time <= 3s, and lists at least one conversation within 15s.
+      - action: Open the first conversation (/network/hq/messages/<id>).
+        observable_result: It answers < 400 with server time <= 3s, and the open thread (#thread-open) is visible within 15s.
+      - action: Open HQ home, https://philanthropy.org/network/hq.
+        observable_result: It answers < 400 with server time <= 3s, and the feed list (#hqf-feed-list) renders within 15s.
+
   - id: resend-no-duplicate-sends
     name: Nobody got the same email twice in the last 24 hours
     description: >
@@ -335,6 +366,7 @@ journeys:
       24h and fails on any recipient that got the same subject more than once (their own
       sign-in links and per-message notices excepted).
     preconditions: [RESEND_API_KEY in env or /home/ubuntu/.config/maxx/alert.env]
+    labels: [incident]  # a repeat email to a nonprofit is a prod incident, not a page bug
     viewport_invariant_reason: an API check with no page
     viewports: [desktop]
     steps:
