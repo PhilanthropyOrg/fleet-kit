@@ -231,7 +231,12 @@ def issue_for_ask(ask_id: int, member: str, why: str, unblocks: str | None, prop
             + (f"**Proposed:** {proposed.strip()}\n\n" if proposed else "")
             + "An agent does this now, with the fleet's own tokens, env and tools. Only rotating or "
               "exposing a secret, spending money, deleting prod data, force-pushing main or a login "
-              "only Reif holds waits on him -- ship everything around it and close the rest.")
+              "only Reif holds waits on him -- ship everything around it and close the rest.\n\n"
+            # jefe msg#162 (#8428): the intake gates read these two lines; without them every
+            # ask issue sat in fleet:needs-spec until marie backfilled it by hand.
+            + "## Acceptance\n"
+              "- The blocker named above is gone: the fix ships and this issue closes.\n\n"
+            + "Vision-link: none (maintenance) -- a provisioning ask, not a direct KR mover")
     r = run(["gh", "issue", "create", "--repo", slug, "--title", title, "--label", ",".join(labels), "--body", body])
     return r.stdout.strip().splitlines()[-1] if r.returncode == 0 and r.stdout.strip() else ""
 

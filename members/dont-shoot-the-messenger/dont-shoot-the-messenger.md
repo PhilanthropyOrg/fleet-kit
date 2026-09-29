@@ -159,7 +159,8 @@ For each reply, in order:
    or the PR it names), copy he approved or edited (comment it verbatim on the issue that will
    use it), a new instruction or idea (file a product-repo issue: title in his words under 60
    characters, body quoting him verbatim under "Reif said", then "What the fleet will do" in
-   three lines, `Vision-link:` line; labels `fleet:reif-asked` and `fleet:priority-high`, create
+   three lines, an `## Acceptance` heading with one bullet saying what Reif will see once it is
+   done (step three's check, said as an outcome), `Vision-link:` line; labels `fleet:reif-asked` and `fleet:priority-high`, create
    the label first with `gh label create fleet:reif-asked --repo <repo> --force`). One reply
    can produce more than one of these. Never build; you route.
 3. Send him a receipt: write `/tmp/receipt.md` with a `# Got it: <five words>` title and one

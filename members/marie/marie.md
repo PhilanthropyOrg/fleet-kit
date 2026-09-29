@@ -775,6 +775,10 @@ this is a determination, not a spec:
 Vision-link: <okr.verified_claims | okr.traffic | okr.clicks | okr.conversion> -- <how> | `none (maintenance)`
 ```
 
+The line must START the line: no `marie: ` prefix before it and never inside parentheses
+mid-sentence. The gate anchors on `Vision-link:` at line start, so `marie: Vision-link: ...`
+reads as MISSING (#8403/#8404, jefe msg#140). Put your usual `marie: ` prose on a later line.
+
 The `--limit 200` pull is a cheap read every pass regardless of label; the write cost only
 applies to the delta since your last pass, which stays small once the initial debt is paid.
 Count it in your report (C4): how many lightweight comments posted (issue numbers) and how many
