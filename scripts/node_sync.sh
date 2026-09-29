@@ -27,7 +27,7 @@ export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 
 cd "$KIT_DIR"
 exec 9>"${TMPDIR:-/tmp}/fleet-node-sync.$(id -u).lock"
-flock -n 9 || exit 0
+flock -n 9 || exit 0  # podman run below closes fd 9: conmon outlives this script and would hold the lock forever
 
 git fetch -q origin main || { echo "$(ts) [node_sync] fetch failed -- keeping current build"; exit 0; }
 want="$(git rev-parse origin/main)"
@@ -63,5 +63,5 @@ GH_TOKEN="$(cat "$HOME/.config/fleet-kit/gh_token")" podman run -d --replace --n
   -v "$INSTANCE_DIR/logs:/var/log/fleet-kit" \
   -v "$INSTANCE_DIR/fleet.env:/fleet-kit/fleet.env:ro" \
   "${mounts[@]}" \
-  "$IMAGE" cron-foreground >/dev/null || { echo "$(ts) [node_sync] run FAILED" >&2; exit 1; }
+  "$IMAGE" cron-foreground >/dev/null 9>&- || { echo "$(ts) [node_sync] run FAILED" >&2; exit 1; }
 echo "$(ts) [node_sync] $CONTAINER now on ${want:0:7}"
