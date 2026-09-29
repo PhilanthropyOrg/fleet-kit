@@ -552,6 +552,13 @@ timeout) decide the outcome, or don't dispatch it at all and say so plainly in y
 ("queued <n> for next pass, no budget to wait on it here"). "I'll pick this up when the
 notification lands" is never a valid way to end a fleet pass.
 
+**minion: background tasks are OFF (2026-09-28).** run_member.sh starts every minion pass with
+`CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` and a 20 min foreground Bash timeout (30 max), because
+32 of 33 minion `reported_nothing` runs in one day still ended "waiting for the background
+verified_test.sh". A minion has no `run_in_background` and no `TaskOutput` to reach for: run
+every command in the foreground, and never poll another process with `pgrep`/`ps | grep`. The
+`run_in_background` + `TaskOutput` pattern above is for members that fan out (gru, the-fixer).
+
 **The same rule applies to the WAIT ITSELF, not just the thing being waited on.** Found live
 (gh#77, 2026-08-24): `gru` backgrounded two minion builds correctly with a foreground `&`, then
 separately launched its OWN poll/wait loop (`while kill -0 $pid; do sleep 10; done`) as a
