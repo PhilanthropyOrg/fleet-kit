@@ -52,7 +52,7 @@ never be renamed) -- only the results.json grouping id carries the suffix.
 
 SEQUENTIAL, NOT PARALLEL (the PRD's own UNKNOWN #1): journeys run one at a time, and each
 journey's two viewports run one at a time, inside a single browser instance. Ten journeys times
-two viewports is 20 short runs; sequential keeps this walker inside sentry's 2400s pass timeout
+two viewports is 20 short runs; sequential keeps this walker inside sentry's 3600s pass timeout
 without opening enough concurrent browser contexts to make a WAF-fronted site's rate limiting
 part of the result. If a future pass needs to shorten wall-clock time, parallelizing across
 journeys (they don't share state, apart from the two message journeys which already run
