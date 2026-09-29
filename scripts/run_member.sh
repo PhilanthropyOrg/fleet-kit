@@ -39,6 +39,17 @@ set -uo pipefail
 # failing "OAuth session expired" for 2+ hours -- the token was correctly in fleet.env the
 # whole time, just never reached the process that needed it).
 [ -f "${FLEET_ENV_FILE:-./fleet.env}" ] && { set -a; . "${FLEET_ENV_FILE:-./fleet.env}"; set +a; }
+# A worker node running a hub's batch (node_gate.sh): the hub's accounts and tokens win over
+# this node's own fleet.env, which sourcing above just re-applied.
+if [ -n "${FLEET_NODE_ACCOUNTS:-}" ]; then
+  export FLEET_ACCOUNTS="$FLEET_NODE_ACCOUNTS"
+  for _a in $FLEET_NODE_ACCOUNTS; do
+    _v="$(echo "$_a" | tr '[:lower:]-' '[:upper:]_')"
+    _t="FLEET_NODE_TOKEN_$_v"
+    [ -n "${!_t:-}" ] && export "CLAUDE_CODE_OAUTH_TOKEN_$_v=${!_t}"
+  done
+  unset _a _v _t
+fi
 
 # FLEET_API_KEY is the fleet-view write key -- it authorizes POST /api/run_now, which spawns
 # `claude -p --dangerously-skip-permissions` on this box. Sourcing fleet.env above exports it,

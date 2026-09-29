@@ -31,15 +31,37 @@ run_here() {
 }
 [ -f "$NODE_DIR/config" ] || run_here "no worker node configured"
 
+# The node spends this box's accounts (Reif, 2026-09-29: "lucky can use all accounts, just has
+# to come from dino first"). Per batch, each FLEET_ACCOUNTS account, in order, goes on ssh's
+# stdin as `acct <name> <token>` -- never argv. A long-lived CLAUDE_CODE_OAUTH_TOKEN_<ACCT> goes
+# as is; a refreshing login sends only its current access token, and only with at least
+# FLEET_NODE_TOKEN_MIN_LEFT_MIN left (a batch is <= 90 min). Copying .credentials.json instead
+# would log this box out: the refresh token rotates on use. Nothing sent: the node uses its own.
+node_tokens() {
+  local acct var
+  for acct in ${FLEET_ACCOUNTS:-}; do
+    [[ "$acct" =~ ^[a-z0-9-]+$ ]] || continue
+    var="CLAUDE_CODE_OAUTH_TOKEN_$(echo "$acct" | tr '[:lower:]-' '[:upper:]_')"
+    if [ -n "${!var:-}" ]; then printf 'acct %s %s\n' "$acct" "${!var}"; continue; fi
+    python3 - "$HOME/.claude-$acct/.credentials.json" "$acct" "${FLEET_NODE_TOKEN_MIN_LEFT_MIN:-120}" <<'PY' 2>/dev/null
+import json, sys, time
+o = json.load(open(sys.argv[1])).get("claudeAiOauth") or {}
+t, left = o.get("accessToken", ""), (o.get("expiresAt", 0) / 1000 - time.time()) / 60
+if t.startswith("sk-ant-") and left >= float(sys.argv[3]):
+    print(f"acct {sys.argv[2]} {t}")
+PY
+  done
+}
+
 accepted=0
-"$SSH" -F "$NODE_DIR/config" -o BatchMode=yes -o ConnectTimeout=30 fleet-node \
-    "minion --items $items" </dev/null 2>&1 | while IFS= read -r line; do
+node_tokens | "$SSH" -F "$NODE_DIR/config" -o BatchMode=yes -o ConnectTimeout=30 fleet-node \
+    "minion --items $items" 2>&1 | while IFS= read -r line; do
   case "$line" in
     node-accepted*) accepted=1; echo "[node_minion] $line" ;;
     "node-row "*)   printf '%s\n' "${line#node-row }" >> "$LOG_DIR/runs.jsonl" ;;
     *)              echo "[node_minion] $line" ;;
   esac
 done
-rc=${PIPESTATUS[0]}
+rc=${PIPESTATUS[1]}
 [ "$accepted" = 1 ] || run_here "node did not accept (ssh rc=$rc)"
 exit "$rc"
