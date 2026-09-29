@@ -124,6 +124,35 @@ def test_intake_plan_fixes_labels_specs_and_skips() -> None:
     print("ok  intake: quality:solid default, needs-spec for a real gap, epics/claimed/prod untouched")
 
 
+def test_intake_resends_a_moved_gap_and_a_stale_item() -> None:
+    # 2026-09-29: marie fixed #30's vision-link; it stayed labeled needs-spec and moved on to
+    # acceptance, and intake never told anyone. #31 was sent 4 days ago and is still stuck.
+    old = [{"body": f"{gd.MARKER} vision-link"}]
+    stuck = [{"body": f"{gd.MARKER} acceptance"}]
+    backlog = [_issue(30, ["fleet:backlog", "quality:solid", gd.NEEDS_SPEC], body=VL),
+               _issue(31, ["fleet:backlog", "quality:solid", gd.NEEDS_SPEC], body=VL),
+               _issue(32, ["fleet:backlog", "quality:solid", gd.NEEDS_SPEC], body=VL)]
+    backlog[0]["comments"], backlog[1]["comments"], backlog[2]["comments"] = old, stuck, stuck
+    now = 1_000_000.0
+    sent = {31: now - 4 * 86400, 32: now - 3600}
+    m = gd.intake_plan(backlog, [], "intake-t", last_sent=sent, now=now)["message"]
+    assert m["items"] == [30, 31], m
+    assert "Sent again" in m["body"] and "#31" in m["body"].split("Sent again")[1], m["body"]
+    assert "#30" not in m["body"].split("Sent again")[1], m["body"]
+    # No bus history (last_sent None): nothing is re-sent, only the moved gap goes out.
+    assert gd.intake_plan(backlog, [], "intake-t")["message"]["items"] == [30]
+    print("ok  intake: a moved gap and a 72h-stuck item reach marie; a fresh one does not")
+
+
+def test_last_sent_by_item_reads_the_bus() -> None:
+    conn = fleet_db.connect(Path(tempfile.mkdtemp()) / "fleet.db")
+    fleet_msg.send(conn, "gru", ["marie"], "gate-drop", "k1", "b", [5, 6])
+    fleet_msg.send(conn, "gru", ["marie"], "nudge", "k2", "b", [7])
+    got = gd.last_sent_by_item(conn)
+    assert set(got) == {5, 6}, got
+    print("ok  last_sent_by_item: gate-drop messages only, newest time per item")
+
+
 def test_intake_apply_messages_marie_jefe_and_hq_once() -> None:
     db = Path(tempfile.mkdtemp()) / "fleet.db"
     calls = []

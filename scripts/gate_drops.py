@@ -27,7 +27,8 @@ thin exec seam -- same split as dead_end_label.py.
 INTAKE (philanthropy#8218 step 3). `run` only sees gru's current tier, so 448 backlog items sat
 unlabeled and unspecced. `intake` runs the same plan()/apply() over EVERY open fleet:backlog
 item before each gru pass (run_gru_fanout.sh), sends marie + jefe ONE message naming the items
-it newly labeled, and sends `hq` ONE message listing open `fleet:needs-prod-access` items
+it newly labeled or found at a new gap (re-sending any still stuck FLEET_GATE_DROP_RESEND_H
+after its last message), and sends `hq` ONE message listing open `fleet:needs-prod-access` items
 (prod DB, secrets, Cloudflare: HQ holds that access, minions don't).
 
 Usage:
@@ -65,6 +66,10 @@ MSG_TO = ("marie", "jefe")
 HQ = "hq"
 # intake leaves these alone: in flight, not minion work at all, or a tracking-only epic.
 INTAKE_SKIP = {LABEL_CLAIMED, *NOT_FOR_MINIONS, quality_gate.EPIC}
+# An item still stuck at a gate this long after marie was last told about it is sent again.
+# 2026-09-29: 32 items sat re-dropped every 30 min for 2.5 days with no message. marie fixed one
+# gap (the vision-link) and the item stayed labeled, so its next gap (acceptance) was never sent.
+RESEND_S = float(os.environ.get("FLEET_GATE_DROP_RESEND_H", "72")) * 3600
 
 # What each gate's drop reason means for the person who has to fix it.
 GAPS = (
@@ -252,21 +257,42 @@ def _gh(cmd: list[str], timeout: int = 60) -> subprocess.CompletedProcess:
 
 # --- intake: the whole backlog, every pass (philanthropy#8218 step 3) -----------------------
 
-def intake_message(records: list[dict], newly: list[int], run_id: str) -> dict | None:
-    """ONE message to marie + jefe naming the items this intake run newly labeled needs-spec.
+def intake_message(records: list[dict], newly: list[int], run_id: str,
+                   stale: list[int] = ()) -> dict | None:
+    """ONE message to marie + jefe naming the items this intake run newly labeled needs-spec
+    or found at a new gap, plus `stale` ones still stuck RESEND_S after they were last sent.
     Pure. Keyed on the item set, so a new batch is never swallowed by the bus's 6h dedupe."""
-    if not newly:
+    items = sorted(set(newly) | set(stale))
+    if not items:
         return None
     gap_of = {r["number"]: r.get("gap") or "other" for r in records if r.get("action") == "needs-spec"}
     by_gap: dict[str, list[int]] = {}
-    for n in newly:
+    for n in items:
         by_gap.setdefault(gap_of.get(n, "other"), []).append(n)
-    lines = [f"backlog intake ({run_id}) labeled {len(newly)} new item(s) `{NEEDS_SPEC}`, each "
-             f"with a `{MARKER} <gap>` comment. Add the missing piece so gru can build them:"]
+    lines = [f"backlog intake ({run_id}): {len(items)} item(s) carry `{NEEDS_SPEC}` and a "
+             f"`{MARKER} <gap>` comment. Add the missing piece so gru can build them:"]
     for gap, nums in sorted(by_gap.items(), key=lambda kv: -len(kv[1])):
         lines.append(f"- {gap} ({len(nums)}): " + ", ".join(f"#{n}" for n in nums))
-    return {"to": MSG_TO, "kind": "gate-drop", "key": "intake:" + ",".join(map(str, sorted(newly))),
-            "body": "\n".join(lines), "items": sorted(newly)}
+    if stale:
+        lines.append(f"Sent again, still stuck {RESEND_S / 3600:.0f}h after the last message: "
+                     + ", ".join(f"#{n}" for n in sorted(stale)) + ". If one can never be "
+                     "specced from its own text, close it (Part B) instead of leaving it here.")
+    return {"to": MSG_TO, "kind": "gate-drop", "key": "intake:" + ",".join(map(str, items)),
+            "body": "\n".join(lines), "items": items}
+
+
+def last_sent_by_item(conn) -> dict[int, float]:
+    """Newest gate-drop message time per item number, from the fleet_msg bus."""
+    out: dict[int, float] = {}
+    for items, sent_at in conn.execute("SELECT items, sent_at FROM msgs WHERE kind = 'gate-drop'"):
+        try:
+            nums = json.loads(items or "[]")
+        except ValueError:
+            continue
+        for n in nums if isinstance(nums, list) else []:
+            if isinstance(n, int) and sent_at > out.get(n, 0):
+                out[n] = sent_at
+    return out
 
 
 def prod_access_message(issues: list[dict]) -> dict | None:
@@ -283,15 +309,23 @@ def prod_access_message(issues: list[dict]) -> dict | None:
 
 
 def intake_plan(backlog: list[dict], prod_access: list[dict], run_id: str,
-                parents: dict | None = None) -> dict:
+                parents: dict | None = None, last_sent: dict[int, float] | None = None,
+                now: float | None = None) -> dict:
     """Pure. plan() over every open backlog item except claimed / human-op / prod-access / epics;
     the Reif ask is replaced by one bus message (an hourly sweep of 400+ items would otherwise
     ask Reif every hour), plus hq's prod-access message."""
     todo = [i for i in backlog if not set(_names(i.get("labels"))) & INTAKE_SKIP]
     p = plan(todo, run_id, parents)
-    newly = [a["number"] for a in p["actions"] if a["op"] == "add_label" and a["label"] == NEEDS_SPEC]
+    # A new gap comment counts too: an item already labeled that moved on to its next gap.
+    newly = sorted({a["number"] for a in p["actions"] if a["op"] == "comment" or
+                    (a["op"] == "add_label" and a["label"] == NEEDS_SPEC)})
+    stale = []
+    if last_sent is not None:
+        now = now or time.time()
+        stale = sorted(r["number"] for r in p["dropped"] if r.get("action") == "needs-spec"
+                       and r["number"] not in newly and now - last_sent.get(r["number"], 0) >= RESEND_S)
     p["ask"] = None
-    p["message"] = intake_message(p["dropped"], newly, run_id)
+    p["message"] = intake_message(p["dropped"], newly, run_id, stale)
     p["messages"] = [m for m in (prod_access_message(prod_access),) if m]
     p["scanned"], p["skipped"] = len(backlog), len(backlog) - len(todo)
     return p
@@ -409,7 +443,13 @@ def main(argv=None) -> int:
         except (RuntimeError, ValueError, subprocess.TimeoutExpired) as exc:
             print(f"gate_drops intake: {exc}", file=sys.stderr)
             return 1
-        p = intake_plan(backlog, prod, a.run_id, fetch_parents(backlog, backlog, a.repo))
+        last_sent = None
+        try:
+            import fleet_db
+            last_sent = last_sent_by_item(fleet_db.connect(Path(a.db_path) if a.db_path else None))
+        except Exception as exc:  # noqa: BLE001 -- no bus history: send only the new ones
+            print(f"gate_drops intake: no message history, no re-sends: {exc}", file=sys.stderr)
+        p = intake_plan(backlog, prod, a.run_id, fetch_parents(backlog, backlog, a.repo), last_sent)
         if not a.dry_run:
             p.update(apply(p, a.repo, a.run_id, db_path=a.db_path))
         summary = {k: p.get(k) for k in ("scanned", "skipped", "results", "sent")}
