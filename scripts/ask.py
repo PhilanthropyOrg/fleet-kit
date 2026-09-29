@@ -158,10 +158,8 @@ def _notify(member: str, ask_id: int, why: str, sender: str | None = None) -> No
     channel -- same helper every other check pages through, so a filed ask reaches a human the
     same way an alarm does and gets the same undelivered-retry queue for free (AC4).
 
-    Rate limit: `problem` is keyed to the current hour bucket, so alert_store.py's own
-    (check, problem) dedupe -- not new state this module has to keep -- pages once per member
-    per hour and silently skips (`SKIP already paged`) every later ask that member files inside
-    the same hour. `severity=critical` is what makes that first page fire immediately rather
+    Dedupe: `problem` is keyed to the ask id, so alert_store.py's own (check, problem) dedupe
+    pages once per ask (a retry of the same ask is `SKIP already paged`). `severity=critical` is what makes that first page fire immediately rather
     than waiting on a debounce window: a fleet member blocked right now needs a human to see it
     now, not after a condition has "persisted."
 
@@ -171,7 +169,9 @@ def _notify(member: str, ask_id: int, why: str, sender: str | None = None) -> No
     """
     import os
     script = HERE / "fleet_alert.sh"
-    problem = f"{member}:{int(time.time() // 3600)}"
+    # fk#1383: only dumbledore's one-way-door escalations page now, so each ask gets its own
+    # page; a per-member hour bucket silently dropped a second escalation for the same member.
+    problem = f"{member}:ask{ask_id}"
     # #1049 made fleet_alert.sh's email leg opt-in and Reif has no ntfy app, so without this an
     # ask reaches nobody. Reif, 2026-09-15: the console inbox is gone; "somehow it can get me a
     # message some other way if it needs me." An ask is that message: force the email leg.
