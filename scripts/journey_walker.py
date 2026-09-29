@@ -998,7 +998,10 @@ def run_all(catalog: dict, users: TestUsers, browser, base_out: Path, run_id: st
                 continue
             out_id = journey["id"] if viewport == "desktop" else f"{journey['id']}--{viewport}"
             out_name = journey["name"] if viewport == "desktop" else f"{journey['name']} ({viewport})"
-            journeys_out.append({"id": out_id, "name": out_name, "steps": ctx.results})
+            out = {"id": out_id, "name": out_name, "steps": ctx.results}
+            if journey.get("vision_link"):  # carried to journey_issue_filer's Vision-link line
+                out["vision_link"] = journey["vision_link"]
+            journeys_out.append(out)
     return journeys_out, blocked
 
 

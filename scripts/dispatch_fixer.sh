@@ -20,10 +20,27 @@ RUN_MEMBER="${FLEET_RUN_MEMBER:-$KIT_DIR/scripts/run_member.sh}"
 LOG_DIR="${FLEET_LOG_DIR:-/var/log/fleet-kit}"
 mkdir -p "$LOG_DIR" 2>/dev/null || true
 
+# THE CAP (2026-09-29, dumbledore). Nothing bounded how many fixers ran at once: 18 sub-passes
+# started in one hour on 09-28 21h and 15 at 09-29 05h, on a 7-core box that runs 3 test slots.
+# Each one queued on verified_test.sh behind the others and died at its 3600s ceiling: on 09-29,
+# 25 timed out and 8 finished ok. A PR over the cap is not lost -- it stays red, and the next
+# hourly check.sh lists it again -- so it waits its turn instead of starving the ones running.
+MAX="${FLEET_FIXER_ITEM_MAX:-3}"
+live_items() {
+  pgrep -af "run_member.sh the-fixer --item [0-9]" 2>/dev/null \
+    | sed -n 's/.*the-fixer --item \([0-9][0-9]*\).*/\1/p' | sort -u | wc -l
+}
+LIVE="$(live_items)"
+
 [ $# -gt 0 ] || { echo "usage: dispatch_fixer.sh <pr> [<pr> ...]" >&2; exit 2; }
 for pr in "$@"; do
   pr="${pr#\#}"
   case "$pr" in (""|*[!0-9]*) echo "dispatch_fixer: skipping '$pr' (not a PR number)" >&2; continue ;; esac
+  if [ "$LIVE" -ge "$MAX" ]; then
+    echo "deferred the-fixer --item $pr ($LIVE fixers already running, cap FLEET_FIXER_ITEM_MAX=$MAX; next hourly pass picks it up)"
+    continue
+  fi
+  LIVE=$((LIVE + 1))
   setsid nohup bash "$RUN_MEMBER" the-fixer --item "$pr" \
     >>"$LOG_DIR/the-fixer-item$pr.dispatch.log" 2>&1 </dev/null &
   echo "dispatched the-fixer --item $pr (detached, pid $!, log $LOG_DIR/the-fixer-item$pr.dispatch.log)"

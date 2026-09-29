@@ -110,6 +110,17 @@ class BuildersTest(unittest.TestCase):
         self.assertIn("When Click Claim this page, Then the claim form loads", body)
         self.assertGreaterEqual(quality_gate.count_gwt(body), 1)
 
+    def test_body_passes_the_vision_link_gate(self):
+        # jefe msg#326: #8628/#8629/#8631 were gate-dropped for want of this line.
+        import vision_link_gate as vlg
+        journey = {"id": "j", "name": "J", "steps": [{"index": 0, "action": "a", "observable_result": "o"}]}
+        body = jif.build_issue_body(journey, journey["steps"][0], "r", "sha", None, jif.step_key("j", 0))
+        self.assertEqual(vlg.classify_candidate(body, [])[0], vlg.STATUS_MAINTENANCE)
+        linked = {**journey, "vision_link": "okr.conversion -- the claim flow"}
+        body = jif.build_issue_body(linked, journey["steps"][0], "r", "sha", None, jif.step_key("j", 0))
+        self.assertEqual(vlg.classify_candidate(body, [])[0], vlg.STATUS_LINKED)
+        self.assertIn("Vision-link: okr.conversion -- the claim flow", body)
+
     def test_body_includes_last_pass_sha_when_known(self):
         journey = {"id": "j", "name": "J", "steps": [{"index": 0, "action": "a", "observable_result": "o"}]}
         step = journey["steps"][0]
