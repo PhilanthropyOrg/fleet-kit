@@ -356,8 +356,9 @@ def build_file_cmd(title: str, body: str) -> list[str]:
     # heartbeat-stale ticket (see file_or_update_incident below), which must NEVER carry the
     # shared INCIDENT_MARKER -- a probe-down event's shared-marker search would otherwise find
     # and silently comment onto an unrelated heartbeat ticket instead of filing its own.
+    body, labels = prod_incident.with_alert_spec(title, body, INCIDENT_LABELS)
     cmd = ["gh", "issue", "create", "--repo", INCIDENT_REPO, "--title", title, "--body", body]
-    for label in INCIDENT_LABELS:
+    for label in labels:
         cmd += ["--label", label]
     return cmd
 

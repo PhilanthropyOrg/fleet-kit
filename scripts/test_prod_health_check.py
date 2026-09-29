@@ -275,7 +275,8 @@ class IncidentFilingTest(unittest.TestCase):
         cmd = phc.build_file_cmd("prod down: x", "body")
         labels = [cmd[i + 1] for i, tok in enumerate(cmd) if tok == "--label"]
         self.assertEqual(
-            labels, ["fleet:backlog", "lane:devops", "fleet:priority-high", "incident"])
+            labels, ["fleet:backlog", "lane:devops", "fleet:priority-high", "incident",
+                     "quality:solid"])  # philanthropy#8707: exactly one quality:* label
 
     def test_further_failure_comments_not_a_second_issue(self):
         gh = FakeGh()
