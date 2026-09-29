@@ -73,7 +73,9 @@ spawns exactly one). Your job, in order:
    bash /fleet-kit/scripts/dispatch_member.sh minion --items <items, comma-separated>
    ```
    An item that is already closed or claimed by a live runner: skip it (the dispatch lock dedups
-   the rest). Listing a PR under `resume` records the dispatch, so the same red content is not
+   the rest). `superseded` lists red minion drafts whose items a newer non-draft PR (`by`)
+   already carries: close each with one line, `gh pr close <N> --comment "superseded by #<by>"`
+   (reopenable), and never resume it. Listing a PR under `resume` records the dispatch, so the same red content is not
    re-sent for 45 minutes, and after 3 tries it moves to `exhausted`. Why (2026-09-29):
    red_prs skipped every draft, so checkpoints #8531/#8550/#8553/#8603/#8604 sat red 14-22h
    while their items waited their turn in the tiers.

@@ -170,6 +170,18 @@ class Detector(unittest.TestCase):
         gone = red_prs.plan([idle], {"8553": {"content": idle["content"], "attempts": 3, "last": 0}}, NOW, 6)
         self.assertEqual(gone["exhausted"], [8553])
 
+    def test_a_draft_rebuilt_on_a_newer_pr_is_superseded_not_resumed(self):
+        # 2026-09-29 live: a minion rebuilt #7220 as #8836 on a fresh branch, leaving checkpoint
+        # #8553 red; `resume` then listed #8553 and would have sent minions to redo it.
+        d = pr(number=8553, branch="member/minion-item7220-13367-1790617968", checks=self.RED_LINT,
+               commits=[commit("WIP checkpoint", 20 * 60)])
+        d["isDraft"] = True
+        newer = pr(number=8836, branch="member/minion-item7220-66-1790701152", checks=self.RED_LINT)
+        rows = red_prs.mark_superseded([red_prs.describe(d, {7220}, NOW)], [d, newer])
+        out = red_prs.plan(rows, {}, NOW, 6)
+        self.assertEqual(out["resume"], [])
+        self.assertEqual(out["superseded"], [{"number": 8553, "items": [7220], "by": [8836]}])
+
     def test_reif_first_then_oldest(self):
         rows = [red_prs.describe(pr(number=n, branch=f"member/minion-item{i}-1-2", checks=self.RED_LINT,
                                     commits=[commit("w", age)]), {7000}, NOW)
