@@ -241,6 +241,10 @@ def build_issue_body(
     ]
     if step.get("detail"):  # what the walker actually saw -- the fixer's first clue
         lines.append(f"**What happened instead:** {step['detail'].strip()[:1500]}")
+    if step.get("url"):  # philanthropy#7988: a timed page load says where and how slow
+        lines.append(f"**URL:** {step['url']}")
+    if step.get("server_ms") is not None:
+        lines.append(f"**Server time:** {step['server_ms']}ms")
     if viewports:
         lines.append(f"**Affected viewports:** {', '.join(viewports)}")
     lines += [
@@ -282,8 +286,11 @@ def build_issue_body(
     return "\n".join(lines)
 
 
-def build_file_cmd(title: str, body: str, label: str = LABEL_JOURNEY, repo: str | None = None) -> list[str]:
+def build_file_cmd(title: str, body: str, label: str = LABEL_JOURNEY, repo: str | None = None,
+                   extra_labels=()) -> list[str]:
     cmd = ["gh", "issue", "create", "--title", title, "--body", body, "--label", label]
+    for extra in extra_labels:
+        cmd += ["--label", extra]
     if repo:
         cmd += ["--repo", repo]
     return cmd
@@ -428,7 +435,10 @@ def group_by_key(results: dict) -> "dict[str, list[tuple[dict, dict]]]":
     which is exactly today's per-viewport behaviour."""
     groups: "dict[str, list[tuple[dict, dict]]]" = {}
     for journey, step in iter_steps(results):
-        key = step_key(journey["id"], step.get("index", 0))
+        journey_id = journey["id"]
+        if step.get("same_at_every_width"):  # a server answer (5xx, slow) is one bug at every width
+            journey_id = base_journey_id(journey_id)
+        key = step_key(journey_id, step.get("index", 0))
         groups.setdefault(key, []).append((journey, step))
     return groups
 
@@ -487,7 +497,7 @@ def process(results_path: Path, state_path: Path = DEFAULT_STATE_PATH, runner=_r
                     journey, step, run, deploy_sha, state.get(key, {}).get("last_pass_sha"), key,
                     collapsed_viewports, profile,
                 )
-                cmd = build_file_cmd(title, body, profile.label, repo)
+                cmd = build_file_cmd(title, body, profile.label, repo, journey.get("labels") or ())
                 if dry_run:
                     print(f"[dry-run] would run: {' '.join(cmd)}")
                     summary["filed"].append({"issue": None, "key": key, "title": title})
