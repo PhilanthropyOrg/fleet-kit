@@ -170,6 +170,17 @@ class Detector(unittest.TestCase):
         gone = red_prs.plan([idle], {"8553": {"content": idle["content"], "attempts": 3, "last": 0}}, NOW, 6)
         self.assertEqual(gone["exhausted"], [8553])
 
+    def test_an_idle_minion_draft_with_no_ci_is_still_resumed(self):
+        # 2026-09-29: philanthropy CI stops running on drafts (Actions minutes: 49 of 227 CI runs
+        # were drafts), so a checkpoint no longer turns red. Idle unfinished work is still resumed.
+        for checks in ([], GREEN):
+            d = pr(number=8601, branch="member/minion-item8601-1-2", checks=checks,
+                   commits=[commit("WIP checkpoint", 3 * 60)])
+            d["isDraft"] = True
+            row = red_prs.describe(d, set(), NOW)
+            self.assertEqual((row["kind"], row["stalled"]), ("resume", True), checks)
+            self.assertEqual([r["number"] for r in red_prs.plan([row], {}, NOW, 6)["resume"]], [8601])
+
     def test_a_draft_rebuilt_on_a_newer_pr_is_superseded_not_resumed(self):
         # 2026-09-29 live: a minion rebuilt #7220 as #8836 on a fresh branch, leaving checkpoint
         # #8553 red; `resume` then listed #8553 and would have sent minions to redo it.
@@ -349,6 +360,43 @@ esac
         self.assertFalse(any("/pulls/7982/" in c for c in puts), puts)
         self.assertTrue(any("/pulls/7990/" in c for c in puts), "a green fleet PR still syncs")
         self.assertTrue(any("/pulls/7991/" in c for c in puts), "a human branch is not ours to hold")
+
+
+class AutoUpdateBranchOnlyWhenMainRequiresIt(unittest.TestCase):
+    """2026-09-29: philanthropy hit its 50k Actions minutes. main's protection has strict=false
+    (GitHub merges a PR that is behind), so every sync of a mergeable PR only re-ran a full CI:
+    25 syncs that day, median 1 commit behind. With strict=false nothing is synced."""
+
+    def _run(self, strict: str):
+        d = tempfile.mkdtemp()
+        calls = Path(d, "calls")
+        gh = Path(d, "gh")
+        gh.write_text(f"""#!/bin/bash
+echo "$*" >> {calls}
+case "$*" in
+  "repo view"*) echo o/r ;;
+  "api repos/o/r/branches/main/protection"*) echo {strict} ;;
+  "pr list --state open --json number,isDraft,mergeable,mergeStateStatus"*) printf '7990\n' ;;
+  "pr view 7990 --json headRefName"*) echo member/minion-item7800-1-2 ;;
+  "pr view 7990 --json statusCheckRollup"*) echo 0 ;;
+  "api repos/o/r/compare/"*) echo 1 ;;
+  *) ;;
+esac
+""")
+        gh.chmod(0o755)
+        Path(d, "repo").mkdir()
+        env = dict(os.environ, PATH=f"{d}:{os.environ['PATH']}", FLEET_REPO=str(Path(d, "repo")),
+                   FLEET_LOG_DIR=d, FLEET_ENV_FILE="/nonexistent", FLEET_ENABLED="true")
+        subprocess.run(["bash", str(HERE / "auto_update_branch.sh")], env=env, capture_output=True,
+                       text=True, timeout=60)
+        return [ln for ln in calls.read_text().splitlines() if "update-branch" in ln]
+
+    def test_not_strict_syncs_nothing(self):
+        self.assertEqual(self._run("false"), [])
+
+    def test_strict_or_unreadable_still_syncs(self):
+        self.assertTrue(self._run("true"))
+        self.assertTrue(self._run(""), "unreadable protection: keep the old behaviour")
 
 
 if __name__ == "__main__":

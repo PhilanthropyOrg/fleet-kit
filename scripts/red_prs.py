@@ -112,7 +112,9 @@ def describe(pr: dict, priority_issues: set[int], now: float, kit: bool = False)
     if not ours(head, draft, kit) or HANDS_OFF_LABEL in labels:
         return None
     info = conflict_aware(pr)
-    if info["state"] not in ("RED", "BLOCK", "CONFLICT"):
+    # A minion draft counts whatever its checks say: philanthropy CI skips drafts (2026-09-29,
+    # Actions minutes), so an idle checkpoint never turns red -- it is unfinished work either way.
+    if info["state"] not in ("RED", "BLOCK", "CONFLICT") and not draft:
         return None
     items = items_of(pr.get("headRefName") or "")
     reif = PRIORITY_LABEL in labels or any(i in priority_issues for i in items)
