@@ -80,8 +80,12 @@ times in the same window.
 
 So testing is YOUR job, not the gate's:
 
-    bash /fleet-kit/scripts/verified_test.sh              # the whole suite
+    bash /fleet-kit/scripts/verified_test.sh              # the tests near your diff
     bash /fleet-kit/scripts/verified_test.sh tests/x.py   # narrower, recorded as such
+
+Targeted only, never the whole suite (Reif, 2026-09-29): the full suite runs in the product
+repo's CI on your PR, and waiting for that CI (`pr_ci_wait.py`) is part of your pass. Your
+evidence names the targeted run and says the full suite runs in CI on the PR.
 
 Run it, get it green, THEN push. `pretest_push_hook.py` blocks a `git push` out of a worktree
 whose current content has no green receipt behind it — the same mechanical layer §6's worktree
