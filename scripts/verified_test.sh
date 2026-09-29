@@ -65,8 +65,8 @@ fi
 # commit; on dino's shared disk they sat blocked on the journal at ~17% CPU. eatmydata turns
 # fsync into a no-op for the test process only (the test DBs are deleted afterwards anyway):
 # 109 tests, same box and load, 1159s/1169s -> 443s/464s. Absent binary = run as before.
-EMD=()
-if command -v eatmydata >/dev/null 2>&1; then EMD=(eatmydata); echo "verified_test: fsync off for the test run (eatmydata)"; fi
+EMD=(); EMD_BIN="${FLEET_EATMYDATA_BIN:-eatmydata}"
+if command -v "$EMD_BIN" >/dev/null 2>&1; then EMD=("$EMD_BIN"); echo "verified_test: fsync off for the test run (eatmydata)"; fi
 
 ARGS="${*:-full}"
 if [ $# -eq 0 ] && [ -f scripts/tests_for_diff.py ]; then

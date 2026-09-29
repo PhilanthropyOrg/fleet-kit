@@ -39,18 +39,17 @@ class EatMyData(unittest.TestCase):
     def _run(self, with_emd: bool) -> tuple[subprocess.CompletedProcess, str]:
         tmp = pathlib.Path(tempfile.mkdtemp())
         log = tmp / "ran.log"
-        path = os.environ["PATH"]
+        extra = {}
         if with_emd:
             (tmp / "bin").mkdir()
             (tmp / "bin" / "eatmydata").write_text(FAKE_EMD)
             (tmp / "bin" / "eatmydata").chmod(0o755)
-            path = f"{tmp / 'bin'}:{path}"
-        else:  # hide a real eatmydata the test box may have
-            path = ":".join(p for p in path.split(":")
-                            if not (pathlib.Path(p) / "eatmydata").exists())
+            extra["FLEET_EATMYDATA_BIN"] = str(tmp / "bin" / "eatmydata")
+        else:  # a box without the binary
+            extra["FLEET_EATMYDATA_BIN"] = str(tmp / "no-such-eatmydata")
         d = _repo()
         r = subprocess.run(["bash", str(VT)], cwd=d, capture_output=True, text=True, timeout=120,
-                           env=dict(os.environ, PATH=path, WT_PATH=d, RAN_LOG=str(log),
+                           env=dict(os.environ, **extra, WT_PATH=d, RAN_LOG=str(log),
                                     FLEET_TEST_SLOT_DIR=str(tmp / "slots")))
         return r, log.read_text().strip() if log.exists() else ""
 
