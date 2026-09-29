@@ -83,7 +83,9 @@ def test_cli_env_target_items_is_a_ceiling_on_the_flag() -> None:
     print("ok  CLI: $FLEET_MINION_TARGET_ITEMS=3 beats a typed --target-items 8")
 
 
-def test_cli_defaults_solo_5_and_reads_minion_timeout() -> None:
+def test_cli_defaults_pack_together_and_read_minion_timeout() -> None:
+    # 2026-09-29 (Reif: "make the minimum 10 issues" per PR): no solo floor by default and a 3h
+    # minion timeout, so the incident's four c5 items are ONE batch now -- inside the ceiling.
     env = {k: v for k, v in os.environ.items() if not k.startswith("FLEET_MINION_")}
     out = subprocess.run(
         [sys.executable, str(HERE / "fanout.py"), "batches", "--turn-budget", "0",
@@ -92,8 +94,9 @@ def test_cli_defaults_solo_5_and_reads_minion_timeout() -> None:
     r = json.loads(out)
     spec = json.loads((HERE.parent / "members/minion/minion.fleet.json").read_text())
     assert r["timeout_s"] == float(spec["timeout_s"]), r
-    assert r["solo_complexity_floor"] == 5 and r["n_batches"] == 4, r
-    print("ok  CLI: solo floor defaults to 5 and the ceiling reads minion's own timeout_s")
+    assert r["solo_complexity_floor"] == 11 and r["n_batches"] == 1, r
+    assert 4 <= r["max_batch_weight"], r
+    print("ok  CLI: no solo floor by default and the ceiling reads minion's own timeout_s")
 
 
 if __name__ == "__main__":

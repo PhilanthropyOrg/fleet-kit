@@ -309,9 +309,9 @@ RETIRE_KILL_GRACE_S="${FLEET_RETIRE_KILL_GRACE_S:-60}"
 # FLEET_RETIRE_MAX_S=900s with 30 / 16 pass(es) still in flight"), each ~15 min after a
 # cutover, and their kill-time checkpoints saved nothing. Past RETIRE_MAX_S only the NON-minion
 # passes are terminated; minion passes finish (or checkpoint on their own timeout) for up to
-# RETIRE_MINION_MAX_S -- minion timeout_s 5400 + 300s for the timeout checkpoint. Deploys
+# RETIRE_MINION_MAX_S -- minion timeout_s 6600 (10-issue batches, 2026-09-29) + 300s for the timeout checkpoint. Deploys
 # coalesce to one per FLEET_DEPLOY_MIN_INTERVAL_S (7200s), so a normal deploy never waits on it.
-RETIRE_MINION_MAX_S="${FLEET_RETIRE_MINION_MAX_S:-5700}"
+RETIRE_MINION_MAX_S="${FLEET_RETIRE_MINION_MAX_S:-6900}"
 
 live_ports() {
     # "<view> <webhook>" of the container that is live NOW. Before the first proxy-mode deploy
