@@ -131,18 +131,9 @@ runner writes the QUIET record itself, $0). The line shapes it emits and what ea
   **2026-09-25: sub-passes are DETACHED now (own session) and this supersedes the
   run_in_background/TaskOutput wording that follows** -- the sub-passes this pass backgrounded
   were killed (exit 143) the moment it ended at 20:26:20, fixes half done. Do not wait for them;
-  report which PRs you dispatched and their state (`pr_ci_wait.py <N> --no-wait`). (Historical:
-  **You are a one-shot `claude -p` pass, same as
-  gru (persona_law.md §12): use the `Bash` tool with `run_in_background: true` for each
-  `bash /fleet-kit/scripts/run_member.sh ... --item <N>` call -- never a raw shell `&`. Then
-  call `TaskOutput(task_id, block: true, timeout: 600000)`
-  for every task_id before you report.**) gh#283 (2026-09-02) recorded this exact section's own
-  prior "background with `&`, `wait` on it" wording producing a live loss: a 2-way `&`+`wait`
-  fan-out (PRs #276/#280) got its whole process group killed by an external signal ~42s in,
-  with no trace of the work -- a recurrence of gh#252's 4-way case. `Bash(run_in_background)` +
-  `TaskOutput(block: true)` (gh#152's confirmed-working replacement, already load-bearing in
-  datta.md/gru.md) survives independently of the calling shell instead of tying a sub-pass's
-  fate to one process tree. Each sub-pass passes `red_prs.py claim` inside run_member.sh first:
+  report which PRs you dispatched and their state (`pr_ci_wait.py <N> --no-wait`). The script starts
+  at most `FLEET_FIXER_ITEM_MAX` (default 3) fixers at once and prints `deferred` for the rest;
+  those stay red and come back next pass, so name them as deferred, not as failures. Each sub-pass passes `red_prs.py claim` inside run_member.sh first:
   a sub-pass that exits `QUIET -- red_prs: SKIP PR #N -- recent/exhausted` was deduplicated
   (another fixer already has that exact content), not lost -- check its PR, not its output. If you cannot afford to wait for all of them in this pass's own
   budget, only dispatch as many as you CAN wait for and say in your report which PRs you left
