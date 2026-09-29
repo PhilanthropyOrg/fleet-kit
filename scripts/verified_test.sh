@@ -6,7 +6,7 @@
 # shortcut worth taking -- the hash comes from the hook's own --content-hash, so a
 # hand-written one is wrong the moment the tree moves.
 #
-#   bash /fleet-kit/scripts/verified_test.sh                 # whole suite
+#   bash /fleet-kit/scripts/verified_test.sh                 # tests near the diff (tests_for_diff)
 #   bash /fleet-kit/scripts/verified_test.sh tests/test_x.py # narrower, recorded as such
 #
 # Width defaults to the box's core count, not 4: the pool machines have 6-7 cores and the
@@ -61,21 +61,31 @@ else
   exit 1
 fi
 
+# 2026-09-29: the product's tests write ~900 MB of throwaway SQLite per run and fsync every
+# commit; on dino's shared disk they sat blocked on the journal at ~17% CPU. eatmydata turns
+# fsync into a no-op for the test process only (the test DBs are deleted afterwards anyway):
+# 109 tests, same box and load, 1159s/1169s -> 443s/464s. Absent binary = run as before.
+EMD=(); EMD_BIN="${FLEET_EATMYDATA_BIN:-eatmydata}"
+if command -v "$EMD_BIN" >/dev/null 2>&1; then EMD=("$EMD_BIN"); echo "verified_test: fsync off for the test run (eatmydata)"; fi
+
 ARGS="${*:-full}"
 if [ $# -eq 0 ] && [ -f scripts/tests_for_diff.py ]; then
   echo "verified_test: diff-scoped -- python3 scripts/tests_for_diff.py --run in $WT"
-  python3 scripts/tests_for_diff.py --run
+  ${EMD[@]+"${EMD[@]}"} python3 scripts/tests_for_diff.py --run
   code=$?
   ARGS="tests_for_diff"
   if [ "$code" -eq 3 ]; then
-    echo "verified_test: diff too wide to scope (rc=3) -- falling back to the full suite"
-    python3 -m pytest -q -n "$WORKERS"
-    code=$?
-    ARGS="full (tests_for_diff rc=3)"
+    # 2026-09-29 (Reif): the box runs targeted tests only, never the whole suite. The full suite
+    # already runs in the product repo's CI on every PR; a 30-min local copy of it held a test
+    # slot, starved every other pass, and timed passes out. A diff too wide to scope pushes on
+    # preflight alone and CI is its test run -- the pass then waits for CI (pr_ci_wait.py).
+    echo "verified_test: diff too wide to scope (rc=3) -- no local run; the full suite runs in CI on the PR"
+    code=0
+    ARGS="ci-only (diff too wide to scope; full suite runs in CI on the PR)"
   fi
 else
   echo "verified_test: pytest -n $WORKERS ${*:-<full suite>} in $WT"
-  python3 -m pytest -q -n "$WORKERS" "$@"
+  ${EMD[@]+"${EMD[@]}"} python3 -m pytest -q -n "$WORKERS" "$@"
   code=$?
 fi
 
@@ -84,6 +94,7 @@ if [ "$code" -eq 0 ]; then STATUS=pass; else STATUS=fail; fi
 printf '{"status":"%s","content":"%s","args":"%s","exit":%d,"preflight":"%s","ts":%d}\n' \
   "$STATUS" "$HASH" "$ARGS" "$code" "$PREFLIGHT" "$(date +%s)" > "$RECEIPT"
 
+[ "$code" -eq 0 ] && echo "verified_test: PASS ($ARGS). The full suite runs in CI on the PR -- evidence line: \`verified_test.sh\` $ARGS green; full suite in CI on the PR."
 if [ "$code" -ne 0 ]; then
   echo "verified_test: suite FAILED (exit $code) -- the push hook will block until it is green" >&2
 fi

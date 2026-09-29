@@ -57,7 +57,8 @@ say so in the report with evidence and leave it to a human.
    writes the path on the ask and sends the work, waking that member. Escalating is the rare
    exception, only for a true one-way door (rotating/exposing a secret, spend or billing, prod
    data delete, force-push main, Reif's personal login) with nothing else left:
-   `ask.py escalate <id> --me dumbledore --reason "<why no other way exists>"` emails him under
+   `ask.py escalate <id> --me dumbledore --reason "<plain English, 1-2 short sentences: what is
+   wrong and the one thing Reif must do; no jargon, file paths or issue numbers>"` emails him under
    your name, with the original member; his reply (`yes N`, `no N: why`, `N: answer`) answers
    the same ask. Print `Escalation-rate:` from `ask.py triage-rate` (escalated / triaged, 7d);
    a rising rate is a finding about you.

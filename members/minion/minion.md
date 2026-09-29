@@ -141,8 +141,12 @@ work done).
    your own venv; for a targeted run use `$(bash /fleet-kit/scripts/test_python.sh) -m pytest
    <files>` with `PYTHONPATH=src`). Then it runs the repo's
    diff-scoped tests where the repo ships a runner
-   (philanthropy's `scripts/tests_for_diff.py`), falls back to the suite only when the diff is
-   too wide to scope, and writes the receipt the push hook checks. A raw whole-tree
+   (philanthropy's `scripts/tests_for_diff.py`) and writes the receipt the push hook checks.
+   **You run only the TARGETED tests near what you changed, never the full suite (Reif,
+   2026-09-29): the full suite runs in the product repo's CI on your PR.** A diff too wide to
+   scope runs no local tests; push, then `pr_ci_wait.py <PR>` IS its test run. Your `Evidence:`
+   line pastes the targeted result plus that note, e.g. `` `verified_test.sh` tests_for_diff
+   green (12 passed); full suite in CI on the PR ``. A raw whole-tree
    `pytest tests/` is blocked by that hook: it cannot produce a receipt, and it was the #1 way
    a pass died (563 whole-suite runs, 1,008 commands backgrounded at 120s, 103 passes that
    ended "waiting for the background run" with a finished build never pushed, 7 days to
@@ -153,8 +157,9 @@ work done).
    (pass `timeout: 1800000` for up to 30) and its output comes back in that same call. Never a
    shell `&`, `nohup`, or a `pgrep -f verified_test.sh` / `ps | grep` wait loop: other minions'
    test runs match the same pattern, and passes lost 20-50 min each polling them
-   (2026-09-28). If a full suite won't fit this pass's budget, run the targeted tests for what
-   you touched.** There is no wakeup: `ScheduleWakeup` is denied.
+   (2026-09-28).** There is no wakeup: `ScheduleWakeup` is denied.
+   `gh issue edit` is denied by design: board labels are gru's and marie's. Name the label
+   you would set in your `Outcome:` line and move on; never re-ask for it (asks #71-#109).
 3b. **A browser ships in this image — USE IT when the item touches rendered UI.** Playwright +
    headless chromium are installed and verified live; "no browser tooling" was the reason 15
    of your own self-critiques gave for missing an issue's OWN acceptance criteria. Same

@@ -97,6 +97,23 @@ class WrapperRunsTheRepoRunner(unittest.TestCase):
         self.assertEqual(r.returncode, 1)
         self.assertIn("suite FAILED", r.stderr)
 
+    def test_a_diff_too_wide_to_scope_never_runs_the_full_suite_locally(self):
+        # Reif 2026-09-29: targeted tests on the box only; the full suite runs in CI on the PR.
+        d = self._repo()
+        os.makedirs(os.path.join(d, "tests"))
+        marker = os.path.join(d, "FULL_SUITE_RAN")
+        with open(os.path.join(d, "tests", "test_marker.py"), "w") as fh:
+            fh.write(f"open({marker!r}, 'w').write('x')\ndef test_x():\n    pass\n")
+        r = self._run(d, FAKE_RC="3")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertFalse(os.path.exists(marker), "the full suite ran locally")
+        self.assertIn("full suite runs in CI on the PR", r.stdout)
+        receipt = json.loads(pathlib.Path(subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "pretest_push_hook.py"), "--receipt-path", d],
+            capture_output=True, text=True).stdout.strip()).read_text())
+        self.assertEqual(receipt["status"], "pass")
+        self.assertTrue(receipt["args"].startswith("ci-only"), receipt)
+
 
 if __name__ == "__main__":
     unittest.main()

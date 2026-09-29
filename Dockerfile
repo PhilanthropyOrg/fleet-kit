@@ -36,6 +36,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 # nothing said so, because a shell command that fails still lets the pass continue.
 RUN apt-get update -qq && apt-get install -y -qq \
       git python3 python3-pip curl ca-certificates cron gnupg jq sqlite3 tzdata openssh-client \
+      eatmydata \
       python3.11-minimal libpython3.11-stdlib \
     && rm -rf /var/lib/apt/lists/*
 
