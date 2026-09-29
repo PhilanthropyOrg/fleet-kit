@@ -214,6 +214,9 @@ def plan(rows: list[dict], ledger: dict, now: float, limit: int,
     pass. Reif-priority first, then oldest quiet. Pure."""
     due, held, exhausted, resume = [], [], [], []
     # A red draft may be a minion mid-build: only an idle one (stalled) is resumed.
+    superseded = [{"number": r["number"], "items": r["items"], "by": r["by"]}
+                  for r in rows if r.get("kind") == "superseded"]
+    rows = [r for r in rows if r.get("kind") != "superseded"]
     wanted = [r for r in rows if r["stalled"] or (r["reif_priority"] and r.get("kind") != "resume")]
     wanted.sort(key=lambda r: (0 if r["reif_priority"] else 1, -r["minutes_since_real_push"]))
     for r in wanted:
@@ -227,7 +230,7 @@ def plan(rows: list[dict], ledger: dict, now: float, limit: int,
             exhausted.append(r["number"])
         else:
             held.append({"number": r["number"], "why": v if v != "go" else "over this pass's limit"})
-    return {"due": due, "resume": resume, "held": held, "exhausted": exhausted,
+    return {"due": due, "resume": resume, "superseded": superseded, "held": held, "exhausted": exhausted,
             "not_yet_stalled": [r["number"] for r in rows if r not in wanted]}
 
 
@@ -267,13 +270,30 @@ def _priority_issues(repo: str | None, gh=pr_ci_wait._gh) -> set[int]:
         return set()
 
 
+def mark_superseded(rows: list[dict], prs: list[dict]) -> list[dict]:
+    """A red minion draft whose items all sit in an open NON-draft fleet PR is superseded: a
+    later pass rebuilt that work on a new branch (2026-09-29: #8836 resumed checkpoint #8553
+    for #7220 on a fresh branch and left #8553 red). Resuming it again would send a minion to
+    redo shipped work, so it becomes kind="superseded" with `by` naming the newer PR. Pure."""
+    live: dict[int, int] = {}
+    for p in prs:
+        if not p.get("isDraft") and FLEET_BRANCH.match(p.get("headRefName") or ""):
+            for i in items_of(p.get("headRefName") or ""):
+                live.setdefault(i, int(p["number"]))
+    for r in rows:
+        if r.get("kind") == "resume" and r["items"] and all(i in live for i in r["items"]):
+            r["kind"] = "superseded"
+            r["by"] = sorted({live[i] for i in r["items"]})
+    return rows
+
+
 def rows_now(repo: str | None, gh=pr_ci_wait._gh, now: float | None = None) -> list[dict] | None:
     prs = _open_prs(repo, gh)
     if prs is None:
         return None
     pri = _priority_issues(repo, gh)
     t = time.time() if now is None else now
-    return [r for r in (describe(p, pri, t) for p in prs) if r]
+    return mark_superseded([r for r in (describe(p, pri, t) for p in prs) if r], prs)
 
 
 def main(argv: list[str] | None = None) -> int:
