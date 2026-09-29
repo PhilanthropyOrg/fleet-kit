@@ -4989,6 +4989,12 @@ def _reif_eyes_files_what_reif_would_have_pointed_out():
     assert urls == ["https://github.com/o/r/issues/5"] and [c[2] for c in calls] == ["create"], (urls, calls)
     assert calls[0][calls[0].index("--label") + 1] == "fleet:backlog,fleet:priority-high,lane:fleet"
     assert "reif-eyes:churn:the-fixer" in calls[0][calls[0].index("--body") + 1]
+    # jefe msg#277: a filed finding must clear both of gru's build gates on its own
+    body = calls[0][calls[0].index("--body") + 1]
+    assert "\nVision-link: none (maintenance)\n" in body, body
+    qg = importlib.util.module_from_spec(importlib.util.spec_from_file_location("quality_gate", ROOT / "scripts" / "quality_gate.py"))
+    qg.__spec__.loader.exec_module(qg)
+    assert qg.count_acceptance_bullets(body) >= 1, body
     assert state["ask-stale:7"]["url"] == "(already open)"
     calls.clear()
     assert re_.file_findings(churn, "o/r", state, [], run=run, now=now + 3600) == [] and not calls, "a key filed this week is not filed twice"

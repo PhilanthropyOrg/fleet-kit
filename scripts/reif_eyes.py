@@ -45,6 +45,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 LOG_DIR = pathlib.Path(os.environ.get("FLEET_LOG_DIR") or os.path.expanduser("~/Library/Logs/fleet-kit"))
 STATE = LOG_DIR / ".reif_eyes.state"
 LABELS = "fleet:backlog,fleet:priority-high,lane:fleet"
+HOURS_DEFAULT = 6.0
 
 
 def log(msg: str) -> None:
@@ -251,7 +252,14 @@ def file_findings(findings: list[dict], slug: str, state: dict, titles: list[str
         if any(issue_cluster.signature(t) == issue_cluster.signature(f["title"]) for t in titles):
             state[f["key"]] = {"ts": now, "url": "(already open)"}
             continue
-        body = f["body"] + f"\n\n<!-- reif-eyes:{f['key']} -->\nFiled by reif_eyes.py, the pass that looks at the console the way Reif does."
+        # gru's build gates drop an item with no acceptance criterion or no Vision-link line
+        # (jefe msg#277: #8589 and #7051 both born gate-blocked). Every finding here is fleet
+        # health, never a KR mover, and "fixed" means the next pass stops seeing it.
+        body = (f["body"] + "\n\n## Acceptance\n"
+                f"- Given the next reif_eyes.py pass, when it re-reads the last {int(HOURS_DEFAULT)}h of runs, "
+                f"then it no longer reports `{f['key']}`.\n\n"
+                "Vision-link: none (maintenance)\n\n"
+                f"<!-- reif-eyes:{f['key']} -->\nFiled by reif_eyes.py, the pass that looks at the console the way Reif does.")
         r = run(["gh", "issue", "create", "--repo", slug, "--title", f["title"], "--label", LABELS, "--body", body])
         if r.returncode == 0 and r.stdout.strip():
             url = r.stdout.strip().splitlines()[-1]
@@ -282,7 +290,7 @@ def save_state(state: dict) -> None:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--dry-run", action="store_true", help="print findings, file nothing")
-    ap.add_argument("--hours", type=float, default=6.0)
+    ap.add_argument("--hours", type=float, default=HOURS_DEFAULT)
     a = ap.parse_args(argv)
     now = time.time()
     runs = load_runs()
