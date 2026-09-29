@@ -144,8 +144,21 @@ done
 
 UPDATED=0
 CHECKED=0
-for pr in $(gh pr list --state open --json number,isDraft,mergeable,mergeStateStatus \
-              -q '.[] | select(.isDraft|not) | select(.mergeable=="MERGEABLE") | select(.mergeStateStatus=="BEHIND" or .mergeStateStatus=="BLOCKED") | .number' 2>/dev/null); do
+# 2026-09-29 (philanthropy hit its 50k Actions minutes): a sync is only needed when main's
+# protection requires an up-to-date branch (strict). With strict=false GitHub merges a PR that
+# is behind, and each sync only re-ran a full CI -- 25 syncs that day, median 1 commit behind.
+# A break that only shows once merged is the deploy gate's (and pull_bad_bag.py's) to catch.
+# Unreadable protection keeps the old behaviour.
+STRICT=$(timeout 25s gh api "repos/${REPO_SLUG}/branches/main/protection" \
+  --jq '.required_status_checks.strict' 2>/dev/null || echo "")
+SYNC_PRS=""
+if [ "$STRICT" = "false" ]; then
+  log "main does not require up-to-date branches (strict=false) -- not syncing mergeable PRs"
+else
+  SYNC_PRS=$(gh pr list --state open --json number,isDraft,mergeable,mergeStateStatus \
+    -q '.[] | select(.isDraft|not) | select(.mergeable=="MERGEABLE") | select(.mergeStateStatus=="BEHIND" or .mergeStateStatus=="BLOCKED") | .number' 2>/dev/null)
+fi
+for pr in $SYNC_PRS; do
   CHECKED=$((CHECKED+1))
   head_ref=$(gh pr view "$pr" --json headRefName -q '.headRefName' 2>/dev/null)
   [ -z "$head_ref" ] && continue
