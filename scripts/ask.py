@@ -175,9 +175,15 @@ def _notify(member: str, ask_id: int, why: str, sender: str | None = None) -> No
     # #1049 made fleet_alert.sh's email leg opt-in and Reif has no ntfy app, so without this an
     # ask reaches nobody. Reif, 2026-09-15: the console inbox is gone; "somehow it can get me a
     # message some other way if it needs me." An ask is that message: force the email leg.
-    env = dict(os.environ, FLEET_ALERT_EMAIL_LEG="1")
+    # Reif, 2026-09-28: "label these as officially from dumbledore" -- this is the one place
+    # in the fleet that pages Reif for an ask, so it brands both ends: the From name (MAIL_FROM,
+    # read by fleet_alert.sh's _send_email) and a "[dumbledore]" subject prefix. inbox.py's reply
+    # matching keys off the message BODY ("yes N"/"no N: ...") and only checks the subject for a
+    # leading Re:/Fwd:, never the literal "fleet ask #N" text, so the prefix cannot break a reply.
+    env = dict(os.environ, FLEET_ALERT_EMAIL_LEG="1",
+              MAIL_FROM="Dumbledore (fleet) <hello@philanthropy.org>")
     sender = sender or member
-    title = f"fleet ask #{ask_id} from {sender}" + (f" (for {member})" if sender != member else "")
+    title = f"[dumbledore] fleet ask #{ask_id} from {sender}" + (f" (for {member})" if sender != member else "")
     # fk#1056: the mail says how to answer it, and a reply to it reaches the fleet (Reply-To
     # is set by fleet_alert.sh; webhook_receiver.py applies the answer with no model in the way).
     body = (f"ask #{ask_id}: {why}\n\n"
