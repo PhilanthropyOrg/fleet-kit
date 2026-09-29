@@ -260,7 +260,7 @@ spawns exactly one). Your job, in order:
    gh issue list --state open --label fleet:backlog --label fleet:priority-high \
      --json number,title,body,labels,createdAt,comments --limit 200 --jq 'sort_by(.createdAt)'
    ```
-   (`comments` needed for the Vision-link gate below — free in the same call.) Filter out
+   (`comments` needed for the Vision-link gate below — free in the same call; `gh issue list` caps it at the oldest 100, and `gate_drops.py` refetches any capped issue in full.) Filter out
    anything already `fleet:claimed` **or carrying `fleet:needs-human-op`** or
    `fleet:needs-prod-access` (HQ's: prod DB, secrets, Cloudflare; philanthropy#8218) (a prior pass already
    confirmed the item is blocked on something no fleet member holds; re-claiming only

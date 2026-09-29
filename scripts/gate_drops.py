@@ -137,6 +137,30 @@ def fetch_parents(items: list[dict], known: list[dict], repo: str | None, run=No
     return out
 
 
+# `gh issue list --json comments` returns only an issue's OLDEST 100 comments (it does not
+# paginate; `gh issue view` does). philanthropy#6850 (108 comments) was dropped as needs-spec
+# while its Given/When/Then sat in comment #102 -- and every later fix lands past the cap too.
+LIST_COMMENT_CAP = 100
+
+
+def fill_capped_comments(items: list[dict], repo: str | None, run=None) -> list[dict]:
+    """Refetch the full comment list, in place, for any item that hit the list cap."""
+    for it in items:
+        if len(it.get("comments") or []) < LIST_COMMENT_CAP:
+            continue
+        try:
+            r = (run or _gh)(["gh", "issue", "view", str(it["number"]), "--json", "comments",
+                              *(["--repo", repo] if repo else [])], 120)
+        except subprocess.TimeoutExpired:
+            continue
+        if r.returncode == 0:
+            try:
+                it["comments"] = json.loads(r.stdout or "{}").get("comments") or it["comments"]
+            except ValueError:
+                pass
+    return items
+
+
 def plan(items: list[dict], run_id: str, parents: dict | None = None) -> dict:
     """Pure. Decides every label/comment/ask and the final eligible list; runs no gh.
     `parents`: fetch_parents() output, so `Vision-link: #<epic>` inherits the epic's link."""
@@ -381,6 +405,7 @@ def main(argv=None) -> int:
         try:
             backlog = list_open(f"{PREFIX}backlog", a.repo, run=lambda c: _gh(c, 300))
             prod = list_open(LABEL_PROD_ACCESS, a.repo, "number,title,labels")
+            fill_capped_comments(backlog, a.repo)
         except (RuntimeError, ValueError, subprocess.TimeoutExpired) as exc:
             print(f"gate_drops intake: {exc}", file=sys.stderr)
             return 1
@@ -394,7 +419,7 @@ def main(argv=None) -> int:
         print(json.dumps(summary if not a.dry_run else dict(summary, plan_actions=p["actions"][:50],
                                                            message=p["message"], messages=p["messages"])))
         return 0
-    items = load_items(a.items)
+    items = fill_capped_comments(load_items(a.items), a.repo)
     p = plan(items, a.run_id, fetch_parents(items, items, a.repo))
     if not a.dry_run:
         p.update(apply(p, a.repo, a.run_id, db_path=a.db_path))
