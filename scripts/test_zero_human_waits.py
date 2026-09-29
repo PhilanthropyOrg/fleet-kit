@@ -66,6 +66,7 @@ class OnlyDumbledoreReachesReif(unittest.TestCase):
             return real(cmd, *a, **kw)
         for p in (mock.patch.object(ask.subprocess, "run", fake),
                   mock.patch.object(ask, "issue_for_ask", lambda *a, **k: ""),
+                  mock.patch.object(ask, "settle_ask_issue", lambda *a, **k: ""),
                   mock.patch.object(fleet_msg, "_default_launcher",
                                     lambda m, r: self.woken.append(m)),
                   mock.patch.dict(os.environ, {"FLEET_LOG_DIR": self.d})):
