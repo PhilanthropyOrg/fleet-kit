@@ -88,6 +88,7 @@ Host fleet-node
   ServerAliveInterval 30
   ServerAliveCountMax 10
 EOF
+ssh "$HUB" "chmod 600 $D/config"  # ssh rejects a group-writable config ("Bad owner or permissions")
 PUB="$(ssh "$HUB" "cat $D/id_ed25519.pub")"
 
 say "4/6 node: forced-command key"
