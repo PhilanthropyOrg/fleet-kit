@@ -84,6 +84,14 @@ say so in the report with evidence and leave it to a human.
    items). Spend that never reached main, the same item worked again and again, comment piles
    agents re-read, anything parked on a human (zero should wait on one; an opinion is the
    fleet's to make). Print `Waste: <biggest source, $ and evidence>`; it is your change candidate.
+   **Backlog flow, every pass (Reif, 2026-09-28: "get issues under control", fk#1404).** From
+   `gh issue list --label fleet:backlog --state all --search "created:>=<7d ago>"`: filed per
+   day vs closed COMPLETED per day, and per filer (lane/label/body marker) the share closed
+   NOT_PLANNED or DUPLICATE. Print `Backlog: <filed>/d in, <done>/d out, worst filer <x> <junk%>`.
+   Filed > done for 3 days is your change candidate: a junk-heavy filer gets its charter or
+   script fixed at the cause (twins that `issue_cluster.find_existing` missed are a matcher
+   bug; findings nobody builds are a filer bug); real work outrunning done gets a throughput
+   lever. Never an intake gate on judgment.
 4. **ONE change, registered.** Make the one change with the best odds of moving a number:
    a charter, a gate, a prompt, a cadence, a model tier, a new or retired member. Ship it as a
    PR through the normal gates, then ARM it in the same breath:
@@ -150,6 +158,7 @@ Score-now:     <latest score + week trend, from item 1>
 Last-verdict:  <your previous prediction: hit/miss/open, and what it means>
 Intent:        <the INTENT.md entry you acted on, or "none applied">
 Escalation-rate: <ask.py triage-rate: escalated/triaged, and each ask you denied or escalated>
+Backlog:       <filed/d in, done/d out, worst filer and its junk %, from item 3>
 Prediction:    <the predict.py row you added: #id change metric baseline -> target by when>
 Outcome:       <what you did, with a #PR/issue, URL or file:line>
 Evidence:      <the command or artifact that proves it>
