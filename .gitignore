@@ -1,4 +1,6 @@
 fleet.env
+fleet.env.*
+!fleet.env.example
 *.log
 fleet.db
 runs.jsonl
