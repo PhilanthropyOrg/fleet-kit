@@ -644,7 +644,10 @@ def run_search_and_open_org(ctx: JourneyCtx):
     page = ctx.page()
 
     def s0():
-        page.goto(ctx.users.url("https://philanthropy.org/990/?q=hospital"), timeout=NAV_TIMEOUT_MS)
+        # philanthropy#9271: wait for the HTML, not `load` -- from dino, Cloudflare's injected
+        # bot-check scripts hold `load` 8-30s after the page is on screen.
+        page.goto(ctx.users.url("https://philanthropy.org/990/?q=hospital"), timeout=NAV_TIMEOUT_MS,
+                  wait_until="domcontentloaded")
         page.wait_for_function(
             "() => document.querySelectorAll('a[href*=\"/990/report/\"]').length > 0", timeout=10000
         )
@@ -683,11 +686,18 @@ def run_search_and_open_org(ctx: JourneyCtx):
             # navigation to settle, up to its own (30s) timeout -- if the checker's own click
             # action reported that timeout instead of the explicit wait_for_url below, a hung
             # connection would propagate as a bare, uncaught TimeoutError (`fail`) before ever
-            # reaching the Blocked classification. The explicit wait_for_url call is the sole
+            # reaching the Blocked classification. The explicit URL wait below is the sole
             # authority on navigation completion here.
             first.click(no_wait_after=True)
             try:
-                page.wait_for_url(re.compile(r"/990/report/"), timeout=10000)
+                # philanthropy#9271: poll the URL, not wait_for_url(). From dino, wait_for_url saw
+                # the report URL, then missed the new page's load-state event 8 runs in 10 and
+                # timed out with the report on screen. The heading check below waits on the DOM.
+                deadline = time.monotonic() + 10
+                while "/990/report/" not in page.url:
+                    if time.monotonic() > deadline:
+                        raise PlaywrightTimeoutError("URL never changed to /990/report/ within 10s")
+                    page.wait_for_timeout(100)
             except PlaywrightTimeoutError:
                 nav_response = nav_responses[-1] if nav_responses else None
                 blocked = _blocked_for_403(nav_response, ctx.users)
@@ -706,7 +716,7 @@ def run_search_and_open_org(ctx: JourneyCtx):
         if blocked:
             raise blocked
 
-        heading = page.get_by_role("heading").first.inner_text().strip()
+        heading = page.get_by_role("heading").first.inner_text(timeout=10000).strip()
         assert heading, "no org-name heading after opening a result"
         assert clicked_text.split()[0].lower() in heading.lower()
 
