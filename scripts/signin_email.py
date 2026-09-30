@@ -40,7 +40,9 @@ _LOCK = threading.Lock()
 
 def allowed(values: dict) -> dict[str, str]:
     """email -> name (the part before @) for everyone on FLEET_OPERATOR_EMAILS."""
-    raw = values.get("FLEET_OPERATOR_EMAILS") or os.environ.get("FLEET_OPERATOR_EMAILS") or ""
+    # The file alone decides once it exists, so removing an email cuts that person off now,
+    # not at the next restart (the process environment holds a copy from start-up).
+    raw = (values.get("FLEET_OPERATOR_EMAILS") if values else os.environ.get("FLEET_OPERATOR_EMAILS")) or ""
     out = {}
     for e in raw.split(","):
         e = e.strip().lower()

@@ -76,11 +76,15 @@ class EachPersonHasTheirOwnKey(unittest.TestCase):
         self.assertEqual(who("10.0.0.5", {"Cookie": cookie}), "reif")
 
     def test_removing_a_persons_key_cuts_only_them_off(self):
+        # The container's entrypoint also loads fleet.env into the server's environment at
+        # start; that stale copy must not keep a removed key working (live 2026-09-30).
+        os.environ["FLEET_OPERATOR_KEYS"] = "brandon:brandon-key"
         ENV.write_text("FLEET_API_KEY=owner-key\nFLEET_API_KEY_OWNER=reif\n")
         try:
             self.assertEqual(who("10.0.0.5", {"X-Fleet-Key": "brandon-key"}), "")
             self.assertEqual(who("10.0.0.5", {"X-Fleet-Key": "owner-key"}), "reif")
         finally:
+            os.environ.pop("FLEET_OPERATOR_KEYS", None)
             ENV.write_text("FLEET_API_KEY=owner-key\nFLEET_API_KEY_OWNER=reif\n"
                            "FLEET_OPERATOR_KEYS=brandon:brandon-key, broken, :nokey\n"
                            "FLEET_ACCOUNTS=primary\n")

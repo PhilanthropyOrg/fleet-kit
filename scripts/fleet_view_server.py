@@ -1316,7 +1316,9 @@ def operator_keys() -> list[tuple[str, str]]:
     if owner:
         name = (values.get("FLEET_API_KEY_OWNER") or os.environ.get("FLEET_API_KEY_OWNER") or "owner").strip()
         keys.append((name or "owner", owner))
-    raw = values.get("FLEET_OPERATOR_KEYS") or os.environ.get("FLEET_OPERATOR_KEYS") or ""
+    # The file alone decides once it exists: the entrypoint also loaded it into this process's
+    # environment at start, and that copy would keep a removed key working until a restart.
+    raw = (values.get("FLEET_OPERATOR_KEYS") if values else os.environ.get("FLEET_OPERATOR_KEYS")) or ""
     for entry in raw.split(","):
         name, _, key = entry.strip().partition(":")
         if name.strip() and key.strip():

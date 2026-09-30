@@ -110,8 +110,13 @@ class EmailSignIn(unittest.TestCase):
         _, token = self.token()
         _, _, cookie = self.post("/api/login_email_verify", {"token": token})
         session = re.search(r"fleet_session=([^;]+)", cookie).group(1)
+        # Stale copy the entrypoint loaded at start must not keep the removed email in.
+        os.environ["FLEET_OPERATOR_EMAILS"] = "brandon@thegoodproject.net"
         ENV.write_text("FLEET_API_KEY=owner-key\nFLEET_VIEW_PUBLIC_URL=https://dino.example.org/x\n")
-        self.assertEqual(who(session), "")
+        try:
+            self.assertEqual(who(session), "")
+        finally:
+            os.environ.pop("FLEET_OPERATOR_EMAILS", None)
 
     def test_forged_or_expired_sessions_and_tokens_fail(self):
         self.assertEqual(who("e:brandon@thegoodproject.net:" + "0" * 64), "")
