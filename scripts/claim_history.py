@@ -24,6 +24,10 @@ other half needed prod access, and was re-claimed every hour. `stalled_run_count
 newest unbroken streak of such passes (run_member.sh records `commits`); at the threshold the
 item reads BLOCKED like a dead end, gru parks it (dead_end_label.py) and the-fixer hears why.
 A pass that commits anything, or a row from before `commits` was recorded, ends the streak.
+A BATCH pass's commits do not end it (2026-09-30): `commits` is per branch, not per item, so
+one item's commit in a 10-item batch reset every rider's streak. philanthropy#6451 (waits on
+a human's Google credentials) rode 19 batches in 2 days reading stalled=1, because a sibling
+regenerated a docs file most passes. A batch commit is skipped, neither stall nor progress.
 
 Before this, every minion run against a still-open item counted, whatever its status. On
 2026-09-26 five fleet:reif-priority items (philanthropy#7939/7940/7942/7948/7950) went
@@ -125,10 +129,13 @@ def is_dead_end_blocked(run_ids: list[str], item_number: int,
 def stalled_run_count(rows) -> int:
     """Newest unbroken streak of passes that added no commit. `rows` are `_terminal_rows`
     shapes, oldest first. Infra endings (kill, timeout, ...) with no commit are skipped: the
-    minion never got to finish. Unknown `commits` (older rows) ends the streak. Pure."""
+    minion never got to finish. A batch row's commits are skipped too: they may be another
+    item's. Unknown `commits` (older rows) ends the streak. Pure."""
     n = 0
-    for _run_id, status, _exit, _blocked, _ckpt, commits in reversed(rows):
+    for _run_id, status, _exit, _blocked, _ckpt, commits, *item_id in reversed(rows):
         if commits is not None and commits > 0:
+            if item_id and "_" in (item_id[0] or ""):
+                continue
             break
         if (status or "") in INFRA_STATUSES:
             continue
@@ -166,7 +173,7 @@ def minion_runs_for_item(conn, item_number: int,
     "6_164"; item 64 matches only "64" and "64_99".
     """
     out: list[str] = []
-    for run_id, status, exit_code, blocked, checkpoint_pr, _commits in _terminal_rows(
+    for run_id, status, exit_code, blocked, checkpoint_pr, *_ in _terminal_rows(
             conn, item_number, window_days):
         if run_id not in out and is_dead_end_run(status, exit_code, blocked, checkpoint_pr,
                                                  item_number):
@@ -184,7 +191,7 @@ def minion_attempts_for_item(conn, item_number: int,
 def _terminal_rows(conn, item_number: int, window_days: float):
     since = time.time() - window_days * 86400
     return conn.execute(
-        "SELECT run_id, status, exit_code, blocked, checkpoint_pr, commits FROM runs"
+        "SELECT run_id, status, exit_code, blocked, checkpoint_pr, commits, item_id FROM runs"
         " WHERE member = 'minion' AND recorded_at >= ? AND COALESCE(status, '') != 'started'"
         " AND ('_' || item_id || '_') GLOB ('*_' || ? || '_*')"
         " ORDER BY recorded_at",

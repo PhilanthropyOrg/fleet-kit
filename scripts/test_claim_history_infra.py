@@ -16,6 +16,7 @@ Plain-python test, no pytest, matching ci.yml's `python3 scripts/test_*.py`.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -36,6 +37,12 @@ def _db(recs: list[dict], d: Path):
     conn = fleet_db.connect(d / "fleet.db")
     fleet_db.sync(conn, runs_file=runs_file)
     return conn
+
+
+def _isolated(d) -> dict:
+    """The CLI syncs $FLEET_LOG_DIR/runs.jsonl into its db; point it at the temp dir so a
+    box's real history (philanthropy#7939 has 27 live runs) never leaks into the fixture."""
+    return dict(os.environ, FLEET_LOG_DIR=str(d))
 
 
 def _run(run_id, item_id, status, exit_code, at, **extra):
@@ -68,7 +75,7 @@ def test_live_7939_history_is_not_a_dead_end() -> None:
         assert claim_history.minion_attempts_for_item(conn, 7939) == 5
         out = subprocess.run([sys.executable, str(HERE / "claim_history.py"), "--item", "7939",
                               "--db-path", str(Path(d) / "fleet.db")],
-                             capture_output=True, text=True)
+                             capture_output=True, text=True, env=_isolated(d))
         assert out.returncode == 0, (out.returncode, out.stdout, out.stderr)
         assert out.stdout.startswith("ok count=0 threshold=3 attempts=5"), out.stdout
     print("ok  #7939's live history (kills, timeout, Part-of PRs) is count=0")
@@ -88,7 +95,7 @@ def test_explicit_blocked_counts_and_blocks_at_threshold() -> None:
         assert claim_history.is_dead_end_blocked(runs, 7948)
         out = subprocess.run([sys.executable, str(HERE / "claim_history.py"), "--item", "7948",
                               "--db-path", str(Path(d) / "fleet.db")],
-                             capture_output=True, text=True)
+                             capture_output=True, text=True, env=_isolated(d))
         assert out.returncode == 1 and "BLOCKED count=3" in out.stdout, out.stdout
     print("ok  three explicit Blocked: runs block; the kill beside them does not add a fourth")
 
@@ -167,7 +174,7 @@ def test_a_streak_of_passes_that_commit_nothing_blocks() -> None:
         assert claim_history.minion_stalls_for_item(conn, 7942) == 3
         out = subprocess.run([sys.executable, str(HERE / "claim_history.py"), "--item", "7942",
                               "--db-path", str(Path(d) / "fleet.db")],
-                             capture_output=True, text=True)
+                             capture_output=True, text=True, env=_isolated(d))
         assert out.returncode == 1 and out.stdout.startswith("BLOCKED count=0"), out.stdout
         assert "stalled=3" in out.stdout, out.stdout
     # One pass that commits resets the streak; a row from before `commits` existed ends it.
@@ -179,6 +186,28 @@ def test_a_streak_of_passes_that_commit_nothing_blocks() -> None:
     print("ok  #7942's loop: 3 passes in a row that committed nothing read BLOCKED stalled=3")
 
 
+def test_a_batch_siblings_commit_does_not_reset_a_riders_stall() -> None:
+    """philanthropy#6451, 2026-09-30: rode 19 ten-item batches in 2 days reading stalled=1,
+    because a sibling item's commit (a regenerated docs file) landed in most of them."""
+    now = time.time()
+    h = 3600
+    batch = "6451_7664_7819_8114_8317"
+    recs = (_run("minion-b-1", batch, "ok", 0, now - 6 * h, commits=0)
+            + _run("minion-b-2", batch, "ok", 0, now - 5 * h, commits=2)
+            + _run("minion-b-3", batch, "quiet", 0, now - 4 * h, commits=0)
+            + _run("minion-b-4", batch, "ok", 0, now - 3 * h, commits=1)
+            + _run("minion-b-5", batch, "ok", 0, now - 2 * h, commits=0))
+    with tempfile.TemporaryDirectory() as d:
+        conn = _db(recs, Path(d))
+        assert claim_history.minion_stalls_for_item(conn, 6451) == 3
+    # A single-item pass that commits is that item's own progress and still ends the streak.
+    with tempfile.TemporaryDirectory() as d:
+        conn = _db(recs + _run("minion-s-6", "6451", "ok", 0, now - h, commits=1)
+                   + _run("minion-b-7", batch, "ok", 0, now - 30 * 60, commits=0), Path(d))
+        assert claim_history.minion_stalls_for_item(conn, 6451) == 1
+    print("ok  #6451: a batch sibling's commit does not reset a rider's stall streak")
+
+
 def main() -> int:
     try:
         test_live_7939_history_is_not_a_dead_end()
@@ -187,6 +216,7 @@ def main() -> int:
         test_blocked_line_in_a_batch_only_blocks_the_items_it_names()
         test_run_report_captures_blocked_lines_and_checkpoint_pr()
         test_a_streak_of_passes_that_commit_nothing_blocks()
+        test_a_batch_siblings_commit_does_not_reset_a_riders_stall()
     except AssertionError as exc:
         print(f"FAIL  {exc}")
         return 1
