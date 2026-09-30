@@ -2049,6 +2049,10 @@ class Handler(BaseHTTPRequestHandler):
             # (fleet_chat_act.py); only a caller already on the box can set this header.
             behalf = (self.headers.get("X-Fleet-On-Behalf") or "").strip()[:60].removesuffix(" (chat)")
             return f"{behalf} (chat)" if behalf else "localhost"
+        cookie = self._session_cookie()
+        if cookie.startswith("e:"):   # signed in by emailed link (signin_email.py)
+            import signin_email
+            return signin_email.who_from_cookie(cookie, read_env_values(), LOG_DIR)
         keys = operator_keys()
         if not keys:
             return ""   # fail closed: no key configured => no remote writes, ever
@@ -2061,7 +2065,6 @@ class Handler(BaseHTTPRequestHandler):
         # Safe against a cross-site caller for the same reasons the header path is: Allow-Origin
         # `*` forbids credentials, only GET is advertised in Allow-Methods, and the cookie is
         # SameSite=Strict so a third-party page's POST never carries it.
-        cookie = self._session_cookie()
         for name, key in keys:
             if sent and hmac.compare_digest(sent, key):
                 return name
@@ -2105,16 +2108,43 @@ class Handler(BaseHTTPRequestHandler):
             return
         name, key = match[0]
         print(f"[fleet-view] LOGIN {name}", flush=True)
+        self._set_session(name, _session_token(key))
+
+    def _set_session(self, name: str, cookie: str) -> None:
+        """Answer {ok, who} with the session cookie. Flags explained in _handle_login."""
         secure = "; Secure" if (self.headers.get("X-Forwarded-Proto") or "").lower() == "https" else ""
         body_bytes = json.dumps({"ok": True, "who": name}).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body_bytes)))
         self.send_header("Set-Cookie",
-                         f"fleet_session={_session_token(key)}; HttpOnly; SameSite=Strict; "
+                         f"fleet_session={cookie}; HttpOnly; SameSite=Strict; "
                          f"Path=/; Max-Age=31536000{secure}")
         self.end_headers()
         self.wfile.write(body_bytes)
+
+    def _handle_login_email(self, body: dict) -> None:
+        """Mail a one-time sign-in link to an allowed operator (signin_email.py). Same answer
+        whether or not the email is on the list, so the list cannot be probed."""
+        import signin_email
+        try:
+            signin_email.send_link(str(body.get("email") or ""), read_env_values())
+        except RuntimeError as exc:
+            print(f"[fleet-view] EMAIL SIGN-IN FAILED: {exc}", flush=True)
+            self._json({"ok": False, "error": str(exc)}, 503)
+            return
+        self._json({"ok": True, "message": "If that email is allowed, a sign-in link is on its way."})
+
+    def _handle_login_email_verify(self, body: dict) -> None:
+        import signin_email
+        values = read_env_values()
+        email = signin_email.redeem(str(body.get("token") or ""), values)
+        if not email:
+            self._json({"ok": False, "error": "that sign-in link is used or expired -- ask for a new one"}, 401)
+            return
+        name = signin_email.allowed(values)[email]
+        print(f"[fleet-view] LOGIN {name} (email link)", flush=True)
+        self._set_session(name, signin_email.session_cookie(email, LOG_DIR))
 
     def _write_log(self, path: str, who: str, body: dict) -> None:
         """One line per allowed write: who did what. Reads stay in access.jsonl; this is the
@@ -2540,6 +2570,12 @@ class Handler(BaseHTTPRequestHandler):
         # carries its own fail-closed check instead (see _handle_login).
         if path == "/api/login":
             self._handle_login(body)
+            return
+        if path == "/api/login_email":
+            self._handle_login_email(body)
+            return
+        if path == "/api/login_email_verify":
+            self._handle_login_email_verify(body)
             return
 
         who = self._authorized()

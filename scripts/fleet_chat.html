@@ -47,9 +47,12 @@
   <form id="ask"><textarea id="q" placeholder="Ask a question" required></textarea><button id="send">Ask</button></form>
 </div>
 <div id="signin" class="signin" hidden role="dialog" aria-label="sign in">
-  <div><b>Sign in</b><small>Paste your fleet key. It becomes a cookie; the page does not keep it.</small>
-    <input id="key" type="password" autocomplete="off" placeholder="your fleet key">
-    <button id="go">Sign in</button><span id="msg" style="color:var(--bad)"></span></div>
+  <div><b>Sign in</b><small>Type your email and we'll send you a sign-in link.</small>
+    <input id="email" type="email" autocomplete="email" placeholder="you@example.org">
+    <button id="mail">Email me a link</button><span id="mailMsg"></span>
+    <small>Or paste a fleet key.</small>
+    <input id="key" type="password" autocomplete="off" placeholder="fleet key">
+    <button id="go">Sign in with key</button><span id="msg" style="color:var(--bad)"></span></div>
 </div>
 <script>
 'use strict';
@@ -62,13 +65,19 @@ let HISTORY = [];
 
 function signIn() {
   return new Promise(resolve => {
-    $('signin').hidden = false; $('key').value = ''; $('msg').textContent = ''; $('key').focus();
+    $('signin').hidden = false; $('key').value = ''; $('msg').textContent = ''; $('email').focus();
     const go = async () => {
       const r = await fetch(url('/api/login'), {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({key: $('key').value})});
       const j = await r.json().catch(() => ({})); $('key').value = '';
       if (j.ok) { $('signin').hidden = true; resolve(); } else { $('msg').textContent = j.error || 'that key was not accepted'; }
     };
     $('go').onclick = go; $('key').onkeydown = ev => { if (ev.key === 'Enter') go(); };
+    const mail = async () => {
+      const r = await fetch(url('/api/login_email'), {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({email: $('email').value})});
+      const j = await r.json().catch(() => ({}));
+      $('mailMsg').textContent = j.ok ? 'Check your email for the link. You can close this tab.' : (j.error || 'could not send the link');
+    };
+    $('mail').onclick = mail; $('email').onkeydown = ev => { if (ev.key === 'Enter') mail(); };
   });
 }
 async function post(path, body) {
@@ -106,7 +115,18 @@ $('ask').onsubmit = async ev => {
   $('send').disabled = false; $('q').focus();
 };
 $('q').onkeydown = ev => { if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); $('ask').requestSubmit(); } };
-post('/api/whoami', {}).then(j => { $('who').textContent = 'signed in as ' + j.who; }).catch(() => {});
+// Arrived from an emailed sign-in link: spend the token, then drop it from the address bar.
+async function start() {
+  const token = new URLSearchParams(location.search).get('signin');
+  if (token) {
+    history.replaceState(null, '', location.pathname);
+    const r = await fetch(url('/api/login_email_verify'), {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({token})});
+    const j = await r.json().catch(() => ({}));
+    if (!j.ok) add('a err', j.error || 'that sign-in link did not work');
+  }
+  post('/api/whoami', {}).then(j => { $('who').textContent = 'signed in as ' + j.who; }).catch(() => {});
+}
+start();
 </script>
 </body>
 </html>

@@ -541,6 +541,10 @@ Give each extra person their own key with `FLEET_OPERATOR_KEYS=name:key,name:key
 with `FLEET_API_KEY`. Every allowed write is appended to `$FLEET_LOG_DIR/writes.jsonl` with
 `who`, so you can see who pressed what. To cut one person off, delete their entry.
 
+Or let people in without handing out a key: list them in `FLEET_OPERATOR_EMAILS` and set
+`FLEET_VIEW_PUBLIC_URL`. On the sign-in box they type their email and get a one-time link
+(15 minutes, single use) that signs them in. Removing the email cuts them off.
+
 `/chat` (linked as "Ask the fleet" on Home) lets a signed-in person ask Claude about the fleet
 in plain English, and ask it to act ("pause nerd", "release the claim on #123").
 `scripts/fleet_chat.py` runs one `claude -p --restricted` pass per question through the account
