@@ -371,10 +371,10 @@ case "${1:-cron-foreground}" in
         echo "21 * * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh jefe >> $LOG_DIR/jefe.log 2>&1"
       fi
       # dumbledore (Reif, 2026-09-26): back to fix the fleet itself -- the duty archived with
-      # "nothing moved" in fk#1195. Every 7h at :13 (01/08/15/22), his pre-fold slot, off the
-      # :03/:21/:33/:41/:47/:51 minutes other members own.
+      # "nothing moved" in fk#1195. Every 3h at :13 (Reif, 2026-09-30: shorter cycles, faster
+      # learning), off the :03/:21/:33/:41/:47/:51 minutes other members own.
       if cron_member_enabled dumbledore; then
-        echo "13 1,8,15,22 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh dumbledore >> $LOG_DIR/dumbledore.log 2>&1"
+        echo "13 */3 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh dumbledore >> $LOG_DIR/dumbledore.log 2>&1"
       fi
       # the-fixer -> the owning member when a fleet PR sits idle > 4h (philanthropy#8215). Its
       # own shell line at the-fixer's minute, not inside check.sh: a 30-50s gh list must never

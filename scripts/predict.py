@@ -40,7 +40,7 @@ sys.path.insert(0, str(HERE))
 import fleet_metrics  # noqa: E402
 
 RESOLVE_WINDOW_H = 24.0
-DEFAULT_BY_HOURS = 72.0
+DEFAULT_BY_HOURS = 24.0  # = RESOLVE_WINDOW_H: the shortest horizon whose score is all post-change
 
 
 def ledger_path() -> Path:
