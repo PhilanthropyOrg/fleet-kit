@@ -5103,6 +5103,13 @@ def _north_weights_every_kr_by_what_reif_shipped_and_where_the_funnel_leaks():
             {"member": "old", "pr": 42, "ts": now - 9 * 86400, "tokens": {"cost_usd": 99.0}}]
     burn, total = n.burn_by_kr(runs, {42: "okr.clicks"}, now)
     assert burn == {"okr.clicks": 3.0, "no PR: marie": 5.5} and total == 8.5, (burn, total)
+    # 2026-09-30: a minion's checkpoint_pr and the-fixer's item_id are PRs too; an unmerged one is its own bucket
+    more = [{"member": "minion", "checkpoint_pr": 42, "ts": now - 10, "tokens": {"cost_usd": 2.0}},
+            {"member": "the-fixer", "item_id": "42", "ts": now - 10, "tokens": {"cost_usd": 1.0}},
+            {"member": "minion", "checkpoint_pr": 77, "item_id": "8000", "ts": now - 10, "tokens": {"cost_usd": 4.0}}]
+    b2, _ = n.burn_by_kr(more, {42: "okr.clicks"}, now)
+    assert b2 == {"okr.clicks": 3.0, "PR not merged: minion": 4.0}, b2
+    assert "- a PR, not merged (yet): $4 (57%) -- minion $4" in n.render([], None, {}, {}, None, b2, 7.0, now)
     text = n.render(reif, None, {"objective": {"id": "okr.verified_claims", "label": "3,000"}, "key_results": [{"id": k, "label": k} for k in n.KR_IDS]},
                     {"funnel": {"worst_step": "cta_clicked->page_viewed", "cta_clicked": 239}}, None, burn, total, now)
     assert "## Weights" in text and "`okr.conversion` 0.85" in text and "no PR at all: $6 (65%) -- marie $6" in text, text
