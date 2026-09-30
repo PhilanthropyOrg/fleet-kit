@@ -11,6 +11,7 @@ Run: python3 scripts/test_verified_test_slots.py
 """
 import os
 import pathlib
+import re
 import subprocess
 import tempfile
 import time
@@ -86,6 +87,17 @@ class TestSlots(unittest.TestCase):
         self.assertIn("NO TEST SLOT", r.stderr)
         self.assertLess(took, 20)
         self.assertFalse(os.path.exists(self.log), "tests ran without a slot")
+
+    def test_the_wait_plus_a_typical_run_fits_one_minion_bash_call(self):
+        # 2026-09-29, 6h live on dino: runs held a slot p75 458s / p90 743s, and a 600s wait gave
+        # up 17 times against 25 successes. The wait must outlast a p90 hold, and the wait plus a
+        # p75 run must fit the minion's default Bash timeout (run_member.sh) or the call dies.
+        wait = int(subprocess.run(["bash", "-c", f'. "{ROOT}/scripts/test_slots.sh"; echo "$TEST_SLOT_WAIT_S"'],
+                                  capture_output=True, text=True, env={"PATH": os.environ["PATH"]}).stdout)
+        rm = (ROOT / "scripts" / "run_member.sh").read_text()
+        bash_default_s = int(re.search(r"BASH_DEFAULT_TIMEOUT_MS=(\d+)", rm).group(1)) // 1000
+        self.assertGreaterEqual(wait, 743 + 60)
+        self.assertLessEqual(wait + 458, bash_default_s)
 
     def test_default_is_half_the_cores(self):
         out = subprocess.run(["bash", "-c", f'. "{ROOT}/scripts/test_slots.sh"; echo "$TEST_SLOT_N"'],

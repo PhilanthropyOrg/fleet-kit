@@ -1091,12 +1091,13 @@ export IS_SANDBOX=1
 # 32 of 33 minion `reported_nothing` runs ended "waiting for the background verified_test.sh" --
 # the CLI moves any Bash call past its 120s default into the background, and the pass then ends
 # its turn on it (or polls `pgrep -f verified_test.sh`, which matches every other minion's run).
-# No background tasks, and a foreground call may run 20 min (30 with an explicit timeout).
+# No background tasks, and a foreground call may run 30 min (45 with an explicit timeout): a
+# test run's slot wait (up to 900s, test_slots.sh) plus the run itself must fit in one call.
 # A the-fixer --item sub-pass is the same one-shot builder (2026-09-29: the fixer on #8836 spent
 # 10+ min re-polling a verified_test.sh the CLI had backgrounded; 179 of 561 --item sessions had
 # at least one command backgrounded). The-fixer's parent pass still fans out in the background.
 if [ "$MEMBER" = "minion" ] || { [ "$MEMBER" = "the-fixer" ] && [ -n "$ITEM" ]; }; then
-  export CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 BASH_DEFAULT_TIMEOUT_MS=1200000 BASH_MAX_TIMEOUT_MS=1800000
+  export CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 BASH_DEFAULT_TIMEOUT_MS=1800000 BASH_MAX_TIMEOUT_MS=2700000
 fi
 # Only pass a cap the spec actually set -- an empty value must not become `--max-turns ""`,
 # which the CLI rejects, nor a silent default (see the MAX_TURNS/MAX_BUDGET note above).

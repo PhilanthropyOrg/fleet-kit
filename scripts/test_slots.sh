@@ -7,14 +7,16 @@
 # the CPU-heavy part -- preflight + pytest -- takes a slot.
 #
 # Same slot-file + flock pattern as claude_concurrency.sh. The wait is in the FOREGROUND of the
-# caller's Bash call and bounded: a minion's Bash call has a 20 min limit (run_member.sh), so
-# waiting longer than FLEET_TEST_SLOT_WAIT_S (default 600s) fails fast with a clear message
+# caller's Bash call and bounded: a minion's Bash call has a 30 min limit (run_member.sh), so
+# waiting longer than FLEET_TEST_SLOT_WAIT_S (default 900s) fails fast with a clear message
 # instead of hanging until the harness kills the call. Progress lines go to stdout so the model
 # sees it is queued, not stuck.
 TEST_SLOT_DIR="${FLEET_TEST_SLOT_DIR:-/tmp/fleet-kit-test-slots}"
 TEST_SLOT_N="${FLEET_TEST_SLOTS:-$(( $(nproc 2>/dev/null || echo 4) / 2 ))}"
 [ "$TEST_SLOT_N" -ge 1 ] 2>/dev/null || TEST_SLOT_N=1
-TEST_SLOT_WAIT_S="${FLEET_TEST_SLOT_WAIT_S:-600}"
+# 900s, not 600 (2026-09-29, 6h live): runs held a slot p75 458s / p90 743s, so a 600s wait gave
+# up 17 times against 25 successes -- each give-up a retry that queued all over again.
+TEST_SLOT_WAIT_S="${FLEET_TEST_SLOT_WAIT_S:-900}"
 TEST_SLOT_PROGRESS_S="${FLEET_TEST_SLOT_PROGRESS_S:-30}"
 
 # test_slot_acquire: holds one slot on fd 8 for the life of the caller's shell. Returns 0 with

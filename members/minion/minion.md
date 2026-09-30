@@ -153,8 +153,8 @@ work done).
    2026-09-19). **You are a
    one-shot `claude -p` pass (persona_law.md §12), and a minion runs with background tasks OFF
    (`CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`, set by run_member.sh): run `verified_test.sh`
-   and every other command in the FOREGROUND, in one Bash call. It may take up to 20 min
-   (pass `timeout: 1800000` for up to 30) and its output comes back in that same call. Never a
+   and every other command in the FOREGROUND, in one Bash call. It may take up to 30 min
+   (queueing for a test slot included; pass `timeout: 2700000` for up to 45) and its output comes back in that same call. Never a
    shell `&`, `nohup`, or a `pgrep -f verified_test.sh` / `ps | grep` wait loop: other minions'
    test runs match the same pattern, and passes lost 20-50 min each polling them
    (2026-09-28).** There is no wakeup: `ScheduleWakeup` is denied.
