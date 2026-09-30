@@ -53,8 +53,8 @@ STATUS_LINKED = "linked"
 STATUS_MAINTENANCE = "maintenance"
 STATUS_MISSING = "missing"
 
-# gh#726's crowd-out escape hatch. Kept as a public name (other scripts import it); the
-# crowd-out it escaped from was removed in fk#1191, so it no longer changes eligibility.
+# gh#726's crowd-out escape hatch (the crowd-out itself was removed in fk#1191). Since jefe
+# msg#430 it passes this gate on its own: live breakage needs no KR to be worth fixing.
 SEVERITY_LIVE_LABEL = "fleet:severity-live"
 
 # Tolerate the punctuation a model actually produces: "none(maintenance)", "None (Maintenance)",
@@ -166,8 +166,11 @@ def gate_candidates(candidates: list[dict], parents: dict | None = None) -> dict
         # outside the KR tiers, yet their links ("KR1 -- ...", "#9117" -> "#8176", "none (Reif
         # direct ask)") failed this gate and sat fleet:needs-spec. The line ranks; it never
         # decided whether Reif's ask gets built.
+        # jefe msg#430 (philanthropy#9300): a live-broken prod item (fleet:severity-live) is
+        # maintenance by construction too, whoever filed it.
         if (status in (STATUS_LINKED, STATUS_MAINTENANCE) or quality_gate.is_alert(labels)
-                or is_reif_ask(labels)):
+                or is_reif_ask(labels)
+                or SEVERITY_LIVE_LABEL in quality_gate._label_names(labels)):
             eligible.append(number)
         else:
             dropped.append({

@@ -1442,15 +1442,16 @@ def _vision_link_gate_severity_escape_hatch_gh726():
         out_pack = vlg.gate_candidates(pack)
         assert out_pack == {"eligible": [513, 100], "dropped": []}, out_pack
 
-    # AC4: fleet:severity-live present but no Vision-link line at all (missing, not maintenance)
-    # -- the hatch rescues an honest maintenance line, never an unlinked one.
+    # AC4, reversed by jefe msg#430 (philanthropy#9300): fleet:severity-live with no Vision-link
+    # line is live breakage, maintenance by construction like an incident, so it passes.
     out_missing = vlg.gate_candidates([
         {"number": 513, "body": "Vision-link: okr.verified_claims"},
         {"number": 100, "body": "no vision line here",
          "labels": [{"name": "fleet:severity-live"}]},
+        {"number": 101, "body": "no vision line here"},
     ])
-    assert out_missing == {"eligible": [513], "dropped": [
-        {"number": 100, "reason": "no Vision-link line (neither a real link nor explicit "
+    assert out_missing == {"eligible": [513, 100], "dropped": [
+        {"number": 101, "reason": "no Vision-link line (neither a real link nor explicit "
                                    "'none (maintenance)')"}
     ]}, out_missing
 
@@ -4609,7 +4610,7 @@ def _email_reply_answers_asks_and_files_backlog_without_a_model():
     assert ib.backlog_title("Re: brief") is None and ib.backlog_title("fleet ask #3 from gru") is None
     assert ib.backlog_title("990 Scout prod alert [app_error]: 20 Postgres statement timeouts") == "prod alert [app_error]: 20 Postgres statement timeouts"
     assert ib.backlog_labels("prod alert [app_error]: x") == "fleet:backlog,fleet:priority-high,lane:devops"
-    assert ib.backlog_labels("claim page blank") == "fleet:backlog"
+    assert ib.backlog_labels("claim page blank") == "fleet:backlog,fleet:user-asked"
     calls, replies = [], []
     class R:  # a fake subprocess result
         def __init__(self, out): self.returncode, self.stdout, self.stderr = 0, out, ""
@@ -4638,7 +4639,7 @@ def _email_reply_answers_asks_and_files_backlog_without_a_model():
                         "text": "tap does nothing on iOS", "message_id": "<m2>"}, {})
         res = ib.apply(row, run=run, reply=reply)
         gh = [c for c in calls if c[:3] == ["gh", "issue", "create"]][0]
-        assert gh[:6] == ["gh", "issue", "create", "--repo", "o/r", "--label"] and "fleet:backlog" in gh, gh
+        assert gh[:6] == ["gh", "issue", "create", "--repo", "o/r", "--label"] and gh[6] == "fleet:backlog,fleet:user-asked", gh
         assert gh[gh.index("--title") + 1] == "claim button dead on phone" and "tap does nothing" in gh[gh.index("--body") + 1], gh
         assert res["done"] and "issues/99" in replies[-1][2], (res, replies)
         # fk#1105: the filing is remembered as a thread, so the resolution can go back to it

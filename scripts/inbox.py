@@ -415,7 +415,12 @@ def backlog_title(subject: str) -> str | None:
 
 
 def backlog_labels(title: str) -> str:
-    return "fleet:backlog,fleet:priority-high,lane:devops" if title.startswith("prod alert [") else "fleet:backlog"
+    # jefe msg#430 (philanthropy#9295/#9297): only Reif's own mail reaches file_backlog, and
+    # it was filed with no Vision-link, so gru's gate dropped every one to fleet:needs-spec.
+    # fleet:user-asked is the label that gate already reads as "Reif's ask is its link".
+    if title.startswith("prod alert ["):
+        return "fleet:backlog,fleet:priority-high,lane:devops"
+    return "fleet:backlog,fleet:user-asked"
 
 
 # fk#1129 slice 1: classification is the deterministic front door every mail passes through
@@ -538,7 +543,9 @@ def file_backlog(title: str, body: str, sender: str, run=None) -> str:
              "--body", f"Fired again by email from {sender}:\n\n{text[:1500]}"])
         return it["url"]
     r = run(["gh", "issue", "create", "--repo", slug, "--label", backlog_labels(title),
-             "--title", title, "--body", f"{text}\n\nFiled by email from {sender} (fk#1056)."])
+             "--title", title, "--body", f"{text}\n\nFiled by email from {sender} (fk#1056).\n\n"
+                                         "Vision-link: none (maintenance) -- Reif's own ask; "
+                                         "fleet:user-asked ranks it"])
     if r.returncode != 0:
         raise RuntimeError((r.stderr or r.stdout).strip()[:300])
     return r.stdout.strip().splitlines()[-1]
