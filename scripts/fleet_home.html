@@ -5,16 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Fleet</title>
 <!--
-  fleet_home.html -- Console v3 (fk#1058). The 990 Scout superadmin sidebar shell (Reif,
-  2026-09-15: "borrow from the templates copy from nonprofitatlas - its got a sidebar admin
-  template that is pretty good"), operator purple, Inter, tabular numbers.
-
-  Three pages, one file, no build step: Home, Roster (members grouped by value stage), and
-  the run panel (fk#748). Every tile is a
-  row in scripts/metrics.json with a real id, a value and a hoverable sparkline; the OKR file
-  references tiles by id. No inbox block (#1054): an ask pages Reif. Each shows its source's
-  as-of time, stale past 2x cadence (gh#8212). Polls the JSON endpoints every 30s, behind a
-  path prefix; every URL goes through withBase() (gh#553).
+  fleet_home.html -- Console v3 (fk#1058): the 990 Scout sidebar shell, operator purple.
+  Home, Roster, the run panel (fk#748) and the messenger (fleet_chat.html), one file, no build
+  step. Each tile is a row in scripts/metrics.json with an id, value and sparkline, stale past
+  2x its cadence (gh#8212). No inbox (#1054). Polls every 30s; every URL goes through
+  withBase() (gh#553).
 -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -32,6 +27,8 @@
     :root{--ink:#eceef2;--ink-2:#c9cdd4;--muted:#a2a8b3;--faint:#7d838e;--paper:#1b1d21;--tint:#15171b;--tint-2:#262930;--rule:#2f333a;--accent:#8f88ff;--accent-soft:#2a2750;--off:#4b4f57;--shadow:0 1px 3px rgba(0,0,0,.4)}
 }
   *{box-sizing:border-box}
+.chat-btn{position:fixed;right:20px;bottom:20px;width:56px;height:56px;border-radius:50%;border:0;background:var(--accent);color:#fff;font:600 24px var(--sans);cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.2);z-index:60}
+.chat-box{position:fixed;right:20px;bottom:88px;width:min(400px,calc(100vw - 40px));height:min(600px,calc(100vh - 108px));border:1px solid var(--rule);border-radius:12px;background:var(--paper);box-shadow:0 8px 30px rgba(0,0,0,.18);z-index:60}
   html,body{margin:0;background:var(--tint);color:var(--ink);font:14px/1.45 var(--sans);-webkit-font-smoothing:antialiased}
   a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
 .layout{display:grid;grid-template-columns:248px 1fr;min-height:100vh}
@@ -185,7 +182,6 @@
     <a class="nav active" data-page="home" href="#home"><span>▣</span>Home</a>
     <a class="nav" data-page="roster" href="#roster"><span>◉</span>Roster<span class="cnt" id="cntMembers">–</span></a>
     <a class="nav" id="navPrs" href="#" target="_blank"><span>⇅</span>Pull requests<span class="cnt" id="cntPrs">–</span></a>
-    <a class="nav" href="chat"><span>?</span>Ask the fleet</a>
     <a class="nav" id="navBacklog" href="#" target="_blank"><span>▤</span>Backlog<span class="cnt" id="cntBacklog">–</span></a>
     <div class="sec">Spend</div>
     <a class="nav" id="navAccounts" href="#home"><span>◐</span>Accounts<span class="cnt" id="cntAccounts">–</span></a>
@@ -225,6 +221,7 @@
     </main>
   </div>
 </div>
+<button id="chatBtn" class="chat-btn" aria-label="Ask the fleet" title="Ask the fleet">?</button><iframe id="chatBox" class="chat-box" title="Ask the fleet" hidden></iframe>
 <div id="sideBack" class="side-back" hidden></div>
 <aside id="side" class="side" hidden aria-label="run details"></aside>
 <div id="signin" class="signin" hidden role="dialog" aria-label="sign in">
@@ -253,9 +250,7 @@ async function getJSON(path) { const r = await fetch(withBase(path), {cache: 'no
 async function postJSON(path, body, retried) {
   const r = await fetch(withBase(path), {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
   const j = await r.json().catch(() => ({}));
-  // No session yet: ask for the key right here, then retry the same write once. Before this
-  // the page said "sign in first (Settings on the classic console)", which sent the operator
-  // to a different app to press a button on this one (Reif, 2026-09-19: "thats stupid").
+  // No session yet: sign in right here, then retry the same write once (Reif, 2026-09-19).
   if (r.status === 401 && !retried) { await signIn(); return postJSON(path, body, true); }
   if (r.status === 401) throw new Error('sign in first');
   if (!r.ok || j.ok === false) throw new Error(j.error || `${path} ${r.status}`);
@@ -283,8 +278,7 @@ function signIn() {
 
 let OPEN = null, OPEN_RUN = null, LIVE_TIMER = null;
 let PAGE = (location.hash.replace('#', '') === 'roster') ? 'roster' : 'home';
-// A run id in the URL opens that run's panel on load, so a pasted link lands a second human
-// (or a second session) on the exact pass being discussed, not on the home page.
+// A run id in the URL opens that run's panel on load (a pasted link lands on the pass).
 function runFromHash() { const m = location.hash.match(/(?:^|[#&])run=([^&]+)/); return m ? decodeURIComponent(m[1]) : null; }
 let STATE = { members: [], runs: [], gh: {}, kpi: {}, build: null, fleet: null, metrics: [] };
 
@@ -297,8 +291,7 @@ async function load() {
   ]);
   STATE = { ...STATE, runs: snap.runs || [], gh: snap.gh || {}, fleet, metrics: (metrics && (metrics.metrics || []).length) ? metrics.metrics : STATE.metrics };
   renderChrome(); renderBanner(); renderStats();
-  // A deep-linked run opens as soon as the runs themselves land (wave one), not after the
-  // roster does -- the whole point of the link is that the reader arrives ON the pass.
+  // A deep-linked run opens with wave one, not after the roster.
   if (!OPEN_RUN) { const r = runFromHash(); if (r) { OPEN_RUN = r; renderRun(); } }
   const [members, kpi, build] = await Promise.all([
     getJSON('/api/members').catch(() => ({members: []})),
@@ -468,9 +461,7 @@ function renderLanded() {
   $('landed').innerHTML = rows.map(pr => `<li><a href="${esc(pr.url)}" target="_blank"><span>${esc(pr.title)}</span><span class="who">#${esc(pr.number)} · ${esc(ago(new Date(pr.mergedAt).getTime()/1000))}</span></a></li>`).join('');
 }
 
-// ---- minion runs (fk#1121, Reif 2026-09-17): what the builder did, run by run -- the item
-// it took, the PR it opened and what became of it (joined server-side from the polled GitHub
-// state), cost and duration. A builder opening PRs nobody merges is visible in one glance.
+// ---- minion runs (fk#1121): item, PR and its fate, cost and duration, run by run.
 let MINION_RUNS_INFLIGHT = false;
 async function renderMinionRuns() {
   if (MINION_RUNS_INFLIGHT) return;
@@ -494,9 +485,7 @@ async function renderMinionRuns() {
   }).join('');
 }
 
-// ---- roster: every member in unison, plain English, grouped by the value stage it serves.
-// Reif, 2026-09-15: "holes show up in value not created or not captured" -- a stage with
-// nobody in it is the hole, so every stage renders even when empty.
+// ---- roster, grouped by value stage; an empty stage still renders (it is the hole).
 const STAGES = [
   ['find',    'Find the work',        'What is broken, missing, or unmeasured?'],
   ['rank',    'Rank it',              'Which of it matters most for the objective?'],
@@ -570,17 +559,13 @@ async function loadLive(rec) {
 }
 function openRun(id) { OPEN_RUN = id; setRunHash(id); renderRun(); }
 function closeRun() { OPEN_RUN = null; setRunHash(null); renderRun(); }
-// Keep the URL in step with the open panel without pushing a history entry per click --
-// replaceState means Back still leaves the page rather than walking back through every run
-// the reader opened.
+// URL follows the open panel; replaceState so Back leaves the page, not every run opened.
 function setRunHash(id) {
   const base = PAGE === 'roster' ? '#roster' : '';
   const next = id ? `${base}${base ? '&' : '#'}run=${encodeURIComponent(id)}` : (base || location.pathname);
   if (location.hash !== next && !(next === location.pathname && !location.hash)) history.replaceState(null, '', next);
 }
-// What a copied run id is FOR: pasting it somewhere another person or session can act on it.
-// So copy the deep link alongside the bare id -- the id alone makes the reader hunt for the
-// page it belongs to.
+// Copy the deep link with the id, so whoever it's pasted to lands on the run.
 async function copyRun(id, el) {
   const link = `${location.origin}${location.pathname}#run=${encodeURIComponent(id)}`;
   const chip = el && el.querySelector('.rc'), was = chip && chip.textContent;
@@ -620,6 +605,10 @@ document.addEventListener('click', async e => {
   }
 });
 
+// Messenger (fleet_chat.html in a frame): always here, opens where it was left.
+function chat(open) { const f = $('chatBox'); if (open && !f.src) f.src = withBase('/chat'); f.hidden = !open; $('chatBtn').textContent = open ? '×' : '?'; try { localStorage.chatOpen = open ? 1 : ''; } catch (e) {} }
+$('chatBtn').onclick = () => chat($('chatBox').hidden);
+try { if (localStorage.chatOpen) chat(true); } catch (e) {}
 load().catch(ex => { $('stats').innerHTML = `<div class="err">${esc(ex.message)}</div>`; });
 setInterval(() => load().catch(() => {}), 30000);
 </script>

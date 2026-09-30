@@ -38,6 +38,11 @@
   .signin[hidden]{display:none}
   .signin div{background:var(--paper);border-radius:10px;padding:20px;display:flex;flex-direction:column;gap:10px;width:100%;max-width:380px}
   .signin input{font:15px var(--sans);padding:10px;border:1px solid var(--rule);border-radius:6px;background:var(--paper);color:var(--ink)}
+  /* Inside the dashboard's messenger frame: no page header, tighter. */
+  .w .wrap{padding:12px;min-height:100vh}
+  .w header{display:none}
+  .w .hint{font-size:13px}
+  .w .signin{padding:8px}
 </style>
 </head>
 <body>
@@ -57,6 +62,7 @@
 <script>
 'use strict';
 const $ = id => document.getElementById(id);
+if (window.top !== window) document.documentElement.classList.add('w');
 // Served at <base>/chat behind a path prefix; every API URL resolves from <base>/.
 const BASE = location.pathname.replace(/chat\/?$/, '');
 const url = p => BASE + p.replace(/^\//, '');
@@ -75,7 +81,7 @@ function signIn() {
     const mail = async () => {
       const r = await fetch(url('/api/login_email'), {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({email: $('email').value})});
       const j = await r.json().catch(() => ({}));
-      $('mailMsg').textContent = j.ok ? 'Check your email for the link. You can close this tab.' : (j.error || 'could not send the link');
+      $('mailMsg').textContent = j.ok ? 'Check your email for the link.' : (j.error || 'could not send the link');
     };
     $('mail').onclick = mail; $('email').onkeydown = ev => { if (ev.key === 'Enter') mail(); };
   });
@@ -123,6 +129,8 @@ async function start() {
     const r = await fetch(url('/api/login_email_verify'), {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({token})});
     const j = await r.json().catch(() => ({}));
     if (!j.ok) add('a err', j.error || 'that sign-in link did not work');
+    // Signed in from the email: land on the dashboard with the messenger open.
+    else if (window.top === window) { try { localStorage.chatOpen = 1; } catch (e) {} location.replace(BASE); return; }
   }
   post('/api/whoami', {}).then(j => { $('who').textContent = 'signed in as ' + j.who; }).catch(() => {});
 }
