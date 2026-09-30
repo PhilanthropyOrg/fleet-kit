@@ -2835,7 +2835,9 @@ class Handler(BaseHTTPRequestHandler):
             if name not in MEMBERS:
                 self._json({"ok": False, "error": f"unknown member {name!r}"}, 400)
                 return
-            by = f"{who} (fleet-view)"
+            # A caller on the box may name who it acts for; a remote person is always themselves.
+            by = str(body.get("by") or "").strip() if who == "localhost" else ""
+            by = by or f"{who} (fleet-view)"
             rec = member_pause.pause(name, by, log_dir=LOG_DIR)
             self._json({"ok": True, "paused": True, "since": rec["since"], "by": rec["by"]})
             return
