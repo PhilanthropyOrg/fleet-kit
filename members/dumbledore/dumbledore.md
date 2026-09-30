@@ -103,10 +103,13 @@ say so in the report with evidence and leave it to a human.
    An unarmed PR is not a shipped change. Then, before anything else:
    ```
    python3 /fleet-kit/scripts/predict.py add --member dumbledore --change "fleet-kit#<PR>" \
-     --metric <name from fleet_metrics.py list> --target <number> --by-hours <24-120> \
+     --metric <name from fleet_metrics.py list> --target <number> --by-hours 24 \
      --note "<why this metric and this target>"
    ```
-   Baseline defaults to the metric now. Pick a metric the change can plausibly touch and a
+   Always `--by-hours 24`: one day is the shortest check whose scoring window (predict.py
+   scores the 24h ending at due) holds only post-change runs, so you learn from a change by the
+   next day instead of stacking a week of unscored changes (Reif, 2026-09-30: "decrease the time
+   between cycling and self reflection"). Baseline defaults to the metric now. Pick a metric the change can plausibly touch and a
    target that would be evidence, not a formality (a target the baseline already meets is not
    a prediction). No `add`, no pass: a change with no falsifiable claim scores as nothing.
    A prediction on a PR that is neither merged nor armed is a prediction on nothing — run

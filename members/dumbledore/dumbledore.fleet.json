@@ -21,7 +21,7 @@
     "escalation": "a defect's real cause needs a product decision: make it yourself and say why (persona_law.md 2b). Needs prod access with no FIXER_PROD_DIAG_DRIVER: find the nearest path the fleet holds (ssh, container env, gh); only a one-way door goes in the Report block as the ONE thing Reif must decide, and continue the pass. Never touch the merge-gate machinery or your own grader."
   },
   "schedule": {
-    "interval_s": 25200
+    "interval_s": 10800
   },
   "timeout_s": 3600,
   "enabled": true,

@@ -14208,6 +14208,23 @@ def _predict_add_resolve_hit_miss_unavailable_gh782():
     assert predict.judge(None, 0.5, 0.6, metric="signal_rate:gru") == ("hit", None)
 
 
+def _dumbledore_cycles_every_3h_and_scores_each_change_in_a_day():
+    """Reif, 2026-09-30: "if we decrease the time between cycling and self reflection our rate of
+    progress will increase". dumbledore ran every 7h and scored each change 72-96h later, so 18
+    changes shipped from 09-26 with none scored yet. Now: every 3h, each change scored at 24h (the
+    shortest horizon whose 24h scoring window holds only post-change runs)."""
+    import json as _json
+    import predict
+    entry = (ROOT / "entrypoint.sh").read_text()
+    line = next(l for l in entry.splitlines() if "run_member.sh dumbledore" in l)
+    assert '"13 */3 * * * root' in line, line
+    spec = _json.loads((ROOT / "members/dumbledore/dumbledore.fleet.json").read_text())
+    assert spec["schedule"]["interval_s"] == 3 * 3600, spec["schedule"]
+    assert predict.DEFAULT_BY_HOURS == predict.RESOLVE_WINDOW_H == 24.0
+    md = (ROOT / "members/dumbledore/dumbledore.md").read_text()
+    assert "--by-hours 24 " in md and "<24-120>" not in md
+
+
 def _predict_ledger_reports_hit_rate_and_pass_cost_gh782():
     import predict
     now = 1_800_000_000.0
@@ -16259,6 +16276,7 @@ if __name__ == "__main__":
     check("charter_bloat_check exits 2, not 1, on any unexpected exception (gh#920)", _charter_bloat_check_unexpected_exception_exits_2_not_1_gh920)
     check("predict.py add/resolve: hit in the baseline->target direction, miss otherwise, unavailable on no data (gh#782 AC2)", _predict_add_resolve_hit_miss_unavailable_gh782)
     check("predict.py ledger reports hit rate and the authoring pass turns/cost (gh#782 AC3)", _predict_ledger_reports_hit_rate_and_pass_cost_gh782)
+    check("dumbledore cycles every 3h and scores each change 24h later, not 72-96h", _dumbledore_cycles_every_3h_and_scores_each_change_in_a_day)
     check("predict.py judge() reads direction from the metric when baseline is unknown, never guesses (gh#789 AC4-6)", _predict_judge_uses_metric_direction_when_baseline_missing_gh789)
     check("predict.py ledger excludes a hit's unattributed cost from cost_per_hit_usd instead of booking it as $0 (gh#789 AC1-3)", _predict_ledger_excludes_unattributed_cost_from_hit_average_gh789)
     check("self_improve_score.sh resolves the ledger, feeds it to the prompt first, and stamps hits/misses on the row (gh#782 AC4)", _self_improve_score_reads_the_ledger_gh782)
