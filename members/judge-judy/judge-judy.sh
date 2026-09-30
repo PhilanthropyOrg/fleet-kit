@@ -58,6 +58,7 @@ TIMEOUT_S="${FLEET_CODE_REVIEW_TIMEOUT:-900}"
 REQUIRED_CHECKS="${FLEET_REQUIRED_CHECKS:-}"
 MAX_PARSE_STRIKES=2
 STRIKE_DIR="$HOME/.cache/fleet-kit/judge-judy-strikes"
+APPROVED_DIR="$HOME/.cache/fleet-kit/judge-judy-approved"  # pr-<N>.fp: "<patch-id> <body sha>" + head
 TICK_BUDGET_USD="${FLEET_TICK_BUDGET_USD:-15}"
 # The diff is capped, not because big diffs don't deserve review, but because an unbounded
 # prompt can blow the context window and produce an unparseable half-answer — which then
@@ -70,7 +71,7 @@ CONTEXT="fleet-code-review"
 # prose left to scrape. See scripts/judge_judy_verdict.py for the parser.
 VERDICT_SCHEMA='{"type":"object","properties":{"verdict":{"type":"string","enum":["approve","block"]},"findings":{"type":"array","items":{"type":"object","properties":{"file":{"type":"string"},"line":{"type":"integer"},"severity":{"type":"string"},"what_breaks":{"type":"string"},"plain":{"type":"string"}},"required":["file","line","severity","what_breaks","plain"]}}},"required":["verdict","findings"]}'
 
-mkdir -p "$LOG_DIR" "$STRIKE_DIR"
+mkdir -p "$LOG_DIR" "$STRIKE_DIR" "$APPROVED_DIR"
 ts() { TZ=America/Chicago date '+%Y-%m-%d %H:%M:%S %Z'; }
 log() { echo "[$(ts)] $*" >> "$LOG"; }
 
@@ -372,6 +373,9 @@ while :; do
     [ -n "$EXPLICIT_PR" ] && break
     continue
   fi
+  # Fingerprint the PR's own change BEFORE truncation: patch-id ignores hunk line numbers and
+  # blob ids, so merging main into the branch leaves it unchanged unless the PR's lines moved.
+  DIFF_ID=$(git patch-id --stable < "$DIFF_FILE" 2>/dev/null | cut -d' ' -f1)
   TRUNC_NOTE=""
   if [ "$(wc -c < "$DIFF_FILE")" -gt "$MAX_DIFF_BYTES" ]; then
     head -c "$MAX_DIFF_BYTES" "$DIFF_FILE" > "${DIFF_FILE}.t" && mv "${DIFF_FILE}.t" "$DIFF_FILE"
@@ -379,6 +383,25 @@ while :; do
   fi
   gh pr view "$PR" --json title,body -q '"TITLE: \(.title)\n\n\(.body)"' > "$BODY_FILE" 2>/dev/null || true
   HEAD_REF=$(gh pr view "$PR" --json headRefName -q '.headRefName' 2>/dev/null || true)
+
+  # Carry an approval forward when only main moved. 2026-09-30: 48% of 3 days' review spend
+  # ($76 of $158) re-reviewed PRs already reviewed; #8555 was approved 11 times, once per
+  # auto_update_branch "Merge main" head, same diff each time. Same diff + same body at a new
+  # head gets the same verdict with no model call. Only approvals carry; a block re-reviews.
+  FP_FILE="$APPROVED_DIR/pr-${PR}.fp"
+  FP=""
+  [ -n "$DIFF_ID" ] && FP="$DIFF_ID $(sha256sum < "$BODY_FILE" | cut -d' ' -f1)"
+  if [ -n "$FP" ] && [ -f "$FP_FILE" ] && [ "$(head -1 "$FP_FILE")" = "$FP" ]; then
+    PREV_HEAD=$(sed -n 2p "$FP_FILE")
+    post_status "$HEAD_SHA" "success" "Code review carried forward: PR diff unchanged since approved head ${PREV_HEAD:0:12}" \
+      && log "PR #$PR head ${HEAD_SHA:0:12}: diff unchanged since approved ${PREV_HEAD:0:12} -- approval carried, no model call" \
+      || log "PR #$PR: WARN carry-forward status POST failed"
+    if ! pr_is_checkpoint "$PR"; then timeout 25s gh pr merge "$PR" --auto >/dev/null 2>&1 || true; fi
+    SKIPPED_THIS_TICK="$SKIPPED_THIS_TICK $PR"
+    cleanup_pass
+    [ -n "$EXPLICIT_PR" ] && break
+    continue
+  fi
 
   # fk#629: a PR may only close an issue it finishes. Reif, 2026-09-07, on the messenger issue
   # closed COMPLETED by a docs-only "measurement, not a fix" PR: "what is the root cause that
@@ -591,12 +614,14 @@ $ERR_VISION_LINK"
     post_status "$HEAD_SHA" "success" "Code review passed (local claude, model=$MODEL)" \
       && log "PR #$PR: APPROVED -- status posted" \
       || log "PR #$PR: WARN approved but status POST failed"
+    [ -n "$FP" ] && printf '%s\n%s\n' "$FP" "$HEAD_SHA" > "$FP_FILE"
     # fleet-kit#523: the queue merges whatever is armed, so the verdict moves the arm.
     # 2026-09-26 #8110: an approve is not "done" for a minion checkpoint; never arm one.
     if pr_is_checkpoint "$PR"; then log "PR #$PR: minion checkpoint -- approved, NOT arming auto-merge"
     elif timeout 25s gh pr merge "$PR" --auto >/dev/null 2>&1; then log "PR #$PR: auto-merge armed"; else log "PR #$PR: WARN could not arm auto-merge"; fi
     report_run "$PR" "$HEAD_SHA" "$USAGE_FILE" "approved PR #$PR" "head ${HEAD_SHA:0:12}, fleet-code-review: success" "$SELF_CRITIQUE" "${FINDINGS:-approved -- no findings}"
   else
+    rm -f "$FP_FILE"
     # Findings comment first, status second: a failure status pointing at nothing is worse
     # than no status at all.
     gh pr comment "$PR" --body "**fleet-code-review: BLOCK** (local claude, model=$MODEL, head ${HEAD_SHA:0:12})
