@@ -295,6 +295,7 @@ def _gh(*args: str, timeout: int = 15) -> str:
 
 _TTL_CACHE: dict[str, tuple[float, object]] = {}
 _TTL_LOCK = threading.Lock()
+_REFRESH = threading.local()   # .ahead = True only on the metrics refresher thread
 
 
 def _cached(key: str, ttl_s: float, produce):
@@ -324,6 +325,17 @@ def _cached(key: str, ttl_s: float, produce):
     endpoint+params combination), so the dict cannot grow without bound.
     """
     now = time.time()
+    if getattr(_REFRESH, "ahead", False):
+        # Background refresher (refresh_metrics_forever): rebuild once an entry is half-way to
+        # expiry, OUTSIDE the lock, so a viewer keeps reading the still-valid old value.
+        hit = _TTL_CACHE.get(key)
+        if hit is not None and now - hit[0] < ttl_s / 2:
+            return hit[1]
+        value, cacheable = produce()
+        if cacheable:
+            with _TTL_LOCK:
+                _TTL_CACHE[key] = (time.time(), value)
+        return value
     with _TTL_LOCK:
         hit = _TTL_CACHE.get(key)
         if hit is not None and now - hit[0] < ttl_s:
@@ -389,6 +401,18 @@ def refresh_backlog_history_forever(interval_s: float = 60.0):
                     _TTL_CACHE[key] = (time.time(), value)
         except Exception as exc:  # noqa: BLE001 -- never let a slow/failed gh call kill the
             log_sync_error(exc)   # refresher thread; log_sync_error throttles repeats itself.
+        time.sleep(interval_s)
+
+
+def refresh_metrics_forever(interval_s: float = 60.0):
+    """Keeps /api/metrics warm (2026-09-30: Home sat on "loading..." ~50s whenever the 30-min
+    scoreboard entries had expired and a viewer's request paid the rebuild)."""
+    _REFRESH.ahead = True
+    while True:
+        try:
+            metrics_snapshot()
+        except Exception as exc:  # noqa: BLE001 -- keep the refresher alive
+            log_sync_error(exc)
         time.sleep(interval_s)
 
 
@@ -2930,6 +2954,7 @@ def main() -> int:
     if _bh_cacheable:
         _TTL_CACHE[f"backlog_history:{_BACKLOG_HISTORY_DAYS}"] = (time.time(), _bh_value)
     threading.Thread(target=refresh_backlog_history_forever, daemon=True).start()
+    threading.Thread(target=refresh_metrics_forever, daemon=True).start()
 
     server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
     print(f"fleet_view_server: serving http://0.0.0.0:{PORT}  (repo={REPO}, runs={RUNS_FILE})",
