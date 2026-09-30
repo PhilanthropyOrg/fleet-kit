@@ -137,6 +137,13 @@ def _classify_value(raw: str) -> tuple[str, str]:
     return STATUS_MISSING, raw
 
 
+REIF_ASK_LABELS = ("fleet:reif-priority", "fleet:user-asked")
+
+
+def is_reif_ask(labels) -> bool:
+    return bool(set(quality_gate._label_names(labels)) & set(REIF_ASK_LABELS))
+
+
 def gate_candidates(candidates: list[dict], parents: dict | None = None) -> dict:
     """candidates: [{"number": int, "body": str, "comments": [...]}, ...], already in the
     order gru.md step 2b/2c produced (tier, then oldest-createdAt-first within a tier).
@@ -155,7 +162,12 @@ def gate_candidates(candidates: list[dict], parents: dict | None = None) -> dict
     dropped: list[dict] = []
     for number, status, raw, labels in classified:
         # philanthropy#8707: a prod alert is maintenance by construction; never drop it here.
-        if status in (STATUS_LINKED, STATUS_MAINTENANCE) or quality_gate.is_alert(labels):
+        # jefe msg#407 (philanthropy#9127/#9129/#9118/#9140): Reif's own asks are ranked
+        # outside the KR tiers, yet their links ("KR1 -- ...", "#9117" -> "#8176", "none (Reif
+        # direct ask)") failed this gate and sat fleet:needs-spec. The line ranks; it never
+        # decided whether Reif's ask gets built.
+        if (status in (STATUS_LINKED, STATUS_MAINTENANCE) or quality_gate.is_alert(labels)
+                or is_reif_ask(labels)):
             eligible.append(number)
         else:
             dropped.append({

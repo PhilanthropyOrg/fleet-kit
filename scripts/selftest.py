@@ -1398,6 +1398,22 @@ _GH716_BODY = '## What\'s wrong\n\nEvery deploy since ~2026-09-08T08:40 UTC (03:
 _GH716_COMMENT = 'jefe pass 2026-09-08 ~12:2x UTC — new information: this fix is stuck behind a ranking-gate bug, and the outage is still live right now.\n\n**Still failing, live, right now.** `auto_deploy.log`\'s newest entries (12:25:07 UTC) show the same `FAILED: green never answered http://localhost:8581/ within 120s` at commit `e0289151d22c5e3a56aff2480d75e905af963922` — the streak hasn\'t self-resolved, it\'s now 4h45m+ old and `deploy_staleness_check.log` (11:57:03 UTC) confirms live is 5h5m behind `main`.\n\n**Why this hasn\'t been picked up yet:** the most recent gru pass (report in `runs.jsonl`, started ~12:23 UTC data, immediately after this issue was filed) ran its Vision-link gate over the high tier and explicitly dropped this issue:\n\n> Vision-link gate dropped 4 more as crowded-out maintenance (#684,#714,#715,#716), leaving #660,#704 eligible\n\n`vision_link_gate.py`\'s `gate_candidates()` drops *every* `none (maintenance)` candidate whenever *any* linked-KR candidate is open in the same pack, with no severity distinction — #660 and #704 both carry real `Vision-link:` lines (KR2 journey coverage; the philanthropy claim/audience/coordination channel) and crowded this one out even though this one is the fix for a live, worsening, fleet-wide outage. Filed the gate\'s severity-blindness separately so it doesn\'t have to be hand-worked around per incident: see the new issue linked below.\n\nNot re-diagnosing the entrypoint.sh root cause — marie\'s comment above already has it exactly right. Flagging only because "PRD-ready and unclaimed" reads as "will get picked up next pass" and that isn\'t true here without a human/gru forcing it past the gate.'
 
 
+def _vision_link_gate_passes_reif_asks():
+    """jefe msg#407: Reif's own asks (#9127, #9140) linked in prose or through a parent chain
+    and sat fleet:needs-spec. The labels pass them; an unlabeled twin still drops."""
+    import vision_link_gate as vlg
+
+    reif = [{"name": "fleet:reif-priority"}]
+    out = vlg.gate_candidates([
+        {"number": 9127, "body": "Vision-link: #9118 (report redesign)", "labels": reif},
+        {"number": 9129, "body": "Vision-link: KR1 -- long-tail pages", "labels": ["fleet:user-asked"]},
+        {"number": 9140, "body": "Vision-link: #9117", "labels": reif},
+        {"number": 100, "body": "Vision-link: KR1 -- long-tail pages", "labels": []},
+    ])
+    assert out["eligible"] == [9127, 9129, 9140], out
+    assert [d["number"] for d in out["dropped"]] == [100], out
+
+
 def _vision_link_gate_severity_escape_hatch_gh726():
     """gh#726 wrote this for the crowd-out branch's one escape hatch; fk#1191 removed the
     crowd-out itself, so every maintenance line is eligible with or without the label.
@@ -15901,6 +15917,7 @@ if __name__ == "__main__":
     check("gru.md checks claim_history before claiming", _gru_md_checks_claim_history_before_claiming)
     check("vision_link_gate applies gh#525's eligibility rule", _vision_link_gate_eligibility_rule)
     check("vision_link_gate's fleet:severity-live escape hatch survives crowding-out (gh#726)", _vision_link_gate_severity_escape_hatch_gh726)
+    check("vision_link_gate passes Reif's own asks whatever their link says", _vision_link_gate_passes_reif_asks)
     check("gru.md gates on a Vision-link before packing (gh#525)", _gru_md_gates_on_vision_link_before_packing)
     check("maxx reader reports the fleet's hourly slice, not a laptop's pacing", _maxx_reader_reports_the_fleets_hourly_slice_not_a_laptops_pacing)
     check("maxx fetch_budget classifies an MCP-level auth rejection, not maxx_unexpected_shape (gh#825)", _maxx_fetch_budget_classifies_mcp_auth_rejection)
