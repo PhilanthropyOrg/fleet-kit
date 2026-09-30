@@ -9,9 +9,8 @@
   2026-09-15: "borrow from the templates copy from nonprofitatlas - its got a sidebar admin
   template that is pretty good"), operator purple, Inter, tabular numbers.
 
-  Three pages, one file, no framework, no build step: Home (tiles + agents + landed today),
-  Roster (every member in unison, plain English, grouped by value stage -- an empty stage
-  shows as a hole), and the run panel (fk#748). Every tile is a
+  Three pages, one file, no build step: Home, Roster (members grouped by value stage), and
+  the run panel (fk#748). Every tile is a
   row in scripts/metrics.json with a real id, a value and a hoverable sparkline; the OKR file
   references tiles by id. No inbox block (#1054): an ask pages Reif. Each shows its source's
   as-of time, stale past 2x cadence (gh#8212). Polls the JSON endpoints every 30s, behind a
@@ -186,6 +185,7 @@
     <a class="nav active" data-page="home" href="#home"><span>▣</span>Home</a>
     <a class="nav" data-page="roster" href="#roster"><span>◉</span>Roster<span class="cnt" id="cntMembers">–</span></a>
     <a class="nav" id="navPrs" href="#" target="_blank"><span>⇅</span>Pull requests<span class="cnt" id="cntPrs">–</span></a>
+    <a class="nav" href="chat"><span>?</span>Ask the fleet</a>
     <a class="nav" id="navBacklog" href="#" target="_blank"><span>▤</span>Backlog<span class="cnt" id="cntBacklog">–</span></a>
     <div class="sec">Spend</div>
     <a class="nav" id="navAccounts" href="#home"><span>◐</span>Accounts<span class="cnt" id="cntAccounts">–</span></a>

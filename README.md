@@ -534,6 +534,21 @@ Two properties worth preserving if you touch this:
   thing the key protects must not be reachable by the things it protects against. `selftest.py`
   fails if a new spawner is added without the unset.
 
+### More than one operator, and the "Ask the fleet" chat
+
+Give each extra person their own key with `FLEET_OPERATOR_KEYS=name:key,name:key` in fleet.env
+(no restart needed; the file is read on every request). They sign in with it like the owner does
+with `FLEET_API_KEY`. Every allowed write is appended to `$FLEET_LOG_DIR/writes.jsonl` with
+`who`, so you can see who pressed what. To cut one person off, delete their entry.
+
+`/chat` (linked as "Ask the fleet" on Home) lets a signed-in person ask Claude about the fleet
+in plain English, and ask it to act ("pause nerd", "release the claim on #123").
+`scripts/fleet_chat.py` runs one `claude -p --restricted` pass per question through the account
+pool. It can read the kit, the logs and the repo, but not `fleet.env` or anything named like a
+secret. Its only command is `scripts/fleet_chat_act.py`, which calls this dashboard's own routes,
+so it can do what that person's buttons can do and nothing more. Those writes are logged as
+`<name> (chat)`. Questions and answers go to `$FLEET_LOG_DIR/chat.jsonl`.
+
 ### Per-caller webhook tokens: firing a member or landing an intake row (fk#1124, fk#1129)
 
 `webhook_receiver.py` (the same process that serves `/webhook/inbox` and the GitHub HMAC
