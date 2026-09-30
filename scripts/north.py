@@ -16,8 +16,9 @@ Three reads, one output, no model:
      here so anyone can audit it.
   2. The OKR -- scripts/okr.json, plus the funnel from the product's own signals endpoint when
      it answers (worst step names the KR that is leaking).
-  3. Where the tokens went -- runs.jsonl, last 7 days: cost by KR (a run that carries a `pr`
-     number inherits that PR's KR; a run that never opened a PR is "no PR: <member>").
+  3. Where the tokens went -- runs.jsonl, last 7 days: cost by KR (a run whose `pr`,
+     `checkpoint_pr` or `item_id` is a merged fleet PR inherits its KR; one with a PR that has
+     not merged is "PR not merged: <member>"; the rest are "no PR: <member>").
 
   north.py write  -> $FLEET_LOG_DIR/NORTH.md, ending in one weight per KR id (sums to 1;
                      `none` is always 0). run_member.sh prepends it after HANDOFF.md; marie
@@ -137,9 +138,13 @@ def fleet_prs(slug: str, now: float, days: int = 7, run=_run) -> dict[int, str]:
     """PR number -> KR for the fleet's own merged PRs, so a run's `pr` can inherit it."""
     if not slug:
         return {}
+    # 2026-09-30: --limit 200 with no date covered ~2.7 of the 7 days (514 fleet merges that
+    # week), so a run on an older merged PR read as "no PR". Bound by date instead.
+    since = time.strftime("%Y-%m-%d", time.gmtime(now - days * 86400))
     try:
-        r = run(["gh", "pr", "list", "--repo", slug, "--state", "merged", "--limit", "200",
-                 "--json", "number,title,headRefName,mergedAt,files"])
+        r = run(["gh", "pr", "list", "--repo", slug, "--state", "merged", "--limit", "1000",
+                 "--search", f"merged:>={since}", "--json", "number,title,headRefName,mergedAt,files"],
+                timeout=180)
         rows = json.loads(r.stdout or "[]") if r.returncode == 0 else []
     except Exception:  # noqa: BLE001
         return {}
@@ -268,16 +273,22 @@ def burn_by_kr(runs: list[dict], pr_kr: dict[int, str], now: float, days: int = 
         if not cost:
             continue
         total += cost
-        pr = r.get("pr")
-        try:
-            pr = int(str(pr).lstrip("#")) if pr else None
-        except ValueError:
-            pr = None
-        key = pr_kr.get(pr) if pr else None
+        # 2026-09-30: only judge-judy and builder ever set `pr`. A minion's PR is its
+        # `checkpoint_pr`, and the-fixer's `item_id` IS the PR it repaired -- read all three,
+        # or 95% of the week reads as "no PR" when a third of it built a real one.
+        prs = [_int(r.get("pr")), _int(r.get("checkpoint_pr"))]
+        key = next((pr_kr[n] for n in (*prs, _int(r.get("item_id"))) if n in pr_kr), None)
         if key is None:
-            key = f"no PR: {r.get('member') or '?'}"
+            key = f"{'PR not merged' if any(prs) else 'no PR'}: {r.get('member') or '?'}"
         out[key] = out.get(key, 0.0) + cost
     return out, total
+
+
+def _int(v) -> int | None:
+    try:
+        return int(str(v).lstrip("#")) if v else None
+    except ValueError:
+        return None
 
 
 def weights(reif: list[dict], leak_kr: str | None) -> dict[str, float]:
@@ -344,10 +355,12 @@ def render(reif: list[dict], reif_err: str | None, okr: dict, funnel: dict, funn
         for k in (*KR_IDS, "none"):
             if kr_spend[k]:
                 out.append(f"- {k}: ${kr_spend[k]:,.0f} ({kr_spend[k] / burn_total:.0%})")
-        no_pr = sorted(((k, v) for k, v in burn.items() if k.startswith("no PR:")), key=lambda x: -x[1])
-        if no_pr:
-            tot = sum(v for _, v in no_pr)
-            out.append(f"- no PR at all: ${tot:,.0f} ({tot / burn_total:.0%}) -- " + ", ".join(f"{k[7:]} ${v:,.0f}" for k, v in no_pr[:6]))
+        for prefix, label in (("PR not merged:", "a PR, not merged (yet)"), ("no PR:", "no PR at all")):
+            rows = sorted(((k, v) for k, v in burn.items() if k.startswith(prefix)), key=lambda x: -x[1])
+            if rows:
+                tot = sum(v for _, v in rows)
+                out.append(f"- {label}: ${tot:,.0f} ({tot / burn_total:.0%}) -- "
+                           + ", ".join(f"{k[len(prefix) + 1:]} ${v:,.0f}" for k, v in rows[:6]))
     out += ["", "## Weights (marie ranks by these; a Vision-link on a heavier KR ranks higher)"]
     out.append(" · ".join(f"`{k}` {w[k]:.2f} -> {tier_for(w[k])}" for k in KR_IDS) + " · `none (maintenance)` 0 -> low")
     out.append("")
