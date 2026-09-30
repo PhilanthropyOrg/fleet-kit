@@ -644,7 +644,10 @@ def run_search_and_open_org(ctx: JourneyCtx):
     page = ctx.page()
 
     def s0():
-        page.goto(ctx.users.url("https://philanthropy.org/990/?q=hospital"), timeout=NAV_TIMEOUT_MS)
+        # philanthropy#9271: wait for the HTML, not `load` -- from dino, Cloudflare's injected
+        # bot-check scripts hold `load` 8-30s after the page is on screen.
+        page.goto(ctx.users.url("https://philanthropy.org/990/?q=hospital"), timeout=NAV_TIMEOUT_MS,
+                  wait_until="domcontentloaded")
         page.wait_for_function(
             "() => document.querySelectorAll('a[href*=\"/990/report/\"]').length > 0", timeout=10000
         )
@@ -687,7 +690,7 @@ def run_search_and_open_org(ctx: JourneyCtx):
             # authority on navigation completion here.
             first.click(no_wait_after=True)
             try:
-                page.wait_for_url(re.compile(r"/990/report/"), timeout=10000)
+                page.wait_for_url(re.compile(r"/990/report/"), timeout=10000, wait_until="domcontentloaded")
             except PlaywrightTimeoutError:
                 nav_response = nav_responses[-1] if nav_responses else None
                 blocked = _blocked_for_403(nav_response, ctx.users)
