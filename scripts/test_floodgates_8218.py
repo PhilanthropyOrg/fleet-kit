@@ -144,6 +144,31 @@ def test_intake_resends_a_moved_gap_and_a_stale_item() -> None:
     print("ok  intake: a moved gap and a 72h-stuck item reach marie; a fresh one does not")
 
 
+def test_intake_parks_a_thrice_sent_low_item_and_skips_ledgers() -> None:
+    # fleet-kit#1463: 8 priority-low items sent twice in 3 days, specced by nobody.
+    stuck = [{"body": f"{gd.MARKER} acceptance"}]
+    base = ["fleet:backlog", "quality:solid", gd.NEEDS_SPEC]
+    backlog = [_issue(40, base + [gd.LOW], body=VL), _issue(41, base + [gd.LOW], body=VL),
+               _issue(42, base, body=VL), _issue(43, base + [gd.LEDGER], body=VL),
+               _issue(44, ["fleet:backlog", "quality:solid", gd.LOW, gd.PARKED])]
+    for it in backlog[:4]:
+        it["comments"] = stuck
+    now = 1_000_000.0
+    sent = {n: now - 4 * 86400 for n in (40, 41, 42, 43)}
+    p = gd.intake_plan(backlog, [], "intake-t", last_sent=sent, now=now,
+                       sends={40: 2, 41: 1, 42: 5, 43: 3})
+    assert p["message"]["items"] == [41, 42], p["message"]
+    assert p["parked"] == [40], p["parked"]
+    ops = {(a["number"], a["op"], a.get("label")) for a in p["actions"]}
+    assert (40, "add_label", gd.PARKED) in ops and not [o for o in ops if o[0] == 43], ops
+    assert (44, "remove_label", gd.PARKED) in ops and 44 in p["eligible"], ops
+    conn = fleet_db.connect(Path(tempfile.mkdtemp()) / "fleet.db")
+    fleet_msg.send(conn, "gru", ["marie", "jefe"], "gate-drop", "k1", "b", [5, 6])
+    fleet_msg.send(conn, "gru", ["marie", "jefe"], "gate-drop", "k2", "b", [5])
+    assert gd.sends_by_item(conn) == {5: 2, 6: 1}, gd.sends_by_item(conn)
+    print("ok  intake: a low item sent 2x is parked not re-sent; ledgers skipped; spec'd item unparked")
+
+
 def test_last_sent_by_item_reads_the_bus() -> None:
     conn = fleet_db.connect(Path(tempfile.mkdtemp()) / "fleet.db")
     fleet_msg.send(conn, "gru", ["marie"], "gate-drop", "k1", "b", [5, 6])

@@ -29,7 +29,9 @@ unlabeled and unspecced. `intake` runs the same plan()/apply() over EVERY open f
 item before each gru pass (run_gru_fanout.sh), sends marie + jefe ONE message naming the items
 it newly labeled or found at a new gap (re-sending any still stuck FLEET_GATE_DROP_RESEND_H
 after its last message), and sends `hq` ONE message listing open `fleet:needs-prod-access` items
-(prod DB, secrets, Cloudflare: HQ holds that access, minions don't).
+(prod DB, secrets, Cloudflare: HQ holds that access, minions don't). A `fleet:priority-low` item
+already sent FLEET_GATE_DROP_MAX_SENDS_LOW times gets `fleet:parked` instead of another send
+(fleet-kit#1463); the label comes off with needs-spec once it clears the gates.
 
 Usage:
   gate_drops.py run --items /tmp/gru_items.json [--run-id ID] [--repo O/R] [--dry-run]
@@ -64,12 +66,18 @@ DROP_LOG = LOG_DIR / "gate_drops.jsonl"
 MSG_THRESHOLD = int(os.environ.get("FLEET_GATE_DROP_MSG_THRESHOLD", "3"))
 MSG_TO = ("marie", "jefe")
 HQ = "hq"
-# intake leaves these alone: in flight, not minion work at all, or a tracking-only epic.
-INTAKE_SKIP = {LABEL_CLAIMED, *NOT_FOR_MINIONS, quality_gate.EPIC}
+# intake leaves these alone: in flight, not minion work at all, or tracking-only (epic, ledger).
+LEDGER = f"{PREFIX}ledger"
+INTAKE_SKIP = {LABEL_CLAIMED, *NOT_FOR_MINIONS, quality_gate.EPIC, LEDGER}
 # An item still stuck at a gate this long after marie was last told about it is sent again.
 # 2026-09-29: 32 items sat re-dropped every 30 min for 2.5 days with no message. marie fixed one
 # gap (the vision-link) and the item stayed labeled, so its next gap (acceptance) was never sent.
 RESEND_S = float(os.environ.get("FLEET_GATE_DROP_RESEND_H", "72")) * 3600
+# fleet-kit#1463: a priority-low item sent this many times with nobody speccing it is parked
+# (label, no more re-sends). 2026-09-30: 8 low items sent twice in 3 days, specced by nobody.
+LOW = f"{PREFIX}priority-low"
+PARKED = f"{PREFIX}parked"
+MAX_SENDS_LOW = int(os.environ.get("FLEET_GATE_DROP_MAX_SENDS_LOW", "2"))
 
 # What each gate's drop reason means for the person who has to fix it.
 GAPS = (
@@ -295,6 +303,20 @@ def last_sent_by_item(conn) -> dict[int, float]:
     return out
 
 
+def sends_by_item(conn) -> dict[int, int]:
+    """How many gate-drop sends named each item (marie + jefe copies of one send count once)."""
+    seen: dict[int, set] = {}
+    for items, sent_at in conn.execute("SELECT items, sent_at FROM msgs WHERE kind = 'gate-drop'"):
+        try:
+            nums = json.loads(items or "[]")
+        except ValueError:
+            continue
+        for n in nums if isinstance(nums, list) else []:
+            if isinstance(n, int):
+                seen.setdefault(n, set()).add(sent_at)
+    return {n: len(v) for n, v in seen.items()}
+
+
 def prod_access_message(issues: list[dict]) -> dict | None:
     """ONE message to hq listing open fleet:needs-prod-access items. Pure; None when none."""
     nums = sorted(i["number"] for i in issues if LABEL_PROD_ACCESS in _names(i.get("labels")))
@@ -310,7 +332,7 @@ def prod_access_message(issues: list[dict]) -> dict | None:
 
 def intake_plan(backlog: list[dict], prod_access: list[dict], run_id: str,
                 parents: dict | None = None, last_sent: dict[int, float] | None = None,
-                now: float | None = None) -> dict:
+                now: float | None = None, sends: dict[int, int] | None = None) -> dict:
     """Pure. plan() over every open backlog item except claimed / human-op / prod-access / epics;
     the Reif ask is replaced by one bus message (an hourly sweep of 400+ items would otherwise
     ask Reif every hour), plus hq's prod-access message."""
@@ -324,6 +346,15 @@ def intake_plan(backlog: list[dict], prod_access: list[dict], run_id: str,
         now = now or time.time()
         stale = sorted(r["number"] for r in p["dropped"] if r.get("action") == "needs-spec"
                        and r["number"] not in newly and now - last_sent.get(r["number"], 0) >= RESEND_S)
+    # Low items already sent MAX_SENDS_LOW times are parked instead of sent again.
+    labels_of = {i["number"]: _names(i.get("labels")) for i in todo}
+    park = [n for n in stale if LOW in labels_of[n] and (sends or {}).get(n, 0) >= MAX_SENDS_LOW]
+    stale = [n for n in stale if n not in park]
+    p["actions"] += [{"number": n, "op": "add_label", "label": PARKED}
+                     for n in park if PARKED not in labels_of[n]]
+    p["actions"] += [{"number": n, "op": "remove_label", "label": PARKED}
+                     for n in p["eligible"] if PARKED in labels_of[n]]
+    p["parked"] = park
     p["ask"] = None
     p["message"] = intake_message(p["dropped"], newly, run_id, stale)
     p["messages"] = [m for m in (prod_access_message(prod_access),) if m]
@@ -443,16 +474,18 @@ def main(argv=None) -> int:
         except (RuntimeError, ValueError, subprocess.TimeoutExpired) as exc:
             print(f"gate_drops intake: {exc}", file=sys.stderr)
             return 1
-        last_sent = None
+        last_sent = sends = None
         try:
             import fleet_db
-            last_sent = last_sent_by_item(fleet_db.connect(Path(a.db_path) if a.db_path else None))
+            conn = fleet_db.connect(Path(a.db_path) if a.db_path else None)
+            last_sent, sends = last_sent_by_item(conn), sends_by_item(conn)
         except Exception as exc:  # noqa: BLE001 -- no bus history: send only the new ones
             print(f"gate_drops intake: no message history, no re-sends: {exc}", file=sys.stderr)
-        p = intake_plan(backlog, prod, a.run_id, fetch_parents(backlog, backlog, a.repo), last_sent)
+        p = intake_plan(backlog, prod, a.run_id, fetch_parents(backlog, backlog, a.repo), last_sent,
+                        sends=sends)
         if not a.dry_run:
             p.update(apply(p, a.repo, a.run_id, db_path=a.db_path))
-        summary = {k: p.get(k) for k in ("scanned", "skipped", "results", "sent")}
+        summary = {k: p.get(k) for k in ("scanned", "skipped", "results", "sent", "parked")}
         summary["eligible"] = len(p["eligible"])
         summary["dropped"] = count_actions(p["dropped"])
         summary["actions"] = len(p["actions"])
