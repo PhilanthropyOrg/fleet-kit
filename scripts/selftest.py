@@ -9952,7 +9952,9 @@ def _write_routes_are_authenticated():
     import re as _re
     routes = [(m.start(), m.group(1)) for m in
               _re.finditer(r'if path == "(/api/[a-z_]+)"', body)]
-    early = [name for at, name in routes if at < gate and name != "/api/login"]
+    # The sign-in routes exist to satisfy the gate; each carries its own check.
+    signin = ("/api/login", "/api/login_email", "/api/login_email_verify")
+    early = [name for at, name in routes if at < gate and name not in signin]
     assert not early, f"write route(s) dispatched before the auth gate: {early}"
     assert any(name != "/api/login" for _at, name in routes), \
         "no write routes found after the gate -- the scan is not matching real dispatch"
