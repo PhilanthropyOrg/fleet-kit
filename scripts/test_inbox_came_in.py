@@ -219,5 +219,31 @@ class DedupeLookupTests(unittest.TestCase):
         self.assertTrue([m for m in logged if "dedupe lookup failed" in m], logged)
 
 
+class ReifMailPassesTheGateTests(unittest.TestCase):
+    """jefe msg#430 (philanthropy#9295/#9297): Reif's forwarded mail was born fleet:needs-spec."""
+
+    def test_reif_mail_is_filed_as_his_ask_with_a_link(self):
+        import vision_link_gate
+        calls = []
+
+        def fake_run(cmd):
+            calls.append(cmd)
+            r = unittest.mock.Mock()
+            r.stderr, r.returncode = "", 0
+            r.stdout = "[]" if cmd[:3] == ["gh", "issue", "list"] else "https://github.com/x/y/issues/9\n"
+            return r
+
+        with unittest.mock.patch.dict("os.environ", {"FLEET_REPO_URL": "https://github.com/x/y"}):
+            inbox.file_backlog('"Something Off?"', "Reif's note: should work", "reif@x", run=fake_run)
+        create = next(c for c in calls if c[:3] == ["gh", "issue", "create"])
+        labels = create[create.index("--label") + 1].split(",")
+        body = create[create.index("--body") + 1]
+        self.assertIn("fleet:user-asked", labels)
+        status, _ = vision_link_gate.classify_candidate(body, [])
+        self.assertNotEqual(status, vision_link_gate.STATUS_MISSING, body)
+        self.assertEqual(vision_link_gate.gate_candidates(
+            [{"number": 9, "body": body, "comments": [], "labels": labels}])["eligible"], [9])
+
+
 if __name__ == "__main__":
     unittest.main()

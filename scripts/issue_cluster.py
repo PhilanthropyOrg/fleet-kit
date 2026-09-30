@@ -305,7 +305,8 @@ def spec_gaps(body: str, labels: list[str]) -> list[str]:
     import vision_link_gate
     gaps = []
     status, raw = vision_link_gate.classify_candidate(body, [])
-    if status == vision_link_gate.STATUS_MISSING:
+    live = vision_link_gate.SEVERITY_LIVE_LABEL in labels or vision_link_gate.is_reif_ask(labels)
+    if status == vision_link_gate.STATUS_MISSING and not live:
         gaps.append("vision-link: add a line starting `Vision-link: okr.<kr id>` or "
                     "`Vision-link: none (maintenance)` (inline, not a `## Vision-link` heading)"
                     + (f"; `{raw[:60]}` names no registered KR id" if raw else ""))

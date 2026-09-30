@@ -169,5 +169,17 @@ class ParentRefTests(unittest.TestCase):
         self.assertIsNone(vlg.parent_ref("helps #7654 somehow"))
 
 
+class SeverityLiveTests(unittest.TestCase):
+    """jefe msg#430 (philanthropy#9300): live breakage passes with no Vision-link line."""
+
+    def test_severity_live_without_a_link_is_eligible(self):
+        items = [{"number": 9300, "body": "Typeahead empty.", "comments": [],
+                  "labels": [{"name": "fleet:severity-live"}]},
+                 {"number": 9301, "body": "Typeahead empty.", "comments": [], "labels": []}]
+        result = vlg.gate_candidates(items)
+        self.assertEqual(result["eligible"], [9300])
+        self.assertEqual([d["number"] for d in result["dropped"]], [9301])
+
+
 if __name__ == "__main__":
     unittest.main()
