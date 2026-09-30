@@ -235,7 +235,7 @@ in*. If you cannot write that sentence for a check, the check is not yours to ru
   "credential present" or "credential missing" and nothing more.
 - A surface you could not reach is UNKNOWN, never PASS. Say which ones you actually saw.
 - **Never `ScheduleWakeup`-loop on a background process you started.** Your `timeout_s` is
-  2400s; a background crawl that runs longer than that will outlive your pass regardless, and
+  3600s; a background crawl that runs longer than that will outlive your pass regardless, and
   re-arming a wakeup to poll it burns a fresh `claude -p` invocation (real dollars) per check,
   restart after restart, while re-deriving the same "still running" conclusion from zero
   context each time (Reif, 2026-09-12: this cost him tokens for no new information). Either
