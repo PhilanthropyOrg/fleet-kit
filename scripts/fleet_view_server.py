@@ -763,16 +763,29 @@ def _scoreboard_merged_prs(since_day: str) -> list[dict]:
 
 
 def _scoreboard_deploy_runs() -> list[dict]:
-    """Successful runs of the product's deploy workflow (FLEET_DEPLOY_WORKFLOW, default DEPLOY)."""
+    """Successful runs of the product's deploy workflow (FLEET_DEPLOY_WORKFLOW, default DEPLOY).
+
+    Two reads, merged: GitHub's `--status success` filter serves a stale list (live 2026-09-30:
+    its newest run was 09-29 08:14 while unfiltered runs showed successes at 17:39 that day), so
+    every merge after its cut-off had no covering deploy and "Issues resolved" read 0. The
+    unfiltered read is fresh but only reaches ~2 days back; the filtered one keeps the history."""
     wf = _deploy_workflow()
 
-    def produce():
-        raw = _gh("run", "list", "--workflow", wf, "--status", "success", "--limit", "300",
+    def read(*extra):
+        raw = _gh("run", "list", "--workflow", wf, *extra, "--limit", "300",
                   "--json", "createdAt,conclusion,headSha", timeout=60)
         try:
-            rows = json.loads(raw) if raw else []
+            return json.loads(raw) if raw else []
         except ValueError:
-            rows = []
+            return []
+
+    def produce():
+        seen, rows = set(), []
+        for r in read("--status", "success") + read():
+            key = (r.get("createdAt"), r.get("headSha"))
+            if r.get("conclusion") == "success" and key not in seen:
+                seen.add(key)
+                rows.append(r)
         return rows, bool(rows)
     return _cached(f"scoreboard_deploys:{wf}", 1800, produce)
 
