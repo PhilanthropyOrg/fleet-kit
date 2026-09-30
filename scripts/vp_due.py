@@ -69,7 +69,8 @@ def _newest(stamps):
 
 
 def is_due(item: dict, running: set[int] | None = None, running_minions: set[int] | None = None,
-           is_open=None) -> tuple[bool, str]:
+           is_open=None, looked_at: float | None = None,
+           now: float | None = None) -> tuple[bool, str]:
     """item = {number, comments:[{body, createdAt}], merged_prs:[{number, mergedAt}],
     labels?, subIssues?}. ISO-8601 Zulu timestamps compare correctly as strings. `is_open(n)`
     answers for an epic child named only in a `decomposed into` comment (subIssues nodes carry
@@ -96,6 +97,12 @@ def is_due(item: dict, running: set[int] | None = None, running_minions: set[int
         return False, f"{len(not_yets)} Not-yet rounds: a decision, not another review"
     if verdict and verdict >= merge:
         return False, "verdict is newer than the last merge"
+    if looked_at is not None:
+        merge_at = _iso_to_epoch(merge)
+        now = time.time() if now is None else now
+        if merge_at is not None and looked_at >= merge_at and now - looked_at < VP_RELOOK_AFTER_S:
+            return False, (f"a vp pass already looked at this merge {int((now - looked_at) / 60)}m "
+                           f"ago and posted no verdict; re-look after {VP_RELOOK_AFTER_S // 3600}h")
     return True, ("no verdict yet" if not verdict else "merge newer than last verdict")
 
 
@@ -130,10 +137,12 @@ def running_minion_items() -> set[int]:
 
 
 def due_items(items: list[dict], running: set[int] | None = None,
-              running_minions: set[int] | None = None, is_open=None) -> dict:
+              running_minions: set[int] | None = None, is_open=None,
+              looked: dict[int, float] | None = None, now: float | None = None) -> dict:
     due, skipped = [], []
+    looked = looked or {}
     for it in items:
-        ok, why = is_due(it, running, running_minions, is_open)
+        ok, why = is_due(it, running, running_minions, is_open, looked.get(it["number"]), now)
         (due if ok else skipped).append({"number": it["number"], "why": why})
     return {"due": [d["number"] for d in due], "skipped": skipped}
 
@@ -437,6 +446,43 @@ def running_vp_items() -> set[int]:
     return running_items(_runs_rows(), "vp")
 
 
+# ONE LOOK PER MERGE, NOT ONE PER HOUR. `is_due` only clears when a VERDICT comment lands, but
+# vp may finish a pass with no verdict: the merge was a side slice ("Schema-version check knows
+# version 8" on philanthropy#8889), or the fix is not live until the nightly rebuild. Nothing
+# recorded that look, so the next tick re-spawned vp on the same merge: #8889 got 11 vp passes
+# in 13h on one merge, each ending QUIET; 115 of 300 vp passes in the 7 days to 2026-09-30
+# posted no verdict ($25). Same shape as REDO_RETRY_AFTER_S on the builder side: a finished vp
+# pass that STARTED after the newest merge counts as a look, and re-arms after this long (a
+# deferral waiting on the 03:55 rebuild still gets its re-look the same day).
+VP_RELOOK_AFTER_S = int(os.environ.get("FLEET_VP_RELOOK_AFTER_S", 6 * 3600))
+
+
+def last_look_at(rows: list[dict], member: str = "vp") -> dict[int, float]:
+    """Per item, the START time of the newest `member` pass that finished with its own verdict
+    on the pass (ok / quiet / reported_nothing). Start, not end: a pass that began before a
+    merge never saw it. Infra endings (killed, timed_out, ...) are not a look."""
+    started: dict[str, tuple[int, float]] = {}
+    finished: set[str] = set()
+    for r in rows:
+        if r.get("member") != member or r.get("item_id") in (None, "", "None"):
+            continue
+        try:
+            n, ts = int(r["item_id"]), float(r.get("ts") or 0)
+        except (TypeError, ValueError, KeyError):
+            continue
+        rid = r.get("run_id")
+        if r.get("status") == "started":
+            started[rid] = (n, ts)
+        elif r.get("status") in ("ok", "quiet", "reported_nothing"):
+            finished.add(rid)
+    out: dict[int, float] = {}
+    for rid in finished:
+        if rid in started:
+            n, ts = started[rid]
+            out[n] = max(out.get(n, 0.0), ts)
+    return out
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--repo-dir", required=True, help="the product checkout gh should read (FLEET_REPO)")
@@ -444,7 +490,9 @@ def main(argv=None) -> int:
     a = p.parse_args(argv)
     items = json.loads(a.items) if a.items else collect(a.repo_dir)
     minions = running_minion_items()
-    out = due_items(items, running_vp_items(), minions, is_open=lambda n: _issue_open(a.repo_dir, n))
+    rows = _runs_rows()
+    out = due_items(items, running_items(rows, "vp"), minions,
+                    is_open=lambda n: _issue_open(a.repo_dir, n), looked=last_look_at(rows))
     out.update(redo_items(items, minions,
                           is_open=lambda n: _valid_redo_target(a.repo_dir, n),
                           dispatched=last_minion_dispatch()))

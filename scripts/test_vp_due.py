@@ -83,6 +83,42 @@ class DueTests(unittest.TestCase):
         it = item(9, comments=[("claimed-by: gru", T2), ("marie: priority=high", T3)], merged=[T1])
         self.assertTrue(vp_due.is_due(it)[0])
 
+    def test_vp_pass_after_merge_with_no_verdict_is_not_due_again(self):
+        # philanthropy#8889: Not yet at 21:14Z, side-slice merge at 21:22Z, then 11 QUIET vp passes
+        merge = vp_due._iso_to_epoch(T2)
+        it = item(30, comments=[("Not yet (VP review): a", T1)], merged=[T2])
+        ok, why = vp_due.is_due(it, looked_at=merge + 60, now=merge + 3600)
+        self.assertFalse(ok); self.assertIn("already looked", why)
+
+    def test_look_rearms_after_relook_window(self):
+        merge = vp_due._iso_to_epoch(T2)
+        it = item(31, comments=[("Not yet (VP review): a", T1)], merged=[T2])
+        self.assertTrue(vp_due.is_due(it, looked_at=merge + 60,
+                                      now=merge + 60 + vp_due.VP_RELOOK_AFTER_S)[0])
+
+    def test_look_before_merge_does_not_count(self):
+        merge = vp_due._iso_to_epoch(T2)
+        it = item(32, comments=[("Not yet (VP review): a", T1)], merged=[T2])
+        self.assertTrue(vp_due.is_due(it, looked_at=merge - 60, now=merge + 600)[0])
+
+    def test_last_look_at_uses_start_time_and_skips_infra_endings(self):
+        rows = [
+            {"member": "vp", "run_id": "a", "item_id": "8889", "status": "started", "ts": 100.0},
+            {"member": "vp", "run_id": "a", "item_id": "8889", "status": "quiet", "ts": 400.0},
+            {"member": "vp", "run_id": "b", "item_id": "8889", "status": "started", "ts": 500.0},
+            {"member": "vp", "run_id": "b", "item_id": "8889", "status": "killed", "ts": 900.0},
+            {"member": "vp", "run_id": "c", "item_id": "77", "status": "started", "ts": 50.0},
+            {"member": "minion", "run_id": "d", "item_id": "77", "status": "started", "ts": 60.0},
+            {"member": "minion", "run_id": "d", "item_id": "77", "status": "ok", "ts": 70.0},
+        ]
+        self.assertEqual(vp_due.last_look_at(rows), {8889: 100.0})
+
+    def test_due_items_passes_looks_through(self):
+        merge = vp_due._iso_to_epoch(T2)
+        its = [item(40, merged=[T2]), item(41, merged=[T2])]
+        out = vp_due.due_items(its, looked={40: merge + 5}, now=merge + 60)
+        self.assertEqual(out["due"], [41])
+
     def test_redo_after_not_yet_with_no_newer_merge(self):
         it = item(20, comments=[("Not yet (VP review): thin\n1. ...", T2)], merged=[T1])
         ok, why = vp_due.redo_due(it)
