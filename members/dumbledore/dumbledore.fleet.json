@@ -23,6 +23,11 @@
   "schedule": {
     "interval_s": 10800
   },
+  "wake": {
+    "skip_kinds": [
+      "cause"
+    ]
+  },
   "timeout_s": 3600,
   "enabled": true,
   "llm": {

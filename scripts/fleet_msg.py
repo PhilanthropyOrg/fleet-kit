@@ -114,6 +114,10 @@ def send(conn, sender: str, recipients, kind: str, key: str, body: str,
 WAKE_KINDS = {k.strip() for k in os.environ.get(
     "FLEET_MSG_WAKE_KINDS", "cause,incident,pr-block,nudge,ask,command").split(",") if k.strip()}
 WAKE_COOLDOWN_S = float(os.environ.get("FLEET_MSG_WAKE_COOLDOWN_S", 1800))
+# A member can opt kinds out of waking it with `"wake": {"skip_kinds": [...]}` in its spec; the
+# message still lands in its inbox for the next scheduled pass. 2026-09-30: jefe's hourly `cause`
+# forwards woke dumbledore 6 times in 17h, each a full pass shipping a new lever before the last
+# one could be scored (0 hits, 18 open rows); msg#457 asked for two fixes that already existed.
 
 
 def _log_dir(log_dir=None) -> Path:
@@ -189,6 +193,8 @@ def wake(conn, sent: list[dict], kind: str, specs=None, now: float | None = None
             reason = "no-spec"
         elif not specs[to].get("enabled", True):
             reason = "disabled"
+        elif kind in ((specs[to].get("wake") or {}).get("skip_kinds") or ()):
+            reason = "member-skips-kind"
         elif (member_pause.get(to, log_dir) or {}).get("paused"):
             reason = "paused"
         elif _cooling_down(to, now, cooldown_s, log_dir):

@@ -24,6 +24,7 @@ SPECS = {
     "marie": {"name": "marie", "enabled": True},
     "gru": {"name": "gru", "enabled": True},
     "dumbledore": {"name": "dumbledore", "enabled": False},
+    "batcher": {"name": "batcher", "enabled": True, "wake": {"skip_kinds": ["cause"]}},
 }
 
 
@@ -83,6 +84,18 @@ class DisabledMemberNotWoken(Base):
         out = self._send("gru", "dumbledore", "cause", "k1", now=1000.0)
         self.assertEqual(self.launched, [])
         self.assertEqual(out[0]["wake_reason"], "disabled")
+
+
+class MemberSkipsKind(Base):
+    def test_skipped_kind_waits_for_the_scheduled_pass(self):
+        out = self._send("jefe", "batcher", "cause", "k1", now=1000.0)
+        self.assertEqual(self.launched, [])
+        self.assertEqual(out[0]["wake_reason"], "member-skips-kind")
+
+    def test_other_kinds_still_wake(self):
+        out = self._send("jefe", "batcher", "ask", "k1", now=1000.0)
+        self.assertEqual(self.launched, [("batcher", "msg-1-ask")])
+        self.assertTrue(out[0]["woken"])
 
 
 class HqNotWoken(Base):
