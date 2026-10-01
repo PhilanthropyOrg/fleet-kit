@@ -448,39 +448,34 @@ paraphrasing the diff back in slightly longer words.
 
 ## 10e. "I could not check it live" is a claim about you, not about the environment
 
-Measured 2026-09-11 from an ordinary member worktree: the philanthropy instance's production URL
-answers **200** with the real page (`https://philanthropy.org/990`, 304KB, real `<title>`), and
-headless Chromium screenshots it. In the same 7 days, **195 self-critiques across six members**
-(minion 58, nerd 54, the-fixer 41, datta 14, vp 13, sentry 10) said some version of "no prod
-access in this sandbox" and, on that belief, left an acceptance criterion unverified, an issue
-open, or a `Fixes` downgraded to `Part of`. The belief was wrong, and each one costs a later pass
-the entire investigation again — the exact rework §14 and the closes-gate exist to stop.
+You can read prod, signed out AND signed in. Two wrong beliefs cost the fleet hundreds of
+unverified criteria: "no prod access" (195 self-critiques, 09-11) and "I could not sign in"
+(vp 20, minion 9 in the 3 days to 2026-10-01, mostly on HQ, Reif's top priority). Both are false.
 
-**Before you write that you could not verify something live, check for your instance's
-production URL and, if one is configured, run one of these against it and report what it
-returned:**
+`run_member.sh` loads `fleet.env` for every member, so these are already in your env when this
+instance has them: `$FIXER_PAGE_URL` (a real prod page), `$ATLAS_TEST_BYPASS` (gets headless
+browsers past the bot wall), `$QA_SESSION_TOKEN` (signs in a QA test user).
 
-`run_member.sh` sources `fleet.env` with `set -a` before launching any member (not just
-the-fixer), so `$FIXER_PAGE_URL` (and `$FIXER_HEALTH_URL`) are already in your environment
-whenever this instance has them set — `echo "$FIXER_PAGE_URL"` is the whole lookup, no grep,
-no CLAUDE.md field (this repo has none).
+Signed out: open `$FIXER_PAGE_URL` (or any real content path; the bare apex 403s) with curl or
+Playwright. Signed in (philanthropy; checked live 2026-10-01, HQ loads as the QA owner):
 
 ```
-curl -sL --max-time 20 -A Mozilla/5.0 -o /tmp/p.html -w '%{http_code}\n' "$FIXER_PAGE_URL"
-python3 -c "from playwright.sync_api import sync_playwright
-import os
+curl -s -H "x-qa-token: $QA_SESSION_TOKEN" -H "x-atlas-test: $ATLAS_TEST_BYPASS" \
+  -H 'Content-Type: application/json' -X POST https://philanthropy.org/990/api/qa/session \
+  -d '{"user":"owner"}' > /tmp/link.json   # -> {"url": ".../990/auth/magic?token=...", "ein", "claim_id"}
+python3 -c "import json,os,sys; from playwright.sync_api import sync_playwright
+u=json.load(sys.stdin)['url']
 with sync_playwright() as p:
-    b=p.chromium.launch(); pg=b.new_page(); r=pg.goto(os.environ['FIXER_PAGE_URL'])
-    print(r.status, pg.title()); pg.screenshot(path='/tmp/prod.png'); b.close()"
+    b=p.chromium.launch(); c=b.new_context(extra_http_headers={'x-atlas-test':os.environ['ATLAS_TEST_BYPASS']})
+    g=c.new_page(); g.goto(u); g.goto('https://philanthropy.org/network/hq')
+    print(g.url, g.title()); g.screenshot(path='/tmp/hq.png'); b.close()" < /tmp/link.json
 ```
 
-Two real limits remain, and only these: a bare apex host may sit behind a bot challenge and answer
-403 (`https://philanthropy.org/` does) — use a real content path; and WRITE access, the prod
-database and a prod shell are genuinely absent (the-fixer's `FIXER_PROD_DIAG_DRIVER` only). Read
-is not. If `$FIXER_PAGE_URL` is unset, this instance genuinely has no known production URL to
-check — say that plainly, that is not the belief this section is correcting. If the fetch
-genuinely fails, say what you ran and what came back — that is a finding worth filing. A blanket
-"sandbox has no prod" with no command behind it is not.
+Users: alice, bob, owner, verified, operator, visitor, member, vendor, funder, newcomer (QA
+accounts on fixture EINs only; never paste the magic-link URL anywhere). What stays absent:
+writes, the prod database and a prod shell (the-fixer's `FIXER_PROD_DIAG_DRIVER` only). If a
+variable is unset, say so plainly. If a command fails, write what you ran and what came back;
+that is a finding to file. "Could not sign in" with no command behind it is not.
 
 ## 11. Every run ends with a self-critique — a post-mortem on yourself, not just the work
 
