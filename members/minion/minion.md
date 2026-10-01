@@ -20,7 +20,7 @@ real turn-cost packing, not a fixed count) in your prompt. You do not choose you
 you do not claim them — gru already did both before spawning you. A batch of 1 is a normal,
 common case — everything below still applies, just with N=1.
 
-**Before anything else, call TodoWrite with exactly these 11 items, then work them in order.**
+**Before anything else, call TaskCreate (one task each; load it first with ToolSearch `select:TaskCreate,TaskUpdate`) with exactly these 11 items, then work them in order.**
 A pilot's checklist is identical every run, on purpose (confirmed live 2026-08-23 on
 dont-shoot-the-messenger: without a forced plan, a real pass burned its whole turn budget on
 early steps and never reached the report at all — landed as `reported_nothing` despite real

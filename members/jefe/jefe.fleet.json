@@ -27,7 +27,7 @@
     "model": "sonnet",
     "prompt_file": "jefe.md",
     "tools": {
-      "allow": ["Read", "Bash", "Grep", "Glob", "TodoWrite"],
+      "allow": ["Read", "Bash", "Grep", "Glob", "TaskCreate", "TaskUpdate"],
       "deny": ["Bash(gh pr merge:*)", "Bash(git push --force:*)", "Bash(gh issue close:*)"]
     }
   },

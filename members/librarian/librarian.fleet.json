@@ -37,7 +37,8 @@
         "Bash",
         "Grep",
         "Glob",
-        "TodoWrite"
+        "TaskCreate",
+        "TaskUpdate"
       ],
       "deny": [
         "Edit(/repo/**)",

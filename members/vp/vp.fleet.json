@@ -35,7 +35,8 @@
         "Grep",
         "Glob",
         "Write",
-        "TodoWrite"
+        "TaskCreate",
+        "TaskUpdate"
       ],
       "deny": [
         "Bash(git push:*)",

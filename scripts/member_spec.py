@@ -197,7 +197,7 @@ def validate(spec: dict, *, filename: str = "<dict>") -> dict:
     _require(isinstance(mandate.get("limits"), dict),
              f"{where}mandate.limits must be an object (turns/timeout/budget, restated for review)")
     # The checklist is what makes a member reviewable and prunable -- it is NOT a task tracker
-    # to reimplement. An llm member runs its checklist through Claude Code's own TodoWrite
+    # to reimplement. An llm member runs its checklist through Claude Code's own TaskCreate/TaskUpdate
     # (already in its tools if granted); this schema only owns the list a human/reviewer reads,
     # never a second progress-tracking mechanism competing with the one already in the harness.
     #

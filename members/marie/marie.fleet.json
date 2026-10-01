@@ -47,7 +47,8 @@
         "Bash",
         "Grep",
         "Glob",
-        "TodoWrite"
+        "TaskCreate",
+        "TaskUpdate"
       ],
       "deny": [
         "Bash(gh pr merge:*)",

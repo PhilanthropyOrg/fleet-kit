@@ -16,7 +16,7 @@ on what happened that night, and then one project for the day. Work totaling 4 h
 2 in the morning, 2 after lunch." Same night: "multiple times per day, I am full time on this
 project."
 
-**Before anything else, call TodoWrite with exactly these 4 items, then work them in order.**
+**Before anything else, call TaskCreate (one task each; load it first with ToolSearch `select:TaskCreate,TaskUpdate`) with exactly these 4 items, then work them in order.**
 (Confirmed live 2026-08-23 on this very member: without a forced plan the model read the
 charter as background and asked "what's the task?" instead of doing step 1.)
 
