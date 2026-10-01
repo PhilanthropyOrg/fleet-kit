@@ -12,7 +12,8 @@ machine per incident key -- the key the box already put on every actionable line
   new key (ERROR / ALERT / non-zero EXIT)  -> ONE board item ``prod alert [<key>]``, through the
                                              same inbox.file_or_comment_alert the email pager uses
                                              (so a box-log key and a mailed page never twin)
-  same key again                           -> counted; at most one comment per REPEAT_COMMENT_S
+  same key again                           -> counted; at most one comment per REPEAT_COMMENT_S,
+                                             reopening the item if it was closed as fixed
   the job's next EXIT without the key      -> closed ("recovered"), with the clean run's line --
     at least CLEAN_S after the key was last seen    only once the key has been gone CLEAN_S (box
                                              time), so a canary that fails every other run stays
@@ -115,9 +116,20 @@ def apply(actions: list[tuple], state: dict, issues: dict, run=None) -> list[str
                     state[key]["issue"] = issues[key]
                 out.append(f"{'filed' if created else 'commented'} {key} -> {url}")
             elif kind == "repeat" and state.get(key, {}).get("issue"):
-                run(["gh", "issue", "comment", "--repo", slug, str(state[key]["issue"]),
-                     "--body", f"Still firing ({a[3]} lines so far): {_line(a[2])}"])
-                out.append(f"repeat {key} x{a[3]}")
+                # A member closed it as fixed but the key is still firing: a comment on a
+                # closed issue reaches no board (#9234: 874 lines after "Fixed by ..."), so
+                # put it back. NOT_PLANNED/DUPLICATE closes were a decision; leave those.
+                num = str(state[key]["issue"])
+                body = f"Still firing ({a[3]} lines so far): {_line(a[2])}"
+                seen = run(["gh", "issue", "view", "--repo", slug, num,
+                            "--json", "state,stateReason", "-q", '.state + " " + .stateReason'])
+                if (getattr(seen, "stdout", "") or "").split() == ["CLOSED", "COMPLETED"]:
+                    run(["gh", "issue", "reopen", "--repo", slug, num, "--comment",
+                         f"Reopened by box_log_incidents.py: still firing after a fixed-close. {body}"])
+                    out.append(f"reopened {key} #{num} x{a[3]}")
+                else:
+                    run(["gh", "issue", "comment", "--repo", slug, num, "--body", body])
+                    out.append(f"repeat {key} x{a[3]}")
             elif kind == "close" and issues.get(key):
                 run(["gh", "issue", "close", "--repo", slug, str(issues[key]),
                      "--comment", f"Auto-closed by box_log_incidents.py -- {a[2]}"[:1500]])
