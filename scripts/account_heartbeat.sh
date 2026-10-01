@@ -65,6 +65,14 @@ ACCOUNTS="${FLEET_ACCOUNTS:-}"
 
 failed=""
 for acct in $ACCOUNTS; do
+  # An API-key account has no login that can expire, which is the one thing this probe
+  # detects -- and the probe below would test the config dir's login, not the key. Skip it,
+  # out loud. A dead key shows up on its first real call (account-pool.log: unauthenticated).
+  key_var="ANTHROPIC_API_KEY_$(echo "$acct" | tr '[:lower:]-' '[:upper:]_')"
+  if [ -n "${!key_var:-}" ]; then
+    log "account=$acct is an API-key account -- heartbeat skipped (no login to expire)"
+    continue
+  fi
   # Same credential-dir convention account_pool.sh uses: /root/.claude-<acct> in-container.
   out=$(podman exec "$CONTAINER" sh -c \
         "CLAUDE_CONFIG_DIR=/root/.claude-$acct timeout 90 claude -p 'say ok'" 2>&1)
