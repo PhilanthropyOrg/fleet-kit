@@ -673,7 +673,9 @@ python3 scripts/fleet_init.py --name <instance> --repo https://github.com/<owner
      -f enforce_admins=false -f required_pull_request_reviews=null -f restrictions=null
    ```
    Add your own CI check contexts to the same call. Builders arm `gh pr merge --auto` per-PR;
-   GitHub merges once every required check is green.
+   GitHub merges once every required check is green. The product repo has this on since
+   2026-10-01 (philanthropy gh#9819); its emergency way past a down reviewer is the
+   `review:skip` label there.
 
 ## Success metric
 

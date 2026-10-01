@@ -19,6 +19,9 @@
 #     one hung/expensive review can't silently blow through many multiples of the cap.
 #   - Selection: open, non-draft PRs whose head has NO fleet-code-review status yet, skipping
 #     heads with a failing/absent required check-run (reviewing a dead head is pure spend).
+#     The product repo REQUIRES this status to merge (gh#9819, 2026-10-01), so every skip here
+#     is a PR that waits: a PR that changes no files gets a pass (pass_empty_pr), a draft or
+#     red head waits for its author, and the `review:skip` label there is the emergency way out.
 #   - Verdict: read from validated JSON (`--json-schema`, see scripts/judge_judy_verdict.py),
 #     never scraped from prose -- gh#806. A schema mismatch is retried at the tool-call layer
 #     by the CLI itself before this script ever sees the output.
@@ -125,6 +128,18 @@ unqueue_pr() { # <pr>
 post_status() { # <sha> <state> <description>
   timeout 25s gh api -X POST "repos/${REPO_SLUG}/statuses/$1" \
     -f state="$2" -f context="$CONTEXT" -f description="${3:0:139}" >/dev/null 2>&1
+}
+
+# gh#9819 (product): the review status is a required check on the product repo, so a PR this
+# reviewer skips would wait forever. The one kind it skips for good is a PR with no changes
+# left (gh#531). Pass it -- but only when GitHub itself says it changes 0 files, so an empty
+# `gh pr diff` from a gh hiccup never passes real code.
+pass_empty_pr() { # <pr> <sha>
+  local n
+  n=$(timeout 25s gh api "repos/${REPO_SLUG}/pulls/$1" --jq '.changed_files' 2>/dev/null)
+  [ "$n" = "0" ] || return 1
+  post_status "$2" "success" "Nothing to review: this PR changes no files" \
+    && log "PR #$1: changes 0 files -- passed with no model call"
 }
 
 # --- pick ONE PR ------------------------------------------------------------------------------
@@ -378,6 +393,7 @@ while :; do
   # claude call reviewing nothing.
   if [ -z "$(tr -d '[:space:]' < "$DIFF_FILE")" ]; then
     log "PR #$PR: gh pr diff returned empty (likely already merged elsewhere) -- skipping without a verdict"
+    pass_empty_pr "$PR" "$HEAD_SHA"
     SKIPPED_THIS_TICK="$SKIPPED_THIS_TICK $PR"
     cleanup_pass
     [ -n "$EXPLICIT_PR" ] && break

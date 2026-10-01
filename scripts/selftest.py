@@ -7162,6 +7162,24 @@ def _judge_judy_skips_an_empty_diff_instead_of_blocking():
     assert "VERDICT" not in empty_branch, \
         "an empty diff must never reach a VERDICT -- it should skip before the model is ever called"
 
+    # gh#9819: the review status is required to merge on the product repo, so "skip" alone
+    # would leave a no-change PR waiting forever. It gets a pass, but only when GitHub says
+    # the PR changes 0 files -- an empty diff from a gh hiccup must not pass real code.
+    assert 'pass_empty_pr "$PR" "$HEAD_SHA"' in empty_branch, "an empty diff never tries pass_empty_pr"
+    fn = src[src.index("pass_empty_pr() {"):src.index("# --- pick ONE PR")]
+    import subprocess
+    with tempfile.TemporaryDirectory() as td:
+        for files, want in (("0", "POST success"), ("3", ""), ("", "")):
+            script = (
+                'REPO_SLUG=o/r; log() { :; }; timeout() { shift; "$@"; }\n'
+                'post_status() { echo "POST $2"; }\n'
+                f'gh() {{ echo "{files}"; }}\n' + fn + '\npass_empty_pr 7 abc\n'
+            )
+            sh = Path(td) / "t.sh"
+            sh.write_text(script)
+            out = subprocess.run(["bash", str(sh)], capture_output=True, text=True).stdout.strip()
+            assert out == want, f"changed_files={files!r}: wanted {want!r}, got {out!r}"
+
 
 def _judge_judy_verdict_reads_validated_json_not_prose():
     """gh#806 AC1/AC2/AC5/AC6: judge_judy_verdict.py reads the verdict from validated JSON --
