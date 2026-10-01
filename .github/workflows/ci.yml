@@ -126,6 +126,8 @@ jobs:
         run: python3 scripts/test_minion_no_bg_tasks.py
       - name: run test_issue_cluster.py
         run: python3 scripts/test_issue_cluster.py
+      - name: run test_issue_flow.py
+        run: python3 scripts/test_issue_flow.py
       - name: run test_never_silent_8215.py
         run: python3 scripts/test_never_silent_8215.py
       - name: run test_scoreboard.py

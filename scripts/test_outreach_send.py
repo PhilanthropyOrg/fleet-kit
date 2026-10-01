@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -285,10 +286,33 @@ class CapsAndSuppression(Base):
                 [sys.executable, str(HERE / "outreach_send.py"), "send", "--type", "lifecycle",
                  "--subject", "Hi", "--body-file", str(body), "--recipients", str(leads), "--send"],
                 env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE))
-        outs = [json.loads(p.communicate(timeout=60)[0]) for p in procs]
+        done = [p.communicate(timeout=60) for p in procs]
+        for out, err in done:  # a racer that died says why, instead of a bare JSON error
+            self.assertTrue(out.strip(), f"a racing send printed nothing; stderr: {err.decode()[-600:]}")
+        outs = [json.loads(out) for out, _err in done]
         self.assertEqual(sum(x["sent"] for x in outs), 1, outs)
         self.assertEqual(len(FakeProvider.seen), 1, "the provider must be called exactly once")
         self.assertEqual(sum(x["refused"].get("daily_cap", 0) for x in outs), 7)
+
+    def test_opening_the_ledger_waits_out_a_locked_file(self):
+        real, calls = sqlite3.connect, {"n": 0}
+
+        class Busy:  # the first two set-up attempts find the new file locked by another send
+            def __init__(self, conn): self._c = conn
+            def execute(self, sql, *a):
+                if sql.startswith("PRAGMA journal_mode"):
+                    calls["n"] += 1
+                    if calls["n"] <= 2:
+                        raise sqlite3.OperationalError("database is locked")
+                return self._c.execute(sql, *a)
+            def __getattr__(self, name): return getattr(self._c, name)
+
+        with mock.patch.object(o.sqlite3, "connect", lambda *a, **k: Busy(real(*a, **k))), \
+                mock.patch.object(o.time, "sleep", lambda _s: None):
+            conn = o.connect()
+        self.assertEqual(calls["n"], 3)
+        self.assertEqual(conn.execute("SELECT count(*) FROM ledger").fetchone()[0], 0)
+        conn.close()
 
     def test_a_crash_mid_send_keeps_its_slot(self):
         self.env(FLEET_OUTREACH_DAILY_CAP="1")
