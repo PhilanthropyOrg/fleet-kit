@@ -156,7 +156,40 @@ def fleet_prs(slug: str, now: float, days: int = 7, run=_run) -> dict[int, str]:
 
 
 def load_okr(path: pathlib.Path | None = None) -> dict:
-    p = path or pathlib.Path(os.environ.get("FLEET_OKR_FILE") or HERE / "okr.json")
+    """Load OKRs from: product repo (fleet/okr.json) → FLEET_OKR_FILE → kit's okr.json.
+
+    For a new startup, goals live in the product repo (fleet/okr.json), not the kit.
+    Falls back to FLEET_OKR_FILE env var, then kit's scripts/okr.json as the last resort
+    (keeps the live instance unchanged if no product OKR exists).
+    """
+    if path:
+        # Explicit path passed
+        try:
+            return json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError):
+            return {}
+
+    # Try product repo's own goals first (fleet/okr.json in the product repo)
+    product_repo = os.environ.get("FLEET_REPO", "/repo")
+    product_okr = pathlib.Path(product_repo) / "fleet" / "okr.json"
+    if product_okr.exists():
+        try:
+            return json.loads(product_okr.read_text())
+        except (OSError, json.JSONDecodeError):
+            pass
+
+    # Fall back to FLEET_OKR_FILE env var
+    env_okr = os.environ.get("FLEET_OKR_FILE")
+    if env_okr:
+        p = pathlib.Path(env_okr)
+        if p.exists():
+            try:
+                return json.loads(p.read_text())
+            except (OSError, json.JSONDecodeError):
+                pass
+
+    # Last resort: kit's own scripts/okr.json (keeps live instance working)
+    p = HERE / "okr.json"
     try:
         return json.loads(p.read_text())
     except (OSError, json.JSONDecodeError):

@@ -68,25 +68,39 @@ fi
 EMD=(); EMD_BIN="${FLEET_EATMYDATA_BIN:-eatmydata}"
 if command -v "$EMD_BIN" >/dev/null 2>&1; then EMD=("$EMD_BIN"); echo "verified_test: fsync off for the test run (eatmydata)"; fi
 
-ARGS="${*:-full}"
-if [ $# -eq 0 ] && [ -f scripts/tests_for_diff.py ]; then
-  echo "verified_test: diff-scoped -- python3 scripts/tests_for_diff.py --run in $WT"
-  ${EMD[@]+"${EMD[@]}"} python3 scripts/tests_for_diff.py --run
-  code=$?
-  ARGS="tests_for_diff"
-  if [ "$code" -eq 3 ]; then
-    # 2026-09-29 (Reif): the box runs targeted tests only, never the whole suite. The full suite
-    # already runs in the product repo's CI on every PR; a 30-min local copy of it held a test
-    # slot, starved every other pass, and timed passes out. A diff too wide to scope pushes on
-    # preflight alone and CI is its test run -- the pass then waits for CI (pr_ci_wait.py).
-    echo "verified_test: diff too wide to scope (rc=3) -- no local run; the full suite runs in CI on the PR"
+# Greenfield repos (empty or newly scaffolded) may have no test infrastructure yet.
+# Preflight gates are still checked, but running the test suite is not required.
+GREENFIELD=0
+if [ ! -f "pyproject.toml" ] && [ ! -f "package.json" ] && [ ! -d "tests" ] && [ ! -d "test" ]; then
+  if [ ! -f "scripts/tests_for_diff.py" ] && [ $# -eq 0 ]; then
+    GREENFIELD=1
+    echo "verified_test: greenfield repo (no test infrastructure yet) -- preflight pass means ready to build"
     code=0
-    ARGS="ci-only (diff too wide to scope; full suite runs in CI on the PR)"
+    ARGS="greenfield (no test infrastructure; ready to build)"
   fi
-else
-  echo "verified_test: pytest -n $WORKERS ${*:-<full suite>} in $WT"
-  ${EMD[@]+"${EMD[@]}"} python3 -m pytest -q -n "$WORKERS" "$@"
-  code=$?
+fi
+
+if [ "$GREENFIELD" -eq 0 ]; then
+  ARGS="${*:-full}"
+  if [ $# -eq 0 ] && [ -f scripts/tests_for_diff.py ]; then
+    echo "verified_test: diff-scoped -- python3 scripts/tests_for_diff.py --run in $WT"
+    ${EMD[@]+"${EMD[@]}"} python3 scripts/tests_for_diff.py --run
+    code=$?
+    ARGS="tests_for_diff"
+    if [ "$code" -eq 3 ]; then
+      # 2026-09-29 (Reif): the box runs targeted tests only, never the whole suite. The full suite
+      # already runs in the product repo's CI on every PR; a 30-min local copy of it held a test
+      # slot, starved every other pass, and timed passes out. A diff too wide to scope pushes on
+      # preflight alone and CI is its test run -- the pass then waits for CI (pr_ci_wait.py).
+      echo "verified_test: diff too wide to scope (rc=3) -- no local run; the full suite runs in CI on the PR"
+      code=0
+      ARGS="ci-only (diff too wide to scope; full suite runs in CI on the PR)"
+    fi
+  else
+    echo "verified_test: pytest -n $WORKERS ${*:-<full suite>} in $WT"
+    ${EMD[@]+"${EMD[@]}"} python3 -m pytest -q -n "$WORKERS" "$@"
+    code=$?
+  fi
 fi
 
 HASH="$(python3 "$HOOK" --content-hash "$WT")"

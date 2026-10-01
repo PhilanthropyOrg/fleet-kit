@@ -289,6 +289,15 @@ gh label create fleet:priority-medium --color e4a72c --description "gru builds a
 gh label create fleet:priority-low    --color a2eeef --description "gru builds only with spare runway" || true
 ```
 
+**Founding issues (for empty/new repos).** If this repo has no commits or no VISION.md yet
+(greenfield), a founding issue (labeled `fleet:backlog,fleet:priority-p1` and filed by
+`fleet_init.sh`) describes a piece of initial work: stack choice, CI setup, deploy driver,
+landing page, auth, payments, analytics. Rank every founding issue `fleet:priority-high` —
+they must ship first before normal product work can land. This is not a RICE call; it is a
+prerequisite (the fleet cannot build features in a repo with no CI, no auth, no landing page).
+Once the repo has a deploy driver and CI, founding issues are complete and you can resume
+normal RICE-based ranking.
+
 **The leak rule (Reif, 2026-09-16: "so the fleet enhances and we all paddle the same
 direction").** `NORTH.md` names the funnel's worst step and its drop percentage. While that
 drop is above 50%, `fleet:priority-high` holds ONLY items whose Vision-link closes that step
