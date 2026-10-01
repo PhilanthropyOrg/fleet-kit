@@ -8,7 +8,7 @@
   fleet_home.html -- Console v3 (fk#1058): the 990 Scout sidebar shell, operator purple.
   Home, Roster, the run panel (fk#748) and the messenger (fleet_chat.html), one file, no build
   step. Each tile is a row in scripts/metrics.json with an id, value and sparkline, stale past
-  2x its cadence (gh#8212). No inbox (#1054). Polls every 30s; every URL goes through
+  2x its cadence (gh#8212). Polls every 30s; every URL goes through
   withBase() (gh#553).
 -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -179,6 +179,7 @@
   <aside class="sidebar">
     <div class="brand"><span class="brand-mark">◆</span><span class="brand-word">FLEET</span></div>
     <span class="brand-env" id="brandEnv">console</span>
+    <a class="nav" id="navAbout" href="#"><span>?</span>What is this?</a>
     <div class="sec">Run</div>
     <a class="nav active" data-page="home" href="#home"><span>▣</span>Home</a>
     <a class="nav" data-page="roster" href="#roster"><span>◉</span>Roster<span class="cnt" id="cntMembers">–</span></a>
@@ -324,7 +325,7 @@ function renderChrome() {
   if (ac && ac.value !== null && ac.value !== undefined) { const gated = (ac.of || 0) - ac.value; cnt.textContent = gated ? `${gated} gated` : `${ac.value} live`; cnt.classList.toggle('bad', gated > 0 && ac.value === 0); cnt.classList.toggle('warn', gated > 0); }
   const base = repoBase();
   if (base) { $('navPrs').href = `${base}/pulls`; $('navBacklog').href = `${base}/issues?q=is%3Aopen+label%3Afleet%3Abacklog`; $('landedAll').href = `${base}/pulls?q=is%3Apr+is%3Amerged`; }
-  $('navClassic').href = withBase('/classic'); $('navSettings').href = withBase('/classic#settings'); $('navStatus').href = withBase('/status'); $('navClassicStats').href = withBase('/classic#stats');
+  $('navAbout').href = withBase('/about'); $('navClassic').href = withBase('/classic'); $('navSettings').href = withBase('/classic#settings'); $('navStatus').href = withBase('/status'); $('navClassicStats').href = withBase('/classic#stats');
   const b = STATE.build; $('build').textContent = b && b.sha ? `build ${String(b.sha).slice(0, 7)}${b.started_at ? ` · up ${ago(b.started_at)}` : ''}` : '';
   $('updated').textContent = `updated ${ctTime()}`;
   document.querySelectorAll('.nav[data-page]').forEach(a => a.classList.toggle('active', a.dataset.page === PAGE));
