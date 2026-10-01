@@ -30,7 +30,11 @@ import pathlib
 import subprocess
 import sys
 import time
+from pathlib import Path
 from fleet_tz import stamp as central_stamp  # noqa: E402 -- humans read Central
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import redact_secrets  # noqa: E402
 
 HERE = pathlib.Path(__file__).resolve().parent
 LOG_DIR = pathlib.Path(os.environ.get("FLEET_LOG_DIR") or os.path.expanduser("~/Library/Logs/fleet-kit"))
@@ -49,7 +53,13 @@ def load_runs(path: pathlib.Path | None = None) -> list[dict]:
     try:
         for line in p.read_text(errors="ignore").splitlines()[-4000:]:
             try:
-                rows.append(json.loads(line))
+                rec = json.loads(line)
+                # Defensive redaction: ensure no secrets leak from runs.jsonl on read (fk#TBD)
+                rec = redact_secrets.redact_dict_fields(rec, [
+                    "outcome", "evidence", "report", "self_critique", "lesson", "broken",
+                    "prediction", "score_now", "last_verdict", "blocked", "reason", "fired_by"
+                ])
+                rows.append(rec)
             except json.JSONDecodeError:
                 continue
     except OSError:

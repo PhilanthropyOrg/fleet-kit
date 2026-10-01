@@ -81,6 +81,20 @@ _LEADING_CD_RE = re.compile(r"(?:^|&&|;)\s*cd\s+('[^']*'|\"[^\"]*\"|[^\s;&]+)")
 _READONLY_STASH_SUBCOMMANDS = {"list", "show"}
 _PATH_TOKEN_RE = re.compile(r"'[^']*'|\"[^\"]*\"|\S+")
 
+# Security: credentials exposure prevention (fk#TBD). Block bare `env`, `printenv`, `set` dumps
+# that would leak GH_TOKEN and other secrets into output, and block `echo`/`printf`/`cat` of
+# specific secret-shaped env vars or the token file. These are best-effort patterns; see gh#592
+# and worktree_guard_hook.py's own NON-GOALS for why obfuscated escapes can still slip past.
+_BARE_ENV_DUMP_RE = re.compile(r"\b(?:env|printenv|set)(?:\s|$|;|&|\|)")
+_CREDENTIAL_VAR_DUMP_RE = re.compile(
+    r"\b(?:echo|printf|cat)\b.*?(?:"
+    r"\$GH_TOKEN|GH_TOKEN|FLEET_MAXX_KEY|FLEET_API_KEY|"
+    r"\$?CLAUDE[A-Z_]*TOKEN|"
+    r"\$?[A-Z][A-Z0-9_]*(?:_TOKEN|_KEY|_SECRET|_PASSWORD)"
+    r"|/root/\.claude|/root/\.git-credentials"
+    r")"
+)
+
 # gh#715: a command that merely QUOTES a mutating verb or a shared-checkout path -- prose in a
 # `gh issue comment --body "..."` argument, or a heredoc BODY -- must not be treated as if it
 # typed that text as a real shell argument. Both are stripped before every regex/token check
@@ -132,6 +146,34 @@ def _effective_cwd(command: str, cwd_real: str | None, verb_start: int) -> str |
         except OSError:
             continue
     return effective
+
+
+def _bash_exposes_credentials(command: str) -> str | None:
+    """Returns a block reason if the command would leak credentials, or None to allow.
+
+    Checks for common credential exposure patterns:
+    - Bare `env`, `printenv`, `set` dumps
+    - `echo`/`printf`/`cat` of secret-shaped env vars
+    - Reading credential files (/root/.claude, /root/.git-credentials)
+    """
+    if not command:
+        return None
+
+    command_stripped = _strip_prose(command)
+
+    # Check for bare env/printenv/set that would dump the entire environment
+    if _BARE_ENV_DUMP_RE.search(command_stripped):
+        return (f"BLOCKED by worktree_guard_hook.py (security): bare `env`/`printenv`/`set` "
+                f"would dump GH_TOKEN and other secrets. Use specific variable names "
+                f"(e.g., `echo $SAFE_VALUE`) or read from a non-credential file instead.")
+
+    # Check for echo/printf/cat of credential variables or files
+    if _CREDENTIAL_VAR_DUMP_RE.search(command_stripped):
+        return (f"BLOCKED by worktree_guard_hook.py (security): this command would output "
+                f"credential variables or files. Credentials cannot be logged. "
+                f"If you need to debug, use a safe flag/variable instead.")
+
+    return None
 
 
 def _bash_targets_repo(command: str, repo_real: str, wt_real: str, cwd_real: str | None) -> bool:
@@ -243,6 +285,11 @@ def decide(payload: dict, env: dict) -> str | None:
 
     if tool_name == "Bash":
         command = tool_input.get("command") or ""
+        # Check for credential exposure first (higher priority than repo mutation)
+        cred_block = _bash_exposes_credentials(command)
+        if cred_block:
+            return cred_block
+
         # gh#834: Claude Code's PreToolUse payload carries the command's own `cwd` -- read it so
         # a bare mutating command with no explicit path (`cd $REPO && git checkout <branch>`)
         # can be caught via cwd, not just via a path token spelled out in the command string.
