@@ -116,6 +116,15 @@ CLASS_LABELS = {
     "pgpassword": "Postgres",
     "postgres_url": "Postgres",
     "secret_env": "Secret-shaped env var",
+    "github_pat": "GitHub OAuth",
+    "openai_key": "OpenAI API key",
+    "stripe_key": "Stripe key",
+    "stripe_webhook": "Webhook signing secret",
+    "resend_key": "Resend API key",
+    "aws_access_key": "AWS access key",
+    "slack_token": "Slack token",
+    "bearer_token": "Bearer token",
+    "private_key": "Private key block",
 }
 
 # A plain \b at the START of a pattern requires a non-word char (or start-of-string)
@@ -175,6 +184,66 @@ PATTERNS.append((
     re.compile(rf"{_BOUNDARY_START}postgres(?:ql)?://[^:\s]+:[^@\s]+@\S+"),
     _simple_sub("postgres_url"),
 ))
+# Other providers a fleet is handed keys for (payments, mail, cloud, chat). Each needs its real
+# prefix AND a realistic length, so an ordinary identifier (`re_validate1`, `sk-something`) is
+# never eaten: real keys are far longer than the 8-char floor the truncated-GitHub case above
+# needs. Lengths are deliberately a little under each provider's real size.
+#
+# `sk-` and `re_` sit inside ordinary words all day (`task-`, `core_`), so those two patterns
+# put their literal FIRST and check the boundary behind it: the engine can then jump from one
+# literal to the next instead of testing _BOUNDARY_START at every character (about 10x faster on
+# a multi-MB transcript, same matches).
+def _literal_then_boundary(literal: str) -> str:
+    lit = re.escape(literal)
+    return rf"{lit}(?:(?<!\w{lit})|(?<=\\[nrt]{lit}))"
+
+
+PATTERNS.append((
+    "github_pat",  # fine-grained PAT: github_pat_ + 82 chars
+    re.compile(rf"{_BOUNDARY_START}github_pat_[A-Za-z0-9_]{{22,255}}\b"),
+    _simple_sub("github_pat"),
+))
+PATTERNS.append((
+    "openai_key",  # sk-<48> (legacy) or sk-proj-/sk-svcacct-/sk-admin-<long>; sk-ant- is matched above
+    re.compile(_literal_then_boundary("sk-")
+               + r"(?:(?:proj|svcacct|admin)-[A-Za-z0-9_\-]{40,}|[A-Za-z0-9]{40,})\b"),
+    _simple_sub("openai_key"),
+))
+PATTERNS.append((
+    "stripe_key",  # secret and restricted keys only; pk_ is publishable, not a secret
+    re.compile(rf"{_BOUNDARY_START}(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{{24,}}\b"),
+    _simple_sub("stripe_key"),
+))
+PATTERNS.append((
+    "stripe_webhook",  # Stripe and Svix (Resend inbound) signing secrets
+    re.compile(rf"{_BOUNDARY_START}whsec_[A-Za-z0-9+/=]{{24,}}"),
+    _simple_sub("stripe_webhook"),
+))
+PATTERNS.append((
+    "resend_key",  # re_<8>_<24>; the second underscore is what keeps `re_compile_x` names out
+    re.compile(_literal_then_boundary("re_") + r"[A-Za-z0-9]{6,12}_[A-Za-z0-9]{20,}\b"),
+    _simple_sub("resend_key"),
+))
+PATTERNS.append((
+    "aws_access_key",
+    re.compile(rf"{_BOUNDARY_START}(?:AKIA|ASIA)[0-9A-Z]{{16}}\b"),
+    _simple_sub("aws_access_key"),
+))
+PATTERNS.append((
+    "slack_token",
+    re.compile(rf"{_BOUNDARY_START}xox[abprs]-[0-9]{{8,}}-[0-9A-Za-z\-]{{20,}}"),
+    _simple_sub("slack_token"),
+))
+PATTERNS.append((
+    "bearer_token",  # a literal token after "Bearer"; needs a digit, so `Bearer $VAR` and prose stay
+    re.compile(r"\b((?:[Bb]earer|BEARER)\s+)(?=[A-Za-z0-9._~+/\-]*[0-9])[A-Za-z0-9._~+/\-]{20,}=*"),
+    lambda m: f"{m.group(1)}[REDACTED:bearer_token]",
+))
+PATTERNS.append((
+    "private_key",  # a PEM block, on real newlines or JSON-escaped ones
+    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]{0,20000}?-----END [A-Z ]*PRIVATE KEY-----"),
+    _simple_sub("private_key"),
+))
 PATTERNS.append((
     "secret_env",
     re.compile(
@@ -183,6 +252,33 @@ PATTERNS.append((
     ),
     lambda m: f"{m.group(1)}=[REDACTED:secret_env]",
 ))
+
+
+# A literal every match of that class must contain. `in` on a multi-MB transcript costs
+# microseconds; a regex that opens with _BOUNDARY_START has no literal prefix for the engine to
+# jump to, so it walks every character (the 1-2.5s/MB measured above). Skipping a class whose
+# literal is absent changes no result -- it only skips a scan that could not have matched.
+HINTS: dict[str, tuple[str, ...]] = {
+    "gho": ("gho_",), "ghp": ("ghp_",), "ghs": ("ghs_",), "ghu": ("ghu_",), "ghr": ("ghr_",),
+    "sk-ant": ("sk-ant-",),
+    "pgpassword": ("PGPASSWORD=",),
+    "postgres_url": ("postgres://", "postgresql://"),
+    "github_pat": ("github_pat_",),
+    "openai_key": ("sk-",),
+    "stripe_key": ("sk_live_", "sk_test_", "rk_live_", "rk_test_"),
+    "stripe_webhook": ("whsec_",),
+    "resend_key": ("re_",),
+    "aws_access_key": ("AKIA", "ASIA"),
+    "slack_token": ("xox",),
+    "bearer_token": ("earer", "BEARER"),
+    "private_key": ("PRIVATE KEY-----",),
+    "secret_env": ("SECRET", "TOKEN", "PASSWORD", "PASSWD", "API_KEY", "APIKEY"),
+}
+
+
+def could_match(cls: str, text: str) -> bool:
+    hints = HINTS.get(cls)
+    return hints is None or any(h in text for h in hints)
 
 
 @dataclass
@@ -285,6 +381,8 @@ def is_done(mtime: float, ranges: list[list[float]]) -> bool:
 
 def redact_text(text: str, stats: ScrubStats, path: str) -> str:
     for cls, pattern, sub_fn in PATTERNS:
+        if not could_match(cls, text):
+            continue
         text, n = pattern.subn(sub_fn, text)
         if n:
             stats.record(cls, path, n)

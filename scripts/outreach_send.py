@@ -98,13 +98,27 @@ def db_path() -> Path:
     return Path(base) / "outreach.db"
 
 
+_OPEN_TRIES = 100
+
+
 def connect() -> sqlite3.Connection:
     p = db_path()
     p.parent.mkdir(parents=True, exist_ok=True)
     # isolation_level=None: transactions are ours to open (BEGIN IMMEDIATE in _reserve).
     conn = sqlite3.connect(str(p), timeout=30, isolation_level=None)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.executescript(_SCHEMA)
+    # Several sends opening a brand-new ledger at once: switching it to WAL and creating the
+    # tables can answer "database is locked" straight away, without waiting out `timeout`
+    # (seen on Linux CI 2026-10-01: one of 8 racing sends died here before reserving anything).
+    # Setting up the file is safe to repeat, so wait and try again rather than crash.
+    for attempt in range(_OPEN_TRIES):
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.executescript(_SCHEMA)
+            return conn
+        except sqlite3.OperationalError as exc:
+            if "locked" not in str(exc) or attempt == _OPEN_TRIES - 1:
+                raise
+            time.sleep(0.1)
     return conn
 
 

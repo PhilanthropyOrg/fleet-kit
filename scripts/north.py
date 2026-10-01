@@ -42,6 +42,7 @@ import time
 import urllib.error
 import urllib.request
 from fleet_tz import stamp as central_stamp  # noqa: E402 -- humans read Central
+import okr as okr_file  # noqa: E402 -- the one goals loader
 
 HERE = pathlib.Path(__file__).resolve().parent
 LOG_DIR = pathlib.Path(os.environ.get("FLEET_LOG_DIR") or os.path.expanduser("~/Library/Logs/fleet-kit"))
@@ -156,11 +157,17 @@ def fleet_prs(slug: str, now: float, days: int = 7, run=_run) -> dict[int, str]:
 
 
 def load_okr(path: pathlib.Path | None = None) -> dict:
-    p = path or pathlib.Path(os.environ.get("FLEET_OKR_FILE") or HERE / "okr.json")
-    try:
-        return json.loads(p.read_text())
-    except (OSError, json.JSONDecodeError):
-        return {}
+    """The goals, from okr.py: FLEET_OKR_FILE, else the product repo's fleet/okr.json, else the
+    kit's scripts/okr.json. One loader, so NORTH.md and the Vision-link gate never disagree."""
+    return okr_file.load(path)
+
+
+def kr_ids_of(okr: dict) -> tuple[str, ...]:
+    """The ids the weights are split over: the loaded goals' key results (a product with only
+    an objective is weighed on that). No goals readable -> KR_IDS, as before."""
+    ids = tuple(k["id"] for k in okr.get("key_results") or [] if isinstance(k, dict) and k.get("id"))
+    obj = (okr.get("objective") or {}).get("id")
+    return ids or ((obj,) if obj else KR_IDS)
 
 
 FUNNEL_TIMEOUT_S = 45  # fk#1189: the live endpoint answered in 30.5s; 20s read as "unreadable"
@@ -291,15 +298,15 @@ def _int(v) -> int | None:
         return None
 
 
-def weights(reif: list[dict], leak_kr: str | None) -> dict[str, float]:
+def weights(reif: list[dict], leak_kr: str | None, ids: tuple[str, ...] = KR_IDS) -> dict[str, float]:
     """One weight per KR, summing to 1. Reif's shipped PRs carry 60%, the funnel's leak 40%;
     with neither readable it is the equal split (today's behaviour). `none` is always 0."""
-    counts = {k: sum(1 for p in reif if p["kr"] == k) for k in KR_IDS}
+    counts = {k: sum(1 for p in reif if p["kr"] == k) for k in ids}
     n = sum(counts.values())
-    reif_part = {k: (counts[k] / n if n else 1 / 3) for k in KR_IDS}
-    if leak_kr in KR_IDS:
-        leak_part = {k: (1.0 if k == leak_kr else 0.0) for k in KR_IDS}
-        w = {k: 0.6 * reif_part[k] + 0.4 * leak_part[k] for k in KR_IDS}
+    reif_part = {k: (counts[k] / n if n else 1 / len(ids)) for k in ids}
+    if leak_kr in ids:
+        leak_part = {k: (1.0 if k == leak_kr else 0.0) for k in ids}
+        w = {k: 0.6 * reif_part[k] + 0.4 * leak_part[k] for k in ids}
     else:
         w = reif_part
     s = sum(w.values()) or 1.0
@@ -317,7 +324,8 @@ def render(reif: list[dict], reif_err: str | None, okr: dict, funnel: dict, funn
     labels = {k["id"]: k["label"] for k in okr.get("key_results", [])}
     labels[(okr.get("objective") or {}).get("id", "okr.verified_claims")] = (okr.get("objective") or {}).get("label", "")
     leak = worst_step_kr(funnel)
-    w = weights(reif, leak)
+    ids = kr_ids_of(okr)
+    w = weights(reif, leak, ids)
     out = [f"# NORTH -- where Reif is paddling (written {central_stamp('%Y-%m-%d %H:%M %Z', now)})",
            "", "## 1. What Reif shipped himself, last 14 days (not the fleet's PRs)"]
     if reif_err:
@@ -325,8 +333,8 @@ def render(reif: list[dict], reif_err: str | None, okr: dict, funnel: dict, funn
     elif not reif:
         out.append("nothing merged outside the fleet in 14 days")
     else:
-        by = {k: [p for p in reif if p["kr"] == k] for k in (*KR_IDS, "none")}
-        for k in (*KR_IDS, "none"):
+        by = {k: [p for p in reif if p["kr"] == k] for k in (*ids, "none")}
+        for k in (*ids, "none"):
             if by[k]:
                 out.append(f"- **{k}** ({len(by[k])}): " + "; ".join(f"#{p.get('number', '?')} {str(p.get('title', ''))[:70]}" for p in by[k][:6])
                            + (" ..." if len(by[k]) > 6 else ""))
@@ -351,8 +359,8 @@ def render(reif: list[dict], reif_err: str | None, okr: dict, funnel: dict, funn
     if not burn:
         out.append("unreadable: no priced runs in runs.jsonl")
     else:
-        kr_spend = {k: burn.get(k, 0.0) for k in (*KR_IDS, "none")}
-        for k in (*KR_IDS, "none"):
+        kr_spend = {k: burn.get(k, 0.0) for k in (*ids, "none")}
+        for k in (*ids, "none"):
             if kr_spend[k]:
                 out.append(f"- {k}: ${kr_spend[k]:,.0f} ({kr_spend[k] / burn_total:.0%})")
         for prefix, label in (("PR not merged:", "a PR, not merged (yet)"), ("no PR:", "no PR at all")):
@@ -362,7 +370,7 @@ def render(reif: list[dict], reif_err: str | None, okr: dict, funnel: dict, funn
                 out.append(f"- {label}: ${tot:,.0f} ({tot / burn_total:.0%}) -- "
                            + ", ".join(f"{k[len(prefix) + 1:]} ${v:,.0f}" for k, v in rows[:6]))
     out += ["", "## Weights (marie ranks by these; a Vision-link on a heavier KR ranks higher)"]
-    out.append(" · ".join(f"`{k}` {w[k]:.2f} -> {tier_for(w[k])}" for k in KR_IDS) + " · `none (maintenance)` 0 -> low")
+    out.append(" · ".join(f"`{k}` {w[k]:.2f} -> {tier_for(w[k])}" for k in ids) + " · `none (maintenance)` 0 -> low")
     out.append("")
     out.append("Rule: an item's tier is the tier of its Vision-link KR above. `fleet:reif-priority` stays outside this. "
                "Spend on a KR Reif is not touching and the funnel is not leaking is spend that does not paddle.")
@@ -396,6 +404,11 @@ def main(argv=None) -> int:
         pr_kr = fleet_prs(slug, now)
     burn, total = burn_by_kr(load_runs(), pr_kr, now)
     text = render(reif, reif_err, load_okr(), funnel, funnel_err, burn, total, now)
+    try:  # prepended to every pass's prompt: no credential (a PR title, an OKR note) may reach it
+        import redact_secrets
+        text = redact_secrets.safe_text(text)
+    except Exception:  # noqa: BLE001
+        pass
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     NORTH.write_text(text)
     if a.stdout:
