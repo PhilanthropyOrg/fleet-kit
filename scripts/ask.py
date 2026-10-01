@@ -190,10 +190,8 @@ def _notify(member: str, ask_id: int, why: str, sender: str | None = None, lead:
     # read by fleet_alert.sh's _send_email) and a "[dumbledore]" subject prefix. inbox.py's reply
     # matching keys off the message BODY ("yes N"/"no N: ...") and only checks the subject for a
     # leading Re:/Fwd:, never the literal "fleet ask #N" text, so the prefix cannot break a reply.
-    mail_from = os.environ.get("FLEET_ASK_MAIL_FROM", "").strip()
-    if not mail_from:
-        mail_from = "Dumbledore (fleet) <hello@philanthropy.org>"
-    env = dict(os.environ, FLEET_ALERT_EMAIL_LEG="1", MAIL_FROM=mail_from)
+    env = dict(os.environ, FLEET_ALERT_EMAIL_LEG="1",
+              MAIL_FROM="Dumbledore (fleet) <hello@philanthropy.org>")
     sender = sender or member
     title = f"[dumbledore] fleet ask #{ask_id} from {sender}" + (f" (for {member})" if sender != member else "")
     # fk#1056: the mail says how to answer it, and a reply to it reaches the fleet (Reply-To

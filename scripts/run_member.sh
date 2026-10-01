@@ -77,6 +77,10 @@ mkdir -p "$LOG_DIR"
 
 MEMBER="${1:?usage: run_member.sh <member-name> [--dry-run] [--item <n> | --items <n1,n2,...>] [--task \"<instruction>\"]}"
 shift || true
+# growth sends mail only through outreach_send.py, which reads its own key from a file. Keep
+# the kit's other mail key out of its model's environment (same least-privilege move as
+# FLEET_API_KEY above; a member with Bash can still read files -- see outreach_send.py's header).
+[ "$MEMBER" = "growth" ] && unset RESEND_API_KEY
 DRY_RUN=0
 ITEM=""
 TASK=""

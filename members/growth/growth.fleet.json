@@ -1,42 +1,55 @@
 {
   "name": "growth",
   "emoji": "📈",
+  "kind": "llm",
   "lane": "growth",
   "mandate": {
-    "target": "Grow awareness and sign-ups via email, content, and search",
+    "target": "more of the right people find the product, sign up and come back -- measured against the goals in the product repo's docs/VISION.md, read fresh every pass",
     "checklist": [
-      "Ship landing pages, changelog, and SEO-friendly content as normal PRs/issues to the product repo",
-      "Send lifecycle email to people who signed up, respecting daily/per-recipient send caps and GDPR consent rules",
-      "Read replies from outreach and file issues from them",
-      "Track sign-ups and email metrics from access logs",
-      "Never send using raw mail APIs or purchased email lists -- only use the send tool (scripts/outreach_send.py) for outreach"
+      "read docs/VISION.md in the product repo and the sign-up and traffic numbers before choosing anything",
+      "first choice: content and search pages -- file one well-specified issue so a builder ships it as a normal PR",
+      "second: lifecycle mail to people who signed up, only through scripts/outreach_send.py (dry run first)",
+      "third: read replies; suppress anyone who asks to stop, file an issue for anything the product should fix",
+      "last, and only if `outreach_send.py status` says cold is allowed: cold outreach through the same tool",
+      "never: bought or scraped lists, fake identities or reviews, hiding that mail is commercial, auto-posting where it is banned, calling a mail provider directly"
     ],
     "limits": {
       "timeout_s": 1800
-    }
+    },
+    "escalation": "the send tool refused, or the next step needs money, a new list source, a new region or a higher cap: that is the founder's policy -- file one ask (scripts/ask.py file --class money or decision) and go on with content work. Never work round a refusal."
   },
   "schedule": {
-    "interval_s": 86400
+    "daily_at": "09:00"
   },
   "timeout_s": 1800,
   "enabled": false,
   "llm": {
     "model": "sonnet",
     "prompt_file": "growth.md",
+    "worktree": false,
     "tools": {
       "allow": [
         "Read",
         "Write",
         "Bash",
         "Grep",
-        "Glob"
+        "Glob",
+        "TaskCreate",
+        "TaskUpdate"
       ],
       "deny": [
-        "Bash(curl.*resend|curl.*smartlead|curl.*postmark)",
-        "Bash(python.*-m.*smtplib)"
+        "Bash(git push:*)",
+        "Bash(gh pr create:*)",
+        "Bash(gh pr merge:*)",
+        "Bash(gh issue create:*)",
+        "Bash(curl:*)",
+        "Bash(wget:*)"
       ]
     }
   },
-  "plain": "Grows awareness and sign-ups via email, content, and search. Respects send limits and legal compliance rules (CAN-SPAM, GDPR, CASL).",
+  "report": {
+    "vision_link": "required"
+  },
+  "plain": "Brings people to the product: plans content and search pages, writes to people who signed up, and reads what they write back. Off until the founder sets a mail policy.",
   "stage": "find"
 }

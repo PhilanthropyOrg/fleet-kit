@@ -41,6 +41,9 @@ Svix secret, its own scheme, so a canary or a CI job never needs a GitHub-shaped
                            credential (fk#1124) -- same Popen path /api/run_now uses, factored
                            into one function so there is ONE spawn path, not two.
 
+Also GET/POST /webhook/unsubscribe -- the link outreach_send.py puts in every marketing mail.
+No login; the link is signed (see _handle_unsubscribe).
+
 Usage: FLEET_WEBHOOK_SECRET=<shared secret> FLEET_REPO=/path/to/target/repo \
          python3 webhook_receiver.py [--port 8562]
 Wire GitHub -> Settings -> Webhooks -> Add webhook, Payload URL = this server's public path
@@ -112,10 +115,55 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):  # silence BaseHTTPServer's default stderr chatter
         pass
 
+    def do_GET(self):
+        # The one GET this server answers: the unsubscribe link in a marketing mail. Every
+        # other GET gets the same 501 it got before this route existed.
+        if self._is_unsubscribe():
+            self._handle_unsubscribe(confirm=False)
+            return
+        self.send_error(501, "Unsupported method ('GET')")
+
+    def _is_unsubscribe(self) -> bool:
+        from urllib.parse import urlsplit
+        return urlsplit(self.path).path.rstrip("/").endswith("/webhook/unsubscribe")
+
+    def _handle_unsubscribe(self, confirm: bool) -> None:
+        """outreach_send.py puts this link in every marketing mail. No login -- the person
+        clicking is a stranger -- so the link carries an HMAC of the address keyed on
+        FLEET_OUTREACH_UNSUB_SECRET, and all a valid one can do is stop mail to that address.
+        GET shows one button; POST (the button, or a mail client's one-click, RFC 8058) does it."""
+        import html
+        from urllib.parse import parse_qs, urlsplit
+        import outreach_send
+        q = parse_qs(urlsplit(self.path).query)
+        email, token = (q.get("e") or [""])[0], (q.get("t") or [""])[0]
+        secret = env_value("FLEET_OUTREACH_UNSUB_SECRET")
+        ok = len(secret) >= 16 and bool(email) and hmac.compare_digest(
+            outreach_send.unsub_token(email, secret), token)
+        if not ok:
+            code, page = 400, "This unsubscribe link is not valid."
+        elif not confirm:
+            code, page = 200, (f"<form method=\"post\">Stop all mail to {html.escape(email)}? "
+                               "<button>Unsubscribe</button></form>")
+        elif outreach_send.unsubscribe(email, token, secret):
+            log("unsubscribe: one address added to the suppression list")
+            code, page = 200, "You are unsubscribed. You will get no more mail from us."
+        else:
+            code, page = 400, "This unsubscribe link is not valid."
+        body = f"<!doctype html><meta charset=\"utf-8\"><title>Unsubscribe</title><p>{page}</p>".encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_POST(self):
         length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(length) if length else b""
         path = self.path.rstrip("/")
+        if self._is_unsubscribe():
+            self._handle_unsubscribe(confirm=True)
+            return
         if path.endswith("/inbox"):
             self._handle_inbox(body)
             return
