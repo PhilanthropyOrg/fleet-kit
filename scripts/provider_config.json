@@ -1,0 +1,39 @@
+{
+  "_comment": "Which model CLIs the fleet can run on. Read by scripts/provider.py (the one reader), which member_spec.py, run_member.sh, judge-judy.sh and codex_pass.py all call. See docs/providers.md.",
+  "default_provider": "claude",
+  "model_tiers": {
+    "_comment": "Member specs keep naming models the way they always have (sonnet, opus, haiku). On claude the name is passed through untouched. On any other provider the name is looked up here to get a tier, then the tier is looked up in that provider's `models`. A name that is not listed here is passed to the provider's CLI as written.",
+    "haiku": "fast",
+    "sonnet": "standard",
+    "opus": "smart"
+  },
+  "providers": {
+    "claude": {
+      "cli": "claude",
+      "auth_kinds": ["subscription", "api_key"],
+      "tool_policy": "native",
+      "_tool_policy": "claude takes the spec's allow/deny lists as --allowedTools/--disallowedTools, so every member's policy can be enforced."
+    },
+    "codex": {
+      "cli": "codex",
+      "auth_kinds": ["chatgpt_login", "api_key"],
+      "tool_policy": "sandbox",
+      "_tool_policy": "codex exec has three sandbox modes and feature switches, and no per-tool or per-command deny list. provider.py's tool_policy() allows only the member shapes those can enforce and refuses the rest.",
+      "runners": ["members/judge-judy/judge-judy.sh"],
+      "_runners": "Member runner scripts that know how to call this provider. A member whose llm.runner is not listed here is refused on it.",
+      "models": {
+        "_comment": "Model slugs seen in the installed CLI's own catalog (codex-cli 0.144.3, `codex debug models`, 2026-10-01).",
+        "fast": "gpt-5.4-mini",
+        "standard": "gpt-5.6-terra",
+        "smart": "gpt-5.5"
+      },
+      "prices_usd_per_mtok": {
+        "_comment": "Read 2026-10-01 from https://developers.openai.com/api/docs/pricing (standard tier). Edit when the vendor's prices change. A model with no entry here is booked with cost unknown (null), never zero.",
+        "gpt-5.4-mini": {"input": 0.75, "cached_input": 0.075, "output": 4.5},
+        "gpt-5.6-terra": {"input": 2.0, "cached_input": 0.2, "output": 12.0},
+        "gpt-5.6-luna": {"input": 0.2, "cached_input": 0.02, "output": 1.2},
+        "gpt-5.5": {"input": 5.0, "cached_input": 0.5, "output": 30.0}
+      }
+    }
+  }
+}
