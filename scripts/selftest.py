@@ -6793,6 +6793,49 @@ def _git_pull_guard_serializes_via_a_lock_on_the_git_directory():
             "auto_deploy.sh no longer locks the same fleet_pull.lock inside its own .git dir"
 
 
+def _judge_judy_reviews_big_prs():
+    """philanthropy gh#9819: the review status is required to merge there, so a PR the
+    reviewer can never review waits forever. Two kinds never got a verdict (2026-10-01):
+
+    * a diff near 150 KB: the prompt is one command argument and Linux caps one argument at
+      128 KB, so `claude -p` died with rc 126 on every tick (#9811, #9844);
+    * more than 300 files: `gh pr diff` answers HTTP 406 (#9846, 526 files).
+    """
+    import subprocess
+    src = (ROOT / "members" / "judge-judy" / "judge-judy.sh").read_text()
+    caps = {k: int(re.search(rf"^{k}=(\d+)$", src, re.M).group(1))
+            for k in ("MAX_DIFF_BYTES", "MAX_BODY_BYTES", "MAX_INTENT_BYTES")}
+    start = src.index('PROMPT="You are the merge-blocking code reviewer')
+    fixed = len(src[start:src.index("RAW=$(account_pool_run", start)].encode())
+    assert sum(caps.values()) + fixed < 131072, \
+        f"the prompt can exceed Linux's 128 KB single-argument limit: {caps} + {fixed} fixed"
+    prompt = src[start:start + fixed]
+    assert 'head -c "$MAX_BODY_BYTES" "$BODY_FILE"' in prompt, "PR body goes into the prompt uncapped"
+    assert 'head -c "$MAX_INTENT_BYTES"' in prompt, "closed-issue text goes into the prompt uncapped"
+
+    assert '! gh pr diff "$PR" > "$DIFF_FILE" 2>/dev/null && ! pr_diff_local "$PR" > "$DIFF_FILE"' in src, \
+        "a failed gh pr diff no longer falls back to the local git diff"
+    fn = src[src.index("pr_diff_local() {"):src.index("pass_empty_pr() {")]
+    fn = fn[:fn.rindex("}") + 1]
+    with tempfile.TemporaryDirectory() as td:
+        sh = Path(td) / "t.sh"
+        sh.write_text(
+            "set -e; cd " + td + "\n"
+            "git init -q -b main origin; cd origin; git config user.email t@t; git config user.name t\n"
+            "echo one > a.txt; git add .; git commit -qm base\n"
+            "git checkout -q -b feat; echo two > b.txt; git add .; git commit -qm feat\n"
+            "git update-ref refs/pull/7/head HEAD; git checkout -q main\n"
+            "echo moved > c.txt; git add .; git commit -qm main-moved\n"
+            "cd ..; git clone -q origin clone; cd clone; set +e\n"
+            "gh() { echo main; }\n" + fn + "\npr_diff_local 7\n"
+            "echo \"rc=$? refs=$(git for-each-ref refs/fleet-review | wc -l | tr -d ' ')\"\n"
+        )
+        out = subprocess.run(["bash", str(sh)], capture_output=True, text=True)
+        assert "+++ b/b.txt" in out.stdout and "+two" in out.stdout, f"no PR diff: {out.stdout!r} {out.stderr!r}"
+        assert "c.txt" not in out.stdout, "main's own change leaked into the PR diff (not a three-dot diff)"
+        assert "rc=0 refs=0" in out.stdout, f"bad exit or leftover refs: {out.stdout[-80:]!r}"
+
+
 def _judge_block_pulls_the_pr_out_of_the_queue():
     """fleet-kit#523: `fleet-code-review` is not (cannot be) a required check on either repo,
     so a green CI run alone would merge a BLOCKed PR -- the verdict has to move the arm
@@ -7161,6 +7204,24 @@ def _judge_judy_skips_an_empty_diff_instead_of_blocking():
     assert "continue" in empty_branch, "an empty diff must continue the tick loop, not fall through into a verdict"
     assert "VERDICT" not in empty_branch, \
         "an empty diff must never reach a VERDICT -- it should skip before the model is ever called"
+
+    # gh#9819: the review status is required to merge on the product repo, so "skip" alone
+    # would leave a no-change PR waiting forever. It gets a pass, but only when GitHub says
+    # the PR changes 0 files -- an empty diff from a gh hiccup must not pass real code.
+    assert 'pass_empty_pr "$PR" "$HEAD_SHA"' in empty_branch, "an empty diff never tries pass_empty_pr"
+    fn = src[src.index("pass_empty_pr() {"):src.index("# --- pick ONE PR")]
+    import subprocess
+    with tempfile.TemporaryDirectory() as td:
+        for files, want in (("0", "POST success"), ("3", ""), ("", "")):
+            script = (
+                'REPO_SLUG=o/r; log() { :; }; timeout() { shift; "$@"; }\n'
+                'post_status() { echo "POST $2"; }\n'
+                f'gh() {{ echo "{files}"; }}\n' + fn + '\npass_empty_pr 7 abc\n'
+            )
+            sh = Path(td) / "t.sh"
+            sh.write_text(script)
+            out = subprocess.run(["bash", str(sh)], capture_output=True, text=True).stdout.strip()
+            assert out == want, f"changed_files={files!r}: wanted {want!r}, got {out!r}"
 
 
 def _judge_judy_verdict_reads_validated_json_not_prose():
@@ -16055,6 +16116,7 @@ if __name__ == "__main__":
     check("board_github ensure_labels creates fleet:severity-live idempotently (gh#726)", _board_github_ensure_labels_creates_severity_live_gh726)
     check("judge-judy files a priority-high fix item when it blocks a PR", _judge_judy_files_a_fix_item_on_block)
     check("judge-judy skips an empty diff instead of blocking (gh#531)", _judge_judy_skips_an_empty_diff_instead_of_blocking)
+    check("judge-judy can review a big PR: prompt fits one argument, >300 files falls back to git (philanthropy gh#9819)", _judge_judy_reviews_big_prs)
     check("judge-judy's verdict is read from validated JSON, not prose (gh#806)", _judge_judy_verdict_reads_validated_json_not_prose)
     check("judge-judy holds a PR on a schema-invalid verdict, not just marks it (gh#806 AC2)", _judge_judy_holds_a_pr_on_schema_invalid_verdict_not_just_marks_it)
     check("judge-judy records block events for a later override audit (gh#806 AC4)", _judge_judy_records_block_events_for_override_audit)
