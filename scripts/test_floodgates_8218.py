@@ -244,6 +244,28 @@ def test_capped_comments_are_refetched_so_a_late_criterion_counts() -> None:
     print("ok  capped comments: an issue at gh issue list's 100-comment cap is refetched in full")
 
 
+def test_a_spec_drop_is_decided_on_github_not_the_callers_copy() -> None:
+    # jefe msg#521: gru-4902 passed comments the gates could not read; 52 false needs-spec.
+    good = dict(_issue(50, ["fleet:backlog", "quality:solid"]), body="Fix it",
+                comments=[{"body": f"{VL}\n\n{GWT}"}])
+    really_bare = dict(_issue(51, ["fleet:backlog", "quality:solid"]), body="Fix it")
+    fine = _issue(52, ["fleet:backlog", "quality:solid"])
+    views = []
+
+    def fake(cmd, timeout=60):
+        views.append(cmd[3])
+        src = {"50": good, "51": really_bare}[cmd[3]]
+        return SimpleNamespace(returncode=0, stdout=json.dumps(src), stderr="")
+
+    items = gd.refetch_spec_drops([dict(good, comments=[]), dict(really_bare),
+                                   dict(fine)], "o/r", run=fake)
+    assert sorted(views) == ["50", "51"], views  # only the would-be drops are re-read
+    p = gd.plan(items, "t")
+    assert 50 in p["eligible"] and 52 in p["eligible"], p["eligible"]
+    assert [r["number"] for r in p["dropped"] if r["action"] == "needs-spec"] == [51]
+    print("ok  spec drop re-read from gh: a hand-built --items file can't false-label an item")
+
+
 def quality_ok(item) -> bool:
     import quality_gate
     return quality_gate.classify_candidate(item["labels"], item["body"], item["comments"])[0]

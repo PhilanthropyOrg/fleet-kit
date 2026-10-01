@@ -174,6 +174,34 @@ def fill_capped_comments(items: list[dict], repo: str | None, run=None) -> list[
     return items
 
 
+def refetch_spec_drops(items: list[dict], repo: str | None, run=None) -> list[dict]:
+    """Re-read from gh, in place, every item the caller's copy would drop for a spec gap.
+
+    jefe msg#521: `run` trusts the --items file gru builds by hand, and gru-4902 (2026-10-01)
+    built one whose comments the gates could not read -- 52 items labeled needs-spec and one
+    ask raised to Reif, while the intake run minutes later read the same issues from gh, found
+    marie's Vision-link/Given-When-Then comments, and took the label back off 47 of them. A
+    needs-spec label is now only ever decided on what GitHub holds, not on the caller's copy.
+    """
+    probe = plan([dict(it) for it in items], "probe")
+    spec = {r["number"] for r in probe["dropped"] if r.get("action") == "needs-spec"}
+    for it in items:
+        if it["number"] not in spec:
+            continue
+        try:
+            r = (run or _gh)(["gh", "issue", "view", str(it["number"]), "--json",
+                              "body,labels,comments", *(["--repo", repo] if repo else [])], 120)
+        except subprocess.TimeoutExpired:
+            continue
+        if r.returncode == 0:
+            try:
+                fresh = json.loads(r.stdout or "{}")
+            except ValueError:
+                continue
+            it.update({k: fresh[k] for k in ("body", "labels", "comments") if k in fresh})
+    return items
+
+
 def plan(items: list[dict], run_id: str, parents: dict | None = None) -> dict:
     """Pure. Decides every label/comment/ask and the final eligible list; runs no gh.
     `parents`: fetch_parents() output, so `Vision-link: #<epic>` inherits the epic's link."""
@@ -492,7 +520,7 @@ def main(argv=None) -> int:
         print(json.dumps(summary if not a.dry_run else dict(summary, plan_actions=p["actions"][:50],
                                                            message=p["message"], messages=p["messages"])))
         return 0
-    items = fill_capped_comments(load_items(a.items), a.repo)
+    items = refetch_spec_drops(fill_capped_comments(load_items(a.items), a.repo), a.repo)
     p = plan(items, a.run_id, fetch_parents(items, items, a.repo))
     if not a.dry_run:
         p.update(apply(p, a.repo, a.run_id, db_path=a.db_path))
