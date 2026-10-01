@@ -15795,6 +15795,7 @@ def _roster_is_ten_members_after_fk1195_fold():
     assert independently_scheduled <= expected
 
     entry = (ROOT / "entrypoint.sh").read_text()
+    import member_spec
     assert member_spec.by_name("growth")["enabled"] is False \
         and not re.search(r"run_member\.sh growth\b|cron_member_enabled growth\b", entry), \
         "growth must stay off and unscheduled by default (mailing people is the owner's switch)"
