@@ -42,6 +42,7 @@ from urllib.parse import parse_qs, urlparse
 KIT_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(KIT_DIR / "scripts"))
 import fleet_db          # noqa: E402  (sqlite mirror -- search/spend queries over runs.jsonl)
+import redact_secrets    # noqa: E402  (credentials never leave in a feed -- see _json/broadcast)
 import fleet_kpi         # noqa: E402  (per-member headline-count extraction from outcome prose)
 import fleet_stats       # noqa: E402  (Stats page aggregation: run timeline, tokens, backlog history)
 import fleet_metrics     # noqa: E402  (named run-derived metrics; items_per_run for the scoreboard)
@@ -1956,7 +1957,7 @@ _subscribers_lock = threading.Lock()
 
 
 def broadcast(event: str, data: dict) -> None:
-    payload = f"event: {event}\ndata: {json.dumps(data)}\n\n"
+    payload = f"event: {event}\ndata: {json.dumps(redact_secrets.safe_record(data))}\n\n"
     with _subscribers_lock:
         for q in _subscribers:
             q.append(payload)
@@ -2038,7 +2039,9 @@ class Handler(BaseHTTPRequestHandler):
             pass  # logging must never take the server down
 
     def _json(self, obj: dict, status: int = 200):
-        body = json.dumps(obj).encode()
+        # Every feed this page shows (runs, run detail, log lines) leaves through here or
+        # broadcast(): a credential in a run's text is redacted before a browser sees it.
+        body = json.dumps(redact_secrets.safe_record(obj)).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
