@@ -89,6 +89,8 @@ older KR1/KR2/KR3 numbering, and the 100,000-entities goal it belonged to, were 
   already handled)` using `came_in.dropped_total` -- 0 is fine, still say it. If every count in
   `came_in.counts` is zero (or the key itself is empty), the whole section is one line:
   "Nothing came in." -- never a blank heading with nothing under it.
+  Last line of the section, always: `issue_flow.line` as written (issues opened and closed on
+  the board, by who filed them). Skip it only when `issue_flow` is empty.
 - `## What landed, and what it moved` -- merged PRs, each one line: what a person can now do,
   **See it: <live URL>**, the PR link, then an arrow to the row it moves (`-> the number`,
   `-> interactions`, `-> sign-ups`, `-> time to first interaction`, or `-> keeps the fleet

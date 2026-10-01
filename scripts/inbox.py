@@ -545,7 +545,7 @@ def file_backlog(title: str, body: str, sender: str, run=None) -> str:
     r = run(["gh", "issue", "create", "--repo", slug, "--label", backlog_labels(title),
              "--title", title, "--body", f"{text}\n\nFiled by email from {sender} (fk#1056).\n\n"
                                          "Vision-link: none (maintenance) -- Reif's own ask; "
-                                         "fleet:user-asked ranks it"])
+                                         "fleet:user-asked ranks it\n\nFiled-by: email"])
     if r.returncode != 0:
         raise RuntimeError((r.stderr or r.stdout).strip()[:300])
     return r.stdout.strip().splitlines()[-1]
@@ -721,7 +721,7 @@ def file_or_comment_alert(row: dict, run=None) -> tuple[str, bool]:
                        f"## Acceptance\n- Given the `{row['check']}` probe fires again, When the next "
                        f"probe tick runs, Then it reports healthy or this issue gets a `Fired again` "
                        f"comment, not a duplicate.\n\n"
-                       f"Vision-link: none (maintenance)"])
+                       f"Vision-link: none (maintenance)\n\nFiled-by: prod-alert"])
     if r.returncode != 0:
         raise RuntimeError((r.stderr or r.stdout).strip()[:300])
     return r.stdout.strip().splitlines()[-1], True

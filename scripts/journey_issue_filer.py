@@ -96,6 +96,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 PREFIX = os.environ.get("FLEET_LABEL_PREFIX", "fleet:")
@@ -282,6 +283,8 @@ def build_issue_body(
         f"Vision-link: {journey.get('vision_link') or DEFAULT_VISION_LINK}",
         "",
         marker_for(key, profile.marker_tag),
+        "",
+        f"Filed-by: {profile.key}",  # issue_flow.source_of: who files, per day
     ]
     return "\n".join(lines)
 
@@ -321,6 +324,43 @@ def build_close_cmd(number: int, body: str, repo: str | None = None) -> list[str
     if repo:
         cmd += ["--repo", repo]
     return cmd
+
+
+def build_reopen_cmd(number: int, body: str, repo: str | None = None) -> list[str]:
+    cmd = ["gh", "issue", "reopen", str(number), "--comment", body]
+    if repo:
+        cmd += ["--repo", repo]
+    return cmd
+
+
+# Measured 2026-10-01: 139 of 199 journey issues in 14 days were a step failing again after this
+# filer had closed its issue on one passing run -- a flapping step got a new issue every flap.
+# With FLEET_JOURNEY_REOPEN_DAYS set (try 14), a step that fails again within that many days
+# of its own "Passing again" close reopens that issue instead. Unset/0 keeps one issue per flap.
+def reopen_window_s() -> float:
+    try:
+        return float(os.environ.get("FLEET_JOURNEY_REOPEN_DAYS") or 0) * 86400
+    except ValueError:
+        return 0.0
+
+
+def reopen_recent(prev: dict, note: str, runner, repo: str | None, now: float) -> "int | None":
+    """Reopen the issue this filer closed for the key, if it is inside the window and still
+    closed as COMPLETED (a member's not-planned/duplicate close was a decision: leave it).
+    Returns the issue number, or None to file a new one as before."""
+    number, window = prev.get("closed_issue"), reopen_window_s()
+    if not number or not window or now - float(prev.get("closed_at") or 0) > window:
+        return None
+    cmd = ["gh", "issue", "view", str(number), "--json", "state,stateReason"]
+    rc, out = runner(cmd + (["--repo", repo] if repo else []))
+    try:
+        seen = json.loads(out) if rc == 0 else {}
+    except json.JSONDecodeError:
+        seen = {}
+    if (seen.get("state"), seen.get("stateReason")) != ("CLOSED", "COMPLETED"):
+        return None
+    rc, _ = runner(build_reopen_cmd(number, note, repo))
+    return number if rc == 0 else None
 
 
 # --- state (last-passing sha per journey+step) ---------------------------------------------
@@ -490,6 +530,12 @@ def process(results_path: Path, state_path: Path = DEFAULT_STATE_PATH, runner=_r
                         continue
                 state[key] = {**state.get(key, {}), "last_fail_run": run, "last_fail_issue": existing}
                 summary["commented"].append({"issue": existing, "key": key})
+            elif not dry_run and (reopened := reopen_recent(
+                    state.get(key, {}),
+                    f"Failing again on run `{run}` (sha `{deploy_sha or 'unknown'}`). Reopened "
+                    "instead of filing a twin.", runner, repo, time.time())):
+                state[key] = {**state.get(key, {}), "last_fail_run": run, "last_fail_issue": reopened}
+                summary["commented"].append({"issue": reopened, "key": key, "reopened": True})
             else:
                 title = build_issue_title(journey.get("name", journey["id"]), step.get("action", ""), profile.title_suffix)
                 collapsed_viewports = failing_viewports if len(failing_viewports) > 1 else None
@@ -515,7 +561,8 @@ def process(results_path: Path, state_path: Path = DEFAULT_STATE_PATH, runner=_r
             # step whose status is neither "pass" nor "fail" (a walker crash, an unrecognized
             # value), never reaches this branch: it is left untouched this run, same as the
             # original per-step `elif status == "pass":` guard did.
-            state[key] = {"last_pass_sha": deploy_sha, "last_pass_run": run}
+            was = {k: v for k, v in state.get(key, {}).items() if k in ("closed_issue", "closed_at")}
+            state[key] = {"last_pass_sha": deploy_sha, "last_pass_run": run, **was}
             existing = None if dry_run else find_open_issue(key, runner, profile, repo)
             if existing is LOOKUP_FAILED:
                 summary["skipped"].append({"key": key, "reason": "lookup_failed"})
@@ -527,6 +574,7 @@ def process(results_path: Path, state_path: Path = DEFAULT_STATE_PATH, runner=_r
                     if rc != 0:
                         summary["errors"].append(f"close #{existing} failed: {out[:200]}")
                         continue
+                state[key].update(closed_issue=existing, closed_at=time.time())
                 summary["closed"].append({"issue": existing, "key": key})
 
     if not dry_run:
