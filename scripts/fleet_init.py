@@ -550,8 +550,11 @@ class Init:
               *(["--accounts", self.a.accounts] if self.a.accounts else [])]
         shown = " ".join(up[1:3] + [f'"{x}"' if " " in x else x for x in up[3:]])
         for x in no_login:
-            self.todo.append(f"Sign the model account `{x}` in on this box: `claude` then `/login`, then "
-                             f"`mkdir -p ~/.claude-{x} && cp ~/.claude/.credentials.json ~/.claude-{x}/`.")
+            key = "ANTHROPIC_API_KEY_" + re.sub(r"[^A-Z0-9]", "_", x.upper())
+            self.todo.append(f"Give the model account `{x}` a login on this box. A Claude login: `claude`, "
+                             f"`/login`, then `mkdir -p ~/.claude-{x} && cp ~/.claude/.credentials.json "
+                             f"~/.claude-{x}/`. Or an API key: `mkdir -p ~/.claude-{x}`, start the fleet, then "
+                             f"add `{key}=...` to {self.instance / 'fleet.env'} (docs/providers.md).")
         if self.a.no_start:
             self.todo.append(f"Start the fleet on the box that will run it: `{shown}`")
             return
