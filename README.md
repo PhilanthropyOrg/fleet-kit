@@ -79,12 +79,9 @@ GitHub Issues (board)  ->  rank (RICE)  ->  build (fresh worktree, claude -p)
   GitHub already serializes it.
 - **Deploy** — a 3-function driver contract (`scripts/deploy_driver.md`): `current_sha`,
   `deploy`, `health`. Bring your own — how you deploy is the most product-specific thing here.
-- **jefe and dumbledore (archived 2026-09-21, fk#1195)** — jefe used to keep the fleet's own
-  guardrails intact and unblock stalled work on a priority ladder; dumbledore used to run a
-  once-daily rot-hunt plus product-epic decomposition. Both were disabled 2026-09-17 and
-  archived with nothing moved (the roster fold that keeps the fleet under 10 independently
-  scheduled members) — their duties have no direct successor. The-fixer covers incidents,
-  sentry covers live verification, and marie now owns backlog PRD-writing (Part C4).
+- **Who is in the fleet, and when each one runs** — `bash scripts/roster.sh`. It reads the
+  member specs (`members/<name>/<name>.fleet.json`), so it cannot go stale the way a list
+  written here would.
 
 ## The four things that make it survivable
 
@@ -197,19 +194,27 @@ container down.
 
 ## Deploying: where the box is, and why it silently stops updating
 
-**The box is `dino`.** `ssh dino` — the SSH config lives in `~/Classified/dino/ssh/config` and
-goes through the cloudflared tunnel (`ProxyCommand cloudflared access ssh --hostname
-dino.luckymachines.co/ssh`), same hostname that serves the API on 8420. `lucky`, `lucky-vm` and
-`lucky-host` are *different machines* and have no fleet-kit checkout — probing them is a dead
-end, they are not this.
+**Which box, which paths and which container are settings, not documentation.** They live in
+`instances/<name>/instance.env` (git-ignored; template: `instance.env.example`), one copy on
+the box and one next to your laptop checkout. Load it once per shell and every command in this
+README and in `RUNBOOK.md` runs as written:
 
-| thing | where |
+```bash
+. instances/*/instance.env     # one instance; with several, name the one you mean
+```
+
+| thing | setting |
 |---|---|
-| host checkout | `/home/ubuntu/fleet-kit` (**not** `/opt/fleet-kit`) |
-| instance dir | `/home/ubuntu/fleet-kit/instances/nonprofit-atlas` |
-| container | `philanthropy` (rootless podman, `podman ps`) |
-| paths *inside* the container | `/fleet-kit/scripts/`, `/var/log/fleet-kit/` |
-| public endpoint | `https://dino.luckymachines.co` → 8420 |
+| the box you ssh to | `$FLEET_BOX` |
+| host checkout | `$FLEET_BOX_KIT_DIR` |
+| instance dir | `$FLEET_BOX_INSTANCE_DIR` |
+| container | `$FLEET_BOX_CONTAINER` (rootless podman, `podman ps`) |
+| paths *inside* the container | `/fleet-kit/scripts/`, `/var/log/fleet-kit/` (the same on every install) |
+| public endpoint | `$FLEET_BOX_URL` → `FLEET_VIEW_PORT` |
+
+`scripts/fleet_status.sh` reads the same file; `bash scripts/fleet_status.sh --where` prints
+what it resolved. Before probing a machine, check `$FLEET_BOX`: a host with no fleet-kit
+checkout is a different machine, not a broken one.
 
 ### Which fleet.env is live (there are two, only one is read)
 
@@ -217,8 +222,8 @@ There are **two** files named `fleet.env` on the box and they are not copies of 
 
 | path | read by | role |
 |---|---|---|
-| `~/fleet-kit/instances/<instance>/fleet.env` | `deploy.sh:46`, bind-mounted to `/fleet-kit/fleet.env` (`deploy.sh:115`) | **live config — the only one that runs** |
-| `~/fleet-kit/fleet.env` | nothing | leftover from a pre-instances single-fleet layout; a decoy |
+| `$FLEET_BOX_INSTANCE_DIR/fleet.env` | `deploy.sh:46`, bind-mounted to `/fleet-kit/fleet.env` (`deploy.sh:115`) | **live config — the only one that runs** |
+| `$FLEET_BOX_KIT_DIR/fleet.env` | nothing | leftover from a pre-instances single-fleet layout; a decoy |
 
 `deploy.sh` requires `FLEET_INSTANCE_DIR` and sources only that directory's `fleet.env`. It
 never reads the repo-root one. Both are gitignored, so `git status` will not warn you that you
@@ -227,7 +232,7 @@ edited the dead file.
 **Always confirm against the container, never the host checkout:**
 
 ```bash
-podman exec <container> grep '^FLEET_ACCOUNTS=' /fleet-kit/fleet.env
+podman exec "$FLEET_BOX_CONTAINER" grep '^FLEET_ACCOUNTS=' /fleet-kit/fleet.env
 ```
 
 Confirmed live 2026-08-27: the root file read `FLEET_ACCOUNTS="primary"` while the running
@@ -242,10 +247,8 @@ target and "fixed" a fleet that was already working.
 per name, so a name with no logged-in dir is a failover target that cannot actually
 authenticate.
 
-| account | email |
-|---|---|
-| `tgp` | reif@thegoodproject.net |
-| `gmail` | reiftauati@gmail.com |
+Which login each account name stands for is an instance fact: keep it as a comment in
+`instance.env`, next to the box it belongs to.
 
 **Renaming an account is not a text edit.** The name is load-bearing in four places that must
 change together — the credential dir, `FLEET_ACCOUNTS`, the exhaustion state file's key, and
@@ -256,10 +259,10 @@ and only ever reports `unauthenticated`. Use the script, which moves all four an
 default:
 
 ```bash
-FLEET_INSTANCE_DIR=/home/ubuntu/fleet-kit/instances/nonprofit-atlas \
-  bash scripts/rename_account.sh <old> <new>          # dry run
-FLEET_INSTANCE_DIR=... bash scripts/rename_account.sh <old> <new> --apply
-FLEET_INSTANCE_DIR=... bash scripts/deploy.sh          # required: remounts under the new name
+export FLEET_INSTANCE_DIR="$FLEET_BOX_INSTANCE_DIR"
+bash scripts/rename_account.sh <old> <new>          # dry run
+bash scripts/rename_account.sh <old> <new> --apply
+bash scripts/deploy.sh                              # required: remounts under the new name
 ```
 
 An account that has hit its weekly limit is recorded in the pool's exhaustion state file with
@@ -269,7 +272,7 @@ passes — that is the `budget verdict=gated:exhausted_until_<epoch>` line, prod
 itself. It is normal, healthy output, not an error.
 
 ```bash
-podman exec <container> tail -20 /var/log/fleet-kit/account-pool.log
+podman exec "$FLEET_BOX_CONTAINER" tail -20 /var/log/fleet-kit/account-pool.log
 ```
 
 Reading `gated:` on the first account plus `call succeeded` on the next is failover **working**.
@@ -278,14 +281,12 @@ The fleet only stops when every account in the list is gated — the pool return
 
 Deploy is **blue-green** and is the only supported path — it builds a green candidate on alt
 ports 8571/8572, health-checks it, cuts over, and keeps the previous build stopped as
-`philanthropy-retired`:
+`<container>-retired`:
 
 ```bash
-ssh dino
-cd ~/fleet-kit
-FLEET_INSTANCE_DIR=/home/ubuntu/fleet-kit/instances/nonprofit-atlas bash scripts/deploy.sh
+ssh "$FLEET_BOX" "cd $FLEET_BOX_KIT_DIR && FLEET_INSTANCE_DIR=$FLEET_BOX_INSTANCE_DIR bash scripts/deploy.sh"
 # roll back at any time:
-bash scripts/deploy.sh --rollback
+ssh "$FLEET_BOX" "cd $FLEET_BOX_KIT_DIR && FLEET_INSTANCE_DIR=$FLEET_BOX_INSTANCE_DIR bash scripts/deploy.sh --rollback"
 ```
 
 ### A deploy waits for in-flight agent passes (2026-08-26)
@@ -320,8 +321,8 @@ anyone, which is why the drain exists rather than relying on the trap alone.
 **Never `podman cp` an edited file into a running fleet-kit container.** It works in the
 moment — the running process picks up the new file — but it mutates the *built image layer*,
 and rootless podman's overlay/permission handling does not tolerate that on the next restart.
-This caused a real outage on `dino`, 2026-08-22: a `podman cp` of `scripts/fleet_view.html` and
-`scripts/fleet_view_server.py` into the running `philanthropy` container (the fastest thing
+This caused a real outage on the first live install, 2026-08-22: a `podman cp` of
+`scripts/fleet_view.html` and `scripts/fleet_view_server.py` into the running container (the fastest thing
 available for iterating on the dashboard) looked fine until the next `podman restart`, which
 then failed outright with `open executable: Permission denied: OCI permission denied` on
 `entrypoint.sh`. The fleet was offline — no cron, no dashboard — until recreated from a clean,
@@ -367,8 +368,8 @@ act** in two states, by design, and both are silent unless you read `auto_deploy
 still not running until this says `0`:
 
 ```bash
-ssh dino 'cd ~/fleet-kit && git fetch -q origin && git branch --show-current && \
-  git rev-list --count HEAD..origin/main && git status --porcelain'
+ssh "$FLEET_BOX" "cd $FLEET_BOX_KIT_DIR && git fetch -q origin && git branch --show-current && \
+  git rev-list --count HEAD..origin/main && git status --porcelain"
 # want: main / 0 / (no output at all)
 ```
 
@@ -471,8 +472,8 @@ characterising a traffic burst after the fact, not for authenticating anyone.
 
 ### Where the key lives, and how to get it
 
-`FLEET_API_KEY` in the **instance's** `fleet.env` — `$FLEET_INSTANCE_DIR/fleet.env`, which on
-dino is `/home/ubuntu/fleet-kit/instances/nonprofit-atlas/fleet.env`. **That file is the only
+`FLEET_API_KEY` in the **instance's** `fleet.env` — `$FLEET_BOX_INSTANCE_DIR/fleet.env` on the
+box. **That file is the only
 source of truth, and it is NOT the `fleet.env` at the repo root** — see "Which fleet.env is
 live" below. Both are gitignored and never committed, so neither is in this repo and neither
 can be recovered from git.
