@@ -52,7 +52,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import quality_gate  # noqa: E402
 import vision_link_gate  # noqa: E402
-from board_github import LABEL_CLAIMED, LABEL_PROD_ACCESS, NOT_FOR_MINIONS  # noqa: E402
+from board_github import LABEL_CLAIMED, LABEL_PROD_ACCESS, NOT_FOR_MINIONS, blocked_by_numbers  # noqa: E402
 from items_arg import HELP as ITEMS_HELP, load_items  # noqa: E402
 
 PREFIX = os.environ.get("FLEET_LABEL_PREFIX", "fleet:")
@@ -82,7 +82,7 @@ MAX_SENDS_LOW = int(os.environ.get("FLEET_GATE_DROP_MAX_SENDS_LOW", "2"))
 # What each gate's drop reason means for the person who has to fix it.
 GAPS = (
     ("no Vision-link", "vision-link",
-     "a `Vision-link:` line naming a KR id from scripts/okr.json, or `Vision-link: none (maintenance)`"),
+     "a `Vision-link:` line naming a KR id (`python3 /fleet-kit/scripts/okr.py ids`), or `Vision-link: none (maintenance)`"),
     ("no quality: label", "quality-label",
      "exactly one `quality:ship-it` / `quality:solid` / `quality:world-class` label"),
     ("more than one quality label", "quality-label",
@@ -91,6 +91,9 @@ GAPS = (
      "at least one Given/When/Then acceptance criterion in the body or the newest PRD comment"),
 )
 BY_DESIGN = ("tracking-only parent", "world-class with no")
+# fleet_init.py files a new product's first issues with this marker and a `Blocked by #N` line
+# naming the founding issue each one needs first (CI needs a stack; a page needs CI).
+FOUNDING_MARKER = "<!-- fleet-founding"
 
 
 def _names(labels) -> list[str]:
@@ -150,6 +153,31 @@ def fetch_parents(items: list[dict], known: list[dict], repo: str | None, run=No
     return out
 
 
+def founding_waits(items: list[dict], repo: str | None, run=None) -> dict[int, int]:
+    """{item: the still-open issue it waits on} for founding issues only. An empty repo cannot
+    take seven builders at once, each picking its own stack. Only an item carrying
+    FOUNDING_MARKER costs a gh call, so a board with none behaves exactly as before; a blocker
+    that will not load is treated as closed (never hold work on a gh hiccup)."""
+    state: dict[int, bool] = {}
+    out: dict[int, int] = {}
+    for it in items:
+        if FOUNDING_MARKER not in (it.get("body") or ""):
+            continue
+        for n in blocked_by_numbers(it):
+            if n not in state:
+                state[n] = False
+                try:
+                    r = (run or _gh)(["gh", "issue", "view", str(n), "--json", "state",
+                                      *(["--repo", repo] if repo else [])])
+                    state[n] = r.returncode == 0 and json.loads(r.stdout or "{}").get("state") == "OPEN"
+                except (subprocess.TimeoutExpired, ValueError):
+                    pass
+            if state[n]:
+                out[it["number"]] = n
+                break
+    return out
+
+
 # `gh issue list --json comments` returns only an issue's OLDEST 100 comments (it does not
 # paginate; `gh issue view` does). philanthropy#6850 (108 comments) was dropped as needs-spec
 # while its Given/When/Then sat in comment #102 -- and every later fix lands past the cap too.
@@ -202,9 +230,14 @@ def refetch_spec_drops(items: list[dict], repo: str | None, run=None) -> list[di
     return items
 
 
-def plan(items: list[dict], run_id: str, parents: dict | None = None) -> dict:
+def plan(items: list[dict], run_id: str, parents: dict | None = None,
+         waits: dict[int, int] | None = None) -> dict:
     """Pure. Decides every label/comment/ask and the final eligible list; runs no gh.
-    `parents`: fetch_parents() output, so `Vision-link: #<epic>` inherits the epic's link."""
+    `parents`: fetch_parents() output, so `Vision-link: #<epic>` inherits the epic's link.
+    `waits`: founding_waits() output; those items sit this pass out, by design."""
+    waits = waits or {}
+    waiting = [it["number"] for it in items if it["number"] in waits]
+    items = [it for it in items if it["number"] not in waits]
     actions: list[dict] = []   # {"number", "op": add_label|remove_label|comment, ...}
     fixed: set[int] = set()
     patched = []
@@ -227,6 +260,8 @@ def plan(items: list[dict], run_id: str, parents: dict | None = None) -> dict:
     eligible = list(qual["eligible"])
     records: list[dict] = [{"number": n, "gate": "quality", "reason": "no quality: label",
                             "action": "fixed"} for n in eligible if n in fixed]
+    records += [{"number": n, "gate": "founding-order", "action": "by-design",
+                 "reason": f"waits for founding issue #{waits[n]} to close"} for n in waiting]
     newly: list[dict] = []
 
     for d in drops:
@@ -360,12 +395,13 @@ def prod_access_message(issues: list[dict]) -> dict | None:
 
 def intake_plan(backlog: list[dict], prod_access: list[dict], run_id: str,
                 parents: dict | None = None, last_sent: dict[int, float] | None = None,
-                now: float | None = None, sends: dict[int, int] | None = None) -> dict:
+                now: float | None = None, sends: dict[int, int] | None = None,
+                waits: dict[int, int] | None = None) -> dict:
     """Pure. plan() over every open backlog item except claimed / human-op / prod-access / epics;
     the Reif ask is replaced by one bus message (an hourly sweep of 400+ items would otherwise
     ask Reif every hour), plus hq's prod-access message."""
     todo = [i for i in backlog if not set(_names(i.get("labels"))) & INTAKE_SKIP]
-    p = plan(todo, run_id, parents)
+    p = plan(todo, run_id, parents, waits)
     # A new gap comment counts too: an item already labeled that moved on to its next gap.
     newly = sorted({a["number"] for a in p["actions"] if a["op"] == "comment" or
                     (a["op"] == "add_label" and a["label"] == NEEDS_SPEC)})
@@ -510,7 +546,7 @@ def main(argv=None) -> int:
         except Exception as exc:  # noqa: BLE001 -- no bus history: send only the new ones
             print(f"gate_drops intake: no message history, no re-sends: {exc}", file=sys.stderr)
         p = intake_plan(backlog, prod, a.run_id, fetch_parents(backlog, backlog, a.repo), last_sent,
-                        sends=sends)
+                        sends=sends, waits=founding_waits(backlog, a.repo))
         if not a.dry_run:
             p.update(apply(p, a.repo, a.run_id, db_path=a.db_path))
         summary = {k: p.get(k) for k in ("scanned", "skipped", "results", "sent", "parked")}
@@ -521,7 +557,7 @@ def main(argv=None) -> int:
                                                            message=p["message"], messages=p["messages"])))
         return 0
     items = refetch_spec_drops(fill_capped_comments(load_items(a.items), a.repo), a.repo)
-    p = plan(items, a.run_id, fetch_parents(items, items, a.repo))
+    p = plan(items, a.run_id, fetch_parents(items, items, a.repo), founding_waits(items, a.repo))
     if not a.dry_run:
         p.update(apply(p, a.repo, a.run_id, db_path=a.db_path))
     print(json.dumps(p))

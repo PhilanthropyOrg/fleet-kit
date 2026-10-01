@@ -636,6 +636,15 @@ you're an agent driving it) -- infra-kit stands up the VM/podman/tunnel, THIS in
 fleet-kit at it once it's up. Already have a box (existing server, another project's VM with
 room for one more podman container)? Skip straight to step 1 below.
 
+**Starting a new product on an EMPTY repo?** One command does the repo side (first commit
+with the vision and the product's own goals, merge rules, the founding issues) and then runs
+`up.sh` for you. Fill in `docs/founder-brief.template.md` first; `--dry-run` shows every write
+without making one; it ends by listing what only you can still do.
+```
+python3 scripts/fleet_init.py --name <instance> --repo https://github.com/<owner>/<repo> \
+    --domain <product domain> --brief <your brief.md>
+```
+
 1. **Copy this kit** into the target repo as `.fleet/` (or clone it as a sibling and point
    `FLEET_REPO` at the target — either layout works, nothing here assumes a specific path).
 2. **Fill `fleet.env`** — copy `fleet.env.example`, set `FLEET_REPO`, `FLEET_LABEL_PREFIX`,

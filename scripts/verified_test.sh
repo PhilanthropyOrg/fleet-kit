@@ -68,43 +68,40 @@ fi
 EMD=(); EMD_BIN="${FLEET_EATMYDATA_BIN:-eatmydata}"
 if command -v "$EMD_BIN" >/dev/null 2>&1; then EMD=("$EMD_BIN"); echo "verified_test: fsync off for the test run (eatmydata)"; fi
 
-# Greenfield repos (empty or newly scaffolded) may have no test infrastructure yet.
-# Preflight gates are still checked, but running the test suite is not required.
-# A repo is greenfield if it has:
-#   - No test infrastructure (pyproject.toml, package.json, tests/, test/, scripts/tests_for_diff.py)
-#   - AND no CI workflows (.github/workflows/ci.yml or similar)
-#   - AND no docs/VISION.md (fleet-kit marker for initialized repos)
-GREENFIELD=0
-if [ ! -f "pyproject.toml" ] && [ ! -f "package.json" ] && [ ! -d "tests" ] && [ ! -d "test" ] && \
-   [ ! -f "scripts/tests_for_diff.py" ] && [ ! -f ".github/workflows/ci.yml" ] && \
-   [ ! -f "docs/VISION.md" ] && [ $# -eq 0 ]; then
-  GREENFIELD=1
-  echo "verified_test: greenfield repo (no test infrastructure yet) -- preflight pass means ready to build"
-  code=0
-  ARGS="greenfield (no test infrastructure; ready to build)"
-fi
-
-if [ "$GREENFIELD" -eq 0 ]; then
-  ARGS="${*:-full}"
-  if [ $# -eq 0 ] && [ -f scripts/tests_for_diff.py ]; then
-    echo "verified_test: diff-scoped -- python3 scripts/tests_for_diff.py --run in $WT"
-    ${EMD[@]+"${EMD[@]}"} python3 scripts/tests_for_diff.py --run
-    code=$?
-    ARGS="tests_for_diff"
-    if [ "$code" -eq 3 ]; then
-      # 2026-09-29 (Reif): the box runs targeted tests only, never the whole suite. The full suite
-      # already runs in the product repo's CI on every PR; a 30-min local copy of it held a test
-      # slot, starved every other pass, and timed passes out. A diff too wide to scope pushes on
-      # preflight alone and CI is its test run -- the pass then waits for CI (pr_ci_wait.py).
-      echo "verified_test: diff too wide to scope (rc=3) -- no local run; the full suite runs in CI on the PR"
-      code=0
-      ARGS="ci-only (diff too wide to scope; full suite runs in CI on the PR)"
-    fi
-  else
-    echo "verified_test: pytest -n $WORKERS ${*:-<full suite>} in $WT"
-    ${EMD[@]+"${EMD[@]}"} python3 -m pytest -q -n "$WORKERS" "$@"
-    code=$?
+ARGS="${*:-full}"
+NO_TESTS=""
+# What counts as a test file, any stack: a tests/ test/ __tests__/ spec/ directory, test_x.*,
+# x_test.*, x.test.*, x.spec.*.
+TEST_FILE_RE='(^|/)(tests?|__tests__|spec)/|(^|/)test_[^/]*\.[a-z]+$|_test\.[a-z]+$|\.(test|spec)\.[a-z]+$'
+if [ $# -eq 0 ] && [ -f scripts/tests_for_diff.py ]; then
+  echo "verified_test: diff-scoped -- python3 scripts/tests_for_diff.py --run in $WT"
+  ${EMD[@]+"${EMD[@]}"} python3 scripts/tests_for_diff.py --run
+  code=$?
+  ARGS="tests_for_diff"
+  if [ "$code" -eq 3 ]; then
+    # 2026-09-29 (Reif): the box runs targeted tests only, never the whole suite. The full suite
+    # already runs in the product repo's CI on every PR; a 30-min local copy of it held a test
+    # slot, starved every other pass, and timed passes out. A diff too wide to scope pushes on
+    # preflight alone and CI is its test run -- the pass then waits for CI (pr_ci_wait.py).
+    echo "verified_test: diff too wide to scope (rc=3) -- no local run; the full suite runs in CI on the PR"
+    code=0
+    ARGS="ci-only (diff too wide to scope; full suite runs in CI on the PR)"
   fi
+elif [ $# -eq 0 ] && TREE_FILES="$(git ls-files --cached --others --exclude-standard 2>/dev/null)" && ! grep -qiE "$TEST_FILE_RE" <<<"$TREE_FILES"; then
+  # A brand-new product repo (fleet_init.py) has no tests and no runner yet. pytest then exits 5
+  # ("no tests collected"), or is not installed at all, the receipt is red, and the push hook
+  # blocks the very PRs that would add the first test. Only when there is nothing to run: no
+  # arguments, no scripts/tests_for_diff.py, and not one test-shaped file in the tree. The
+  # receipt lets the push through and says in `args` that NO test ran; preflight above still did.
+  # If git cannot list the tree this is NOT taken: unknown is never "no tests".
+  echo "verified_test: this repo has no tests yet (no scripts/tests_for_diff.py, no test files) -- nothing to run"
+  code=0
+  NO_TESTS=1
+  ARGS="no-tests (new repo: no test files and no scripts/tests_for_diff.py; nothing ran)"
+else
+  echo "verified_test: pytest -n $WORKERS ${*:-<full suite>} in $WT"
+  ${EMD[@]+"${EMD[@]}"} python3 -m pytest -q -n "$WORKERS" "$@"
+  code=$?
 fi
 
 HASH="$(python3 "$HOOK" --content-hash "$WT")"
@@ -112,7 +109,8 @@ if [ "$code" -eq 0 ]; then STATUS=pass; else STATUS=fail; fi
 printf '{"status":"%s","content":"%s","args":"%s","exit":%d,"preflight":"%s","ts":%d}\n' \
   "$STATUS" "$HASH" "$ARGS" "$code" "$PREFLIGHT" "$(date +%s)" > "$RECEIPT"
 
-[ "$code" -eq 0 ] && echo "verified_test: PASS ($ARGS). The full suite runs in CI on the PR -- evidence line: \`verified_test.sh\` $ARGS green; full suite in CI on the PR."
+[ "$code" -eq 0 ] && [ -n "$NO_TESTS" ] && echo "verified_test: NOTHING TO TEST ($ARGS). Evidence line: \`verified_test.sh\` found no tests in this repo; nothing was test-verified."
+[ "$code" -eq 0 ] && [ -z "$NO_TESTS" ] && echo "verified_test: PASS ($ARGS). The full suite runs in CI on the PR -- evidence line: \`verified_test.sh\` $ARGS green; full suite in CI on the PR."
 if [ "$code" -ne 0 ]; then
   echo "verified_test: suite FAILED (exit $code) -- the push hook will block until it is green" >&2
 fi
