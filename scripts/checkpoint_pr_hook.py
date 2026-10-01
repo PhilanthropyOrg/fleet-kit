@@ -88,12 +88,11 @@ def decide(command: str, cwd: str, view=None) -> str | None:
         pr = view(t, cwd)
         if pr and mc.is_checkpoint_pr(pr.get("title"), pr.get("body")):
             return (f"Blocked: PR #{pr.get('number')} is a minion checkpoint (draft WIP). It must "
-                    "never merge as a checkpoint. When EVERY item on the branch meets its "
-                    "done-criteria: `gh pr edit` the title (no WIP) and body (`Closes #N` per "
-                    "item, no `Part of` / `Remaining:`), push, run verified_test.sh, then run "
+                    "never merge as a checkpoint. To ship the green slice: `gh pr edit` the title "
+                    "(no WIP) and body (`Closes #N` per finished item, `Part of #N` + a "
+                    "`Remaining:` line for the rest), push, run verified_test.sh, then run "
                     "`python3 /fleet-kit/scripts/minion_checkpoint.py ready`. It checks all of "
-                    "that and marks the PR ready. If an item is not done, leave the PR a draft "
-                    "and say what remains in your report; the next pass resumes it.")
+                    "that and marks the PR ready.")
     return None
 
 

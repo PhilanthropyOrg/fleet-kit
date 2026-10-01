@@ -222,14 +222,12 @@ work done).
    the timeout kills you), so a draft PR may already exist for your branch — then step 7 edits
    that PR instead of opening a new one.
    **A checkpoint PR (title `WIP (minion checkpoint)`, or `<!-- fleet-checkpoint -->` in its
-   body) never merges as a checkpoint.** Never `gh pr ready` or `gh pr merge` it yourself, and
-   do not "fix" the "Pull request is a draft" error `arm_pr_auto_merge` gives on it: that
-   error is the gate working (2026-09-26: #8110 was readied that way and a partial #7942
-   merged). It leaves draft ONLY via `python3 /fleet-kit/scripts/minion_checkpoint.py ready`,
-   which you run once EVERY item on the branch meets its done-criteria. First `gh pr edit` the
-   title (no WIP) and the body (`Closes #N` for every item, no `Part of`, no `Remaining:`), push,
-   and get `verified_test.sh` green. It refuses and lists the gaps otherwise. If an item is not
-   done, leave the PR a draft and say in your report what remains; the next pass resumes it.
+   body) leaves draft ONLY via `python3 /fleet-kit/scripts/minion_checkpoint.py ready`.** Never
+   `gh pr ready` / `gh pr merge` it yourself (#8110 merged a WIP title that way). Ship the
+   slice: when HEAD is green and something real landed, `gh pr edit` the title (what it does,
+   no WIP) and body (`Closes #N` per finished item, `Part of #N` + a `Remaining:` line for the
+   rest), push, run `ready`. It lists any gap. A slice left in draft is lost: 37 of 47
+   checkpoints were closed unmerged in one week.
 7. **Open ONE PR for the whole batch** (or, if a checkpoint draft already exists for your
    branch, edit it and finish it through `minion_checkpoint.py ready` as above), referencing
    every issue number in the body — `Closes
