@@ -162,6 +162,15 @@ def file_broken(runs: list[dict], now: float, run=_run, hours: float = 24.0) -> 
     return urls
 
 
+def _redacted(text: str) -> str:
+    """This file is prepended to every pass's prompt: no credential may reach it. Never raises."""
+    try:
+        import redact_secrets
+        return redact_secrets.safe_text(text)
+    except Exception:  # noqa: BLE001
+        return text
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -173,6 +182,7 @@ def main(argv=None) -> int:
     if a.cmd == "write":
         issues = [] if a.no_gh else instrument_issues()
         text = render(runs, load_asks(), issues, now, a.hours)
+        text = _redacted(text)  # rows written before run_report.py redacted at the source
         LOG_DIR.mkdir(parents=True, exist_ok=True)
         HANDOFF.write_text(text)
         print(f"wrote {HANDOFF} ({len(text)} chars)")

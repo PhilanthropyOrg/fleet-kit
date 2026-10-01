@@ -396,6 +396,11 @@ def main(argv=None) -> int:
         pr_kr = fleet_prs(slug, now)
     burn, total = burn_by_kr(load_runs(), pr_kr, now)
     text = render(reif, reif_err, load_okr(), funnel, funnel_err, burn, total, now)
+    try:  # prepended to every pass's prompt: no credential (a PR title, an OKR note) may reach it
+        import redact_secrets
+        text = redact_secrets.safe_text(text)
+    except Exception:  # noqa: BLE001
+        pass
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     NORTH.write_text(text)
     if a.stdout:

@@ -25,6 +25,12 @@ import sys
 from pathlib import Path
 
 MATCHER = "Edit|Write|Bash"
+# fk#1494: the credential guard also watches the two tools that can print a file's contents
+# without Bash. Registered as its own entry -- same script, one extra word so merge_one's
+# by-command idempotence sees it as a separate line -- so only this guard runs on a Read, not
+# all four.
+READ_MATCHER = "Read|Grep"
+READ_GUARD_ARG = "credential-read-guard"
 
 
 def _hook_commands() -> list[str]:
@@ -39,7 +45,7 @@ def _hook_commands() -> list[str]:
     scripts = Path(__file__).resolve().parent
     return [f"python3 {scripts / name}" for name in
             ("worktree_guard_hook.py", "pretest_push_hook.py", "checkpoint_pr_hook.py",
-             "issue_create_hook.py")]
+             "issue_create_hook.py", f"worktree_guard_hook.py {READ_GUARD_ARG}")]
 
 
 def _stop_hook_commands() -> list[str]:
@@ -91,7 +97,8 @@ def merge_one(path: Path, hook_cmds: list[str] | str, stop_cmds: list[str] | Non
     settings["cleanupPeriodDays"] = TRANSCRIPT_KEEP_DAYS
 
     for cmd in missing:
-        pre_list.append({"matcher": MATCHER, "hooks": [{"type": "command", "command": cmd}]})
+        matcher = READ_MATCHER if cmd.endswith(" " + READ_GUARD_ARG) else MATCHER
+        pre_list.append({"matcher": matcher, "hooks": [{"type": "command", "command": cmd}]})
     for cmd in stop_missing:
         settings["hooks"]["Stop"].append(
             {"hooks": [{"type": "command", "command": cmd, "timeout": STOP_TIMEOUT_S}]})
