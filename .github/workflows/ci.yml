@@ -286,6 +286,12 @@ jobs:
         run: python3 scripts/test_account_readiness_names_pool.py
       - name: run test_pr_arm_sweep.py
         run: python3 scripts/test_pr_arm_sweep.py
+      - name: run test_credential_guard.py
+        run: python3 scripts/test_credential_guard.py
+      - name: run test_redact_secrets.py
+        run: python3 scripts/test_redact_secrets.py
+      - name: run test_untrusted_text.py
+        run: python3 scripts/test_untrusted_text.py
 
   # Not a required check (see selftest above for why) -- but still runs on every PR, and its
   # failures are still visible on the PR's checks tab. `--with-deps` here can still fail on an

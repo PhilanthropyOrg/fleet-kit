@@ -41,11 +41,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from pathlib import Path
 from fleet_tz import stamp as central_stamp  # noqa: E402 -- humans read Central
-
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import redact_secrets  # noqa: E402
 
 HERE = pathlib.Path(__file__).resolve().parent
 LOG_DIR = pathlib.Path(os.environ.get("FLEET_LOG_DIR") or os.path.expanduser("~/Library/Logs/fleet-kit"))
@@ -257,13 +253,7 @@ def load_runs(path: pathlib.Path | None = None) -> list[dict]:
     try:
         for line in p.read_text(errors="ignore").splitlines()[-20000:]:
             try:
-                rec = json.loads(line)
-                # Defensive redaction: ensure no secrets leak from runs.jsonl on read (fk#TBD)
-                rec = redact_secrets.redact_dict_fields(rec, [
-                    "outcome", "evidence", "report", "self_critique", "lesson", "broken",
-                    "prediction", "score_now", "last_verdict", "blocked", "reason", "fired_by"
-                ])
-                rows.append(rec)
+                rows.append(json.loads(line))
             except json.JSONDecodeError:
                 continue
     except OSError:
@@ -406,6 +396,11 @@ def main(argv=None) -> int:
         pr_kr = fleet_prs(slug, now)
     burn, total = burn_by_kr(load_runs(), pr_kr, now)
     text = render(reif, reif_err, load_okr(), funnel, funnel_err, burn, total, now)
+    try:  # prepended to every pass's prompt: no credential (a PR title, an OKR note) may reach it
+        import redact_secrets
+        text = redact_secrets.safe_text(text)
+    except Exception:  # noqa: BLE001
+        pass
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     NORTH.write_text(text)
     if a.stdout:

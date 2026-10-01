@@ -200,12 +200,18 @@ trap cleanup EXIT
 # --- STEP 3: build ------------------------------------------------------------------------------
 CHARTER=""
 [ -f "$KIT_DIR/agents/builder.md" ] && CHARTER=$(awk 'BEGIN{d=0} /^---$/{d++; next} d>=2{print}' "$KIT_DIR/agents/builder.md")
+# The issue's title and body are whatever the person who filed it typed. Fence them as data
+# (untrusted_text.py) so a body that says "ignore your charter" reads as the task's text, not as
+# an order. If the helper cannot run, the item still goes in, unfenced, as before.
+ITEM_BLOCK=$(printf 'Title: %s\nContext: %s\n' "$ITEM_TEXT" "$ITEM_CONTEXT" \
+  | python3 "$KIT_DIR/scripts/untrusted_text.py" wrap "issue #$ITEM_ID" 2>>"$LOG") \
+  || ITEM_BLOCK="Title: $ITEM_TEXT
+Context: $ITEM_CONTEXT"
 PROMPT="$CHARTER
 
 ## This item (injected by worktree_builder.sh)
 ID: $ITEM_ID
-Title: $ITEM_TEXT
-Context: $ITEM_CONTEXT
+$ITEM_BLOCK
 
 You are in a fresh worktree at $WT_PATH on branch $WT_BRANCH. Commit from here.
 $([ -n "${ONTO_PR:-}" ] && echo "This is a FOLD-IN onto PR #$ONTO_PR's own branch -- do NOT push and do NOT open a new PR yourself; worktree_builder.sh rebases and pushes once after you finish." || echo "Push from here.")

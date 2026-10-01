@@ -30,11 +30,7 @@ import pathlib
 import subprocess
 import sys
 import time
-from pathlib import Path
 from fleet_tz import stamp as central_stamp  # noqa: E402 -- humans read Central
-
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import redact_secrets  # noqa: E402
 
 HERE = pathlib.Path(__file__).resolve().parent
 LOG_DIR = pathlib.Path(os.environ.get("FLEET_LOG_DIR") or os.path.expanduser("~/Library/Logs/fleet-kit"))
@@ -53,13 +49,7 @@ def load_runs(path: pathlib.Path | None = None) -> list[dict]:
     try:
         for line in p.read_text(errors="ignore").splitlines()[-4000:]:
             try:
-                rec = json.loads(line)
-                # Defensive redaction: ensure no secrets leak from runs.jsonl on read (fk#TBD)
-                rec = redact_secrets.redact_dict_fields(rec, [
-                    "outcome", "evidence", "report", "self_critique", "lesson", "broken",
-                    "prediction", "score_now", "last_verdict", "blocked", "reason", "fired_by"
-                ])
-                rows.append(rec)
+                rows.append(json.loads(line))
             except json.JSONDecodeError:
                 continue
     except OSError:
@@ -172,6 +162,15 @@ def file_broken(runs: list[dict], now: float, run=_run, hours: float = 24.0) -> 
     return urls
 
 
+def _redacted(text: str) -> str:
+    """This file is prepended to every pass's prompt: no credential may reach it. Never raises."""
+    try:
+        import redact_secrets
+        return redact_secrets.safe_text(text)
+    except Exception:  # noqa: BLE001
+        return text
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -183,6 +182,7 @@ def main(argv=None) -> int:
     if a.cmd == "write":
         issues = [] if a.no_gh else instrument_issues()
         text = render(runs, load_asks(), issues, now, a.hours)
+        text = _redacted(text)  # rows written before run_report.py redacted at the source
         LOG_DIR.mkdir(parents=True, exist_ok=True)
         HANDOFF.write_text(text)
         print(f"wrote {HANDOFF} ({len(text)} chars)")

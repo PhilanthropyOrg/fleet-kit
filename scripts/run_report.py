@@ -37,8 +37,6 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import redact_secrets  # noqa: E402
-
 # The vision guardrail is OPTIONAL in the kit. In the source fleet a `Vision:` score is only
 # legitimate alongside a `Vision-link:` line naming which coordination link the work moves, and
 # board_rice.py is the single validator both the board and every run report use. That axis is
@@ -437,11 +435,14 @@ def build_record(*, member: str, run_id: str, kind: str, exit_code: int,
         "cache_read_input_tokens": u.get("cache_read_input_tokens"),
         "cache_creation_input_tokens": u.get("cache_creation_input_tokens"),
     }
-    # Redact secrets from free-text fields before writing to runs.jsonl (fk#TBD security hardening)
-    rec = redact_secrets.redact_dict_fields(rec, [
-        "outcome", "evidence", "report", "self_critique", "lesson", "broken",
-        "prediction", "score_now", "last_verdict", "blocked", "reason", "fired_by"
-    ])
+    # A credential a member printed by mistake must not ride the run log: this record goes to
+    # runs.jsonl, the dashboard, and (via HANDOFF.md) every later pass's prompt. Never raises --
+    # a redaction bug must not cost the run its record.
+    try:
+        import redact_secrets
+        rec = redact_secrets.safe_record(rec)
+    except Exception:  # noqa: BLE001
+        pass
     return rec
 
 
