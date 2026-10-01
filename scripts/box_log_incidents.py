@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import calendar
 import json
+import os
 import re
 import subprocess
 import sys
@@ -38,7 +39,9 @@ from notify_reif_hq import read_new_records  # noqa: E402
 
 REPEAT_COMMENT_S = 6 * 3600
 QUIET_CLOSE_S = 24 * 3600
-CLEAN_S = 30 * 60
+# 30 min re-filed every flapping canary: 202 `prod alert` issues in 48h (2026-09-29..10-01),
+# 21 for search_filter_latency_canary alone. Replaying those same 48h of box logs: 6h -> 86.
+CLEAN_S = int(os.environ.get("FLEET_BOX_LOG_CLEAN_S", str(6 * 3600)))
 UNFRAMED = ("nginx:", "journal:")
 
 
