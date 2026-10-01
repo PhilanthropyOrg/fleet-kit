@@ -230,12 +230,15 @@ def _pr_sandbox(title: str, body: str, green: bool = True, branch: str | None = 
 def test_8110_as_merged_is_not_done() -> None:
     gaps = mc.done_gaps(PR_8110_TITLE, PR_8110_BODY, [7942])
     joined = "\n".join(gaps)
-    assert "WIP" in joined and "Closes #7942" in joined and "Part of" in joined \
-        and "Remaining" in joined, gaps
+    assert "WIP" in joined and "auto-written" in joined, gaps
     assert mc.is_checkpoint_pr(PR_8110_TITLE, PR_8110_BODY)
     assert mc.done_gaps(DONE_TITLE, DONE_BODY, [7942]) == []
-    # a batch: every item must close, not just one
-    assert mc.done_gaps(DONE_TITLE, "Closes #1\nPart of #2\nRemaining: x", [1, 2])
+    # a green slice ships: Part of + Remaining is a normal result (fk#1481)
+    assert mc.done_gaps(DONE_TITLE, "Closes #1\nPart of #2\nRemaining: x", [1, 2]) == []
+    assert mc.done_gaps(DONE_TITLE, "Part of #2\nRemaining: the PDF", [2]) == []
+    # but every item is named, and a Part of says what is left
+    assert mc.done_gaps(DONE_TITLE, "Closes #1", [1, 2])
+    assert mc.done_gaps(DONE_TITLE, "Closes #1\nPart of #2", [1, 2])
     assert mc.branch_items("member/minion-item7942_7950-1-2") == [7942, 7950]
     print("ok  #8110's title/body (WIP, Part of, Remaining, no Closes) is not done")
 

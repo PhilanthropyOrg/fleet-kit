@@ -27,9 +27,9 @@ opened #8110 as a draft; two minutes later the same pass hit "Pull request is a 
 auto-merge, ran `gh pr ready` (minion.md step 7 said to), re-armed, and the partial slice of
 #7942 merged 12s later with its "WIP" title and "Part of #7942" body intact. The rule, in code:
   * `ready` is the ONLY way a checkpoint PR leaves draft. It runs from the pass whose worktree
-    is on the PR's branch, and only when every item on the branch is `Closes #N`, nothing says
-    `Part of` / `Remaining:`, the title is no longer WIP, and the pushed HEAD has a passing
-    verified_test receipt. Otherwise it prints the gaps and leaves the PR a draft.
+    is on the PR's branch, and only when the title is no longer WIP, the body is no longer the
+    auto-written text, every item is `Closes #N` or `Part of #N` + `Remaining:` (a green slice
+    ships; fk#1481), and the pushed HEAD has a passing verified_test receipt. Otherwise it prints the gaps and leaves the PR a draft.
   * merge_arm.sh and judge-judy refuse to arm auto-merge on a checkpoint PR, and
     checkpoint_pr_hook.py blocks a raw `gh pr ready` / `gh pr merge` on one.
 `ready` strips MARKER on its way out, so a finished PR is an ordinary PR again.
@@ -264,21 +264,24 @@ def branch_items(branch: str) -> list[int]:
 
 
 def done_gaps(title: str, body: str, items: list[int]) -> list[str]:
-    """What still stands between this PR and "done". Pure, so the rule is testable."""
+    """What still stands between this PR and a shippable slice. Pure, so the rule is testable.
+    A slice ships: `Part of #N` + a `Remaining:` line is fine (minion.md step 7). Requiring
+    every item closed kept epics in draft forever: 1 of 47 checkpoints merged 09-23..09-30,
+    37 were closed unmerged, #7661 alone chained five (fk#1481)."""
     gaps = []
     if not items:
         gaps.append("no items: not a minion checkpoint branch")
     if re.match(r"\s*\[?wip\b", title or "", re.I):
         gaps.append("title still says WIP: `gh pr edit --title` with what the PR does")
+    if "**Draft checkpoint**" in (body or ""):
+        gaps.append("body is still the auto-written checkpoint text: say what this PR ships")
     closed = {int(n) for n in CLOSES_RE.findall(body or "")}
+    part = {int(n) for n in re.findall(r"(?i)\bpart of #(\d+)", body or "")}
     for n in items:
-        if n not in closed:
-            gaps.append(f"#{n} is not `Closes #{n}` in the body: finish it (its done-criteria "
-                        "are in the issue) or leave the PR a draft for the next pass")
-    if re.search(r"(?i)\bpart of #\d+", body or ""):
-        gaps.append("body still says `Part of #N`: unfinished work stays in draft")
-    if re.search(r"(?im)^\W*remaining\s*:", body or ""):
-        gaps.append("body still has a `Remaining:` line: unfinished work stays in draft")
+        if n not in closed | part:
+            gaps.append(f"#{n} is neither `Closes #{n}` nor `Part of #{n}` in the body")
+    if part and not re.search(r"(?im)^\W*remaining\s*:", body or ""):
+        gaps.append("`Part of #N` with no `Remaining:` line: say what is left")
     return gaps
 
 
