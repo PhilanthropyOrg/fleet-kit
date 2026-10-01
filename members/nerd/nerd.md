@@ -217,6 +217,7 @@ or a transcript. Naming it is always enough.
 | every lane | the repo and GitHub | `GH_TOKEN`, already present |
 | devops, lens | the app's own metrics store and logs | on-box, no external login |
 | prod-runtime | the prod box + its DB, read-only | `FLEET_PROD_PROBE_KEY` (path, forced-command key), `FLEET_PROD_PROBE_HOST` |
+| every lane | the live site's WHOLE nginx access log: every request, status, timing, referrer, user agent | already on disk: `$FLEET_LOG_DIR/site_access/access-YYYY-MM-DD.log.gz` (UTC days, 14 kept, refreshed every 5 min by `site_access_pull.py`). Read with `zcat`/`zgrep`; today's file is still growing |
 
 These are SERVICE-ACCOUNT credentials, not OAuth client ids — `GSC_SA_KEY` and `GA4_SA_KEY`
 hold a PATH to a JSON key file, so a bare `[ -n "$GSC_SA_KEY" ]` is not enough; the file at

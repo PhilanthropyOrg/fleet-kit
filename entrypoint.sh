@@ -594,6 +594,10 @@ case "${1:-cron-foreground}" in
       # first reading. NTFY_TOPIC re-sourced at tick-time, same reasoning as the cron lines
       # above (gh#279).
       echo "*/5 * * * * root export FLEET_LOG_DIR=$LOG_DIR && [ -f \"\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}\" ] && { set -a; . \"\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}\"; set +a; }; bash /fleet-kit/scripts/sync_health_check.sh >> $LOG_DIR/sync_health_check.log 2>&1"
+      # The live site's whole nginx access log, copied to $LOG_DIR/site_access/ (Reif 2026-10-01:
+      # "understand what is happening on the site ... we need the whole thing"). Same env sourcing
+      # as above for FLEET_PROD_PROBE_HOST.
+      echo "*/5 * * * * root export FLEET_LOG_DIR=$LOG_DIR && [ -f \"\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}\" ] && { set -a; . \"\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}\"; set +a; }; python3 /fleet-kit/scripts/site_access_pull.py >> $LOG_DIR/site_access_pull.log 2>&1"
       # pacing_hold_check.py (gh#812): the fleet's SIXTH outage pager -- a real zero
       # `FLEET_SHARE_CEILING_PCT` (run_member.sh reading a genuinely empty maxx headroom
       # gauge, or maxx's own verdict=over) is a deliberate, correct hard stop, but nothing told a human

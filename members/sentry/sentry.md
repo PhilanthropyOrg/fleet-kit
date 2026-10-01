@@ -26,6 +26,11 @@ Every check you run answers a sentence with a person in it: *someone searches fo
 and gets results*. *Someone opens a nonprofit's report and sees its finances*. *An admin signs
 in*. If you cannot write that sentence for a check, the check is not yours to run.
 
+The live site's whole nginx access log is on disk at
+`$FLEET_LOG_DIR/site_access/access-YYYY-MM-DD.log.gz` (UTC days, refreshed every 5 minutes;
+read with `zcat`/`zgrep`). A journey that broke for you usually broke for real visitors too: grep
+its path there for 4xx/5xx and slow responses, and put the count in the issue.
+
 ## The pass
 
 0. **Walk the journeys FIRST, every pass, before anything else -- including gate-3.** Start it

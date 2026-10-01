@@ -16,6 +16,38 @@
 set -uo pipefail
 export LC_ALL=C
 
+# `access-log <inode> <offset>` (Reif 2026-10-01: "understand what is happening on the site ...
+# we need the whole thing"): the bytes of nginx's access log added since the caller's last pull,
+# gzipped, behind one `#fleet-access-log ino=<inode> end=<offset>` line the caller stores for its
+# next pull. A caller still on yesterday's inode gets the rest of access.log.1 first; one that has
+# lost track (inode in neither file) gets access.log.1 whole, a first pull (inode 0) only today's.
+# Read-only like everything else here. scripts/site_access_pull.py is the caller.
+ACCESS_LOG=${PROBE_ACCESS_LOG:-/var/log/nginx/access.log}
+access_log() {
+    local ino=$1 off=$2 cino csize
+    cino=$(stat -c %i "$ACCESS_LOG") && csize=$(stat -c %s "$ACCESS_LOG") || exit 1
+    {
+        printf '#fleet-access-log ino=%s end=%s\n' "$cino" "$csize"
+        if [ "$ino" = "$cino" ]; then
+            [ "$off" -le "$csize" ] || off=0   # truncated in place: start over
+            tail -c +$((off + 1)) "$ACCESS_LOG" | head -c $((csize - off))
+        else
+            if [ "$ino" = "$(stat -c %i "$ACCESS_LOG.1" 2>/dev/null)" ]; then
+                tail -c +$((off + 1)) "$ACCESS_LOG.1"
+            elif [ "$ino" != 0 ]; then
+                cat "$ACCESS_LOG.1" 2>/dev/null
+            fi
+            head -c "$csize" "$ACCESS_LOG"
+        fi
+        true   # tail|head SIGPIPEs whenever nginx wrote mid-read; the caller checks the stream itself
+    } | gzip -c
+}
+read -r verb a1 a2 rest <<< "${SSH_ORIGINAL_COMMAND:-}"
+if [ "${verb:-}" = access-log ]; then
+    [[ ${a1:-} =~ ^[0-9]+$ && ${a2:-} =~ ^[0-9]+$ && -z ${rest:-} ]] || { echo "usage: access-log <inode> <offset>" >&2; exit 2; }
+    access_log "$a1" "$a2"; exit
+fi
+
 ENV_FILE=${PROBE_ENV_FILE:-/root/.config/atlas/web.env}
 LOGDIR=${PROBE_CRON_LOGDIR:-/var/log/atlas}
 set -a; . "$ENV_FILE" 2>/dev/null; set +a
