@@ -50,6 +50,6 @@
   "report": {
     "vision_link": "optional"
   },
-  "plain": "Digs into one lane's number against real data and files one evidence-backed finding, or says plainly why there is none.",
+  "plain": "Digs into the real numbers behind one part of the goal and reports one finding with proof, or says plainly that there is none.",
   "stage": "find"
 }

@@ -48,6 +48,6 @@
   "report": {
     "vision_link": "optional"
   },
-  "plain": "Judges a world-class item's design before it is built: approved, accepted, or not yet with numbered fixes.",
+  "plain": "Before a big item is built, checks its design is good enough: approves it, or sends it back with a numbered list of fixes.",
   "stage": "build"
 }

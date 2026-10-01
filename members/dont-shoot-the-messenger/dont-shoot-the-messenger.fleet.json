@@ -46,6 +46,6 @@
   },
   "pacing": "exempt",
   "pacing_why": "the brief Reif reads must go out (fleet-kit#781)",
-  "plain": "Sends Reif the morning brief, the afternoon block, and the evening wrap, Central time.",
+  "plain": "Sends the owner three short emails a day, morning, afternoon and evening (Central time): what got done and what needs a person.",
   "stage": "tell"
 }

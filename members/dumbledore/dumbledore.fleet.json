@@ -54,6 +54,6 @@
   "report": {
     "vision_link": "required"
   },
-  "plain": "Every 7 hours fixes the fleet itself: takes the causes jefe and the others find, ships one fleet-kit fix, and checks it moved a number.",
+  "plain": "Every 7 hours fixes the fleet itself: takes one weak spot that jefe or others found, fixes it, and checks that it helped.",
   "stage": "learn"
 }

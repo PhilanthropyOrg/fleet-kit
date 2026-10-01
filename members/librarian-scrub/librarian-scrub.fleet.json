@@ -42,6 +42,6 @@
   "report": {
     "vision_link": "optional"
   },
-  "plain": "Every hour redacts anything credential-shaped from stored transcripts and compresses old ones.",
+  "plain": "Every hour hides any passwords or keys that slipped into the saved work logs, and shrinks old logs.",
   "stage": "learn"
 }

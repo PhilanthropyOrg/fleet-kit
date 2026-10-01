@@ -52,6 +52,6 @@
   "report": {
     "vision_link": "optional"
   },
-  "plain": "Builds a batch of items into one mergeable PR with auto-merge armed.",
+  "plain": "Builds a few to-do items into one code change that goes live on its own once it passes review and tests.",
   "stage": "build"
 }

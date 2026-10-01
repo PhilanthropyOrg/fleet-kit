@@ -59,6 +59,6 @@
   "report": {
     "vision_link": "optional"
   },
-  "plain": "Keeps the backlog honest every hour: every item real, ranked against the vision, claimed items matched to live PRs, and writes the spec for what is about to be built.",
+  "plain": "Every hour keeps the to-do list honest: removes items that are not real, ranks the rest against the goal, and writes clear instructions for what gets built next.",
   "stage": "rank"
 }

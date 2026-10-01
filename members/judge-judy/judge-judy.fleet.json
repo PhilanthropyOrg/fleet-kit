@@ -47,6 +47,6 @@
   "report": {
     "vision_link": "optional"
   },
-  "plain": "Reviews every open PR within 15 minutes and posts one verdict: approve or block with the reason.",
+  "plain": "Checks every proposed code change within 15 minutes, then approves it or blocks it and says why.",
   "stage": "review"
 }
