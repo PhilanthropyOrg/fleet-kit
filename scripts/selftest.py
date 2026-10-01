@@ -15778,6 +15778,9 @@ def _roster_is_ten_members_after_fk1195_fold():
         # Reif, 2026-09-26: back to fix the fleet itself -- archived with "nothing moved", so
         # for nine days the fleet diagnosed itself and nobody fixed the cause.
         "dumbledore",
+        # fk#1495: the owner asked for a go-to-market member. Ships enabled:false with no cron
+        # line (asserted below), so the scheduled roster is unchanged until he turns it on.
+        "growth",
     }
     assert set(member_dirs) == expected, \
         f"roster drifted from fk#1195's fold: have {sorted(member_dirs)}, want {sorted(expected)}"
@@ -15792,6 +15795,10 @@ def _roster_is_ten_members_after_fk1195_fold():
     assert independently_scheduled <= expected
 
     entry = (ROOT / "entrypoint.sh").read_text()
+    import member_spec
+    assert member_spec.by_name("growth")["enabled"] is False \
+        and not re.search(r"run_member\.sh growth\b|cron_member_enabled growth\b", entry), \
+        "growth must stay off and unscheduled by default (mailing people is the owner's switch)"
     for archived in ("roomba", "custodian", "signals", "datta"):
         assert not re.search(rf'run_member\.sh {archived}\b', entry), \
             f"a cron line still launches archived member {archived!r}"
