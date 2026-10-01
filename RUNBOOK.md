@@ -2,12 +2,22 @@
 
 The 2026-09-19 rebuild took a day because these facts lived in six logs, three handoffs and
 one person's head. This page is the levers. `docs/deployment-learnings.md` is the why.
-Everything below is for the `philanthropy` instance on `dino`; substitute your container name.
+
+**Load this install's settings first.** Which box, paths and container are not written on this
+page; they are in `instances/<name>/instance.env` (git-ignored, no secrets; template:
+`instance.env.example`). Keep one copy next to your laptop checkout and one on the box at
+`$FLEET_BOX_INSTANCE_DIR/instance.env`. Then every command below runs as written:
+
+```
+. instances/*/instance.env        # from the kit checkout, laptop or box; once per shell
+```
+
+Commands that start with `ssh "$FLEET_BOX"` run from your laptop. The rest run on the box.
 
 ## 1. Is it alive? (run this first, always)
 
 ```
-ssh dino 'bash ~/fleet-kit/scripts/fleet_status.sh'
+ssh "$FLEET_BOX" "bash $FLEET_BOX_KIT_DIR/scripts/fleet_status.sh"
 ```
 
 One screen, one verdict per layer, top to bottom: container → deploy → cron → kill switch →
@@ -19,16 +29,16 @@ single log again.
 
 | Symptom | Do this |
 |---|---|
-| `DEAD container` | `bash ~/fleet-kit/scripts/refresh_container.sh philanthropy` (podman restart with the rootlessport retry) |
+| `DEAD container` | `bash "$FLEET_BOX_KIT_DIR/scripts/refresh_container.sh" "$FLEET_BOX_CONTAINER"` (podman restart with the rootlessport retry) |
 | `DEAD cron` (no tick >20 min) | Same command. A fresh container is the ONLY thing that has revived a wedged cron (fk#1171). Restarting the cron process inside does nothing; the watchdog already tried 24 times. |
-| `WAIT deploy` for >2h after a merge | `tail ~/fleet-kit-logs/auto_deploy.log`. `ABORT: working tree dirty` = an untracked file in `~/fleet-kit`; commit or delete it. Force: `cd ~/fleet-kit && FLEET_HEALTH_TIMEOUT_S=300 FLEET_INSTANCE_DIR=$PWD/instances/nonprofit-atlas FLEET_CONTAINER_NAME=philanthropy bash scripts/deploy.sh && git rev-parse HEAD > ~/.cache/fleet-kit/auto_deploy.last_sha.philanthropy && date +%s > ~/.cache/fleet-kit/auto_deploy.last_sha.philanthropy.deployed_at`. Both tails matter: the 120s default health check false-fails, and without recording the sha auto_deploy redeploys the same build 5 min later, retiring (and at 15 min SIGTERMing) every pass the forced build started (2026-09-26 06:42, 10 passes). |
-| Roll back a bad deploy | `bash ~/fleet-kit/scripts/deploy.sh --rollback` (previous build is kept stopped as `philanthropy-retired`) |
-| Stop everything | `FLEET_ENABLED=false` in `~/fleet-kit/instances/nonprofit-atlas/fleet.env` (read per run, no restart needed). `FLEET_BUILDER_ENABLED` / `FLEET_REVIEWER_ENABLED` for one lane. |
+| `WAIT deploy` for >2h after a merge | `tail "$FLEET_BOX_DEPLOY_LOG"`. `ABORT: working tree dirty` = an untracked file in `$FLEET_BOX_KIT_DIR`; commit or delete it. Force: `cd "$FLEET_BOX_KIT_DIR" && FLEET_HEALTH_TIMEOUT_S=300 FLEET_INSTANCE_DIR="$FLEET_BOX_INSTANCE_DIR" FLEET_CONTAINER_NAME="$FLEET_BOX_CONTAINER" bash scripts/deploy.sh && git rev-parse HEAD > ~/.cache/fleet-kit/auto_deploy.last_sha."$FLEET_BOX_CONTAINER" && date +%s > ~/.cache/fleet-kit/auto_deploy.last_sha."$FLEET_BOX_CONTAINER".deployed_at`. Both tails matter: the 120s default health check false-fails, and without recording the sha auto_deploy redeploys the same build 5 min later, retiring (and at 15 min SIGTERMing) every pass the forced build started (2026-09-26 06:42, 10 passes). |
+| Roll back a bad deploy | `bash "$FLEET_BOX_KIT_DIR/scripts/deploy.sh" --rollback` (previous build is kept stopped as `<container>-retired`) |
+| Stop everything | `FLEET_ENABLED=false` in `$FLEET_BOX_INSTANCE_DIR/fleet.env` (read per run, no restart needed). `FLEET_BUILDER_ENABLED` / `FLEET_REVIEWER_ENABLED` for one lane. |
 
 ## 3. Kick one member now (don't wait for its cron slot)
 
 ```
-podman exec -d philanthropy bash -c 'set -a; eval "$(grep -hE "^[A-Z_]+=" /etc/cron.d/*)"; set +a; \
+podman exec -d "$FLEET_BOX_CONTAINER" bash -c 'set -a; eval "$(grep -hE "^[A-Z_]+=" /etc/cron.d/*)"; set +a; \
   export GH_TOKEN=$(cat /root/.gh_token); cd /fleet-kit && bash scripts/run_member.sh <member> >> /var/log/fleet-kit/<member>.log 2>&1'
 ```
 
@@ -42,8 +52,8 @@ guard, not a failure. From outside the box, the fleet_view server has `POST /api
 Container code is **baked into the image**; the host checkout proves nothing.
 
 ```
-grep 'deploy OK at' ~/fleet-kit-logs/auto_deploy.log | tail -1        # must name your sha
-podman exec philanthropy grep -c "<a string only your change has>" /fleet-kit/scripts/<file>
+grep 'deploy OK at' "$FLEET_BOX_DEPLOY_LOG" | tail -1        # must name your sha
+podman exec "$FLEET_BOX_CONTAINER" grep -c "<a string only your change has>" /fleet-kit/scripts/<file>
 ```
 
 Merge → up to 2h (`FLEET_DEPLOY_MIN_INTERVAL_S`, auto_deploy coalesces) → `deploy OK` → next
@@ -51,29 +61,22 @@ cron slot. Budget three hours from merge to first evidence, not thirty minutes.
 
 ## 5. Members (manifest = `members/<name>/<name>.fleet.json`, instructions = `members/<name>/<name>.md`)
 
-**Rostered down from 18 to 12 dirs, 2026-09-21 (fk#1195, "keep members under 10, add tasks to
-existing members, never create new ones").** jefe, dumbledore, roomba, custodian, signals, and
-datta were archived; their live duties moved onto the members below (marie's Part E/F, nerd's
-datadog lane, gru's own step 9) rather than staying separate dispatch targets. vp and
-librarian-scrub stay separate dispatch targets despite the letter of the PRD's 10-dir budget —
-both hit a real tool-grant/cadence conflict with the member they'd otherwise fold into (see
-judge-judy.md and librarian.md for the specifics); that is a stated deviation, not an oversight.
+Who is on, when each one runs and what it does: **`bash scripts/roster.sh`**. It reads the
+specs, so it is never out of date; inside the container it also applies live overrides
+(`scripts/overrides.py`) and says so. The cron lines really in force:
+`podman exec "$FLEET_BOX_CONTAINER" cat /etc/cron.d/fleet-kit`. No table is kept on this page:
+the one that was here went stale within a week.
 
-| member | cadence (Central -- the container clock) | job |
-|---|---|---|
-| gru | hourly :03 | orchestrator: reads runway, picks how many minions, fans out; also computes lane coverage and spawns nerd on demand (folded from datta), and answers decision/infra asks within the hour |
-| minion | spawned by gru | builds a batch of backlog items → `member/…` branch → PR |
-| judge-judy | every 15 min | text-only merge-blocking code review of open PRs |
-| the-fixer | hourly :47 + webhook on red CI | incident response: red CI/deploy, dark prod, stuck PR, red lint, alert-issue dedup |
-| marie | every 4h :33 | backlog hygiene, RICE ranking, stale-claim clearing; also worktree/branch sweep (folded from roomba) and surface-debt hygiene (folded from custodian) |
-| sentry | every 3h :17 | uses the product like a person; files what breaks; also re-checks the last deploy live (gate 3) at the top of every pass |
-| vp | on `quality:*` labels (`vp_due.sh`) | acceptance judge (kept as its own dispatch target — see fk#1195 note above) |
-| nerd | spawned by gru with `lane=<name>` | filed-findings pass (ui/quality/datadog/…); the datadog lane also carries the product funnel read and "doubt the number" rule (folded from signals) |
-| red | every 6h :23 | adversary: `members/red/attacks.yaml` |
-| dont-shoot-the-messenger | daily 06:30 CT (+12:30, 17:30) | the one voice to the human: the brief |
-| librarian | daily 00:15 | tends memory dirs; writes INTENT.md |
-| librarian-scrub | hourly :06 | the shell credential scrub (kept as its own dispatch target — see fk#1195 note above) |
-| jefe | hourly :21, only when its inbox has mail | escalation desk for member-to-member messages (`scripts/fleet_msg.py`): gru's gate-drop cc, permission denials, and anything a member left unacked for 2 of its cadences. Back from the fk#1195 archive by Reif's #8215 amendment (he named jefe as the recipient); its `llm.pregate` makes an empty inbox cost $0, so it adds no spend to a quiet hour |
+The rule behind the roster (fk#1195): keep members under 10, add tasks to existing members,
+never create new ones. Folded duties live in the charters that took them (marie's Part E/F,
+nerd's datadog lane, gru's own step 9). vp and librarian-scrub stay separate dispatch targets
+despite the letter of that budget — both hit a real tool-grant/cadence conflict with the member
+they'd otherwise fold into (see judge-judy.md and librarian.md); that is a stated deviation,
+not an oversight.
+
+Not every start is a cron slot: gru spawns minion, and nerd with `lane=<name>`; the-fixer also
+wakes on a red-CI webhook; vp only works when `vp_due.sh` finds `quality:*` labels; jefe's
+`llm.pregate` makes an empty inbox cost $0.
 
 **Member-to-member messages (philanthropy#8215).** `fleet_msg.py send` → `msgs` in fleet.db →
 the recipient's next pass opens with an INBOX block (run_member.sh) → `ack`/`reply`. The
@@ -81,14 +84,14 @@ watchdog (cron :04/:19/:34/:49) escalates an unacked message to jefe after 2 of 
 cadences, then folds jefe's unacked ones into ONE ask for Reif. Senders today: gru → marie+jefe
 (>3 gate drops, `gate_drops.py`), any member → jefe (gh denial, `denial_asks.py`), the-fixer →
 owner (PR idle >4h, hourly :47 cron), sentry → the-fixer (failing journey, `journey_issue_filer.py`).
-Inspect: `podman exec -e FLEET_LOG_DIR=/var/log/fleet-kit philanthropy python3 /fleet-kit/scripts/fleet_msg.py summary`.
+Inspect: `podman exec -e FLEET_LOG_DIR=/var/log/fleet-kit "$FLEET_BOX_CONTAINER" python3 /fleet-kit/scripts/fleet_msg.py summary`.
 
 **hq is a member on the bus (philanthropy#8218)**, but not a container member: it is the Claude
-session on the dino host, ticking every 30 min (its cadence for the watchdog). Before each gru
+session on the box itself, ticking every 30 min (its cadence for the watchdog). Before each gru
 pass, run_gru_fanout.sh sends it `prod-access` (open `fleet:needs-prod-access` items: prod DB,
 secrets, Cloudflare, which gru and minions skip) and `merge-ready` (minion drafts that are done
 and green: `minion_checkpoint.py ready --pr N --ci`, then `gh pr merge N --auto --squash`).
-It reads with `podman exec -e FLEET_LOG_DIR=/var/log/fleet-kit philanthropy python3 /fleet-kit/scripts/fleet_msg.py inbox --me hq --render`
+It reads with `podman exec -e FLEET_LOG_DIR=/var/log/fleet-kit "$FLEET_BOX_CONTAINER" python3 /fleet-kit/scripts/fleet_msg.py inbox --me hq --render`
 and acks/replies like any member. The same pre-gru step runs `gate_drops.py intake` over the
 whole backlog (quality:solid default; needs-spec + comment + one message to marie/jefe).
 
@@ -104,19 +107,18 @@ caps live in the manifest (`llm.max_turns`, `mandate.limits.max_budget_usd`); th
 
 ## 6. Accounts and budget
 
-Claude logins on the box: `~/.claude-philanthropy`, `~/.claude-tgp`, `~/.claude-gmail`,
-`~/.claude-reif-google` (each a full Claude Code auth dir; `scripts/set_account_token.sh` and
+Claude logins on the box: one `~/.claude-<account>` per name in `FLEET_ACCOUNTS` (fleet.env);
+which login each name stands for is noted in `instance.env` (each a full Claude Code auth dir; `scripts/set_account_token.sh` and
 `scripts/verify_account_login.sh` manage them). The pool order and gating come from
 `scripts/account_pool.sh`, which reads each account's Maxx meter:
 
-- Maxx server = podman container `maxx` on dino; owner keys in its volume `/data/_auth.json`.
+- Maxx server = podman container `maxx` on the box; owner keys in its volume `/data/_auth.json`.
 - The fleet's copies: `~/.config/fleet-kit/secrets.env` → `FLEET_MAXX_HANDLE_<ACCT>` /
   `FLEET_MAXX_KEY_<ACCT>` (plus `GH_TOKEN`, `CLOUDFLARE_API_TOKEN`, `NTFY_TOPIC`). Names only
   here, never values. **A Maxx container restart can rewrite a key** (2026-09-18); the fleet then
   reads `maxx_auth_rejected` and shows the account as `calibrating`. Re-sync from `_auth.json`.
 - Check one account: `FLEET_MAXX_HANDLE=<h> FLEET_MAXX_KEY=<k> python3 scripts/maxx_reader.py` → `label: ok`.
-- Weekly caps reset per account (philanthropy Sun 07:00Z as of 09-2026; the others on their own
-  day). `logs/account-pool-exhausted.state` lists who is gated and until when; `fleet_status.sh`
+- Weekly caps reset per account, each on its own day. `logs/account-pool-exhausted.state` lists who is gated and until when; `fleet_status.sh`
   prints it.
 - Ceiling = `FLEET_SHARE_FRACTION` × sustainable pace per hour (fk#1169). Below 0.01 every
   member logs `PACED` and holds. That is budget, not breakage, unless the accounts are healthy,
@@ -126,12 +128,13 @@ Claude logins on the box: `~/.claude-philanthropy`, `~/.claude-tgp`, `~/.claude-
 
 | what | path |
 |---|---|
-| live dials | `~/fleet-kit/instances/nonprofit-atlas/fleet.env` (bash-sourced, last assignment wins; `scripts/fleet_env_lint.py` names duplicates) |
+| where this install is (box, paths, container, URL) | `$FLEET_BOX_INSTANCE_DIR/instance.env`, and the same file in your laptop checkout under `instances/<name>/` (never in git, no secrets) |
+| live dials | `$FLEET_BOX_INSTANCE_DIR/fleet.env` (bash-sourced, last assignment wins; `scripts/fleet_env_lint.py` names duplicates) |
 | secrets | `~/.config/fleet-kit/secrets.env` (never in the repo) |
-| logs (host view of the container's `/var/log/fleet-kit`) | `~/fleet-kit/instances/nonprofit-atlas/logs/` — `runs.jsonl` (every pass), `<member>.log`, `gitpull.log` (cron canary), `cron_watchdog.log`, `account-pool.log`, `inbox.log`, `fleet.db` |
-| deploy log | `~/fleet-kit-logs/auto_deploy.log` |
-| host crons | `crontab -l` on dino: auto_deploy every 5 min, liveness/health checks every 5 min, control_plane tick |
-| product repo inside the container | `/repo` (bind mount of `instances/nonprofit-atlas/repo`) |
+| logs (host view of the container's `/var/log/fleet-kit`) | `$FLEET_BOX_INSTANCE_DIR/logs/` — `runs.jsonl` (every pass), `<member>.log`, `gitpull.log` (cron canary), `cron_watchdog.log`, `account-pool.log`, `inbox.log`, `fleet.db` |
+| deploy log | `$FLEET_BOX_DEPLOY_LOG` |
+| host crons | `crontab -l` on the box: auto_deploy every 5 min, liveness/health checks every 5 min, control_plane tick |
+| product repo inside the container | `/repo` (bind mount of `$FLEET_BOX_INSTANCE_DIR/repo`) |
 
 Read logs from the host paths. `podman exec … cat` truncates piped output (391 of 20k lines
 on 2026-09-19) and makes a live fleet look weeks dead.
