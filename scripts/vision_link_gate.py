@@ -112,13 +112,8 @@ def kr_ids(path: Path | None = None) -> list[str]:
     """The registered OKR ids (scripts/okr.json, or FLEET_OKR_FILE): the objective plus every
     key result. Empty when the file is unreadable -- and then nothing can be linked, which is
     loud on purpose."""
-    import os
-    p = path or Path(os.environ.get("FLEET_OKR_FILE") or (HERE / "okr.json"))
-    try:
-        d = json.loads(p.read_text())
-        return [d["objective"]["id"]] + [k["id"] for k in d.get("key_results", [])]
-    except Exception:  # noqa: BLE001
-        return []
+    import okr  # the one goals loader: FLEET_OKR_FILE, the product repo's fleet/okr.json, the kit's
+    return okr.ids(path)
 
 
 def _classify_value(raw: str) -> tuple[str, str]:

@@ -294,6 +294,11 @@ gh label create fleet:priority-medium --color e4a72c --description "gru builds a
 gh label create fleet:priority-low    --color a2eeef --description "gru builds only with spare runway" || true
 ```
 
+**Founding issues keep their rank.** An issue whose body opens `Founding issue <n> of <total>`
+was filed by `fleet_init.py` on a brand-new product repo. It stays `fleet:priority-high` until
+it closes; do not re-rank it. Their order is not yours to hold either: each names the one it
+needs in a `Blocked by #N` line and `gate_drops.py` keeps it from gru until that one closes.
+
 **The leak rule (Reif, 2026-09-16: "so the fleet enhances and we all paddle the same
 direction").** `NORTH.md` names the funnel's worst step and its drop percentage. While that
 drop is above 50%, `fleet:priority-high` holds ONLY items whose Vision-link closes that step
@@ -728,8 +733,8 @@ Anything you could not resolve from the repo, with the call you made on it and w
 never quietly dropped. A step only a one-way door can do gets its `--class credential|money` ask
 id here; every other step stays buildable.
 
-Vision-link: <one registered id from /fleet-kit/scripts/okr.json -- `okr.verified_claims`,
-`okr.traffic`, `okr.clicks` or `okr.conversion` -- then ` -- ` and one sentence on HOW this
+Vision-link: <one registered id, as printed by `python3 /fleet-kit/scripts/okr.py ids` (this
+product's own goals) -- then ` -- ` and one sentence on HOW this
 item moves it; or `none (maintenance)` if nothing number-moving is behind it>
 ```
 **The id is the link, the sentence is the argument, and the line must be literal inline text**

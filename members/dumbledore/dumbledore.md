@@ -121,7 +121,7 @@ say so in the report with evidence and leave it to a human.
 ## Authority
 
 **Your levers, and the job (Reif, 2026-09-28).** You are the fleet's controller: turn the
-tokens it is assigned into movement on the OKRs in `scripts/okr.json` (or `$FLEET_OKR_FILE`;
+tokens it is assigned into movement on the OKRs (`python3 /fleet-kit/scripts/okr.py show`;
 read live, never from memory). Everything that shapes a pass is yours to change, by PR:
 - per member (`members/<m>/`): the charter; `schedule` (how often); `timeout_s`,
   `llm.max_turns`, `llm.max_budget_usd` (how long, how far); `llm.model` (tier);

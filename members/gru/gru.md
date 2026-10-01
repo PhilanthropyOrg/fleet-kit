@@ -353,7 +353,7 @@ spawns exactly one). Your job, in order:
    **Then gate the survivors on a Vision-link — gh#525.** Eligible only if the body or newest
    comment (any comment — `vision_link_gate.py` never checks labels, so a `fleet:prd` comment and
    marie's lightweight `Vision-link:`-only comment, gh#4597, read identically) carries a
-   `Vision-link:` line naming a registered KR id from `/fleet-kit/scripts/okr.json` (Reif
+   `Vision-link:` line naming a registered KR id (`python3 /fleet-kit/scripts/okr.py ids` prints them) (Reif
    2026-09-16: prose no longer counts — "KR2 -- messages" passed while no such KR existed), OR
    is explicitly `Vision-link: none (maintenance)` (fk#1191: a linked candidate elsewhere in the
    pull no longer crowds maintenance out -- KR-first is marie's ranking, not eligibility). A candidate with
@@ -392,7 +392,7 @@ spawns exactly one). Your job, in order:
    for days (5 of them his own `fleet:reif-priority` asks) waiting on marie's 4-hourly pass to
    write two lines. You already hold each issue and the vision. For every `dropped` entry whose
    gap is `vision-link` or `acceptance` (not `by-design`), when the issue text makes it clear:
-   post ONE comment carrying the missing piece -- a `Vision-link: <id from okr.json>` line (or
+   post ONE comment carrying the missing piece -- a `Vision-link: <id from okr.py ids>` line (or
    `Vision-link: none (maintenance)`), and/or Given/When/Then criteria drawn from what the issue
    already asks for, nothing invented -- then run `gate_drops.py run` again on just those items
    and add the newly `eligible` ones to step 3's pack. A `fleet:reif-priority` / `fleet:user-asked`
