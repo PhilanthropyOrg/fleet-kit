@@ -12,3 +12,7 @@ instances/
 .fenix/
 qa-out/
 .retired
+.pytest_cache/
+*.orig
+*.bak
+*.tmp
