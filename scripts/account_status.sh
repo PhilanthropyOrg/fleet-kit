@@ -56,6 +56,28 @@ for acct in $ACCOUNTS; do
   creds="$dir/.credentials.json"
   echo "── $acct"
 
+  # An API-key account (ANTHROPIC_API_KEY_<ACCOUNT> in fleet.env) has no login file to
+  # inspect and no weekly reset: the key works or it does not, and it runs out of credit,
+  # not quota. Only --live can say which; the offline checks below do not apply to it.
+  if [ "$(account_pool_auth_kind "$acct")" = "api_key" ]; then
+    echo "   credentials: API key (ANTHROPIC_API_KEY_$(echo "$acct" | tr '[:lower:]-' '[:upper:]_')) -- pay per token, no weekly limit"
+    if [ "$LIVE" -eq 1 ]; then
+      out=$(CLAUDE_CONFIG_DIR="$dir" ANTHROPIC_API_KEY="$(_account_pool_key_for ANTHROPIC_API_KEY "$acct")" \
+              env -u CLAUDE_CODE_OAUTH_TOKEN timeout 90 claude -p "say ok" 2>&1)
+      rc=$?
+      if [ "$rc" -eq 0 ]; then
+        echo "   live auth:   OK"; usable=$((usable + 1))
+      else
+        echo "   live auth:   FAIL (rc=$rc) -- $(head -3 <<<"$out" | tr '\n' ' ' | cut -c1-100)"
+        echo "   fix:         check the key and its credit balance in the Anthropic console"
+      fi
+    else
+      usable=$((usable + 1))
+    fi
+    echo
+    continue
+  fi
+
   if [ ! -f "$creds" ]; then
     echo "   credentials: MISSING ($creds)"
     echo "   fix:         bash set_account_token.sh $acct"

@@ -355,7 +355,8 @@ def build_record(*, member: str, run_id: str, kind: str, exit_code: int,
                  lane: str | None = None, trailing_loss: bool = False,
                  heartbeat: bool = False, dispatch_skipped: bool = False,
                  fired_by: str | None = None, reason: str | None = None,
-                 checkpoint_pr: int | None = None, commits: int | None = None) -> dict:
+                 checkpoint_pr: int | None = None, commits: int | None = None,
+                 provider: str | None = None, auth: str | None = None) -> dict:
     """One run = one record. `usage` is pass_accounting's parsed JSON, or None (mechanical)."""
     report = parse_report(pass_text)
     if not report.get("report") and kind != "llm" and (pass_text or "").strip():
@@ -420,6 +421,14 @@ def build_record(*, member: str, run_id: str, kind: str, exit_code: int,
         # Real commits the pass added to its branch; 0 on a streak = stalled (claim_history.py).
         "commits": commits,
     }
+    # Which vendor's CLI ran the pass and how the account pays (subscription, api_key,
+    # chatgpt_login), so cost can be compared across them. Written only when the runner says
+    # so: a row without them is a claude pass on a subscription, which is every row before
+    # other providers existed -- those rows keep their exact shape.
+    if provider:
+        rec["provider"] = provider
+    if auth:
+        rec["auth"] = auth
     u = usage or {}
     # Field names here match pass_accounting.py's split() output verbatim -- that module is the
     # ONE place that reads `claude -p --output-format json`, so every consumer of a run record
@@ -489,6 +498,10 @@ def main(argv=None) -> int:
                          "(run_member.sh). claim_history.py never counts such a run as a dead end.")
     ap.add_argument("--commits", type=int,
                     help="real (non-merge) commits this pass added to its branch (run_member.sh)")
+    ap.add_argument("--provider", help="the model CLI that ran this pass (claude, codex), when "
+                                       "it is not the default claude-on-a-subscription")
+    ap.add_argument("--auth", help="how the account that ran this pass pays: subscription, "
+                                   "api_key or chatgpt_login")
     ap.add_argument("--trailing-loss", action="store_true",
                     help="gh#257: stream_log.py's _detect_trailing_loss fired for this run -- "
                          "a real report existed one turn earlier and was overwritten by a "
@@ -537,7 +550,7 @@ def main(argv=None) -> int:
                        item_id=a.item_id, pr=a.pr, lane=a.lane, trailing_loss=a.trailing_loss,
                        heartbeat=a.heartbeat, dispatch_skipped=a.dispatch_skipped,
                        fired_by=a.fired_by, reason=a.reason, checkpoint_pr=a.checkpoint_pr,
-                       commits=a.commits)
+                       commits=a.commits, provider=a.provider, auth=a.auth)
     # Reif, 2026-09-16, on a gru report in the console: "this needs to be in plain english and
     # run on haiku - dont burn tokens for this." The same 160-word haiku rewrite run_mail.py
     # already does for the email lands ON the record, so the console drawer opens with it.

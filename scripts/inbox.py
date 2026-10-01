@@ -551,6 +551,18 @@ def file_backlog(title: str, body: str, sender: str, run=None) -> str:
     return r.stdout.strip().splitlines()[-1]
 
 
+def resend_post(payload: dict, key: str) -> int:
+    """POST one message to Resend and return the HTTP status. The kit's one Python door to
+    the mail provider: send_reply below and outreach_send.py both go through it. Raises what
+    urlopen raises (HTTPError carries the provider's status in .code)."""
+    req = urllib.request.Request(f"{RESEND_API}/emails", data=json.dumps(payload).encode(),
+                                 headers={"Authorization": f"Bearer {key}",
+                                          "Content-Type": "application/json",
+                                          "User-Agent": "fleet-kit-inbox/1.0"})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return r.status
+
+
 def send_reply(to: str, subject: str, text: str, in_reply_to: str | None = None) -> bool:
     """One short confirmation back to the sender, threaded under his mail."""
     key = resend_key()
@@ -562,13 +574,8 @@ def send_reply(to: str, subject: str, text: str, in_reply_to: str | None = None)
         payload["reply_to"] = [os.environ["FLEET_REPLY_TO"]]
     if in_reply_to:
         payload["headers"] = {"In-Reply-To": in_reply_to, "References": in_reply_to}
-    req = urllib.request.Request(f"{RESEND_API}/emails", data=json.dumps(payload).encode(),
-                                 headers={"Authorization": f"Bearer {key}",
-                                          "Content-Type": "application/json",
-                                          "User-Agent": "fleet-kit-inbox/1.0"})
     try:
-        with urllib.request.urlopen(req, timeout=30) as r:
-            return 200 <= r.status < 300
+        return 200 <= resend_post(payload, key) < 300
     except Exception as exc:  # noqa: BLE001
         log(f"reply to {to} failed: {exc}")
         return False
