@@ -1998,6 +1998,7 @@ PAGE = (KIT_DIR / "scripts" / "fleet_view.html")
 # reachable at /classic until Reif accepts v2 on his phone (docs/quality-standard.md rule 5).
 PAGE_V2 = (KIT_DIR / "scripts" / "fleet_home.html")
 PAGE_CHAT = KIT_DIR / "scripts" / "fleet_chat.html"   # ask Claude about the fleet (fleet_chat.py)
+PAGE_ABOUT = KIT_DIR / "scripts" / "fleet_about.html"  # what the fleet is, for a newcomer
 PROCESS_STARTED_AT = time.time()
 
 
@@ -2232,8 +2233,9 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
-        if path == "/chat":
-            body = (PAGE_CHAT.read_text() if PAGE_CHAT.exists() else "<h1>fleet_chat.html missing</h1>").encode()
+        if path in ("/chat", "/about"):
+            page = PAGE_CHAT if path == "/chat" else PAGE_ABOUT
+            body = (page.read_text() if page.exists() else f"<h1>{page.name} missing</h1>").encode()
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))

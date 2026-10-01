@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>What is the fleet?</title>
+<!--
+  fleet_about.html -- /about: what the fleet is, for someone who has never seen it. Plain words.
+  Everything that changes (status, the goal, the roster, today's numbers) is read live from the
+  same APIs Home uses, never written into this file.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{--ink:#1a1c19;--ink-2:#3a3f3a;--muted:#6b736b;--faint:#8b9188;--paper:#fff;--tint:#f5f7f3;--tint-2:#eef1ea;--rule:#e6e9e4;
+  --accent:#635bff;--accent-soft:#f0ebff;--ok:#1f8b4c;--off:#b9bcc2;--shadow:0 1px 3px rgba(0,0,0,.06);
+  --sans:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;--mono:"IBM Plex Mono",ui-monospace,Menlo,monospace}
+@media (prefers-color-scheme: dark){:root{--ink:#eceef2;--ink-2:#c9cdd4;--muted:#a2a8b3;--faint:#7d838e;--paper:#1b1d21;--tint:#15171b;--tint-2:#262930;--rule:#2f333a;--accent:#8f88ff;--accent-soft:#2a2750;--off:#4b4f57;--shadow:0 1px 3px rgba(0,0,0,.4)}}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--tint);color:var(--ink);font:15px/1.6 var(--sans);-webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+.top{background:var(--paper);border-bottom:1px solid var(--rule)}
+.top .in{max-width:960px;margin:0 auto;padding:14px 24px;display:flex;align-items:center;gap:12px}
+.brand{font:700 15px var(--sans);letter-spacing:.08em}.brand b{color:var(--accent);letter-spacing:0}
+.brand small{font:500 10px var(--sans);letter-spacing:.1em;text-transform:uppercase;color:var(--faint);margin-left:6px}
+.top a.go{margin-left:auto;font-weight:600;font-size:14px}
+main{max-width:960px;margin:0 auto;padding:40px 24px 80px}
+h1{font:700 36px/1.15 var(--sans);letter-spacing:-.02em;margin:0 0 14px;max-width:720px}
+.lead{font-size:18px;color:var(--ink-2);max-width:680px;margin:0 0 20px}
+h2{font:700 22px/1.3 var(--sans);letter-spacing:-.01em;margin:56px 0 6px}
+h2+p{color:var(--muted);margin:0 0 18px;max-width:680px}
+.pill{display:inline-flex;align-items:center;gap:8px;padding:4px 12px;border-radius:999px;background:var(--paper);border:1px solid var(--rule);font-size:13px;font-weight:500}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--off)}.dot.on{background:var(--ok)}
+.strip{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:28px}
+.card{background:var(--paper);border:1px solid var(--rule);border-radius:10px;box-shadow:var(--shadow);padding:16px 18px}
+.big{font:600 30px/1.1 var(--sans);letter-spacing:-.02em}
+.lbl{font:500 11px var(--mono);text-transform:uppercase;letter-spacing:.06em;color:var(--faint);margin-bottom:6px}
+.sub{color:var(--muted);font-size:13px;margin-top:4px}
+.goal{display:grid;grid-template-columns:auto 1fr;gap:24px;align-items:center}
+.goal .big{font-size:48px}
+.steps{display:grid;gap:12px}
+.step{display:grid;grid-template-columns:200px 1fr;gap:20px;background:var(--paper);border:1px solid var(--rule);border-radius:10px;padding:18px}
+.step .n{font:500 11px var(--mono);color:var(--accent);letter-spacing:.06em;text-transform:uppercase}
+.step h3{margin:2px 0 4px;font:700 17px var(--sans)}
+.step p{margin:0;color:var(--ink-2);font-size:14px}
+.who{display:grid;gap:8px}
+.m{display:grid;grid-template-columns:26px 1fr;gap:6px;font-size:14px}
+.m .e{font-size:17px;line-height:1.4}
+.m b{font-weight:600}.m .meta{font:12px var(--mono);color:var(--faint);margin-left:6px}
+.m.off{opacity:.55}.m .tag{font:500 10px var(--mono);text-transform:uppercase;background:var(--tint-2);border-radius:4px;padding:1px 5px;margin-left:6px;color:var(--muted)}
+.m p{margin:0;color:var(--muted)}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+dl{margin:0}dt{font-weight:600;margin-top:12px}dt:first-child{margin-top:0}dd{margin:2px 0 0;color:var(--ink-2);font-size:14px}
+ul.plain{margin:0;padding-left:18px}ul.plain li{margin:6px 0;font-size:14px;color:var(--ink-2)}
+.cta{margin-top:56px;background:var(--accent-soft);border-radius:12px;padding:24px;display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+.cta p{margin:0;flex:1;min-width:240px}
+.btn{display:inline-block;background:var(--accent);color:#fff;font-weight:600;padding:10px 18px;border-radius:8px}.btn:hover{text-decoration:none;opacity:.92}
+.muted{color:var(--muted)}
+@media (max-width:720px){h1{font-size:28px}.lead{font-size:16px}.strip,.cols{grid-template-columns:1fr}.step{grid-template-columns:1fr;gap:12px}.goal{grid-template-columns:1fr;gap:8px}main{padding:28px 16px 64px}.top .in{padding:12px 16px}}
+</style>
+</head>
+<body>
+<div class="top"><div class="in">
+  <span class="brand"><b>◆</b> FLEET<small id="brand"></small></span>
+  <a class="go" id="dash" href="./">Open the dashboard →</a>
+</div></div>
+<main>
+  <span class="pill"><span class="dot" id="dot"></span><span id="status">Checking…</span></span>
+  <h1 style="margin-top:16px">A team of AI workers that builds and runs <span id="product">this product</span> by itself.</h1>
+  <p class="lead">Each worker is an AI (Claude) with one job. Together they find what is broken or missing,
+    decide what matters most, write the code, check it, put it live, and report back. A person sets
+    the direction. The fleet does the rest, day and night.</p>
+  <div class="strip">
+    <div class="card"><div class="lbl">Changes put live, last 24h</div><div class="big" id="sShipped">–</div><div class="sub">Code changes that are now on the real site.</div></div>
+    <div class="card"><div class="lbl">Problems solved, last 24h</div><div class="big" id="sResolved">–</div><div class="sub">To-do items closed by a change that went live.</div></div>
+    <div class="card"><div class="lbl">Workers switched on</div><div class="big" id="sOn">–</div><div class="sub">Each runs on its own schedule.</div></div>
+  </div>
+
+  <h2>What it is working toward</h2>
+  <p>Every worker reads the same goal before it starts. Work that does not move this number gets pushed down the list.</p>
+  <div class="card goal">
+    <div><div class="lbl" id="gLabel">The number</div><div class="big" id="gValue">–</div></div>
+    <div><div id="gUnit" style="font-weight:600"></div><div class="sub" id="gSub">Loading…</div></div>
+  </div>
+
+  <h2>How one piece of work moves through the fleet</h2>
+  <p>Think of it as a small company. Each step below has its own workers. The list is live: it shows who is on that job right now.</p>
+  <div class="steps" id="steps"></div>
+
+  <h2>Reading the dashboard</h2>
+  <p>The Home page is split into four rows. Here is what each one tells you.</p>
+  <div class="cols">
+    <div class="card"><dl>
+      <dt>Outcome</dt><dd>The goal above, and the steps that lead to it. Is the product getting the results it exists for?</dd>
+      <dt>Output</dt><dd>What the fleet finished: problems solved, changes put live, and requests from the owner that got done.</dd>
+      <dt>Flow</dt><dd>What is waiting or stuck: the to-do list, open changes, items that need a clearer description, and messages between workers.</dd>
+      <dt>Health and spend</dt><dd>Is it alive? How many AI accounts are working, and what it costs.</dd>
+    </dl></div>
+    <div class="card"><dl>
+      <dt>Issue</dt><dd>One item on the to-do list: a bug, a missing feature, or a finding.</dd>
+      <dt>Backlog</dt><dd>The whole to-do list, ranked.</dd>
+      <dt>Pull request (PR)</dt><dd>A proposed code change, waiting to be checked.</dd>
+      <dt>Merge</dt><dd>The change was approved and joined the main code.</dd>
+      <dt>Live (deployed)</dt><dd>The change is now on the real site people use.</dd>
+      <dt>Run</dt><dd>One turn of one worker. Click any run on Home to see what it did.</dd>
+    </dl></div>
+  </div>
+
+  <h2>What people do</h2>
+  <p>The fleet works without anyone watching. People steer it and step in when it matters.</p>
+  <div class="cols">
+    <div class="card"><div class="lbl">The owner</div><ul class="plain">
+      <li>Sets the goal and the direction the work is ranked against.</li>
+      <li>Asks for things. Those requests jump the queue ("Your requests" on Home).</li>
+      <li>Gets three short emails a day: what landed, and anything that needs a person.</li>
+    </ul></div>
+    <div class="card"><div class="lbl">Anyone signed in</div><ul class="plain">
+      <li>Pause the whole fleet with the <b>Fleet</b> switch at the top right of Home.</li>
+      <li>Switch one worker on or off from the Roster page.</li>
+      <li>Ask the fleet a question, or ask it to do something, in the chat.</li>
+      <li>Every action is logged under your name.</li>
+    </ul></div>
+  </div>
+  <div class="card" style="margin-top:12px"><div class="lbl">Built-in safety</div><ul class="plain">
+    <li>No change goes live without an AI review and the automated tests passing.</li>
+    <li>If the site or a test breaks, a fixer opens a fix or rolls the change back within the hour.</li>
+    <li>Each worker has a time and spending limit per run, and every run is recorded, even ones that did nothing.</li>
+  </ul></div>
+
+  <div class="cta">
+    <p><b>Have a question?</b> Open the dashboard and click the chat button in the bottom corner. Ask in plain words, like "what is stuck?" or "pause nerd".</p>
+    <a class="btn" id="dash2" href="./">Open the dashboard</a>
+  </div>
+</main>
+<script>
+// Served at <base>/about; the APIs live under <base>/.
+const BASE = location.pathname.replace(/about\/?$/, '');
+const api = p => fetch(BASE + p, {cache: 'no-store'}).then(r => r.ok ? r.json() : Promise.reject(r.status));
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
+$('dash').href = $('dash2').href = BASE;
+
+const STEPS = [
+  ['find', 'Find', 'Spot problems and gaps. Workers use the live site like a person would, attack it like a bad actor, and dig into the numbers. Each finding becomes an issue on the to-do list.'],
+  ['rank', 'Rank', 'Decide what matters. Every item is checked against the goal and put in order, so the most useful work is done first.'],
+  ['build', 'Build', 'Write the code. Builders take the top items, change the code in a private copy, and open a pull request: a proposed change.'],
+  ['review', 'Review', 'Check the work. An AI reviewer reads every proposed change and automated tests run. Nothing goes in without passing both.'],
+  ['ship', 'Ship', 'Put it live. Approved changes merge on their own and go out to the server. If something breaks, it gets fixed or rolled back.'],
+  ['tell', 'Report', 'Say what happened. Short emails tell the owner what landed and what needs a person.'],
+  ['learn', 'Improve itself', 'Underneath it all, some workers look after the fleet: they keep its memory tidy, answer messages between workers, and fix the fleet\'s own weak spots.'],
+];
+
+function when(s) {
+  if (!s) return '';
+  if (s.interval_s) { const h = s.interval_s / 3600; return h >= 1 ? `every ${h % 1 ? h.toFixed(1) : h} h` : `every ${Math.round(s.interval_s / 60)} min`; }
+  if (s.hourly_at_minute != null) return 'every hour';
+  if (s.daily_at) return `daily at ${s.daily_at}`;
+  return '';
+}
+
+function renderSteps(members, state) {
+  const by = {};
+  for (const m of members) { const s = m.spec || {}; (by[s.stage] = by[s.stage] || []).push(s); }
+  const known = new Set(STEPS.map(x => x[0]));
+  const rest = Object.keys(by).filter(k => !known.has(k)).flatMap(k => by[k]);
+  const steps = STEPS.map(x => [...x]);
+  if (rest.length) steps.push(['_other', 'Other', 'Workers with their own job.']);
+  if (rest.length) by._other = rest;
+  $('steps').innerHTML = steps.map(([k, title, text], i) => {
+    const who = (by[k] || []).map(s => {
+      const on = state ? state[s.name] !== false : s.enabled !== false;
+      return `<div class="m${on ? '' : ' off'}"><span class="e">${esc(s.emoji || '•')}</span><div><b>${esc(s.name)}</b><span class="meta">${esc(when(s.schedule))}</span>${on ? '' : '<span class="tag">off now</span>'}<p>${esc(s.plain || '')}</p></div></div>`;
+    }).join('') || '<span class="muted">No worker on this step right now.</span>';
+    return `<div class="step"><div><div class="n">Step ${i + 1}</div><h3>${esc(title)}</h3><p>${esc(text)}</p></div><div class="who">${who}</div></div>`;
+  }).join('');
+}
+
+(async () => {
+  const [state, members, metrics] = await Promise.all([
+    api('api/fleet_state').catch(() => null), api('api/members').catch(() => null), api('api/metrics').catch(() => null)]);
+  if (state) {
+    if (state.BRAND) { $('product').textContent = state.BRAND; $('brand').textContent = state.BRAND; }
+    const paused = state.FLEET_ENABLED === false;
+    $('dot').classList.toggle('on', !paused);
+    $('status').textContent = paused ? 'Paused right now' : 'Running right now';
+  } else { $('status').textContent = 'Status unavailable'; }
+  const ms = (members && members.members) || [];
+  if (ms.length) {
+    renderSteps(ms, state);
+    const on = ms.filter(m => (state ? state[m.spec.name] !== false : m.spec.enabled !== false)).length;
+    $('sOn').textContent = `${on} of ${ms.length}`;
+  } else { $('steps').innerHTML = '<span class="muted">The roster could not be read right now.</span>'; }
+  const t = Object.fromEntries(((metrics && metrics.metrics) || []).map(m => [m.id, m]));
+  const show = (id, el) => { if (t[id] && t[id].value != null) $(el).textContent = t[id].value; };
+  show('fleet.shipped_live_per_day', 'sShipped'); show('fleet.issues_resolved_24h', 'sResolved');
+  const g = Object.values(t).find(m => m.home === 'outcome');
+  if (g) {
+    $('gLabel').textContent = g.label; $('gValue').textContent = g.value ?? '–';
+    $('gUnit').textContent = g.unit || ''; $('gSub').textContent = g.sub || '';
+  } else { $('gSub').textContent = 'The goal is not set up on this fleet yet.'; }
+})();
+</script>
+</body>
+</html>

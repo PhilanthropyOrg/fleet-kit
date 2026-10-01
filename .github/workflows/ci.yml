@@ -96,6 +96,8 @@ jobs:
         run: python3 scripts/test_signin_email.py
       - name: run test_scoreboard_deploy_runs.py
         run: python3 scripts/test_scoreboard_deploy_runs.py
+      - name: run test_fleet_about.py
+        run: python3 scripts/test_fleet_about.py
       - name: run test_metrics_warm.py
         run: python3 scripts/test_metrics_warm.py
       - name: run test_ci_runs_every_test_file.py
