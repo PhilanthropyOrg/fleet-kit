@@ -1,0 +1,33 @@
+The fleet has a growth member, with send limits it cannot talk its way past
+
+The fleet can now run go-to-market: the growth member sends outreach/marketing
+email with hard policy limits enforced in code, never in prompts.
+
+New behavior:
+1. Growth member (members/growth/): owns awareness and sign-ups via email, content,
+   and search. Disabled by default. Reports what moved via access logs.
+2. Send tool (scripts/outreach_send.py): the ONLY path for marketing/outreach mail.
+   Enforces before any send: policy enabled, daily/per-recipient caps, GDPR consent,
+   list source allowed, email type allowed, recipient not unsubscribed.
+3. Configuration (fleet.env): outreach policy as environment variables
+   (enabled flag, sending domain, caps in units and USD, GDPR region rules,
+   allowed sources and email types). All OFF by default.
+4. Database schema (fleet_db.py): outreach_campaigns, recipients, results, ledger
+   for measuring compliance post-hoc.
+5. Ledger: every send decision (sent/refused + reason) logged to fleet.db for
+   audit and measuring what stopped what.
+6. Ask.py configurable: FLEET_ASK_MAIL_FROM env var makes the "from" address
+   configurable, preserving hello@philanthropy.org as the live default.
+
+Tests prove:
+- Every cap actually refuses (daily, spend, daily per-recipient)
+- Every refusal reason works (GDPR consent, list source, email type, suppression)
+- Member spec validates and is disabled by default
+- Dry-run walkthrough shows footer + ledger + compliance
+
+No real email sent. Dry-run is default; real send requires --send flag AND
+policy enabled in fleet.env. Unsubscribe handling: link in every mail, immediate
+addition to suppression list.
+
+Co-Authored-By: Claude Haiku 4.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01CwAyEJ7t6VcDQmqSWe5KKi

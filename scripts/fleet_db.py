@@ -173,6 +173,83 @@ CREATE TABLE IF NOT EXISTS msgs (
 );
 CREATE INDEX IF NOT EXISTS idx_msgs_inbox ON msgs(recipient, status);
 CREATE INDEX IF NOT EXISTS idx_msgs_dedupe ON msgs(recipient, kind, key, sent_at);
+
+-- Outreach campaigns and send tracking (scripts/outreach_send.py). NOT rebuilt from runs.jsonl;
+-- this is state for the growth member's email outreach.
+--
+-- outreach_campaigns: one row per email campaign (bulk send to recipients)
+CREATE TABLE IF NOT EXISTS outreach_campaigns (
+  id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+  campaign_name      TEXT NOT NULL,
+  subject            TEXT NOT NULL,
+  body               TEXT NOT NULL,
+  email_type         TEXT NOT NULL,  -- transactional, lifecycle, announcement, outreach
+  source             TEXT NOT NULL,  -- own_form, apollo, rocketreach, clearbit, etc.
+  recipient_count    INTEGER NOT NULL,
+  created_at         REAL NOT NULL,
+  sent_at            REAL,
+  status             TEXT NOT NULL DEFAULT 'draft'  -- draft, sent, failed
+);
+CREATE INDEX IF NOT EXISTS idx_outreach_campaigns_created ON outreach_campaigns(created_at);
+
+-- outreach_recipients: one row per email address in a campaign
+CREATE TABLE IF NOT EXISTS outreach_recipients (
+  id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+  campaign_id        INTEGER NOT NULL,
+  email              TEXT NOT NULL,
+  region             TEXT,  -- US, EU, CA, etc.
+  consent_status     TEXT,  -- explicit_optin, business_contact, existing_customer
+  name               TEXT,
+  company            TEXT,
+  source             TEXT,  -- own_form, apollo, rocketreach, clearbit, etc.
+  source_url         TEXT,  -- URL where consent came from
+  added_at           REAL NOT NULL,
+  FOREIGN KEY (campaign_id) REFERENCES outreach_campaigns(id)
+);
+CREATE INDEX IF NOT EXISTS idx_outreach_recipients_campaign ON outreach_recipients(campaign_id);
+CREATE INDEX IF NOT EXISTS idx_outreach_recipients_email ON outreach_recipients(email);
+
+-- outreach_results: tracking opens, clicks, bounces per recipient per campaign
+CREATE TABLE IF NOT EXISTS outreach_results (
+  id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+  campaign_id        INTEGER NOT NULL,
+  recipient_id       INTEGER NOT NULL,
+  opened             BOOLEAN DEFAULT 0,
+  opened_at          REAL,
+  clicked            BOOLEAN DEFAULT 0,
+  clicked_at         REAL,
+  bounced            BOOLEAN DEFAULT 0,
+  unsubscribed       BOOLEAN DEFAULT 0,
+  unsubscribed_at    REAL,
+  last_update        REAL NOT NULL,
+  FOREIGN KEY (campaign_id) REFERENCES outreach_campaigns(id),
+  FOREIGN KEY (recipient_id) REFERENCES outreach_recipients(id)
+);
+CREATE INDEX IF NOT EXISTS idx_outreach_results_campaign ON outreach_results(campaign_id);
+
+-- outreach_ledger: every send decision (sent/refused) logged with reason. Queryable by
+-- campaign/recipient/reason for measuring policy enforcement post-hoc.
+CREATE TABLE IF NOT EXISTS outreach_ledger (
+  id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+  campaign_id        INTEGER NOT NULL,
+  recipient_email    TEXT NOT NULL,
+  decision           TEXT NOT NULL,  -- sent, refused
+  reason             TEXT,  -- daily_cap_exceeded, spend_cap_exceeded, gdpr_no_consent, no_suppression_list, etc.
+  decided_at         REAL NOT NULL,
+  provider_response  TEXT  -- Resend/Postmark API response if sent; error if refused
+);
+CREATE INDEX IF NOT EXISTS idx_outreach_ledger_campaign ON outreach_ledger(campaign_id);
+CREATE INDEX IF NOT EXISTS idx_outreach_ledger_decided ON outreach_ledger(decided_at);
+CREATE INDEX IF NOT EXISTS idx_outreach_ledger_reason ON outreach_ledger(reason);
+
+-- outreach_suppression: unsubscribed email addresses (CAN-SPAM, GDPR compliance)
+CREATE TABLE IF NOT EXISTS outreach_suppression (
+  id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+  email              TEXT NOT NULL UNIQUE,
+  unsubscribed_at    REAL NOT NULL,
+  source             TEXT  -- campaign_id, manual, bounced, etc.
+);
+CREATE INDEX IF NOT EXISTS idx_outreach_suppression_email ON outreach_suppression(email);
 """
 
 

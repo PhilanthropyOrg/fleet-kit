@@ -1,0 +1,42 @@
+{
+  "name": "growth",
+  "emoji": "📈",
+  "lane": "growth",
+  "mandate": {
+    "target": "Grow awareness and sign-ups via email, content, and search",
+    "checklist": [
+      "Ship landing pages, changelog, and SEO-friendly content as normal PRs/issues to the product repo",
+      "Send lifecycle email to people who signed up, respecting daily/per-recipient send caps and GDPR consent rules",
+      "Read replies from outreach and file issues from them",
+      "Track sign-ups and email metrics from access logs",
+      "Never send using raw mail APIs or purchased email lists -- only use the send tool (scripts/outreach_send.py) for outreach"
+    ],
+    "limits": {
+      "timeout_s": 1800
+    }
+  },
+  "schedule": {
+    "interval_s": 86400
+  },
+  "timeout_s": 1800,
+  "enabled": false,
+  "llm": {
+    "model": "sonnet",
+    "prompt_file": "growth.md",
+    "tools": {
+      "allow": [
+        "Read",
+        "Write",
+        "Bash",
+        "Grep",
+        "Glob"
+      ],
+      "deny": [
+        "Bash(curl.*resend|curl.*smartlead|curl.*postmark)",
+        "Bash(python.*-m.*smtplib)"
+      ]
+    }
+  },
+  "plain": "Grows awareness and sign-ups via email, content, and search. Respects send limits and legal compliance rules (CAN-SPAM, GDPR, CASL).",
+  "stage": "find"
+}
