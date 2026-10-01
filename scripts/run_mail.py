@@ -153,6 +153,40 @@ def raw_text(rec: dict) -> str:
     return "\n\n".join(parts)
 
 
+# The rewrite is 160 words of text, and it ran as a full agent session. Measured on the live
+# fleet 2026-09-24..10-01 from the CLI's own transcripts: 4,821 rewrite sessions, $328 at list
+# price, none of it in runs.jsonl. Each one loaded the product repo's SessionStart hooks, its
+# CLAUDE.md, the skill list and 12 tool definitions (13.7k tokens written to cache), and thought
+# for 4,000-10,000 output tokens before writing ~110. That put a session at $0.05-0.08 against
+# a $0.05 cap and 50-100s against a 120s timeout: through 09-28 no run got a `plain` field at
+# all, and on 10-01 142 of 573 timed out and the pool re-ran failures on the next account (741
+# sessions for 573 runs). LEAN_FLAGS drop what a rewrite never uses: project settings and
+# hooks, skills, tools. LEAN_ENV turns thinking off. Same prompt, same model, same cap, same
+# account pool. FLEET_RUN_PLAIN_LEAN=0 puts the old call back.
+LEAN_FLAGS = ("--setting-sources", "--disable-slash-commands", "--tools")
+LEAN_ARGS = '--setting-sources user --disable-slash-commands --tools ""'
+LEAN_ENV = {"MAX_THINKING_TOKENS": "0"}
+_lean_ok: bool | None = None
+
+
+def lean() -> bool:
+    """Use the lean call? Only when this box's CLI lists every lean flag in its --help (no
+    model call, checked once per process): an unknown flag would fail on every account, and the
+    pool counts those failures against the accounts the members run on."""
+    global _lean_ok
+    if os.environ.get("FLEET_RUN_PLAIN_LEAN", "1").strip() == "0":
+        return False
+    if _lean_ok is None:
+        try:
+            out = subprocess.run(["claude", "--help"], capture_output=True, text=True, timeout=20).stdout
+            # A flag's own entry sits at the left margin; a mention of it inside another
+            # flag's description is indented far deeper and does not count.
+            _lean_ok = all(re.search(rf"(?m)^ {{1,4}}{re.escape(f)}(?=[ ,=]|$)", out) for f in LEAN_FLAGS)
+        except (subprocess.SubprocessError, OSError):
+            _lean_ok = False
+    return _lean_ok
+
+
 def plain_words(rec: dict) -> str:
     """Best-effort plain-English rewrite. Empty string on any failure -- see plain-words.log
     (PLAIN_LOG_FILE) for which of the four reasons fired."""
@@ -160,16 +194,18 @@ def plain_words(rec: dict) -> str:
     if not pool.exists():
         _log_plain_failure(rec, "no-account-pool", str(pool))
         return ""
+    use_lean = lean()
     script = (
         f'. "{pool}"; account_pool_run claude -p "$1" --model "$2" --output-format text '
-        f'--max-budget-usd "$3"'
+        f'--max-budget-usd "$3"' + (f" {LEAN_ARGS}" if use_lean else "")
     )
     # No --dangerously-skip-permissions: the container runs as root, where the CLI refuses that
     # flag, and a text-only rewrite never calls a tool, so it never needs one approved.
     try:
         r = subprocess.run(["bash", "-c", script, "run_mail", PLAIN_PROMPT + raw_text(rec)[:6000],
                             PLAIN_MODEL, PLAIN_BUDGET_USD],
-                           capture_output=True, text=True, timeout=PLAIN_TIMEOUT_S)
+                           capture_output=True, text=True, timeout=PLAIN_TIMEOUT_S,
+                           env={**os.environ, **LEAN_ENV} if use_lean else None)
     except subprocess.TimeoutExpired:
         _log_plain_failure(rec, "timeout", f"budget={PLAIN_TIMEOUT_S}s")
         return ""
