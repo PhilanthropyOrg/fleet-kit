@@ -149,17 +149,22 @@ Part C has its own, different, closing rule for those (including the scope-chang
 philanthropy#8475), and none of this Part's five tests apply to a standing human directive or
 a direct user ask).
 
-**Walk the WHOLE corpus, not just what is new or what you touched last pass.** The dead items
-are disproportionately the OLD ones: an issue filed months ago has had the most time for the
-code to move past it and for the direction to change out from under it, and it is precisely the
-one no recent pass has re-read. A sweep biased toward recent issues re-triages the healthiest
-part of the backlog and never reaches the part that actually rots. Pull the full open list
-(`gh issue list --state open --limit 200`) and work it **oldest first**.
+**Start with the list a script already made, before any labelling or scoring.** Measured
+2026-10-01: 575 open, and one issue at a time never got through them (0-2 closes a pass).
+`python3 /fleet-kit/scripts/issue_flow.py prune --repo <product repo>` reads the board once and
+lists what can close without a build. Close each with its `reason` in the comment form below:
+- `pr_done` -- an item about a PR that has since merged or closed. Close it even if it wears
+  `fleet:reif-priority`: a filer put that there, not Reif.
+- `twins` -- close every number in `close`; never the `keep`.
+- `shipped` -- a merged PR said it closes this. Run the "Already fixed" check below first.
 
-If the backlog is too large to examine every issue properly in one pass, do NOT skim all of it
-badly — take the oldest slice you can judge on real evidence and say in your report where you
-stopped, so the next pass resumes there instead of restarting at the top. Depth beats coverage:
-a wrong close destroys signal a human has not seen yet.
+Report `Pruned: <n> closed (pr_done a, twins b, shipped c) of <open> open`.
+
+Then walk the rest **oldest first** (`gh issue list --state open --limit 1000 --json
+number,title,labels,createdAt`): the dead items are disproportionately the old ones, the ones
+no recent pass has re-read. Take the oldest slice you can judge on real evidence and say in
+your report where you stopped, so the next pass resumes there. Depth beats coverage: a wrong
+close destroys signal a human has not seen yet.
 
 For each remaining open issue, look for real evidence it's dead:
 
@@ -288,6 +293,11 @@ gh label create fleet:priority-high   --color d73a4a --description "gru builds t
 gh label create fleet:priority-medium --color e4a72c --description "gru builds after high is claimed" || true
 gh label create fleet:priority-low    --color a2eeef --description "gru builds only with spare runway" || true
 ```
+
+**Founding issues keep their rank.** An issue whose body opens `Founding issue <n> of <total>`
+was filed by `fleet_init.py` on a brand-new product repo. It stays `fleet:priority-high` until
+it closes; do not re-rank it. Their order is not yours to hold either: each names the one it
+needs in a `Blocked by #N` line and `gate_drops.py` keeps it from gru until that one closes.
 
 **The leak rule (Reif, 2026-09-16: "so the fleet enhances and we all paddle the same
 direction").** `NORTH.md` names the funnel's worst step and its drop percentage. While that
@@ -723,8 +733,8 @@ Anything you could not resolve from the repo, with the call you made on it and w
 never quietly dropped. A step only a one-way door can do gets its `--class credential|money` ask
 id here; every other step stays buildable.
 
-Vision-link: <one registered id from /fleet-kit/scripts/okr.json -- `okr.verified_claims`,
-`okr.traffic`, `okr.clicks` or `okr.conversion` -- then ` -- ` and one sentence on HOW this
+Vision-link: <one registered id, as printed by `python3 /fleet-kit/scripts/okr.py ids` (this
+product's own goals) -- then ` -- ` and one sentence on HOW this
 item moves it; or `none (maintenance)` if nothing number-moving is behind it>
 ```
 **The id is the link, the sentence is the argument, and the line must be literal inline text**

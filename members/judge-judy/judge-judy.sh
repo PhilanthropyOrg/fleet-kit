@@ -54,6 +54,14 @@ REPO="${FLEET_REPO:?set FLEET_REPO in fleet.env}"
 LOG_DIR="${FLEET_LOG_DIR:-$HOME/Library/Logs/fleet-kit}"
 LOG="$LOG_DIR/judge-judy.log"
 MODEL="${FLEET_CODE_REVIEW_MODEL:-sonnet}"
+# Which vendor reviews (docs/providers.md). claude unless this instance says otherwise; codex
+# puts the review on a different vendor's model than the one that built the change.
+# run_member.sh exports FLEET_MEMBER_PROVIDER after checking the tool policy; a direct run of
+# this script reads the same two fleet.env settings itself.
+REVIEW_PROVIDER="${FLEET_MEMBER_PROVIDER:-${FLEET_PROVIDER_JUDGE_JUDY:-${FLEET_PROVIDER:-claude}}}"
+# What the posted status and comment call the reviewer. Unchanged wording for claude.
+REVIEWER_LABEL="local claude, model=$MODEL"
+[ "$REVIEW_PROVIDER" != "claude" ] && REVIEWER_LABEL="$REVIEW_PROVIDER, model=$(python3 "$KIT_DIR/scripts/provider.py" model --provider "$REVIEW_PROVIDER" --model "$MODEL" 2>/dev/null || echo "$MODEL")"
 TIMEOUT_S="${FLEET_CODE_REVIEW_TIMEOUT:-900}"
 REQUIRED_CHECKS="${FLEET_REQUIRED_CHECKS:-}"
 MAX_PARSE_STRIKES=2
@@ -182,9 +190,11 @@ pick_pr() {
 
 report_run() { # <pr> <head_sha> <usage_file> <outcome-line> <evidence-line> <self-critique-line> [report-text]
   # fk#748: the review the model wrote IS this run's report -- the console's run panel shows it.
+  # $REVIEW_RECEIPT: empty for a claude review on a subscription (the row is then unchanged);
+  # otherwise the provider and how the account pays, set where the model is called below.
   printf 'Outcome: %s\nEvidence: %s\nSelf-critique: %s\nReport:\n%s\n' "$4" "$5" "${6:-none}" "${7:-no review text captured}" | python3 "$KIT_DIR/scripts/run_report.py" \
     --member "judge-judy" --run-id "review-${1}-${2:0:12}" --kind llm --exit-code 0 \
-    --pass-file - --usage-file "$3" --pr "$1" >> "$LOG_DIR/runs.jsonl" 2>>"$LOG"
+    --pass-file - --usage-file "$3" --pr "$1" ${REVIEW_RECEIPT:-} >> "$LOG_DIR/runs.jsonl" 2>>"$LOG"
 }
 
 # gh#267: a tick that finds no PR to review used to log to judge-judy.log and exit without ever
@@ -458,9 +468,38 @@ Answer with a verdict of block unless there is truly nothing blocking, plus one 
   # (see judge_judy_verdict.py), not prose grepped for a magic line (gh#806). pass_accounting.py
   # text/usage still work unchanged -- they only read the envelope's total_cost_usd/usage/result
   # fields, none of which --json-schema changes the shape of.
+  # The pool runs inside $(...), so the account it picked is handed back through a file --
+  # only to say on the run record how that account pays (see REVIEW_RECEIPT).
+  ACCOUNT_POOL_SELECTED_FILE=$(mktemp "${TMPDIR:-/tmp}/judge_judy_acct.XXXXXX")
+  export ACCOUNT_POOL_SELECTED_FILE
+  if [ "$REVIEW_PROVIDER" = "codex" ]; then
+    # The same review on OpenAI's Codex CLI: no tools at all, the same verdict schema
+    # (codex exec --output-schema), and an envelope shaped like claude's so everything below
+    # this line reads it unchanged. codex_pass.py has the flags. The prompt goes by file: the
+    # pool may try a second account, and a pipe could only be read once.
+    PROMPT_FILE=$(mktemp "${TMPDIR:-/tmp}/judge_judy_prompt.XXXXXX")
+    printf '%s' "$PROMPT" > "$PROMPT_FILE"
+    RAW=$(ACCOUNT_POOL_PROVIDER=codex account_pool_run timeout "$TIMEOUT_S" python3 "$KIT_DIR/scripts/codex_pass.py" \
+      --model "$MODEL" --prompt-file "$PROMPT_FILE" --schema "$VERDICT_SCHEMA" 2>>"$LOG")
+    RC=$?
+    rm -f "$PROMPT_FILE"
+  elif [ "$REVIEW_PROVIDER" = "claude" ]; then
   RAW=$(account_pool_run timeout "$TIMEOUT_S" claude -p "$PROMPT" --model "$MODEL" \
     --output-format json --json-schema "$VERDICT_SCHEMA" --max-budget-usd "${FLEET_MAX_BUDGET_USD:-5}" 2>>"$LOG")
   RC=$?
+  else
+    # A provider this script cannot call. No review is better than a review by the wrong
+    # vendor that nobody asked for: no status is posted and the next tick retries.
+    log "PR #$PR: FLEET_PROVIDER names '$REVIEW_PROVIDER', which judge-judy cannot call (claude or codex) -- not reviewing"
+    RAW=""; RC=2
+  fi
+  REVIEW_ACCOUNT=$(cat "$ACCOUNT_POOL_SELECTED_FILE" 2>/dev/null); rm -f "$ACCOUNT_POOL_SELECTED_FILE"
+  REVIEW_RECEIPT=""
+  if [ -n "$REVIEW_ACCOUNT" ] && command -v account_pool_auth_kind >/dev/null 2>&1; then
+    REVIEW_AUTH=$(account_pool_auth_kind "$REVIEW_ACCOUNT" "$REVIEW_PROVIDER")
+    { [ "$REVIEW_PROVIDER" != "claude" ] || [ "$REVIEW_AUTH" != "subscription" ]; } \
+      && REVIEW_RECEIPT="--provider $REVIEW_PROVIDER --auth $REVIEW_AUTH"
+  fi
   printf '%s' "$RAW" | python3 "$KIT_DIR/scripts/pass_accounting.py" text > "$OUT_FILE"
   printf '%s' "$RAW" | python3 "$KIT_DIR/scripts/pass_accounting.py" usage > "$USAGE_FILE" 2>/dev/null
   CALL_COST=$(python3 -c 'import json,sys; d=json.load(sys.stdin); c=d.get("total_cost_usd"); print(c if c is not None else 0)' < "$USAGE_FILE" 2>/dev/null)
@@ -611,7 +650,7 @@ $ERR_VISION_LINK"
   fi  # end of the model-review section (closes gate may have set VERDICT already)
 
   if [ "$VERDICT" = "VERDICT: approve" ]; then
-    post_status "$HEAD_SHA" "success" "Code review passed (local claude, model=$MODEL)" \
+    post_status "$HEAD_SHA" "success" "Code review passed ($REVIEWER_LABEL)" \
       && log "PR #$PR: APPROVED -- status posted" \
       || log "PR #$PR: WARN approved but status POST failed"
     [ -n "$FP" ] && printf '%s\n%s\n' "$FP" "$HEAD_SHA" > "$FP_FILE"
@@ -624,7 +663,7 @@ $ERR_VISION_LINK"
     rm -f "$FP_FILE"
     # Findings comment first, status second: a failure status pointing at nothing is worse
     # than no status at all.
-    gh pr comment "$PR" --body "**fleet-code-review: BLOCK** (local claude, model=$MODEL, head ${HEAD_SHA:0:12})
+    gh pr comment "$PR" --body "**fleet-code-review: BLOCK** ($REVIEWER_LABEL, head ${HEAD_SHA:0:12})
 
 $FINDINGS" >/dev/null 2>&1 || log "PR #$PR: WARN findings comment failed"
     post_status "$HEAD_SHA" "failure" "Code review found blocking issues -- see PR comment" \

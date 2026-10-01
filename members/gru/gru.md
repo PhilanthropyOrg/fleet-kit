@@ -224,8 +224,9 @@ The same checklist every run, on purpose: without it a pass never reaches the re
      pass that path; full issue bodies overflow inline argv.
    - Never run `vision_link_gate.py` / `quality_gate.py` yourself: that is the silent drop
      this call replaced (H§17).
-   - Vision-link passes on a `Vision-link:` line (body or newest comment) naming a KR id from
-     `/fleet-kit/scripts/okr.json` (prose does not count), or `Vision-link: none (maintenance)`.
+   - Vision-link passes on a `Vision-link:` line (body or newest comment) naming a registered
+     KR id (`python3 /fleet-kit/scripts/okr.py ids` prints them; prose does not count), or
+     `Vision-link: none (maintenance)`.
    - Quality passes on exactly one `quality:ship-it` / `quality:solid` / `quality:world-class`
      label AND a Given/When/Then criterion in the newest PRD comment or body. World-class is
      buildable only for its research pass (criteria carry a `References:` line) or after a
@@ -236,7 +237,8 @@ The same checklist every run, on purpose: without it a pass never reaches the re
 
    **Fill the gap yourself, then re-gate — don't wait on marie (H§18).** For each `dropped`
    entry whose gap is `vision-link` or `acceptance` (not `by-design`), when the issue text
-   makes it clear: post ONE comment with the missing piece — a `Vision-link:` line and/or
+   makes it clear: post ONE comment with the missing piece — a
+   `Vision-link: <id from okr.py ids>` line (or `Vision-link: none (maintenance)`) and/or
    Given/When/Then criteria drawn from what the issue already asks for, nothing invented —
    then re-run `gate_drops.py run` on just those items and pack the newly `eligible` ones. A
    `fleet:reif-priority` / `fleet:user-asked` item is always clear enough: Reif's ask is its

@@ -27,6 +27,11 @@ command (a variable holding the path, a wrapper script) can still slip past it -
 guard rail, not a sandbox, the same caveat postflight_dirty_check.sh's own header states for
 its layer.
 
+CREDENTIAL GUARD (fk#1494), the second job of this hook: it also blocks a Bash command, or a
+Read/Grep, whose output would be a credential's VALUE (`env`, `echo $GH_TOKEN`, `cat
+/root/.gh_token`) -- for every pass, worktree-isolated or not. See the "credential guard"
+section below for what it judges, what it deliberately allows, and what it cannot stop.
+
 Reads one PreToolUse hook payload (JSON) from stdin. Exit 0 = allow, exit 2 = block (Claude
 Code shows stderr back to the model as the reason) -- the documented hook contract.
 """
@@ -134,6 +139,480 @@ def _effective_cwd(command: str, cwd_real: str | None, verb_start: int) -> str |
     return effective
 
 
+# --- credential guard (fk#1494) ---------------------------------------------------------------
+# Every member runs with --dangerously-skip-permissions and GH_TOKEN in its environment, so one
+# `env` (or one issue body that talks a member into it) prints the fleet's token into the
+# transcript, the run log and the next pass's prompt. This blocks the commands whose OUTPUT is a
+# credential's VALUE, and nothing else: naming a variable, passing it to a program
+# (`curl -H "x: $QA_SESSION_TOKEN"`), testing it (`[ -n "$GH_TOKEN" ]`) all stay allowed.
+#
+# It judges each simple command on its own, split the way a shell splits (quotes, `;`, `&&`,
+# `|`, `$(...)`), never by searching the whole string for a word: the first version of this
+# matched `\bset\b` anywhere and so blocked `set -euo pipefail`, `env X=1 git push`, and a PR
+# titled "Members can set a goal". A false block here stops every merge the fleet makes; a miss
+# is where the fleet stood before. So when in doubt it ALLOWS.
+#
+# NOT A SANDBOX. A script that reads os.environ, a value piped through base64, a file copied
+# and then read, `ssh box 'env'` -- all get past it. The real fix is that the model's
+# environment holds no long-lived token at all (short-lived, repo-scoped tokens behind a
+# credential helper). Until then this stops the accident and the lazy attack, not the determined
+# one. Set FLEET_CREDENTIAL_GUARD=0 to turn it off without a deploy.
+_SECRET_NAME_RE = re.compile(
+    r"^(?:\w*(?:_TOKEN|_KEY|_SECRET|_PASSWORD|_PASSWD)|\w*OAUTH_TOKEN_\w+|FLEET_WEBHOOK_TOKENS?\w*)$")
+_EXPANSION_RE = re.compile(r"\$(?:([A-Za-z_]\w*)|\{([#!]?)([A-Za-z_]\w*)([^}]*)\})")
+_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_]\w*\+?=")
+# Words that come before the command a segment really runs.
+_COMMAND_PREFIXES = {"then", "do", "else", "elif", "if", "while", "until", "!", "{", "time",
+                     "sudo", "command", "builtin", "exec", "nohup"}
+# Print a whole file / stream as-is.
+_DUMPERS = {"cat", "head", "tail", "less", "more", "nl", "tac", "bat", "base64", "base32", "xxd",
+            "od", "hexdump", "strings", "tee", "rev", "cut", "tr", "fold", "sort", "uniq"}
+# Print parts of a file; their first plain argument is a pattern/program, not a file.
+_PATTERN_READERS = {"grep", "egrep", "fgrep", "rg", "ag", "sed", "awk", "gawk", "jq", "yq"}
+_REDIRECT = "\x02"   # marks a redirect operator word produced by _shell_segments
+_INERT = "\x00"      # a `$` the shell will not expand (single-quoted or backslash-escaped)
+
+_CREDENTIAL_PATH_RES = [
+    re.compile(r"(?:^|/)\.gh_token$"),             # entrypoint.sh writes GH_TOKEN here for cron
+    re.compile(r"(?:^|/)fleet-kit/gh_token$"),     # node_up.sh's copy on a worker node
+    re.compile(r"(?:^|/)\.credentials\.json$"),    # each account's Claude login (/root/.claude-*/)
+    re.compile(r"(?:^|/)\.git-credentials$"),
+    re.compile(r"(?:^|/)gh/hosts\.yml$"),
+    re.compile(r"(?:^|/)\.webhook_secret$"),
+    re.compile(r"^/proc/[^/]+/environ$"),
+]
+
+_SAFE_WAYS = ("To list which variables exist: `compgen -e` (names only). To read one setting: "
+              "`printenv NAME`. To test a credential is there: `[ -n \"$NAME\" ] && echo set`. "
+              "Programs that need a credential read it from the environment themselves.")
+
+
+def _is_secret_name(name: str) -> bool:
+    return bool(_SECRET_NAME_RE.match(name or ""))
+
+
+def _holds_secret(name: str, env: dict, paths_too: bool = False) -> bool:
+    """True when `$name` would expand to a credential in THIS pass: secret-shaped name, set in
+    the environment the hook inherited from the pass, with a real value. Judging by the name
+    alone blocked `echo "$DISPATCH_LOCK_KEY"` and every `$CACHE_KEY` a member's own one-liner
+    defines. A value that is a path (GSC_SA_KEY points at a key FILE) is not itself the secret
+    -- printing it is fine, `cat`-ing it is not (paths_too)."""
+    value = env.get(name) or ""
+    if not _is_secret_name(name) or len(value) < 12:
+        return False
+    return paths_too or not value.startswith(("/", "~", "./"))
+
+
+def _is_credential_path(word: str) -> bool:
+    word = word.replace(_INERT, "$")
+    return any(rx.search(word) for rx in _CREDENTIAL_PATH_RES)
+
+
+def _expanded_secrets(word: str, env: dict, paths_too: bool = False) -> list[str]:
+    """Credentials this word EXPANDS to their value. `${NAME:+x}` ("x if set") and
+    `${#NAME}` (its length) give nothing away and do not count; neither does a `$` the shell
+    will not expand."""
+    out = []
+    for m in _EXPANSION_RE.finditer(word):
+        if m.group(1):
+            name = m.group(1)
+        else:
+            name, rest = m.group(3), m.group(4)
+            out.extend(_expanded_secrets(rest, env, paths_too))  # ${OTHER:-$GH_TOKEN}
+            if m.group(2) == "#" or rest.startswith((":+", "+")):
+                continue
+        if _holds_secret(name, env, paths_too):
+            out.append(name)
+    return out
+
+
+_DECLARERS = {"export", "local", "readonly", "declare", "typeset"}
+# Programs that take a credential as an argument and send it where it belongs:
+# `curl -H "Authorization: token $(gh auth token)"`, `git push https://x:$(cat ...)@...`.
+_CREDENTIAL_USERS = {"curl", "wget", "git", "docker", "podman", "ssh", "scp"}
+_CAPTURED, _USED = "captured", "used"
+
+
+def _shell_segments(command: str) -> list[tuple[list[str], str, str]]:
+    """The simple commands in `command`, each as (words, separator that ended it, where its
+    output goes).
+
+    The third field is "" for a command whose output reaches the screen. _CAPTURED marks one
+    inside `NAME=$( ... )`: the output goes into a variable (`export GH_TOKEN=$(cat
+    /root/.gh_token)` is how cron itself hands the token on). _USED marks one inside `$( ... )`
+    in the arguments of a program that consumes a credential (_CREDENTIAL_USERS).
+
+    Quote-aware, so text a command merely quotes is never read as a command: a single-quoted
+    string or a heredoc body is data, and its `$` is marked inert. A double-quoted string stays
+    one word but keeps its `$` -- the shell expands it there. `$( ... )` and backticks run their
+    own commands, so their contents come back as their own segments. Redirect operators are
+    words prefixed with _REDIRECT; the word after one is its target. Best effort, like every
+    other check in this file: no aliases, no functions, no command held in a variable."""
+    command = _HEREDOC_RE.sub(lambda m: m.group(1) + m.group(2) + m.group(3), command)
+    segs: list[tuple[list[str], str, str]] = []
+    words: list[str] = []
+    cur: list[str] = []
+    started = False          # a word is open (so an empty "" still counts as a word)
+    dq = False
+    captured = ""
+    subshells = 0            # plain `(` still open
+    stack: list[tuple] = []  # contexts suspended by $( or ` or an array literal
+    i, n = 0, len(command)
+
+    def end_word():
+        nonlocal cur, started
+        if started:
+            words.append("".join(cur))
+        cur, started = [], False
+
+    def end_seg(sep: str):
+        nonlocal words
+        end_word()
+        if words:
+            segs.append((words, sep, captured))
+        words = []
+
+    def push(kind: str):
+        nonlocal words, cur, started, dq, captured
+        stack.append((kind, words, cur, started, dq, captured))
+        outer = [w for w in words if not (w in _COMMAND_PREFIXES or _ASSIGNMENT_RE.match(w)
+                                          or w.startswith(_REDIRECT))]
+        if captured != _CAPTURED:
+            if _ASSIGNMENT_RE.match("".join(cur)) and all(w in _DECLARERS for w in outer):
+                captured = _CAPTURED
+            elif outer and os.path.basename(outer[0]) in _CREDENTIAL_USERS:
+                captured = _USED
+            else:
+                captured = ""
+        words, cur, started, dq = [], [], False, False
+
+    def pop():
+        nonlocal words, cur, started, dq, captured
+        end_seg(")")
+        _kind, words, cur, started, dq, captured = stack.pop()
+
+    while i < n:
+        c = command[i]
+        nxt = command[i + 1] if i + 1 < n else ""
+        if c == "\\" and nxt:
+            if nxt != "\n":          # backslash-newline just continues the line
+                cur.append(_INERT if nxt == "$" else nxt)
+                started = True
+            i += 2
+            continue
+        if c == "$" and nxt == "(":
+            push("(")
+            i += 2
+            continue
+        if c == "`":
+            if stack and stack[-1][0] == "`":
+                pop()
+            else:
+                push("`")
+            i += 1
+            continue
+        if dq:
+            if c == '"':
+                dq = False
+            else:
+                cur.append(c)
+            i += 1
+            continue
+        if c == "'":
+            end = command.find("'", i + 1)
+            end = n if end < 0 else end
+            cur.append(command[i + 1:end].replace("$", _INERT))
+            started = True
+            i = end + 1
+            continue
+        if c == '"':
+            dq, started = True, True
+            i += 1
+            continue
+        if c in " \t":
+            end_word()
+            i += 1
+            continue
+        if c == "#" and not started:
+            end = command.find("\n", i)
+            i = n if end < 0 else end
+            continue
+        if c == "\n" or c == ";":
+            end_seg(c)
+            i += 1
+            continue
+        if c == "&" and nxt == ">":
+            c, i = ">", i + 1    # `&>file`: a redirect, not a separator
+        elif c in "&|":
+            end_seg(c + nxt if nxt == c else c)
+            i += 2 if nxt == c else 1
+            continue
+        if c == "(":
+            if started and "".join(cur).endswith("="):
+                push("=(")       # arr=(env printenv): an array's words are data, not commands
+                captured = _CAPTURED
+            elif nxt == ")" and started:
+                cur, started = [], False   # `env() { ...; }` defines a function, runs nothing
+                i += 2
+                continue
+            else:
+                end_seg("(")
+                subshells += 1
+            i += 1
+            continue
+        if c == ")":
+            if stack and stack[-1][0] == "=(":
+                words = []
+                pop()
+            elif stack and stack[-1][0] == "(":
+                pop()
+            elif subshells:
+                subshells -= 1
+                end_seg(")")
+            else:                # `set)` / `env|printenv)` in a `case`: a pattern, not a command
+                end_word()
+                words = []
+                while segs and segs[-1][1] == "|":
+                    segs.pop()
+            i += 1
+            continue
+        if c in "<>":
+            fd = ""
+            if started and "".join(cur).isdigit():
+                fd = "".join(cur)          # the 2 of `2>`: part of the operator, not a word
+                cur, started = [], False
+            end_word()
+            j = i
+            while j < n and command[j] in "<>|":
+                j += 1
+            op = fd + command[i:j]
+            m = re.match(r"&(?:\d+|-)", command[j:])
+            if m:                          # `>&2`, `2>&1`: complete on its own, no target word
+                op += m.group(0)
+                j += m.end()
+            words.append(_REDIRECT + op)
+            i = j
+            continue
+        cur.append(c)
+        started = True
+        i += 1
+    while stack:
+        pop()
+    end_seg("")
+    return segs
+
+
+def _split_redirects(words: list[str]) -> tuple[list[str], list[tuple[str, str]]]:
+    """(plain words, [(operator, target)])."""
+    plain, redirects, i = [], [], 0
+    while i < len(words):
+        w = words[i]
+        if w.startswith(_REDIRECT):
+            op = w[1:]
+            if "&" in op or i + 1 >= len(words):
+                redirects.append((op, ""))
+            else:
+                redirects.append((op, words[i + 1]))
+                i += 1
+        else:
+            plain.append(w)
+        i += 1
+    return plain, redirects
+
+
+# A `grep -o` pattern that can only ever match a variable's NAME: name characters, anchors,
+# simple classes and alternation, at most one trailing `=`. No `.`, no negated class, no `\S` --
+# nothing that could run past the `=` into the value.
+_NAME_ONLY_PATTERN_RE = re.compile(r"^(?:[A-Za-z0-9_^*+?|()\[\]-]|\\[|()])+=?$")
+
+
+def _no_values(next_words: list[str]) -> bool:
+    """True when the next command in the pipe cannot print a value. Seen in real sessions:
+    `env | grep -c '^FLEET_'` and `env | wc -l` (a count), `env | grep -q CI=` (nothing),
+    `env | grep -o '^PHILANTHROPY_[A-Z_]*'` and `env | cut -d= -f1` (names only)."""
+    plain = [w for w in _split_redirects(next_words)[0] if not _ASSIGNMENT_RE.match(w)]
+    if not plain:
+        return False
+    cmd, args = os.path.basename(plain[0]), plain[1:]
+    short = "".join(a[1:] for a in args if a.startswith("-") and not a.startswith("--"))
+    if cmd == "wc":
+        return True
+    if cmd == "cut":
+        return "-d=" in args and ("-f1" in args or args[-2:] == ["-f", "1"])
+    if cmd in ("grep", "egrep", "fgrep"):
+        if "c" in short or "q" in short or "--count" in args or "--quiet" in args:
+            return True
+        patterns = [a.replace(_INERT, "$") for a in args if not a.startswith("-")]
+        return ("o" in short and len(patterns) == 1 and "[^" not in patterns[0]
+                and bool(_NAME_ONLY_PATTERN_RE.match(patterns[0])))
+    return False
+
+
+# Flags whose NEXT word is their value, not a file (`grep -A 3 pattern file`).
+_GREP_VALUE_FLAGS = {"-A", "-B", "-C", "-m", "-d", "-D", "-g", "-t", "-T", "-j", "--include",
+                     "--exclude", "--exclude-dir", "--glob", "--type", "--max-count", "--context",
+                     "--after-context", "--before-context"}
+_VALUE_FLAGS = {
+    **{c: _GREP_VALUE_FLAGS for c in ("grep", "egrep", "fgrep", "rg", "ag")},
+    "awk": {"-F", "-v"}, "gawk": {"-F", "-v"}, "jq": {"--indent"}, "yq": {"--indent"},
+    "head": {"-n", "-c"}, "tail": {"-n", "-c"}, "cut": {"-d", "-f", "-c", "-b"},
+    "sort": {"-k", "-t", "-o"}, "fold": {"-w"},
+}
+_PATTERN_FLAGS = {"-e", "-f", "--regexp", "--file", "--expression"}
+_TWO_VALUE_FLAGS = {"--arg", "--argjson", "--slurpfile", "--rawfile"}
+
+
+def _file_args(cmd: str, args: list[str]) -> list[str]:
+    """The arguments of a reader that name FILES. For grep/sed/awk/jq the first plain argument
+    is the pattern or program (`grep -rn "/root/.gh_token" scripts/` searches FOR that text), so
+    it is dropped -- unless -e/-f already supplied it."""
+    files, skip, pattern_given = [], 0, cmd not in _PATTERN_READERS
+    for a in args:
+        if skip:
+            skip -= 1
+        elif a in _TWO_VALUE_FLAGS:
+            skip = 2
+        elif a in _PATTERN_FLAGS:
+            skip, pattern_given = 1, True
+        elif a in _VALUE_FLAGS.get(cmd, ()):
+            skip = 1
+        elif a.startswith("-") and a != "-":
+            continue
+        elif not pattern_given:
+            pattern_given = True
+        else:
+            files.append(a)
+    return files
+
+
+def _credential_dump(words: list[str], sep: str, next_words: list[str], env: dict) -> str | None:
+    """Why this one simple command would print a credential's value, or None."""
+    reason = _dump_reason(words, sep, next_words, env)
+    if reason and "prints every" in reason and sep == "|" and _no_values(next_words):
+        return None
+    return reason
+
+
+def _dump_reason(words: list[str], sep: str, next_words: list[str], env: dict) -> str | None:
+    plain, redirects = _split_redirects(words)
+    next_plain = [w for w in _split_redirects(next_words)[0] if not _ASSIGNMENT_RE.match(w)]
+    next_cmd = os.path.basename(next_plain[0]) if next_plain else ""
+    while plain and (plain[0] in _COMMAND_PREFIXES or _ASSIGNMENT_RE.match(plain[0])):
+        plain = plain[1:]
+    if not plain:
+        return None
+    cmd, args = os.path.basename(plain[0]), plain[1:]
+    flags = [a for a in args if a.startswith("-") and a != "-"]
+    names = [a for a in args if not a.startswith(("-", "+"))]
+
+    if cmd == "env":
+        rest, skip = [], False
+        for k, a in enumerate(args):
+            if skip:
+                skip = False
+            elif a in ("-u", "--unset", "-C", "--chdir"):
+                skip = True
+            elif not (a.startswith("-") or _ASSIGNMENT_RE.match(a)):
+                rest = args[k:]
+                break
+        if not rest:
+            return "`env` with no command to run prints every variable's value"
+        kept = [w for op, t in redirects for w in ([_REDIRECT + op, t] if t else [_REDIRECT + op])]
+        return _dump_reason(rest + kept, sep, next_words, env)
+    if cmd == "printenv":
+        if not names:
+            return "`printenv` with no name prints every variable's value"
+        leaked = [a for a in names if _holds_secret(a, env)]
+        if leaked:
+            return f"`printenv {leaked[0]}` prints that credential's value"
+        return None
+    if cmd == "set" and not args:
+        return "`set` with no arguments prints every variable's value"
+    if cmd in ("declare", "typeset"):
+        letters = "".join(f.lstrip("-") for f in flags)
+        if not names and not (letters and set(letters) <= set("fF")):
+            return f"`{cmd}` with no variable name prints every variable's value"
+        if "p" in letters and any(_holds_secret(a, env) for a in names):
+            return f"`{cmd} -p` prints that credential's value"
+        return None
+    if cmd == "export" and not names:
+        return "`export` with no assignment prints every exported variable's value"
+    if cmd in ("bash", "sh", "zsh", "dash") and any("c" in f for f in flags if not f.startswith("--")):
+        script = next((a for a in args if not a.startswith("-")), "")
+        return credential_block_reason(script.replace(_INERT, "$"), env)
+    if cmd == "eval" and args:
+        return credential_block_reason(" ".join(args).replace(_INERT, "$"), env)
+    if cmd == "gh" and args[:2] == ["auth", "token"]:
+        return "`gh auth token` prints the GitHub token"
+    if cmd == "gh" and args[:2] == ["auth", "status"] and ("--show-token" in args or "-t" in args):
+        return "`gh auth status --show-token` prints the GitHub token"
+    if cmd == "git" and names[:1] == ["credential"] and "fill" in names:
+        return "`git credential fill` prints the stored password"
+
+    if cmd in ("echo", "printf", "print"):
+        leaked = [nm for a in args for nm in _expanded_secrets(a, env)]
+        # stdout sent to a real file (`> f`, `1>> f`, `&> f`) -- `2>/dev/null` does not count
+        to_file = any(op.lstrip("1") in (">", ">>", ">|") and t not in ("/dev/stdout", "/dev/stderr", "/dev/tty")
+                      for op, t in redirects)
+        # Piped into a program that USES the value (`| gh auth login --with-token`, `| wc -c`,
+        # `| sha256sum`) or written to a file is not a print. Piped into another printer is.
+        piped_to_user = sep == "|" and next_cmd not in _DUMPERS | _PATTERN_READERS
+        if leaked and not to_file and not piped_to_user:
+            return f"this `{cmd}` prints the value of ${leaked[0]}"
+        return None
+
+    if cmd in _DUMPERS | _PATTERN_READERS:
+        files = _file_args(cmd, args) + [t for op, t in redirects if op.lstrip("0123456789").startswith("<")]
+        for f in files:
+            if _is_credential_path(f):
+                return (f"`{cmd}` on {f.replace(_INERT, '$')} prints a stored credential (for an "
+                        f"account's login state run `bash /fleet-kit/scripts/account_status.sh`)")
+        if cmd in _DUMPERS:
+            leaked = [nm for f in files for nm in _expanded_secrets(f, env, paths_too=True)]
+            if leaked:
+                return f"`{cmd}` on ${leaked[0]} prints that credential (or the key file it points at)"
+    return None
+
+
+def credential_block_reason(command: str, env: dict | None = None) -> str | None:
+    """A block message if this Bash command would print a credential's value, else None."""
+    env = os.environ if env is None else env
+    segs = _shell_segments(command or "")
+    for idx, (words, sep, goes_to) in enumerate(segs):
+        if goes_to == _CAPTURED:
+            continue
+        next_words = segs[idx + 1][0] if sep == "|" and idx + 1 < len(segs) else []
+        why = _credential_dump(words, sep, next_words, env)
+        if why and goes_to == _USED and "prints every" not in why:
+            continue   # one credential, handed straight to the program that needs it
+        if why:
+            if why.startswith("BLOCKED"):
+                return why  # already a full message, from a `bash -c` / `eval` body
+            return (f"BLOCKED by worktree_guard_hook.py (credential guard): {why}, and that would "
+                    f"land in the run log and later prompts. {_SAFE_WAYS}")
+    return None
+
+
+def _credential_guard(payload: dict, env: dict) -> str | None:
+    """Fails OPEN: a bug in the guard must never block the fleet's own work."""
+    if (env.get("FLEET_CREDENTIAL_GUARD") or "1").strip() == "0":
+        return None
+    tool_name = payload.get("tool_name", "")
+    tool_input = payload.get("tool_input") or {}
+    try:
+        if tool_name == "Bash":
+            return credential_block_reason(tool_input.get("command") or "", env)
+        if tool_name in ("Read", "Grep"):
+            path = tool_input.get("file_path") or tool_input.get("path") or ""
+            if path and _is_credential_path(os.path.expanduser(path)):
+                return (f"BLOCKED by worktree_guard_hook.py (credential guard): {path} holds a "
+                        f"stored credential, and reading it would land the value in the run log "
+                        f"and later prompts. {_SAFE_WAYS}")
+    except Exception as exc:  # noqa: BLE001
+        print(f"worktree_guard_hook.py: credential guard error ({exc}), allowing", file=sys.stderr)
+    return None
+
+
 def _bash_targets_repo(command: str, repo_real: str, wt_real: str, cwd_real: str | None) -> bool:
     if not command:
         return False
@@ -210,6 +689,12 @@ def _bash_targets_repo(command: str, repo_real: str, wt_real: str, cwd_real: str
 
 def decide(payload: dict, env: dict) -> str | None:
     """Returns a block reason, or None to allow."""
+    # Before the worktree checks, and for EVERY pass: a pass with no worktree of its own (jefe)
+    # holds the same token.
+    reason = _credential_guard(payload, env)
+    if reason:
+        return reason
+
     wt_path = (env.get("WT_PATH") or "").strip()
     repo = (env.get("REPO") or "").strip()
     if not wt_path or not repo:

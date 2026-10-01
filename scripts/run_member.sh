@@ -77,6 +77,10 @@ mkdir -p "$LOG_DIR"
 
 MEMBER="${1:?usage: run_member.sh <member-name> [--dry-run] [--item <n> | --items <n1,n2,...>] [--task \"<instruction>\"]}"
 shift || true
+# growth sends mail only through outreach_send.py, which reads its own key from a file. Keep
+# the kit's other mail key out of its model's environment (same least-privilege move as
+# FLEET_API_KEY above; a member with Bash can still read files -- see outreach_send.py's header).
+[ "$MEMBER" = "growth" ] && unset RESEND_API_KEY
 DRY_RUN=0
 ITEM=""
 TASK=""
@@ -431,6 +435,7 @@ RUN_ID="${MEMBER}${ITEM:+-item$ITEM}${TASK:+-adhoc}-$$-$(date +%s)"
 # can show that pass's turns/cost (leg 3 of the grader). Exported, not just set: `claude -p`
 # is a separate exec and only sees the environment.
 export FLEET_RUN_ID="$RUN_ID"
+export FLEET_MEMBER="$MEMBER"  # issue_cluster.stamp: every issue this run files says who filed it
 
 MAX_BUDGET=$(jget "['mandate']['limits'].get('max_budget_usd') or ''")
 
@@ -552,6 +557,38 @@ fi
 # A member MAY declare its own runner (e.g. judge-judy's judge-judy.sh, which reviews a
 # diff as untrusted TEXT with zero tools -- a shape the generic claude -p path below can't
 # express safely). Default: none, every other member runs through the generic path.
+# Which model CLI this member runs on (docs/providers.md). Nothing set means claude, and
+# then nothing below this block changes: the check, and the only new code, is for the others.
+# Most specific wins: FLEET_PROVIDER_<MEMBER>, then the spec's llm.provider, then FLEET_PROVIDER.
+PROVIDER_VAR="FLEET_PROVIDER_$(echo "$MEMBER" | tr '[:lower:]-' '[:upper:]_')"
+PROVIDER="${!PROVIDER_VAR:-}"
+[ -z "$PROVIDER" ] && PROVIDER=$(jget "['llm'].get('provider') or ''")
+PROVIDER="${PROVIDER:-${FLEET_PROVIDER:-claude}}"
+if [ "$PROVIDER" != "claude" ]; then
+  # A member's allow/deny tool lists are its authority. A provider that cannot enforce them
+  # does not get the member: provider.py decides, and a "no" is recorded here as a
+  # dispatch_skipped row with the reason -- nothing is spent and nothing runs unguarded.
+  POLICY=$(echo "$SPEC" | python3 "$KIT_DIR/scripts/provider.py" tool-policy --provider "$PROVIDER" 2>>"$LOG")
+  POLICY_RC=$?
+  POLICY_REASON=$(printf '%s' "$POLICY" | python3 -c 'import json,sys; print(json.load(sys.stdin)["reason"])' 2>/dev/null)
+  if [ "$POLICY_RC" -ne 0 ]; then
+    POLICY_REASON="${POLICY_REASON:-$MEMBER cannot run on $PROVIDER: the tool-policy check itself failed, so it is refused}"
+    log "REFUSED: $POLICY_REASON"
+    if [ "$DRY_RUN" -eq 1 ]; then
+      echo "[dry-run] REFUSED: $POLICY_REASON"
+      exit 0
+    fi
+    printf 'Evidence: %s (scripts/provider.py tool-policy --provider %s)\nSelf-critique: none -- refused before any model was started; nothing was spent\n' \
+        "$POLICY_REASON" "$PROVIDER" \
+      | python3 "$KIT_DIR/scripts/run_report.py" \
+          --member "$MEMBER" --run-id "$RUN_ID" --kind llm --exit-code 0 --dispatch-skipped \
+          --provider "$PROVIDER" --pass-file - ${ITEM:+--item-id "$ITEM"} $LANE_FLAG >> "$LOG_DIR/runs.jsonl" 2>>"$LOG"
+    exit 0
+  fi
+  log "$MEMBER: provider=$PROVIDER -- $POLICY_REASON"
+  export FLEET_MEMBER_PROVIDER="$PROVIDER"
+fi
+
 CUSTOM_RUNNER=$(jget "['llm'].get('runner', '')")
 if [ -n "$CUSTOM_RUNNER" ]; then
   RUNNER_PATH="$KIT_DIR/$CUSTOM_RUNNER"
@@ -1220,9 +1257,18 @@ if [ -n "${WT_START_SHA:-}" ]; then
   PASS_COMMITS=$(git -C "$WT_PATH" rev-list --no-merges --count HEAD "^$WT_START_SHA" $MAIN_EXCLUDE 2>/dev/null)
 fi
 
+# Receipts: a pass that ran on a pay-per-token key says so on its row, so its cost can be told
+# apart from subscription passes. A subscription pass (every pass before API-key accounts
+# existed) adds nothing, so its row is exactly what it always was.
+AUTH_FLAGS=""
+if [ -n "${ACCOUNT_POOL_SELECTED:-}" ] && command -v account_pool_auth_kind >/dev/null 2>&1 \
+   && [ "$(account_pool_auth_kind "$ACCOUNT_POOL_SELECTED")" = "api_key" ]; then
+  AUTH_FLAGS="--provider claude --auth api_key"
+fi
+
 echo "$OUT" | python3 "$KIT_DIR/scripts/run_report.py" \
   --member "$MEMBER" --run-id "$RUN_ID" --kind llm --exit-code "$RC" \
-  --pass-file - --usage-file "$USAGE_FILE" ${ITEM:+--item-id "$ITEM"} ${CHECKPOINT_PR:+--checkpoint-pr "$CHECKPOINT_PR"} ${PASS_COMMITS:+--commits "$PASS_COMMITS"} $VISION_FLAG $LANE_FLAG $TRAILING_LOSS_FLAG $FIRED_FLAG $REASON_FLAG >> "$LOG_DIR/runs.jsonl" 2>>"$LOG"
+  --pass-file - --usage-file "$USAGE_FILE" ${ITEM:+--item-id "$ITEM"} ${CHECKPOINT_PR:+--checkpoint-pr "$CHECKPOINT_PR"} ${PASS_COMMITS:+--commits "$PASS_COMMITS"} $VISION_FLAG $LANE_FLAG $TRAILING_LOSS_FLAG $FIRED_FLAG $REASON_FLAG $AUTH_FLAGS >> "$LOG_DIR/runs.jsonl" 2>>"$LOG"
 rm -f "$USAGE_FILE"
 
 SUMMARY=$(tail -c 400 <<<"$OUT" | tr '\n' ' ' | tail -c 300)

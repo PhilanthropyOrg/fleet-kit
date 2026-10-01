@@ -19,7 +19,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import member_spec  # noqa: E402
 
 # member -> most bytes its charter file may hold. Set a little above the size it was slimmed
-# to on 2026-10-01 (gru 34.2 KB, nerd 20.6 KB), so a small real rule still fits.
+# to on 2026-10-01 (gru 34.0 KB, nerd 20.6 KB), so a small real rule still fits.
 BUDGET_BYTES = {"gru": 36_000, "nerd": 22_000}
 
 
