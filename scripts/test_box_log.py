@@ -165,6 +165,28 @@ class ApplyTests(unittest.TestCase):
         self.assertEqual(calls[0][:5], ["gh", "issue", "close", "--repo", "o/r"])
         self.assertEqual(calls[0][5], "77")
 
+    def _repeat(self, view_stdout):
+        st = {"exit:j": {"issue": 77, "job": "j", "first": 0, "last": 0, "count": 2, "commented": 0}}
+        calls = []
+
+        def run(c):
+            calls.append(c)
+            return mock.Mock(stdout=view_stdout if c[2] == "view" else "")
+        with mock.patch("inbox.repo_slug", return_value="o/r"):
+            out = bi.apply([("repeat", "exit:j", _rec(key="exit:j"), 3)], st, {}, run=run)
+        return out, [c[2] for c in calls]
+
+    def test_repeat_on_issue_closed_as_fixed_reopens_it(self):
+        out, verbs = self._repeat("CLOSED COMPLETED\n")
+        self.assertEqual(verbs, ["view", "reopen"])
+        self.assertEqual(out, ["reopened exit:j #77 x3"])
+
+    def test_repeat_on_open_or_not_planned_issue_only_comments(self):
+        for seen in ("OPEN \n", "CLOSED NOT_PLANNED\n", ""):
+            out, verbs = self._repeat(seen)
+            self.assertEqual(verbs, ["view", "comment"], seen)
+            self.assertEqual(out, ["repeat exit:j x3"])
+
 
 if __name__ == "__main__":
     unittest.main()
