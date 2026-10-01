@@ -34,6 +34,6 @@
   "report": {
     "vision_link": "optional"
   },
-  "plain": "Answers the messages fleet members send each other when the owner has not, so nothing dropped waits for Reif to notice.",
+  "plain": "Answers the messages workers send each other when the owner has not, so nothing gets stuck waiting for a person to notice.",
   "stage": "learn"
 }

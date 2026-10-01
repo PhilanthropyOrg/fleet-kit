@@ -56,6 +56,6 @@
   "report": {
     "vision_link": "optional"
   },
-  "plain": "Once a day keeps every agent's memory under its size cap, merges duplicates, and keeps the one-page intent file current.",
+  "plain": "Once a day keeps each worker's memory short and tidy, removes repeats, and updates the one-page summary of what the fleet is for.",
   "stage": "learn"
 }

@@ -46,6 +46,6 @@
   "report": {
     "vision_link": "optional"
   },
-  "plain": "Uses the product like a person every 3 hours and files an issue when something a user does stops working.",
+  "plain": "Uses the product like a person every 3 hours and adds a to-do item when something people do stops working.",
   "stage": "find"
 }

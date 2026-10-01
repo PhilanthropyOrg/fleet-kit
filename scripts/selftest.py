@@ -5919,6 +5919,8 @@ def _console_roster_shows_every_member_in_plain_english_by_stage():
         plain = spec.get("plain", "")
         assert 20 < len(plain) < 220 and plain[0].isupper(), f"{spec['name']}: plain purpose missing or not a sentence"
         assert not re.search(r"\.(py|sh|json)\b|\$FLEET|_[A-Z]{2,}", plain), f"{spec['name']}: plain purpose carries an identifier: {plain}"
+        # /about shows these to newcomers (Reif 2026-09-30): no insider words either.
+        assert not re.search(r"(?i)\b(PRs?|CI|lane|auto-merge|mergeable|backlog|spec|fleet-kit|credential|transcripts?|redacts?)\b", plain), f"{spec['name']}: plain purpose uses jargon: {plain}"
         assert spec.get("stage") in stages, f"{spec['name']}: stage {spec.get('stage')!r} not in the roster"
 
 

@@ -47,6 +47,6 @@
   "report": {
     "vision_link": "optional"
   },
-  "plain": "Every hour picks the top-ranked items the budget can afford and hands them to builders in batches.",
+  "plain": "Every hour picks the top items on the to-do list that the budget can pay for and hands them to the builders.",
   "stage": "build"
 }
