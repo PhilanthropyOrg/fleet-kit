@@ -1246,3 +1246,65 @@ class QaSessionSignInTest(unittest.TestCase):
                                   "PHILANTHROPY_BASE_URL": self.base})
         with self.assertRaises(jw.Blocked):
             jw.qa_session_url(users, users.users["bob"])
+
+
+class FixtureDiscoveryTest(unittest.TestCase):
+    """asks #113/#114 and #117/#118: FIXTURE_CLAIMED_ORG_URL and NOTIFICATION_DEEPLINK_URL are
+    read off the signed-in user's own pages when unset, so neither journey waits on a human."""
+
+    @classmethod
+    def setUpClass(cls):
+        from playwright.sync_api import sync_playwright
+
+        class _Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                if self.path.startswith("/network/hq"):
+                    body = (b'<html><body><a href="/990">Home</a>'
+                            b'<a href="/network/hq/org/qa-owner-org/billing#billing">Verify</a></body></html>')
+                    ctype = "text/html"
+                elif self.path.startswith("/990/messages/conversations.json"):
+                    body = json.dumps({"conversations": [{"thread_id": 4242}, {"thread_id": 7}]}).encode()
+                    ctype = "application/json"
+                else:
+                    body, ctype = b"<html><body>ok</body></html>", "text/html"
+                self.send_response(200)
+                self.send_header("Content-Type", ctype)
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *a):
+                pass
+
+        cls.port = _free_port()
+        cls.httpd = http.server.ThreadingHTTPServer(("127.0.0.1", cls.port), _Handler)
+        threading.Thread(target=cls.httpd.serve_forever, daemon=True).start()
+        cls.pw = sync_playwright().start()
+        cls.browser = cls.pw.chromium.launch(args=["--no-sandbox", "--disable-dev-shm-usage"])
+        cls.base = f"http://127.0.0.1:{cls.port}"
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.browser.close()
+        cls.pw.stop()
+        cls.httpd.shutdown()
+        cls.httpd.server_close()
+
+    def _page(self):
+        page = self.browser.new_page()
+        self.addCleanup(page.close)
+        return page
+
+    def test_org_console_read_off_hq_page(self):
+        users = jw.TestUsers(env={"PHILANTHROPY_BASE_URL": self.base})
+        self.assertEqual(jw.find_claimed_org_path(self._page(), users), "/network/hq/org/qa-owner-org")
+
+    def test_newest_thread_becomes_the_notification_link(self):
+        users = jw.TestUsers(env={"PHILANTHROPY_BASE_URL": self.base})
+        self.assertEqual(jw.find_newest_thread_url(self._page(), users), "/network/hq/messages/4242")
+
+    def test_env_overrides_still_win(self):
+        users = jw.TestUsers(env={"PHILANTHROPY_BASE_URL": self.base,
+                                  "FIXTURE_CLAIMED_ORG_URL": "/x", "NOTIFICATION_DEEPLINK_URL": "/y"})
+        page = self._page()
+        self.assertEqual(jw.find_claimed_org_path(page, users), "/x")
+        self.assertEqual(jw.find_newest_thread_url(page, users), "/y")

@@ -34,10 +34,15 @@ lacks a credential, not that the product broke):
   ALICE_EMAIL, BOB_EMAIL + QA_SESSION_TOKEN (or *_PASSWORD for a venture with a sign-in
   form)  -- test users; the product mints a magic link, fleet-kit#1033.
   FIXTURE_EIN             a known EIN with a filed 990, for open-990-report and the claim flow.
-  FIXTURE_CLAIMED_ORG_URL path (relative to PHILANTHROPY_BASE_URL) of an org admin/settings
-                          page alice can administer, for the Verified Org checkout journey.
-  NOTIFICATION_DEEPLINK_URL  a thread deep-link URL for bob, for the "open from notification"
-                          journey -- this walker has no mailbox/notification-fetch of its own.
+  FIXTURE_CLAIMED_ORG_URL optional override: path of an org console the signer-in can
+                          administer, for the Verified Org checkout journey. Unset (normal),
+                          the journey signs in as the `owner` QA persona (a claimed org, no
+                          badge) and reads the console link off its own HQ page.
+  NOTIFICATION_DEEPLINK_URL  optional override: a thread URL for bob. Unset (normal), the
+                          walker reads bob's newest thread from /990/messages/conversations.json
+                          and opens /network/hq/messages/<id>, the same link the notification
+                          carries. Both were asked of a human six times (asks #21/#22, #113/#114,
+                          #117/#118) for values the fleet can read itself.
   FLEET_CONSOLE_URL       default https://dino.luckymachines.co/fleet/<instance> (<instance>
                           from plan_rank.resolve_instance(), gh#724 -- the bare host is dino's
                           own multi-instance container list, not a fleet console) for the
@@ -341,6 +346,41 @@ def sign_in(page, users: "TestUsers", creds: dict) -> None:
     password_field(page).first.fill(creds["password"])
     submit_button(page).first.click()
     wait_path_no_longer_contains(page, "/login", timeout=10000)
+
+
+# The org console link an owner's own HQ page carries (routes_hq verify CTA, routes_report
+# manage_href): /network/hq/org/<handle>[/section].
+_ORG_CONSOLE_HREF = re.compile(r"/network/hq/org/([^/?#]+)")
+
+
+def find_claimed_org_path(page, users: "TestUsers") -> str:
+    """FIXTURE_CLAIMED_ORG_URL if set; otherwise the console of the org `page`'s signed-in
+    user administers, read off their HQ page. BLOCKED (fixture gap, not a human ask) if the
+    page links no org console."""
+    if users.fixture_claimed_org_url:
+        return users.fixture_claimed_org_url
+    page.goto(users.url("https://philanthropy.org/network/hq"), timeout=NAV_TIMEOUT_MS)
+    hrefs = page.eval_on_selector_all("a[href]", "els => els.map(e => e.getAttribute('href'))")
+    for href in hrefs:
+        m = _ORG_CONSOLE_HREF.search(urlsplit(href or "").path)
+        if m:
+            return f"/network/hq/org/{m.group(1)}"
+    raise Blocked("FIXTURE_CLAIMED_ORG_URL unset and the signed-in owner's HQ page links no org console")
+
+
+def find_newest_thread_url(page, users: "TestUsers") -> str:
+    """NOTIFICATION_DEEPLINK_URL if set; otherwise the notification link (rt_app's
+    /network/hq/messages/<id>) for the newest thread in the signed-in user's inbox."""
+    if users.notification_deeplink_url:
+        return users.notification_deeplink_url
+    resp = page.request.get(users.url("https://philanthropy.org/990/messages/conversations.json"),
+                            timeout=NAV_TIMEOUT_MS)
+    if not resp.ok:
+        raise AssertionError(f"conversations.json answered {resp.status}")
+    ids = [c.get("thread_id") for c in resp.json().get("conversations", []) if c.get("thread_id")]
+    if not ids:
+        raise Blocked("NOTIFICATION_DEEPLINK_URL unset and bob has no thread to open")
+    return f"/network/hq/messages/{ids[0]}"
 
 
 def submit_button(page, pattern=r"sign in|log in|submit"):
@@ -787,17 +827,15 @@ def run_claim_org_through_verify_screen(ctx: JourneyCtx):
 
 def run_verified_org_checkout_to_stripe(ctx: JourneyCtx):
     users = ctx.users
-    users.require_users("alice")
-    admin_path = users.require(users.fixture_claimed_org_url, "FIXTURE_CLAIMED_ORG_URL")
-    alice = users.users["alice"]
-    page = ctx.page("alice")
+    # The `owner` persona is provisioned with a claimed, unbadged org on every mint -- the
+    # exact state this journey upgrades. alice only when a human pinned the console path.
+    signer = "alice" if users.fixture_claimed_org_url else "owner"
+    users.require_users(signer)
+    page = ctx.page(signer)
 
     def s0():
-        page.goto(users.url("https://philanthropy.org/990/login"), timeout=NAV_TIMEOUT_MS)
-        email_field(page).first.fill(alice["email"])
-        password_field(page).first.fill(alice["password"])
-        submit_button(page).first.click()
-        wait_path_no_longer_contains(page, "/login", timeout=10000)
+        sign_in(page, users, users.users[signer])
+        admin_path = find_claimed_org_path(page, users)
         page.goto(users.url(admin_path), timeout=NAV_TIMEOUT_MS)
         page.get_by_role("button", name=re.compile("upgrade to verified|upgrade", re.I)).first.click()
         wait_text_matches(page, r"plan|checkout", timeout=8000)
@@ -854,18 +892,12 @@ def run_message_send_and_read_receipt(ctx: JourneyCtx):
 def run_open_thread_from_notification_link_and_send(ctx: JourneyCtx):
     users = ctx.users
     users.require_users("bob")
-    deeplink = users.require(users.notification_deeplink_url, "NOTIFICATION_DEEPLINK_URL")
-    bob = users.users["bob"]
     page = ctx.page("bob")
     marker = f"sentry-reply-{ctx.run_id}-{int(time.time())}"
 
     def s0():
-        page.goto(users.url("https://philanthropy.org/990/login"), timeout=NAV_TIMEOUT_MS)
-        email_field(page).first.fill(bob["email"])
-        password_field(page).first.fill(bob["password"])
-        submit_button(page).first.click()
-        wait_path_no_longer_contains(page, "/login", timeout=10000)
-        page.goto(users.url(deeplink), timeout=NAV_TIMEOUT_MS)
+        sign_in(page, users, users.users["bob"])
+        page.goto(users.url(find_newest_thread_url(page, users)), timeout=NAV_TIMEOUT_MS)
 
     if not ctx.step(0, s0, page):
         return
