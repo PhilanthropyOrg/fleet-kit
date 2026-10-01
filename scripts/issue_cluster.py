@@ -48,6 +48,10 @@ SKIP_LABELS = {"fleet:claimed", "fleet:epic", MEGA_LABEL, "fleet:fold-into-pr"}
 SIG_MARKER = "mega-signature:"
 LANE_MARKER = "mega-lane:"
 DEFAULT_MIN_CLUSTER = 3
+# Every issue has one GitHub author (the fleet's token), so who filed it was a guess from the
+# title (2026-10-01: 577 of 2,213 issues in 14 days could not be traced to a filer). The filing
+# tools stamp this line; issue_flow.source_of reads it back.
+FILED_BY = "Filed-by:"
 # Members whose prompts file issues. Each denies raw `Bash(gh issue create:*)` in its
 # fleet.json and files through `issue_cluster.py file` instead (test_issue_cluster.py pins it).
 # Script filers call file_issue()/find_existing() directly: board_github.file_item (judge-judy),
@@ -77,6 +81,15 @@ def signature(title: str) -> str:
     t = re.sub(r"\d+", "#", t)
     t = re.sub(r"[\s\-—–,.;!?\"`]+", " ", t)
     return t.strip()
+
+
+def stamp(body: str, who: str = "") -> str:
+    """`body` with a closing `Filed-by: <who>` line. `who` defaults to $FLEET_MEMBER (set by
+    run_member.sh); with neither, or a stamp already there, the body is returned unchanged."""
+    who = (who or os.environ.get("FLEET_MEMBER") or "").strip()
+    if not who or re.search(rf"(?im)^{re.escape(FILED_BY)}", body or ""):
+        return body
+    return f"{(body or '').rstrip()}\n\n{FILED_BY} {who}"
 
 
 def lane(issue: dict) -> str:
@@ -271,7 +284,7 @@ def file_issue(title: str, body: str, labels: list[str], repo: str | None = None
         note = f"Seen again{f' by {who}' if who else ''}: {title}\n\n{(body or '').strip()[:1500]}"
         r = run(["gh", "issue", "comment", str(hit["number"]), *_repo_args(repo), "--body", note])
         return {"action": "commented", "number": hit["number"], "ok": r.returncode == 0}
-    cmd = ["gh", "issue", "create", *_repo_args(repo), "--title", title, "--body", body]
+    cmd = ["gh", "issue", "create", *_repo_args(repo), "--title", title, "--body", stamp(body, who)]
     for lab in labels:
         cmd += ["--label", lab]
     r = run(cmd)

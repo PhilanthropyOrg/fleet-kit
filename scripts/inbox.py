@@ -535,22 +535,17 @@ def file_backlog(title: str, body: str, sender: str, run=None) -> str:
     if not slug:
         raise RuntimeError("FLEET_REPO_URL does not name a GitHub repo")
     text = (body or "").strip() or title
-    # Dedupe by signature for prod alerts (titles with dynamic per-firing ids like pg_lock:<pid>),
-    # by exact title otherwise. fk#1129 fix: 222 prod alerts in 14 days were filed as 222 twins
-    # because exact-title matching never found duplicates whose titles differed only in the id.
-    by_sig = title.startswith("prod alert [")
-    it = open_issue_titled(slug, title, run, by_signature=by_sig)
+    # Dedupe by exact open title: a pager that fires hourly must not file hourly. The repeat
+    # becomes a comment on the open item (so the count is visible), never a twin.
+    it = open_issue_titled(slug, title, run)
     if it:
-        filed_by = os.environ.get("FLEET_MEMBER", sender or "unknown")
         run(["gh", "issue", "comment", "--repo", slug, str(it["number"]),
-             "--body", f"Fired again by {filed_by}:\n\n{text[:1500]}"])
+             "--body", f"Fired again by email from {sender}:\n\n{text[:1500]}"])
         return it["url"]
-    filed_by = os.environ.get("FLEET_MEMBER", sender or "unknown")
     r = run(["gh", "issue", "create", "--repo", slug, "--label", backlog_labels(title),
              "--title", title, "--body", f"{text}\n\nFiled by email from {sender} (fk#1056).\n\n"
                                          "Vision-link: none (maintenance) -- Reif's own ask; "
-                                         "fleet:user-asked ranks it\n\n"
-                                         f"Filed-by: {filed_by}"])
+                                         "fleet:user-asked ranks it\n\nFiled-by: email"])
     if r.returncode != 0:
         raise RuntimeError((r.stderr or r.stdout).strip()[:300])
     return r.stdout.strip().splitlines()[-1]
@@ -711,7 +706,6 @@ def file_or_comment_alert(row: dict, run=None) -> tuple[str, bool]:
     # has scored the item, not a default an unattended pager hands itself. severity-live above
     # is what keeps a genuinely firing alert visible despite the low tier (gh#726's escape
     # hatch keys off severity-live + a linked candidate, not off priority).
-    filed_by = os.environ.get("FLEET_MEMBER", row.get('from') or row.get('source') or "unknown")
     r = run(["gh", "issue", "create", "--repo", slug,
              "--label", "fleet:backlog,lane:devops,fleet:priority-low,fleet:severity-live,quality:solid",
              "--title", title,
@@ -720,8 +714,7 @@ def file_or_comment_alert(row: dict, run=None) -> tuple[str, bool]:
                        f"## Acceptance\n- Given the `{row['check']}` probe fires again, When the next "
                        f"probe tick runs, Then it reports healthy or this issue gets a `Fired again` "
                        f"comment, not a duplicate.\n\n"
-                       f"Vision-link: none (maintenance)\n\n"
-                       f"Filed-by: {filed_by}"])
+                       f"Vision-link: none (maintenance)\n\nFiled-by: prod-alert"])
     if r.returncode != 0:
         raise RuntimeError((r.stderr or r.stdout).strip()[:300])
     return r.stdout.strip().splitlines()[-1], True

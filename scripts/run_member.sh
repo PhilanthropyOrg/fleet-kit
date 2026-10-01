@@ -431,6 +431,7 @@ RUN_ID="${MEMBER}${ITEM:+-item$ITEM}${TASK:+-adhoc}-$$-$(date +%s)"
 # can show that pass's turns/cost (leg 3 of the grader). Exported, not just set: `claude -p`
 # is a separate exec and only sees the environment.
 export FLEET_RUN_ID="$RUN_ID"
+export FLEET_MEMBER="$MEMBER"  # issue_cluster.stamp: every issue this run files says who filed it
 
 MAX_BUDGET=$(jget "['mandate']['limits'].get('max_budget_usd') or ''")
 

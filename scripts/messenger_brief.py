@@ -273,6 +273,22 @@ def came_in_since(now: dt.datetime) -> dict:
     return inbox.came_in(since_ts)
 
 
+def issue_flow_since(hours: float) -> dict:
+    """Who filed and who closed on the product board in the window, per filer, plus the one
+    plain `line` the brief prints (issue_flow.py). {} with no product repo configured, and on
+    any failure: the brief still goes out."""
+    slugs = repo_slugs()
+    if len(slugs) < 2:
+        return {}
+    try:
+        import issue_flow
+        res = issue_flow.read_flow(slugs[-1], hours)
+        return {**res, "line": issue_flow.flow_line(res)}
+    except Exception as exc:  # noqa: BLE001
+        log(f"issue_flow skipped: {exc}")
+        return {}
+
+
 def collect(since_hours: float) -> dict:
     now = dt.datetime.now(dt.timezone.utc)
     since = now - dt.timedelta(hours=since_hours)
@@ -296,6 +312,7 @@ def collect(since_hours: float) -> dict:
         "vision": vision(),
         "pages": pages(),
         "came_in": came_in_since(now),
+        "issue_flow": issue_flow_since(since_hours),
         "app_url": os.environ.get("FLEET_PUBLIC_APP_URL", "https://philanthropy.org"),
         "console_url": os.environ.get("FLEET_CONSOLE_URL", "https://dino.luckymachines.co/fleet/philanthropy/"),
     }
