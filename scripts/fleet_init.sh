@@ -221,69 +221,111 @@ EOF
   local temp_dir=$(mktemp -d)
   trap "rm -rf '$temp_dir'" EXIT
 
-  run_or_dry "Cloning repo to check state" \
-    git clone --depth=1 "$REPO" "$temp_dir/repo" 2>&1 | grep -v "warning: " || true
-
   local is_empty=0
-  if [ ! -d "$temp_dir/repo/.git" ]; then
-    log_warn "Could not clone repo. It may be empty or private. Will proceed with GitHub API checks."
-    is_empty=1
-  elif [ ! -f "$temp_dir/repo/docs/VISION.md" ]; then
-    is_empty=1
+  local repo_dir="$temp_dir/repo"
+
+  # Try to clone; if it fails, repo is likely empty
+  if run_or_dry "Cloning repo to check state" \
+    git clone --depth=1 "$REPO" "$repo_dir" 2>&1 | grep -v "warning: " || true; then
+    # Cloned successfully - check if it has VISION.md
+    if [ ! -f "$repo_dir/docs/VISION.md" ]; then
+      is_empty=1
+    fi
+  else
+    # Clone failed - repo is empty or auth issue. Try to detect empty via GitHub API
+    if gh api "repos/$REPO_SLUG" --jq '.pushed_at' 2>/dev/null | grep -q .; then
+      # Repo exists but clone failed (likely auth/private) - don't scaffold
+      log_warn "Could not clone repo (private or auth issue). Skipping scaffold."
+      is_empty=0
+    else
+      # Repo is truly empty
+      is_empty=1
+      mkdir -p "$repo_dir"
+    fi
   fi
 
   if [ "$is_empty" -eq 1 ]; then
-    log_info "Repo appears empty or lacks VISION.md. Scaffolding now..."
+    log_info "Repo is empty or lacks VISION.md. Scaffolding now..."
 
-    # Create VISION.md from brief (in temp dir, then we'll push)
+    # Get the vision template
     local vision_template="$(dirname "$0")/../docs/VISION.md.template"
     if [ ! -f "$vision_template" ]; then
       log_error "VISION.md template not found: $vision_template"
       exit 1
     fi
 
-    mkdir -p "$temp_dir/repo/docs" "$temp_dir/repo/fleet"
+    # Create directory structure
+    mkdir -p "$repo_dir/docs" "$repo_dir/fleet"
 
-    # Substitute template placeholders
-    substitute_template "$vision_template" "$temp_dir/repo/docs/VISION.md" "$REPO_NAME" "Founder"
+    # Initialize git if this is a new repo
+    if [ ! -d "$repo_dir/.git" ]; then
+      run_or_dry "Initializing git repo" \
+        git -C "$repo_dir" init
+      run_or_dry "Configuring git user" \
+        bash -c "cd '$repo_dir' && git config user.email 'fleet@startup.local' && git config user.name 'Fleet Init'"
+    fi
 
-    # Parse brief and inject into VISION.md (simplified: read first line of each section)
+    # Substitute template placeholders and create VISION.md
+    substitute_template "$vision_template" "$repo_dir/docs/VISION.md" "$REPO_NAME" "Founder"
+
+    # Inject founder brief into VISION.md
     if [ -f "$BRIEF" ]; then
       run_or_dry "Injecting founder brief into VISION.md" \
-        cat "$BRIEF" >> "$temp_dir/repo/docs/VISION.md"
+        bash -c "echo '---' >> '$repo_dir/docs/VISION.md' && cat '$BRIEF' >> '$repo_dir/docs/VISION.md'"
     fi
 
     # Create initial fleet/okr.json with placeholder goals
-    run_or_dry "Creating fleet/okr.json" cat > "$temp_dir/repo/fleet/okr.json" <<'OKRJSON'
+    run_or_dry "Creating fleet/okr.json" \
+      bash -c "cat > '$repo_dir/fleet/okr.json' <<'OKRJSON'
 {
-  "_doc": "Goals for this startup. Read live by the fleet. Update as the business evolves.",
-  "objective": {
-    "id": "okr.north_star",
-    "label": "Achieve north-star metric",
-    "metric": null
+  \"_doc\": \"Goals for this startup. Read live by the fleet. Update as the business evolves.\",
+  \"objective\": {
+    \"id\": \"okr.north_star\",
+    \"label\": \"Achieve north-star metric\",
+    \"metric\": null
   },
-  "key_results": [
+  \"key_results\": [
     {
-      "id": "okr.users",
-      "label": "Acquire initial customers",
-      "metric": null
+      \"id\": \"okr.users\",
+      \"label\": \"Acquire initial customers\",
+      \"metric\": null
     },
     {
-      "id": "okr.product",
-      "label": "Ship core product features",
-      "metric": null
+      \"id\": \"okr.product\",
+      \"label\": \"Ship core product features\",
+      \"metric\": null
     },
     {
-      "id": "okr.retention",
-      "label": "Retain and delight users",
-      "metric": null
+      \"id\": \"okr.retention\",
+      \"label\": \"Retain and delight users\",
+      \"metric\": null
     }
   ]
 }
 OKRJSON
+"
 
-    # If repo is empty, we can't push via git (no history). Skip this part and note it.
-    log_warn "Empty repos need initial commit before pushing. Push these files manually or use 'git init && git add'."
+    # Commit and push for empty repos
+    if [ "$DRY_RUN" -eq 0 ]; then
+      cd "$repo_dir"
+      git add docs/VISION.md fleet/okr.json
+      git commit -m "Initial scaffold: VISION.md and goals from fleet_init" 2>&1 | head -2 || log_warn "Commit failed (already exists?)"
+
+      # Set remote and push
+      if [ ! -d ".git/refs/remotes/origin" ]; then
+        git remote add origin "$REPO" 2>/dev/null || true
+      fi
+
+      # For empty repos, push directly to main/master
+      local default_branch=$(gh api "repos/$REPO_SLUG" --jq '.default_branch' 2>/dev/null || echo "main")
+      git push -u origin "HEAD:$default_branch" 2>&1 | head -2 || log_warn "Push failed (may already exist)"
+      cd - > /dev/null
+    else
+      echo "[DRY-RUN] Would commit VISION.md and fleet/okr.json:"
+      echo "          git -C $repo_dir add docs/VISION.md fleet/okr.json"
+      echo "          git -C $repo_dir commit -m 'Initial scaffold: VISION.md and goals from fleet_init'"
+      echo "          git -C $repo_dir push -u origin HEAD:main"
+    fi
   else
     log_info "Repo already has VISION.md and committed history. Skipping scaffold."
   fi
@@ -318,9 +360,32 @@ OKRJSON
     fi
   fi
 
-  # Generate webhook secret (for manual registration)
+  # Generate and register webhook
   local webhook_secret=$(openssl rand -hex 16)
-  log_info "Webhook secret (register in GitHub repo settings): $webhook_secret"
+  local webhook_created=0
+
+  log_info "Registering webhook with GitHub..."
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "[DRY-RUN] Would create webhook:"
+    echo "          gh api repos/$REPO_SLUG/hooks -f name=web -f config[url]=https://${DOMAIN}/webhook/inbox -f config[secret]=$webhook_secret -f config[content_type]=json -F active=true -f events[]=pull_request -f events[]=issues -f events[]=push"
+  else
+    if gh api "repos/$REPO_SLUG/hooks" \
+      -f name=web \
+      -f "config[url]=https://${DOMAIN}/webhook/inbox" \
+      -f "config[secret]=$webhook_secret" \
+      -f "config[content_type]=json" \
+      -F "active=true" \
+      -f "events[]=pull_request" \
+      -f "events[]=issues" \
+      -f "events[]=push" \
+      --jq '.id' 2>/dev/null | grep -q .; then
+      webhook_created=1
+      log_info "Webhook registered with GitHub"
+    else
+      log_warn "Webhook registration failed (may need webhook admin scope). Manual step:"
+      echo "  gh api repos/$REPO_SLUG/hooks -f name=web -f config[url]=https://${DOMAIN}/webhook/inbox -f config[secret]=$webhook_secret -f config[content_type]=json -F active=true -f events[]=pull_request -f events[]=issues -f events[]=push"
+    fi
+  fi
 
   # Output verification checklist
   cat <<EOF
@@ -332,13 +397,11 @@ ${YELLOW}Scaffolded:${NC}
   ✓ fleet/okr.json (initial goals)
   ✓ 7 founding issues (stack, CI, deploy, landing page, auth, payments, analytics)
   ✓ Branch protection on main (if admin access available)
+  $([ "$webhook_created" -eq 1 ] && echo "✓ Webhook registered" || echo "○ Webhook registration (manual step below)")
 
 ${YELLOW}Next steps:${NC}
-  [ ] If repo was empty, git add + git push the VISION.md and fleet/okr.json files
   [ ] Review and update docs/VISION.md with full business details
-  [ ] Add webhook in GitHub repo settings:
-      URL: https://${DOMAIN}/webhook/inbox
-      Secret: $webhook_secret
+  $([ "$webhook_created" -eq 0 ] && echo "  [ ] Webhook: $webhook_secret" || echo "")
   [ ] Set up CI: choose tech stack, add .github/workflows/ci.yml
   [ ] Configure deploy driver (see scripts/deploy_driver.md)
   [ ] Start building! The fleet will claim and build founded issues.
@@ -346,6 +409,7 @@ ${YELLOW}Next steps:${NC}
 ${YELLOW}Verify:${NC}
   gh issue list --repo $REPO_SLUG --label fleet:backlog
   gh api repos/$REPO_SLUG/branches/main/protection
+  gh api repos/$REPO_SLUG/hooks
 
 ${YELLOW}Help:${NC}
   See RUNBOOK.md for fleet operations

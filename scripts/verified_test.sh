@@ -70,14 +70,18 @@ if command -v "$EMD_BIN" >/dev/null 2>&1; then EMD=("$EMD_BIN"); echo "verified_
 
 # Greenfield repos (empty or newly scaffolded) may have no test infrastructure yet.
 # Preflight gates are still checked, but running the test suite is not required.
+# A repo is greenfield if it has:
+#   - No test infrastructure (pyproject.toml, package.json, tests/, test/, scripts/tests_for_diff.py)
+#   - AND no CI workflows (.github/workflows/ci.yml or similar)
+#   - AND no docs/VISION.md (fleet-kit marker for initialized repos)
 GREENFIELD=0
-if [ ! -f "pyproject.toml" ] && [ ! -f "package.json" ] && [ ! -d "tests" ] && [ ! -d "test" ]; then
-  if [ ! -f "scripts/tests_for_diff.py" ] && [ $# -eq 0 ]; then
-    GREENFIELD=1
-    echo "verified_test: greenfield repo (no test infrastructure yet) -- preflight pass means ready to build"
-    code=0
-    ARGS="greenfield (no test infrastructure; ready to build)"
-  fi
+if [ ! -f "pyproject.toml" ] && [ ! -f "package.json" ] && [ ! -d "tests" ] && [ ! -d "test" ] && \
+   [ ! -f "scripts/tests_for_diff.py" ] && [ ! -f ".github/workflows/ci.yml" ] && \
+   [ ! -f "docs/VISION.md" ] && [ $# -eq 0 ]; then
+  GREENFIELD=1
+  echo "verified_test: greenfield repo (no test infrastructure yet) -- preflight pass means ready to build"
+  code=0
+  ARGS="greenfield (no test infrastructure; ready to build)"
 fi
 
 if [ "$GREENFIELD" -eq 0 ]; then

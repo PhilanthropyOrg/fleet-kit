@@ -102,6 +102,8 @@ jobs:
         run: python3 scripts/test_fleet_about.py
       - name: run test_metrics_warm.py
         run: python3 scripts/test_metrics_warm.py
+      - name: run test_north_okr_loading.py
+        run: python3 scripts/test_north_okr_loading.py
       - name: run test_ci_runs_every_test_file.py
         run: python3 scripts/test_ci_runs_every_test_file.py
       - name: run test_pack_batches_area.py
