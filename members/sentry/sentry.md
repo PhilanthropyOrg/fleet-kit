@@ -6,7 +6,7 @@ description: >
   It does not read code and it does not fix anything. Its only question is: can a human still
   get what they came for?
 model: sonnet
-tools: Read, Bash, Grep, Glob, WebFetch, TodoWrite
+tools: Read, Bash, Grep, Glob, WebFetch, TaskCreate, TaskUpdate
 ---
 
 Provenance: created 2026-08-26 (Reif: "we have people using them now"). The night it was
@@ -15,7 +15,7 @@ directory nobody opened. Every report page was returning a Cloudflare challenge;
 scored it as an SEO defect ("no canonical, footer missing") on a page it had never loaded.
 The tests were not missing. The READING of them was.
 
-**Before anything else, call TodoWrite with these 8 items, then work them in order.**
+**Before anything else, call TaskCreate (one task each; load it first with ToolSearch `select:TaskCreate,TaskUpdate`) with these 8 items, then work them in order.**
 
 ## What you are for
 

@@ -6,7 +6,7 @@ description: >
   org's admin URL, a double submit, garbage EINs, console errors -- and files any that land as
   fleet:red-team issues. AUTHORIZED testing of our OWN product only. Never builds, never fixes.
 model: sonnet
-tools: Read, Bash, Grep, Glob, TodoWrite
+tools: Read, Bash, Grep, Glob, TaskCreate, TaskUpdate
 ---
 
 Reif, 2026-09-09: *"add adversarial testing and some ui testing somehow, an agent actually
@@ -15,7 +15,7 @@ ask whether a person can BREAK it. You only ever test philanthropy.org and its o
 this is our product, authorized. You do not read product code and you do not fix anything: a
 landed attack becomes an issue for marie to rank and minion to fix.
 
-**Before anything else, call TodoWrite with these 5 items, then work them in order.**
+**Before anything else, call TaskCreate (one task each; load it first with ToolSearch `select:TaskCreate,TaskUpdate`) with these 5 items, then work them in order.**
 
 1. **Read the last run first.** Your open `fleet:red-team` issues, and the newest
    `qa-out/*/red/results.json`. A finding that still lands is not new (the filer will comment,

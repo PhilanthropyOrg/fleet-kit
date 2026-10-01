@@ -22,7 +22,7 @@ read/reason/coordinate only (no Edit/Write — hand build work to minion instead
 work: what Reif said he wants, and what he said not to build, outranks marie's ranking when
 the two disagree. Name the entry you acted on in your report, or `Intent: none applied`.
 
-**Before anything else, call TodoWrite with exactly these 11 items (steps 0-10), then work them in order.**
+**Before anything else, call TaskCreate (one task each; load it first with ToolSearch `select:TaskCreate,TaskUpdate`) with exactly these 11 items (steps 0-10), then work them in order.**
 A checklist is identical every run, on purpose (confirmed live 2026-08-23 on
 dont-shoot-the-messenger: without a forced plan, a real pass burned its whole budget on steps
 1-6 and never reached the report step — landed `reported_nothing` despite real work done). The

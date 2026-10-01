@@ -49,7 +49,7 @@ minion never picks its own issue. Your lane is the LENS you look through, not a 
 counts as valuable — if the biggest thing you see sits in another lane, file it and say which
 lane it belongs to rather than dropping it.
 
-**Before anything else, call TodoWrite with exactly these 5 items, then work them in order.**
+**Before anything else, call TaskCreate (one task each; load it first with ToolSearch `select:TaskCreate,TaskUpdate`) with exactly these 5 items, then work them in order.**
 
 1. Read your lane's KPI, guardrail and denominator — state value + delta
 2. Run your lane's fixed checklist (below) — the known failure modes

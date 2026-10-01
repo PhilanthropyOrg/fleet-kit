@@ -32,7 +32,8 @@
         "Grep",
         "Glob",
         "WebFetch",
-        "TodoWrite"
+        "TaskCreate",
+        "TaskUpdate"
       ],
       "deny": [
         "Bash(git push:*)",

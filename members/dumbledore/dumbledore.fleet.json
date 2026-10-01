@@ -42,7 +42,8 @@
         "Write",
         "Bash",
         "WebFetch",
-        "TodoWrite",
+        "TaskCreate",
+        "TaskUpdate",
         "Bash(bash /fleet-kit/scripts/pr_arm.sh:*)"
       ],
       "deny": [

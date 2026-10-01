@@ -7615,7 +7615,7 @@ def _marie_sweeps_the_whole_backlog_not_just_the_new():
        though the mandate already forbids open items that contradict the repo's north star and
        Part 0 re-reads that north star fresh every pass BECAUSE it changes.
 
-    The forced TodoWrite list is what a pass actually executes, so a part that is not on it is
+    The forced TaskCreate list is what a pass actually executes, so a part that is not on it is
     a part that gets skipped -- that list must name every part the charter defines.
     """
     charter = (Path(__file__).parent.parent / "members" / "marie" / "marie.md").read_text()
@@ -7627,7 +7627,7 @@ def _marie_sweeps_the_whole_backlog_not_just_the_new():
     assert "named conflict" in charter.lower() or "NAMED conflict" in charter, \
         "off-vision close has no evidence bar"
 
-    todo = charter[charter.find("call TodoWrite"):charter.find("## Part A")]
+    todo = charter[charter.find("call TaskCreate"):charter.find("## Part A")]
     for part in ("Part A", "Part B", "Part C", "Part C3", "Part D"):
         assert part in todo, f"{part} missing from the forced checklist -- a pass will skip it"
     import re
@@ -7952,7 +7952,7 @@ def _marie_writes_a_prd_and_minion_reads_it():
         "minion has no rule for picking among multiple PRD-shaped comments on the same issue"
 
     # The forced checklist is what a pass executes; a part missing from it is a part skipped.
-    todo = marie[marie.find("call TodoWrite"):marie.find("## Part A")]
+    todo = marie[marie.find("call TaskCreate"):marie.find("## Part A")]
     assert "Part C4" in todo, "Part C4 missing from the forced checklist"
     import re
     m = re.search(r"exactly these (\d+) items", marie)

@@ -36,7 +36,8 @@
         "Bash",
         "Grep",
         "Glob",
-        "TodoWrite",
+        "TaskCreate",
+        "TaskUpdate",
         "WebFetch",
         "WebSearch"
       ],
