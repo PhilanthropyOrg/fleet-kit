@@ -96,7 +96,7 @@ class FoldTests(unittest.TestCase):
         self.assertEqual(a2, [])
         self.assertEqual(st["exit:prune_api_cache"]["count"], 2)
         ok = [_rec(level="START"), _rec(level="EXIT", exit=0, msg="EXIT 0", run_keys=[],
-                                        ts="2026-09-29T06:06:50Z")]  # next hourly run, clean
+                                        ts="2026-09-29T11:06:50Z")]  # clean, 6h on
         a3 = bi.fold(st, ok, now=3000)
         self.assertEqual(sorted(a[1] for a in a3 if a[0] == "close"),
                          ["exit:prune_api_cache", "prune_api_cache:error-api_cache-still"])
@@ -114,8 +114,20 @@ class FoldTests(unittest.TestCase):
                          run_keys=["exit:c"] if rc else [])]
             acts += bi.fold(st, recs, now=0)
         self.assertEqual([a[0] for a in acts], ["open"])
-        clean = [_rec(job="c", level="EXIT", exit=0, ts="2026-09-29T13:55:00Z", run_keys=[])]
+        clean = [_rec(job="c", level="EXIT", exit=0, ts="2026-09-29T19:20:00Z", run_keys=[])]
         self.assertEqual([a[0] for a in bi.fold(st, clean, now=0)], ["close"])
+
+    def test_hourly_flapper_stays_one_item(self):
+        """Live 2026-10-01: a canary failing once an hour or two, clean in between, got a new
+        issue each time (21 in 48h). Clean for 1-5h is still the same incident."""
+        st: dict = {}
+        acts = []
+        for i, rc in enumerate([1, 0, 0, 1, 0, 1]):
+            ts = f"2026-09-29T{10 + i:02d}:00:00Z"
+            recs = [_rec(job="c", level="EXIT", exit=rc, ts=ts, key="exit:c" if rc else None,
+                         run_keys=["exit:c"] if rc else [])]
+            acts += bi.fold(st, recs, now=0)
+        self.assertEqual([a[0] for a in acts], ["open"])
 
     def test_alert_still_in_run_keys_stays_open_and_comments_after_6h(self):
         st: dict = {}
@@ -142,7 +154,7 @@ class ApplyTests(unittest.TestCase):
     def test_open_then_close_in_one_batch_closes_the_issue_it_filed(self):
         st: dict = {}
         recs = [_rec(level="EXIT", exit=1, key="exit:j", job="j", run_keys=["exit:j"]),
-                _rec(level="EXIT", exit=0, job="j", run_keys=[], ts="2026-09-29T07:06:50Z")]
+                _rec(level="EXIT", exit=0, job="j", run_keys=[], ts="2026-09-29T11:06:50Z")]
         actions = bi.fold(st, recs, now=0)
         calls = []
         with mock.patch("inbox.file_or_comment_alert",
