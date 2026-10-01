@@ -243,6 +243,17 @@ def validate(spec: dict, *, filename: str = "<dict>") -> dict:
                  f"{where}llm.capabilities names unknown slot(s) {unknown} -- not in "
                  f"{CAPABILITIES_FILE.name} (known slots: {sorted(known)})")
 
+    # llm.provider: which model CLI runs this member (docs/providers.md). Optional -- absent
+    # means the instance's default, claude. A name provider_config.json does not list fails
+    # HERE, at load time: a typo must not become a member that quietly runs on claude, or one
+    # that is refused every tick with nobody reading why.
+    if "provider" in llm:
+        known_providers = sorted(json.loads(
+            (Path(__file__).resolve().parent / "provider_config.json").read_text())["providers"])
+        _require(isinstance(llm["provider"], str) and llm["provider"] in known_providers,
+                 f"{where}llm.provider must be one of {known_providers} "
+                 f"(scripts/provider_config.json), got {llm['provider']!r}")
+
     report = spec["report"]
     _require(isinstance(report, dict), f"{where}report must be an object")
     _require(report.get("vision_link") in ("required", "optional"),

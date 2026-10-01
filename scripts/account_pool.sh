@@ -526,12 +526,22 @@ _account_pool_order() {
 # this closes the other two the same way, for the one rc unambiguous enough to key off safely.
 # $2 is optional so direct unit-test callers that only care about the prose match keep working.
 _account_pool_classify_failure() {
-  local out="$1" rc="${2:-}"
+  local out="$1" rc="${2:-}"   # $3 (optional): the account's auth kind, see account_pool_auth_kind
   if [ "$rc" = "124" ]; then
     echo "other"; return
   fi
   if grep -qiE "(reached|hit) your (weekly|usage|5-hour|session) limit|quota exceeded|\b429\b|too many requests" <<<"$out"; then
     echo "exhausted"; return
+  fi
+  # A pay-per-token account (an Anthropic or OpenAI API key) has no weekly limit to hit; it
+  # runs out of MONEY, and says so in different words. Matched only for those accounts ($3),
+  # so a subscription pass that merely prints one of these phrases is classified as before.
+  # No reset time comes with a billing error, so _account_pool_mark_exhausted gates it for its
+  # 5-minute fallback and the next call re-checks -- a topped-up key is back within one tick.
+  if [ "${3:-}" = "api_key" ]; then
+    if grep -qiE "credit balance is too low|insufficient_quota|exceeded your current quota" <<<"$out"; then
+      echo "exhausted"; return
+    fi
   fi
   if grep -qiE "not logged in|please (log|sign) in|invalid api key|unauthorized|token (has been )?revoked|401" <<<"$out"; then
     echo "unauthenticated"; return
@@ -641,8 +651,45 @@ _account_pool_config_dir() {
   printf '%s\n' "$mirror"
 }
 
+# _account_pool_key_for <prefix> <account> -- print the value of <prefix>_<ACCOUNT>, the same
+# naming CLAUDE_CODE_OAUTH_TOKEN_<ACCOUNT> uses (upper-cased, "-" -> "_"), or nothing.
+_account_pool_key_for() {
+  local var_name
+  var_name="$1_$(echo "$2" | tr '[:lower:]-' '[:upper:]_')"
+  printf '%s' "${!var_name:-}"
+}
+
+# account_pool_auth_kind <account> [provider] -- how this account pays, for the run record
+# (run_report.py --auth) and for the failure classifier above:
+#   claude: api_key       when ANTHROPIC_API_KEY_<ACCOUNT> is set (pay per token)
+#           subscription  otherwise (a Claude login or setup-token, today's only mode)
+#   codex:  api_key       when OPENAI_API_KEY_<ACCOUNT> is set
+#           chatgpt_login otherwise (a `codex login` saved under $HOME/.codex-<account>)
+account_pool_auth_kind() {
+  local account="$1" provider="${2:-claude}"
+  if [ "$provider" = "codex" ]; then
+    [ -n "$(_account_pool_key_for OPENAI_API_KEY "$account")" ] && echo "api_key" || echo "chatgpt_login"
+  else
+    [ -n "$(_account_pool_key_for ANTHROPIC_API_KEY "$account")" ] && echo "api_key" || echo "subscription"
+  fi
+}
+
 account_pool_run() {
   local account verdict rc capture
+  # ACCOUNT_POOL_PROVIDER=codex: this call goes to the Codex CLI, so it draws from
+  # FLEET_CODEX_ACCOUNTS instead of FLEET_ACCOUNTS. Unset (every caller before this existed)
+  # is claude, and nothing below changes for it. `local` so the swap ends with this call.
+  local pool_provider="${ACCOUNT_POOL_PROVIDER:-claude}" auth_kind api_key
+  local ACCOUNT_POOL_ORDER="$ACCOUNT_POOL_ORDER"
+  if [ "$pool_provider" = "codex" ]; then
+    ACCOUNT_POOL_ORDER="${FLEET_CODEX_ACCOUNTS:-}"
+    if [ -z "$ACCOUNT_POOL_ORDER" ]; then
+      _account_pool_log "provider=codex but FLEET_CODEX_ACCOUNTS is empty -- no account to run on"
+      export ACCOUNT_POOL_LAST_REASON="no_codex_accounts"
+      [ -n "${ACCOUNT_POOL_REASON_FILE:-}" ] && printf '%s\n' "no_codex_accounts" > "$ACCOUNT_POOL_REASON_FILE" 2>/dev/null
+      return 3
+    fi
+  fi
   export ACCOUNT_POOL_SELECTED="" ACCOUNT_POOL_LAST_REASON=""
   capture=$(mktemp "${TMPDIR:-/tmp}/account_pool_out.XXXXXX")
   trap 'rm -f "$capture"' RETURN
@@ -687,7 +734,33 @@ account_pool_run() {
     # gh#818: resolve ONCE, here, so all three branches below agree. Returns
     # $HOME/.claude-$account unchanged whenever that dir is writable.
     config_dir="$(_account_pool_config_dir "$account")"
-    if [ -n "$token_override" ]; then
+    auth_kind=$(account_pool_auth_kind "$account" "$pool_provider")
+    if [ "$pool_provider" = "codex" ]; then
+      # A Codex account: its own CODEX_HOME (where `codex login` saved a ChatGPT login), and,
+      # for an API-key account, the key as CODEX_API_KEY for THIS command only -- the variable
+      # `codex exec` documents for it. No Claude credential goes along.
+      api_key="$(_account_pool_key_for OPENAI_API_KEY "$account")"
+      mkdir -p "$HOME/.codex-$account" 2>/dev/null   # an API-key account has no login dir yet
+      if [ -n "$api_key" ]; then
+        CODEX_HOME="$HOME/.codex-$account" CODEX_API_KEY="$api_key" \
+          env -u CLAUDE_CODE_OAUTH_TOKEN -u ANTHROPIC_API_KEY -u OPENAI_API_KEY \
+          "$@" 2>&1 | tee "$capture"
+      else
+        CODEX_HOME="$HOME/.codex-$account" \
+          env -u CLAUDE_CODE_OAUTH_TOKEN -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u CODEX_API_KEY \
+          "$@" 2>&1 | tee "$capture"
+      fi
+    elif [ "$auth_kind" = "api_key" ]; then
+      # An Anthropic API-key account (ANTHROPIC_API_KEY_<ACCOUNT> is set): the key rides as
+      # ANTHROPIC_API_KEY on THIS command only. In `-p` mode the CLI always uses that key when
+      # it is present (its documented precedence puts it above CLAUDE_CODE_OAUTH_TOKEN and a
+      # saved login; only ANTHROPIC_AUTH_TOKEN ranks higher), so both of those are cleared and
+      # the pass cannot quietly bill something else. The next account in the loop starts from
+      # the untouched environment, so the key never follows a failover.
+      api_key="$(_account_pool_key_for ANTHROPIC_API_KEY "$account")"
+      CLAUDE_CONFIG_DIR="$config_dir" ANTHROPIC_API_KEY="$api_key" \
+        env -u CLAUDE_CODE_OAUTH_TOKEN -u ANTHROPIC_AUTH_TOKEN "$@" 2>&1 | tee "$capture"
+    elif [ -n "$token_override" ]; then
       CLAUDE_CONFIG_DIR="$config_dir" CLAUDE_CODE_OAUTH_TOKEN="$token_override" \
         "$@" 2>&1 | tee "$capture"
     elif [ "$account" = "primary" ]; then
@@ -741,7 +814,7 @@ account_pool_run() {
       _account_pool_log "account=$account command killed rc=$rc -- a signal, not an account failure; not failing over"
       return "$rc"
     fi
-    reason=$(_account_pool_classify_failure "$(cat "$capture")" "$rc")
+    reason=$(_account_pool_classify_failure "$(cat "$capture")" "$rc" "$auth_kind")
     _account_pool_log "account=$account command failed rc=$rc reason=$reason"
     export ACCOUNT_POOL_LAST_REASON="$reason"
     [ -n "${ACCOUNT_POOL_REASON_FILE:-}" ] && printf '%s\n' "$reason" > "$ACCOUNT_POOL_REASON_FILE" 2>/dev/null

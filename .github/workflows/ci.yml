@@ -102,6 +102,8 @@ jobs:
         run: python3 scripts/test_fleet_about.py
       - name: run test_metrics_warm.py
         run: python3 scripts/test_metrics_warm.py
+      - name: run test_providers.py
+        run: python3 scripts/test_providers.py
       - name: run test_ci_runs_every_test_file.py
         run: python3 scripts/test_ci_runs_every_test_file.py
       - name: run test_pack_batches_area.py
@@ -288,6 +290,10 @@ jobs:
         run: python3 scripts/test_account_readiness_names_pool.py
       - name: run test_pr_arm_sweep.py
         run: python3 scripts/test_pr_arm_sweep.py
+      - name: run test_outreach_send.py
+        run: python3 scripts/test_outreach_send.py
+      - name: run test_no_instance_specific_in_readme.py
+        run: python3 scripts/test_no_instance_specific_in_readme.py
 
   # Not a required check (see selftest above for why) -- but still runs on every PR, and its
   # failures are still visible on the PR's checks tab. `--with-deps` here can still fail on an

@@ -10,14 +10,35 @@
 #
 #   bash scripts/fleet_status.sh                # instance defaults below
 #   FLEET_CONTAINER_NAME=x KIT_DIR=~/fleet-kit bash scripts/fleet_status.sh
+#   bash scripts/fleet_status.sh --where        # print what was resolved, check nothing
 set -u
-C="${FLEET_CONTAINER_NAME:-philanthropy}"
-KIT="${KIT_DIR:-$HOME/fleet-kit}"
-DEPLOY_LOG="${FLEET_DEPLOY_LOG:-$HOME/fleet-kit-logs/auto_deploy.log}"
+# Instance settings (instance.env.example): which container, checkout, instance dir and deploy
+# log this install uses. Read when FLEET_INSTANCE_ENV names the file, or when this checkout
+# holds exactly one instances/*/instance.env. Order: environment, then that file, then the
+# built-in defaults below -- so a box with no instance.env behaves exactly as before.
+_ie="${FLEET_INSTANCE_ENV:-}"
+if [ -z "$_ie" ]; then
+  _n=0
+  for _f in "$(cd "$(dirname "$0")/.." && pwd)"/instances/*/instance.env; do
+    [ -f "$_f" ] && { _ie="$_f"; _n=$((_n + 1)); }
+  done
+  [ "$_n" -eq 1 ] || _ie=""
+fi
+# shellcheck disable=SC1090
+[ -n "$_ie" ] && [ -f "$_ie" ] && . "$_ie"
+C="${FLEET_CONTAINER_NAME:-${FLEET_BOX_CONTAINER:-philanthropy}}"
+KIT="${KIT_DIR:-${FLEET_BOX_KIT_DIR:-$HOME/fleet-kit}}"
+DEPLOY_LOG="${FLEET_DEPLOY_LOG:-${FLEET_BOX_DEPLOY_LOG:-$HOME/fleet-kit-logs/auto_deploy.log}}"
 # Logs are read from the HOST bind mount, never via `podman exec cat`: podman truncates a
 # piped exec's stdout (391 of 20,230 lines came through on 2026-09-19), which made runs.jsonl
 # look 28 days stale.
-LOGS="${FLEET_LOG_DIR:-$HOME/fleet-kit/instances/nonprofit-atlas/logs}"
+LOGS="${FLEET_LOG_DIR:-${FLEET_BOX_INSTANCE_DIR:+$FLEET_BOX_INSTANCE_DIR/logs}}"
+LOGS="${LOGS:-$HOME/fleet-kit/instances/nonprofit-atlas/logs}"
+if [ "${1:-}" = "--where" ]; then
+  printf '%s=%s\n' settings "${_ie:-none (built-in defaults)}" container "$C" kit "$KIT" \
+    logs "$LOGS" deploy_log "$DEPLOY_LOG"
+  exit 0
+fi
 now=$(date +%s)
 pe() { podman exec "$C" sh -c "$1" 2>/dev/null; }
 row() { printf '%-5s %-10s %s\n' "$1" "$2" "$3"; }
