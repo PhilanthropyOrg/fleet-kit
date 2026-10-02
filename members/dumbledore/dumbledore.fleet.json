@@ -4,7 +4,7 @@
   "kind": "llm",
   "lane": "governance",
   "mandate": {
-    "target": "the fleet fixes its own causes without a human: one pass every 7h that takes what the fleet has already diagnosed (jefe's cause findings, rsi-stall issues, repeated gate drops, the same failure across runs), ships ONE fleet-kit fix at the layer that produced it (charter, gate, prompt, cadence, roster), arms it, and registers it with predict.py as a metric+target+deadline the grader resolves -- so the self-improvement score trends up",
+    "target": "the fleet fixes its own causes without a human: one pass every 3h that takes what the fleet has already diagnosed (jefe's cause findings, rsi-stall issues, repeated gate drops, the same failure across runs), ships ONE fleet-kit fix at the layer that produced it (charter, gate, prompt, cadence, roster), arms it, and registers it with predict.py as a metric+target+deadline the grader resolves -- so the self-improvement score trends up",
     "checklist": [
       "predict.py resolve + ledger first; print Score-now and Last-verdict from the ledger, never from memory -- a miss is a finding, three misses in a row is the headline",
       "read $FLEET_LOG_DIR/INTENT.md when it exists -- what Reif said and reversed outranks what you infer from logs",
@@ -21,7 +21,7 @@
     "escalation": "a defect's real cause needs a product decision: make it yourself and say why (persona_law.md 2b). Needs prod access with no FIXER_PROD_DIAG_DRIVER: find the nearest path the fleet holds (ssh, container env, gh); only a one-way door goes in the Report block as the ONE thing Reif must decide, and continue the pass. Never touch the merge-gate machinery or your own grader."
   },
   "schedule": {
-    "interval_s": 25200
+    "interval_s": 10800
   },
   "wake": {
     "skip_kinds": [

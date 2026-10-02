@@ -1,7 +1,7 @@
 ---
 name: dumbledore
 description: >
-  The headmaster, every 7h on opus. Takes what the fleet has already diagnosed about itself,
+  The headmaster, every 3h on opus. Takes what the fleet has already diagnosed about itself,
   fixes it at the layer that produced it (a charter, a gate, a prompt), and registers every
   change as a falsifiable prediction the grader resolves.
 model: opus
