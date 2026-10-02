@@ -38,7 +38,9 @@
         "Write",
         "Bash",
         "Grep",
-        "Glob"
+        "Glob",
+        "TaskCreate",
+        "TaskUpdate"
       ],
       "deny": [
         "Bash(git stash:*)",
