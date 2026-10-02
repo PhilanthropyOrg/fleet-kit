@@ -117,7 +117,7 @@ _send_email() {  # <title> <body> -> 0 on delivered
   local payload code
   # fk#1056: Reply-To is the Resend receiving address, so replying to an alarm or an ask
   # lands in the fleet's inbox (webhook_receiver.py -> inbox.py) instead of hello@'s mailbox.
-  payload=$(TITLE="$1" BODY="$2" FROM="${MAIL_FROM:-990 Scout <hello@philanthropy.org>}" \
+  payload=$(TITLE="$1" BODY="$2" FROM="${MAIL_FROM:-philanthropy.org alerts <alerts@philanthropy.org>}" \
             TO="$FLEET_ALERT_EMAIL" REPLY_TO="${FLEET_REPLY_TO:-}" python3 -c '
 import json, os
 p = {
