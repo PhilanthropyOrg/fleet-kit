@@ -385,7 +385,7 @@ class RealSend(Base):
             self.assertTrue(inbox.send_reply("r@example.org", "Re: x", "ok", in_reply_to="<id1>"))
         (req,) = FakeProvider.seen
         self.assertEqual(req["auth"], "Bearer re_kit")
-        self.assertEqual(req["body"], {"from": "990 Scout <hello@philanthropy.org>", "to": ["r@example.org"],
+        self.assertEqual(req["body"], {"from": "philanthropy.org alerts <alerts@philanthropy.org>", "to": ["r@example.org"],
                                        "subject": "Re: x", "text": "ok\n\n-- dino fleet",
                                        "headers": {"In-Reply-To": "<id1>", "References": "<id1>"}})
         FakeProvider.status = 500

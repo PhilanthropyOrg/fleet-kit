@@ -4690,7 +4690,7 @@ def _email_reply_answers_asks_and_files_backlog_without_a_model():
     ask = (ROOT / "scripts" / "ask.py").read_text()
     assert 'f"[dumbledore] fleet ask #{ask_id} from {sender}"' in ask and "Reply to this email with one line" in ask, "ask mail does not say how to reply"
     # Reif, 2026-09-28: "label these as officially from dumbledore" -- the From name too.
-    assert 'MAIL_FROM="Dumbledore (fleet) <hello@philanthropy.org>"' in ask, "ask mail is not branded from dumbledore"
+    assert 'MAIL_FROM="Dumbledore (fleet) <alerts@philanthropy.org>"' in ask, "ask mail is not branded from dumbledore"
 
 
 def _intake_classifies_and_dedupes_alerts_by_check():
@@ -4723,6 +4723,7 @@ def _intake_classifies_and_dedupes_alerts_by_check():
     # a hello@philanthropy.org mail is accepted (FLEET_INTAKE_FROM default) but never parsed
     # as an ask answer, even when its body is shaped exactly like one
     assert ib.intake_allowed("990 Scout <hello@philanthropy.org>")
+    assert ib.intake_allowed("philanthropy.org alerts <alerts@philanthropy.org>")  # philanthropy#10275
     assert ib.classify({"from": "990 Scout <hello@philanthropy.org>", "subject": "Re: brief", "text": "yes 12"}) == "unknown"
     # an address in neither FLEET_INBOX_FROM nor FLEET_INTAKE_FROM is still rejected (untrusted)
     assert not ib.intake_allowed("stranger@example.org")
