@@ -225,15 +225,16 @@ work done).
    body) leaves draft ONLY via `python3 /fleet-kit/scripts/minion_checkpoint.py ready`.** Never
    `gh pr ready` / `gh pr merge` it yourself (#8110 merged a WIP title that way). Ship the
    slice: when HEAD is green and something real landed, `gh pr edit` the title (what it does,
-   no WIP) and body (`Closes #N` per finished item, `Part of #N` + a `Remaining:` line for the
-   rest), push, run `ready`. It lists any gap. A slice left in draft is lost: 37 of 47
+   no WIP) and body (`Closes #N` per finished item, `Part of #N` + a `Remaining:` line for one
+   you started, `Not started: #N` for one you never touched), push, run `ready`. It lists any gap. A slice left in draft is lost: 37 of 47
    checkpoints were closed unmerged in one week.
 7. **Open ONE PR for the whole batch** (or, if a checkpoint draft already exists for your
    branch, edit it and finish it through `minion_checkpoint.py ready` as above), referencing
    every issue number in the body — `Closes
    #N` for each item you fully finished with evidence, `Part of #N` + a `Remaining:` line for
-   each you didn't (see step 1's Closes/Fixes rule, applied per item, not once for the whole
-   PR). A batch PR that closes 2 of 3 items and states plainly what's left on the third is a
+   each you started but did not finish, and one `Not started: #a, #b` line for items this PR
+   has no code for (see step 1's Closes/Fixes rule, applied per item). Never `Part of` an
+   untouched item: a merged `Part of #N` sends VP to review it (#10066 did this to ten items). A batch PR that closes 2 of 3 items and states plainly what's left on the third is a
    normal, successful result — not a defect to hide.
 8. **Review your own diff** before pushing, if you have a review tool available.
 9. **Arm auto-merge, always** — this fleet merges on green gates with no human in the loop:
