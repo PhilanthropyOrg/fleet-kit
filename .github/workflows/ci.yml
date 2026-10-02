@@ -290,6 +290,8 @@ jobs:
         run: python3 scripts/test_judge_judy_fix_item_gate.py
       - name: run test_judge_judy_carry_forward.py
         run: python3 scripts/test_judge_judy_carry_forward.py
+      - name: run test_judge_judy_no_tools.py
+        run: python3 scripts/test_judge_judy_no_tools.py
       - name: run test_inbox_came_in.py
         run: python3 scripts/test_inbox_came_in.py
       - name: run test_inbox_forward.py
