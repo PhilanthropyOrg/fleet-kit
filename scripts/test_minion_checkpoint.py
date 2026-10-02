@@ -239,6 +239,9 @@ def test_8110_as_merged_is_not_done() -> None:
     # but every item is named, and a Part of says what is left
     assert mc.done_gaps(DONE_TITLE, "Closes #1", [1, 2])
     assert mc.done_gaps(DONE_TITLE, "Closes #1\nPart of #2", [1, 2])
+    # an untouched batch item is `Not started:`, never `Part of` (vp_due reads that as a slice)
+    assert mc.done_gaps(DONE_TITLE, "Closes #1\nNot started: #2, #3", [1, 2, 3]) == []
+    assert mc.done_gaps(DONE_TITLE, "Closes #1\nNot started: #2", [1, 2, 3])
     assert mc.branch_items("member/minion-item7942_7950-1-2") == [7942, 7950]
     print("ok  #8110's title/body (WIP, Part of, Remaining, no Closes) is not done")
 
