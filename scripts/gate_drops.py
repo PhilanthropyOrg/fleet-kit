@@ -248,6 +248,15 @@ def plan(items: list[dict], run_id: str, parents: dict | None = None,
             actions.append({"number": it["number"], "op": "add_label", "label": DEFAULT_QUALITY})
             fixed.add(it["number"])
             it = dict(it, labels=list(it.get("labels") or []) + [{"name": DEFAULT_QUALITY}])
+        # Mechanical: filers pre-stamp the default and marie's score adds a second one without
+        # removing it (jefe msg#632: 4 of 4 needs-spec items). The scored label wins; two
+        # non-default labels stay a real gap.
+        quals = set(labels) & set(quality_gate.QUALITY_LABELS)
+        if len(quals) == 2 and DEFAULT_QUALITY in quals:
+            actions.append({"number": it["number"], "op": "remove_label", "label": DEFAULT_QUALITY})
+            fixed.add(it["number"])
+            it = dict(it, labels=[x for x in it.get("labels") or []
+                                  if (x.get("name") if isinstance(x, dict) else x) != DEFAULT_QUALITY])
         patched.append(it)
     items = patched
     by_num = {it["number"]: it for it in items}
@@ -258,7 +267,7 @@ def plan(items: list[dict], run_id: str, parents: dict | None = None,
     drops = [dict(d, gate="vision-link") for d in vis["dropped"]]
     drops += [dict(d, gate="quality") for d in qual["dropped"]]
     eligible = list(qual["eligible"])
-    records: list[dict] = [{"number": n, "gate": "quality", "reason": "no quality: label",
+    records: list[dict] = [{"number": n, "gate": "quality", "reason": "quality label normalized",
                             "action": "fixed"} for n in eligible if n in fixed]
     records += [{"number": n, "gate": "founding-order", "action": "by-design",
                  "reason": f"waits for founding issue #{waits[n]} to close"} for n in waiting]
