@@ -52,15 +52,18 @@ def test_spec_gap_gets_label_comment_and_one_ask() -> None:
              _item(4, ["quality:solid"], GWT),                               # no Vision-link
              _item(5, ["quality:solid"], f"{VL}\n\n{GWT}")]                  # fine
     p = gd.plan(items, "r2")
-    assert p["eligible"] == [5], p
+    # Two quality labels is mechanical: the stamped default comes off and it builds now.
+    assert p["eligible"] == [2, 5], p
     ops = {(a["number"], a["op"], a.get("label")) for a in p["actions"]}
-    for n in (2, 3, 4):
+    assert (2, "remove_label", "quality:solid") in ops and (2, "add_label", gd.NEEDS_SPEC) not in ops, ops
+    for n in (3, 4):
         assert (n, "add_label", gd.NEEDS_SPEC) in ops, (n, ops)
         assert (n, "comment", None) in ops, (n, ops)
-    gaps = {d["number"]: d["gap"] for d in p["dropped"]}
-    assert gaps == {2: "quality-label", 3: "acceptance", 4: "vision-link"}, gaps
-    assert p["ask"] and all(f"#{n}" in p["ask"]["why"] for n in (2, 3, 4)), p["ask"]
-    print("ok  spec gaps -> fleet:needs-spec + a comment naming the gap + one ask for the pass")
+    gaps = {d["number"]: d["gap"] for d in p["dropped"] if d["action"] == "needs-spec"}
+    assert gaps == {3: "acceptance", 4: "vision-link"}, gaps
+    assert p["ask"] and all(f"#{n}" in p["ask"]["why"] for n in (3, 4)), p["ask"]
+    assert "#2" not in p["ask"]["why"], p["ask"]
+    print("ok  spec gaps -> fleet:needs-spec + a comment naming the gap + one ask; two quality labels self-heal")
 
 
 def test_second_pass_is_idempotent_and_clears_fixed_items() -> None:
