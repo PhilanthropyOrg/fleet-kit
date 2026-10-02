@@ -233,9 +233,11 @@ def test_judge_judy_default_call_is_unchanged() -> None:
         got = _judge(box, "claude", FLEET_ACCOUNTS="alpha")
         calls = box.calls()
         assert "RC=0" in got["stdout"] and [c["bin"] for c in calls] == ["claude"], (got, calls)
-        # origin/main: claude -p "$PROMPT" --model "$MODEL" --output-format json
+        # origin/main: claude -p "$PROMPT" --model "$MODEL" --tools "" --output-format json
         #              --json-schema "$VERDICT_SCHEMA" --max-budget-usd "${FLEET_MAX_BUDGET_USD:-5}"
-        assert calls[0]["argv"] == ["-p", "review this diff", "--model", "sonnet", "--output-format", "json",
+        # (--tools "": the review runs with no tools, test_judge_judy_no_tools.py)
+        assert calls[0]["argv"] == ["-p", "review this diff", "--model", "sonnet", "--tools", "",
+                                    "--output-format", "json",
                                     "--json-schema", got["schema"], "--max-budget-usd", "5"], calls[0]["argv"]
         assert "RECEIPT=\n" in got["stdout"], got["stdout"]   # subscription: the run record is unchanged
         assert judge_judy_verdict.parse(got["raw"])["ok"]
