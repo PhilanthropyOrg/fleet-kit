@@ -14282,7 +14282,9 @@ def _dumbledore_cycles_every_3h_and_scores_each_change_in_a_day():
     line = next(l for l in entry.splitlines() if "run_member.sh dumbledore" in l)
     assert '"13 */3 * * * root' in line, line
     spec = _json.loads((ROOT / "members/dumbledore/dumbledore.fleet.json").read_text())
-    assert spec["schedule"]["interval_s"] == 3 * 3600, spec["schedule"]
+    # 3h -> 7h on kit#1507: at 3h, 22 one-day judgments overlapped and none was readable. The
+    # cron line still ticks every 3h; interval_s is what gates a pass.
+    assert spec["schedule"]["interval_s"] == 7 * 3600, spec["schedule"]
     assert predict.DEFAULT_BY_HOURS == predict.RESOLVE_WINDOW_H == 24.0
     md = (ROOT / "members/dumbledore/dumbledore.md").read_text()
     assert "--by-hours 24 " in md and "<24-120>" not in md
