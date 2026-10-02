@@ -124,6 +124,17 @@ def test_intake_plan_fixes_labels_specs_and_skips() -> None:
     print("ok  intake: quality:solid default, needs-spec for a real gap, epics/claimed/prod untouched")
 
 
+def test_intake_collapses_a_stamped_default_beside_a_scored_label() -> None:
+    backlog = [_issue(20, ["fleet:backlog", "quality:solid", "quality:ship-it", gd.NEEDS_SPEC]),
+               _issue(21, ["fleet:backlog", "quality:ship-it", "quality:world-class"])]
+    p = gd.intake_plan(backlog, [], "intake-t")
+    ops = {(a["number"], a["op"], a.get("label")) for a in p["actions"]}
+    assert (20, "remove_label", "quality:solid") in ops and (20, "remove_label", gd.NEEDS_SPEC) in ops
+    assert p["eligible"] == [20], p
+    assert (21, "add_label", gd.NEEDS_SPEC) in ops and not [o for o in ops if o[0] == 21 and o[1] == "remove_label"]
+    print("ok  intake: filer-stamped quality:solid yields to marie's score; two scored labels stay a gap")
+
+
 def test_intake_resends_a_moved_gap_and_a_stale_item() -> None:
     # 2026-09-29: marie fixed #30's vision-link; it stayed labeled needs-spec and moved on to
     # acceptance, and intake never told anyone. #31 was sent 4 days ago and is still stuck.
