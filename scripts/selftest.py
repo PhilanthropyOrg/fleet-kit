@@ -8825,6 +8825,60 @@ def _hourly_at_minute_matches_entrypoint_cron_line():
         "no-op in prod:\n" + "\n".join(mismatches))
 
 
+def _cron_spacing_s(minute: str, hour: str):
+    """Seconds between fires of a `minute hour * * *` cron line, or None if uneven/unknown."""
+    import re
+    minute, hour = (re.sub(r"\$\{[A-Z_]+:-([^}]*)\}", r"\1", f) for f in (minute, hour))
+
+    def step(field, span):
+        if field == "*":
+            return 1
+        if field.startswith("*/") and field[2:].isdigit() and span % int(field[2:]) == 0:
+            return int(field[2:])
+        vals = [int(v) for v in field.split(",")] if all(v.isdigit() for v in field.split(",")) else []
+        if len(vals) > 1:
+            gaps = {b - a for a, b in zip(vals, vals[1:])} | {span - vals[-1] + vals[0]}
+            return gaps.pop() if len(gaps) == 1 else None
+        return None
+
+    if minute.isdigit():
+        h = step(hour, 24)
+        return h * 3600 if h else None
+    if hour == "*":
+        m = step(minute, 60)
+        return m * 60 if m else None
+    return None
+
+
+def _interval_s_matches_entrypoint_cron_spacing():
+    """The interval_s half of the gh#754 check above. Nothing gates a pass on interval_s:
+    entrypoint.sh's cron line is the only clock. kit#1507 set dumbledore's interval_s to 7h
+    and its prediction (runs/day 10 -> 8) missed at 10.0, because cron still fired every 3h."""
+    import json, glob, re
+    root = Path(__file__).parent.parent
+    entry = (root / "entrypoint.sh").read_text()
+    mismatches = []
+    for f in sorted(glob.glob(str(root / "members" / "*" / "*.fleet.json"))):
+        spec = json.loads(Path(f).read_text())
+        name, sched = spec["name"], spec.get("schedule") or {}
+        if not spec.get("enabled") or "interval_s" not in sched:
+            continue
+        script = f"run_{name}_fanout.sh" if f"run_{name}_fanout.sh" in entry else f"run_member.sh {name}"
+        m = re.search(rf'echo "(\S+) (\S+) [^\n"]*{re.escape(script)}', entry)
+        if not m:
+            continue  # existence is _every_scheduled_member_is_actually_on_cron's job
+        actual = _cron_spacing_s(m.group(1), m.group(2))
+        if actual != sched["interval_s"]:
+            mismatches.append(f"{name}: interval_s={sched['interval_s']}, cron "
+                              f"{m.group(1)!r} {m.group(2)!r} fires every {actual}s")
+    assert not mismatches, (
+        "a member's schedule.interval_s disagrees with its entrypoint.sh cron line; the cron "
+        "line is what runs, so the fleet.json edit is a no-op in prod:\n" + "\n".join(mismatches))
+    assert _cron_spacing_s("17", "0,3,6,9,12,15,18,21") == 10800
+    assert _cron_spacing_s("*/15", "*") == 900
+    assert _cron_spacing_s("13", "*/3") == 10800 and _cron_spacing_s("13", "*/7") is None
+
+
 def _fleet_cron_members_gates_entrypoint_crontab():
     """gh#138: fleet.env's own header can declare an instance "judge-judy only", but
     entrypoint.sh's crontab used to be a single hardcoded list installed unconditionally --
@@ -14283,9 +14337,9 @@ def _dumbledore_cycles_every_3h_and_scores_each_change_in_a_day():
     line = next(l for l in entry.splitlines() if "run_member.sh dumbledore" in l)
     assert '"13 */3 * * * root' in line, line
     spec = _json.loads((ROOT / "members/dumbledore/dumbledore.fleet.json").read_text())
-    # 3h -> 7h on kit#1507: at 3h, 22 one-day judgments overlapped and none was readable. The
-    # cron line still ticks every 3h; interval_s is what gates a pass.
-    assert spec["schedule"]["interval_s"] == 7 * 3600, spec["schedule"]
+    # kit#1507 set interval_s to 7h believing it gated a pass; nothing reads it for that, so
+    # runs/day stayed 10. The cron line is the clock; the two must agree.
+    assert spec["schedule"]["interval_s"] == 3 * 3600, spec["schedule"]
     assert predict.DEFAULT_BY_HOURS == predict.RESOLVE_WINDOW_H == 24.0
     md = (ROOT / "members/dumbledore/dumbledore.md").read_text()
     assert "--by-hours 24 " in md and "<24-120>" not in md
@@ -16143,6 +16197,7 @@ if __name__ == "__main__":
     check("every pass files a written report", _every_pass_files_a_written_report)
     check("every scheduled member is actually on cron", _every_scheduled_member_is_actually_on_cron)
     check("schedule.hourly_at_minute matches entrypoint.sh's actual cron minute (gh#754)", _hourly_at_minute_matches_entrypoint_cron_line)
+    check("schedule.interval_s matches entrypoint.sh's actual cron spacing", _interval_s_matches_entrypoint_cron_spacing)
     check("FLEET_CRON_MEMBERS gates entrypoint.sh's generated crontab", _fleet_cron_members_gates_entrypoint_crontab)
     check("gru's cron line redirects to its own log file (gh#511)", _gru_cron_line_redirects_to_its_own_log_file)
     check("account + tunnel health checks are actually scheduled", _account_and_tunnel_health_checks_are_actually_scheduled)
