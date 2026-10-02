@@ -520,7 +520,12 @@ Answer with a verdict of block unless there is truly nothing blocking, plus one 
     RC=$?
     rm -f "$PROMPT_FILE"
   elif [ "$REVIEW_PROVIDER" = "claude" ]; then
-  RAW=$(account_pool_run timeout "$TIMEOUT_S" claude -p "$PROMPT" --model "$MODEL" \
+  # --tools "": the review is diff-as-text with no tools (header above; judge-judy.fleet.json
+  # denies Read/Grep/Glob/Bash), but this call never said so, so 239 of 393 reviews on
+  # 2026-10-02 ran 3-16 turns reading the repo, and every call paid ~19k tokens of tool and
+  # agent prompt it does not use ($0.079 vs $0.003 on the same tiny schema prompt, measured).
+  # --json-schema's verdict still comes back with no tools enabled.
+  RAW=$(account_pool_run timeout "$TIMEOUT_S" claude -p "$PROMPT" --model "$MODEL" --tools "" \
     --output-format json --json-schema "$VERDICT_SCHEMA" --max-budget-usd "${FLEET_MAX_BUDGET_USD:-5}" 2>>"$LOG")
   RC=$?
   else
