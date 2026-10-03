@@ -41,9 +41,24 @@ def _findings_text(findings: list) -> str:
     return "\n".join(lines)
 
 
+def _last_envelope(raw: str):
+    """The account pool retries on a second account when the first answers 429, and both
+    calls print to the same stdout -- so RAW can hold two envelopes, one per line: the
+    rate-limit error, then the real answer. A single json.loads failed on that with "Extra
+    data: line 2 column 1" (18 of 21 schema strikes in judge-judy.log, 2026-10-03; PR #10685
+    and #10706 were held for it). The last envelope is the one that answered."""
+    dec, i, last = json.JSONDecoder(), 0, None
+    raw = raw.strip()
+    while i < len(raw):
+        last, i = dec.raw_decode(raw, i)
+        while i < len(raw) and raw[i].isspace():
+            i += 1
+    return last
+
+
 def parse(raw: str) -> dict:
     try:
-        envelope = json.loads(raw)
+        envelope = _last_envelope(raw)
     except json.JSONDecodeError as e:
         return {"ok": False, "reason": f"outer --output-format json envelope did not parse: {e}"}
     if not isinstance(envelope, dict):

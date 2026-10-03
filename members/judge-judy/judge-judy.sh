@@ -670,6 +670,9 @@ until this item is worked. Raw model output from the last attempt: $RAW_CAPTURE
 Re-run the review on this head first. If it parses, the hold clears on its own; if it fails the
 same way again, the defect is in the reviewer (prompt or schema), not in PR #$PR.
 
+## Acceptance
+- Given PR #$PR held at head ${HEAD_SHA:0:12} for an errored review, When the review is re-run on the same head, Then a verdict posts or the hold clears.
+
 $ERR_VISION_LINK"
       python3 "$KIT_DIR/scripts/board_github.py" file "$ERR_FIX_TITLE" --context "$ERR_FIX_BODY" \
           --priority high >>"$LOG" 2>&1 \
