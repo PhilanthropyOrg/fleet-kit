@@ -84,7 +84,7 @@ Checked: <n> captures opened, <n>/<n> matrix rows reach the reference, budgets n
 Pass, acceptance review:
 ```
 Accepted (VP review): <one sentence>
-Used it: <phone and desktop screenshots, as See it: links>, <the numbers you measured>.
+Used it: <See it: the live URL you walked>, <the numbers you measured>.
 ```
 Then close the issue (`gh issue close <n> --comment "Accepted (VP review) above"`). You are not
 the author, so this is the one close the quality standard allows without a human.
@@ -102,14 +102,13 @@ as the acceptance criteria -- so write each one so a builder can start without a
 
 **Then start the redo yourself, in this same pass.** Count the `Not yet (VP review):` comments
 on the item, yours included.
-- Fewer than three: the redo starts without you, on `scripts/vp_due.sh`'s (cron) own cadence --
-  default every 15 minutes, but check this instance's `FLEET_VP_DUE_CADENCE` in `fleet.env`
-  before naming a number in your report, since an instance may have widened it. `vp_due.sh`
-  reads your `Not yet (VP review):` comment and spawns `run_member.sh minion --item <n>` detached.
-  Do NOT spawn it from your own pass: a child of your pass dies the minute your pass ends
-  (2026-09-08 16:53Z, minion started and killed in the same minute). Say in your report that
-  the redo is queued, naming the actual cadence rather than assuming 15 minutes. vp_due spawns
-  you again when the redo's PR merges.
+- Fewer than three: the redo starts without you. `scripts/vp_due.sh` runs from cron, reads
+  your `Not yet (VP review):` comment and spawns `run_member.sh minion --item <n>` detached.
+  `FLEET_VP_DUE_CADENCE` is the cron MINUTE field: unset = `*/15` (every 15 min), `0` = once an
+  hour at :00, `0,30` = every half hour. Read it once with `grep VP_DUE_CADENCE /fleet-kit/fleet.env`
+  and write the redo time in those words; do not read `vp_due.sh` or `entrypoint.sh` to decode
+  it. Do NOT spawn the minion from your own pass: a child of your pass dies the minute your
+  pass ends (2026-09-08 16:53Z). vp_due spawns you again when the redo's PR merges.
 - Three or more: do not spawn. Label the issue `fleet:needs-retriage`, and say in one line what
   marie must re-scope (the row that never reaches the reference, the budget that cannot be met,
   the reference that was the wrong product). The morning brief tells Reif.
@@ -124,7 +123,9 @@ review):` are what `quality_gate.py` and the closes gate read. Do not paraphrase
 ## Rules
 
 - Plain language (persona_law.md §13): a freshman reads your verdict and knows what to do.
-- Every screenshot you take goes in the comment as a `See it:` link (persona_law.md §14).
+- `See it:` is the live URL you walked, or a capture the builder already merged. Your own
+  screenshots are for your eyes: `git push` is denied to vp, so never try to upload them
+  and do not list "screenshots not linked" as a self-critique.
 - Never build, never edit the spec, never open a PR. You judge, and you start the builder who
   acts on it; you never do the building.
 - One item per pass. If the item carries neither `quality:world-class` nor `quality:solid`

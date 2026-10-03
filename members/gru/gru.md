@@ -421,9 +421,8 @@ spawns exactly one). Your job, in order:
    ```
    FLEET_RUN_NOW=1 bash /fleet-kit/scripts/run_member.sh vp --item <n>
    ```
-   `scripts/vp_due.sh` on the crontab does this deterministically, on whatever cadence this
-   instance's `FLEET_VP_DUE_CADENCE` dial is set to (default every 15 min, but an instance may
-   have widened it — check `fleet.env` rather than assuming 15) — you only spawn `vp` yourself
+   `scripts/vp_due.sh` on the crontab does this deterministically, on the cron minute field
+   `FLEET_VP_DUE_CADENCE` (unset = every 15 min, `0` = hourly at :00) — you only spawn `vp` yourself
    when you can see it is due right now and `vp_due.py --repo-dir /repo`
    agrees. One `vp` per item per pass, counted against the hour like a minion (opus). Never file a
    `decision`-class ask for a design or acceptance question again; Reif vetoes with a
