@@ -174,11 +174,13 @@ def test_denial_asks_cli_files_into_fleet_db() -> None:
 
 def test_hook_parses_and_dedupes_raw_create() -> None:
     p = hook.parse('gh issue create --repo O/R --title "Scout: foo 3 bar" --label fleet:backlog,lane:ui --body-file /tmp/x')
-    assert p == {"title": "Scout: foo 3 bar", "labels": ["fleet:backlog", "lane:ui"], "repo": "O/R"}, p
+    assert p == {"title": "Scout: foo 3 bar", "labels": ["fleet:backlog", "lane:ui"], "repo": "O/R",
+                 "body": None, "body_file": "/tmp/x"}, p
     board = [{"number": 42, "title": "Scout: foo 7 bar", "labels": [], "body": ""}]
     msg = hook.decide('gh issue create --title "Scout: foo 3 bar" --body x', list_open=lambda r: board)
     assert msg and "#42" in msg, msg
-    assert hook.decide('gh issue create --title "new thing" --body x', list_open=lambda r: board) is None
+    good = "## Acceptance\n- Given a page, when I open it, then it loads.\n\nVision-link: none (maintenance)"
+    assert hook.decide(f'gh issue create --title "new thing" --body "{good}"', list_open=lambda r: board) is None
     assert hook.decide('gh issue create --title "Scout: foo 3 bar" --label fleet:reif-asked',
                        list_open=lambda r: board) is None, "Reif asks are always created"
 
@@ -188,6 +190,31 @@ def test_hook_parses_and_dedupes_raw_create() -> None:
     heredoc = "gh issue create --title \"Org asks X\" --body \"$(cat <<'EOF'\nit's here\nEOF\n)\""
     assert hook.parse(heredoc)["title"] == "Org asks X", hook.parse(heredoc)
     print("ok  hook: twin blocked with its number, new/Reif/board-down allowed, heredoc parsed")
+
+
+def test_hook_refuses_a_new_issue_gru_would_gate_drop() -> None:
+    """jefe msg#712: philanthropy#10370 was a raw create with one prose paragraph."""
+    empty = lambda r: []  # noqa: E731
+    msg = hook.decide('gh issue create --title "main: test fails" --body "Moves no number (maintenance)."',
+                      list_open=empty)
+    assert msg and "acceptance" in msg and "vision-link" in msg, msg
+    heredoc = ("gh issue create --title \"Org asks X\" --body \"$(cat <<'EOF'\nOnly prose here.\n"
+               "Vision-link: none (maintenance)\nEOF\n)\"")
+    msg = hook.decide(heredoc, list_open=empty)
+    assert msg and "acceptance" in msg and "vision-link" not in msg, msg
+    good = ("gh issue create --title \"Org asks X\" --body \"$(cat <<'EOF'\n## Acceptance\n- Given a page, "
+            "when I open it, then it loads.\n\nVision-link: none (maintenance)\nEOF\n)\"")
+    assert hook.decide(good, list_open=empty) is None
+    with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as fh:
+        fh.write("just prose")
+    assert hook.decide(f'gh issue create --title "x y" --body-file {fh.name}', list_open=empty)
+    assert hook.decide('gh issue create --title "x y" --body-file /nonexistent/b.md', list_open=empty) is None
+    assert hook.decide('gh issue create --title "x y" --body-file -', list_open=empty) is None
+    assert hook.decide('gh issue create -R PhilanthropyOrg/fleet-kit --title "x y" --body prose',
+                       list_open=empty) is None, "kit issues are not gru-gated"
+    assert hook.decide('gh issue create --title "x y" --body prose --label fleet:reif-asked',
+                       list_open=empty) is None
+    print("ok  hook: a new issue gru would gate-drop is refused with the missing lines")
 
 
 def test_messenger_and_sentry_may_create_issues() -> None:
