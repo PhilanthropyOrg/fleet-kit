@@ -8100,8 +8100,11 @@ def _datta_dispatches_and_nerds_analyse():
     assert "cheat" in nerd.lower(), "the obvious gamification of each KPI is not named"
     assert "UNCAPPED" in nerd, "the file-or-say-why law did not come across"
     assert "unverified" in nerd, "no honest-gap escape; invites fabricated metrics"
-    for var in ("GSC_SA_KEY", "GSC_PROPERTY", "GA4_PROPERTY_ID", "CLARITY_API_TOKEN"):
-        assert var in nerd, f"{var} not declared, so a nerd cannot tell if it can measure"
+    # GSC/GA4/PostHog are read through the prod signals route (no creds of the nerd's own);
+    # Clarity still needs its own token.
+    assert "CLARITY_API_TOKEN" in nerd, "CLARITY_API_TOKEN not declared, so a nerd cannot tell if it can measure"
+    assert "/990/api/signals/gsc" in nerd and "FLEET_NUMBER_TOKEN" in nerd, \
+        "nerd is not told how to read Search Console/GA4/PostHog"
     assert "never build the fix" in nerd.lower(), "nerd may wander into minion's lane"
 
     # growth's checklist was hand-tuned 2026-08-26 against live numbers. The properties that
