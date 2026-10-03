@@ -577,40 +577,11 @@ spawns exactly one). Your job, in order:
    pass, never force an item not front-of-skipped for 3 consecutive passes, and always quote
    `forced_over_floor`/`over_allowance` in your report when it fires.
 
-3a. **Reserve `est_spend_pct` before you claim or spawn anything.** `reserved_pct` in step 1's
-   read was silently 0 on every pass until now — the formula subtracts it, but nothing wrote it,
-   so the next hour's gru saw no trace of this hour's spend until maxx's own tally caught up.
-   That gap is how correctly-capped hourly passes compound into an unsustainable day: cron
-   doesn't wait for one gru pass to land before the next fires, and an unreserved pass looks
-   like headroom that was never really free.
-   ```
-   maxx_reserve(pct=<fanout's est_spend_pct>, label="gru-<run-id>", ttl_sec=3600)
-   ```
-   Keep the `lease_id` it returns. TTL defaults to 3600s (this pass's own cadence) as a backstop
-   if release below is ever skipped — a lease that outlives its own hour self-expires instead of
-   choking every later pass forever.
-
-3b. **Check your LAST estimate against what actually happened.** This is the loop that makes
-   the estimate trustworthy, and it is not optional:
-   ```
-   # sqlite3 CLI ships in the image (Dockerfile). If it's ever missing, this command dies
-   # silently on "sh: sqlite3: not found" and the calibration below runs on NO data while
-   # looking like it worked -- check for that failure mode; python3's sqlite3 module always
-   # works as a fallback.
-   sqlite3 "$FLEET_LOG_DIR/fleet.db" \
-     "SELECT run_id, cost_usd, num_turns, status FROM runs
-      WHERE member='minion' AND recorded_at > strftime('%s','now','-2 hours')
-      ORDER BY recorded_at DESC"
-   ```
-   Compare each of last pass's `est_pct` values against what that minion really spent. Report
-   the error plainly — "estimated 0.05%, actual 0.11%, 2.2x under". `cost_bridge.py` (step 3)
-   already feeds these numbers back in as `--observed` every pass so the unit self-corrects
-   automatically — this query is for your own narrative comparison and for spotting a systematic
-   miss: if complexity-8s consistently cost 3x their estimate, marie's ladder is mis-calibrated
-   for this repo and she should hear about it in a comment.
-
-   Do NOT silently adjust the estimate to match your intuition. The correction happens through
-   `--observed` (real data) or marie's scoring, never by you overriding the number.
+3b. **Last pass's estimates self-correct; you do not run a calibration step.** `cost_bridge.py`
+   (step 3) feeds real minion spend back in as `--observed` every pass. Do NOT adjust an
+   estimate by hand. If one complexity tier keeps costing ~3x its estimate, tell marie in a
+   comment. (3a's `maxx_reserve`/`maxx_release` lease was cut 2026-10-03: no such tool exists
+   in the kit or gru's toolset, and 25 of 34 passes on 10-02 named it as skipped.)
 
    Lower tiers fill whatever room the higher ones leave: an unspent hour is gone, and the packer
    already keeps marie's order, so a medium item never displaces a high one.
@@ -707,14 +678,6 @@ spawns exactly one). Your job, in order:
    `running (pid N)` for every issue number in its batch, and the next gru pass's step 7 reads
    its result. Never `wait $PID` (gh#152) and never end your turn "to wait for a notification":
    you are a one-shot `claude -p` pass (persona_law.md §12).
-
-   **Release your lease from 3a the moment this wait returns**, success or not:
-   ```
-   maxx_release(lease_id=<from 3a>)
-   ```
-   Do this even if reporting a failure — an unreleased lease double-holds this hour's headroom
-   against every later pass until its own TTL clears, the same failure shape as never reserving
-   at all, just delayed.
 
 7. **Read each minion's real result** — its own run record in `runs.jsonl` (a batched minion's
    run_id is `minion-item<n1>_<n2>_<n3>-<pid>-<timestamp>` — the first issue number in its
