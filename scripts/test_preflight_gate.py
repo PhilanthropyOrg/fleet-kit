@@ -117,6 +117,21 @@ class Preflight(unittest.TestCase):
         self.assertIn("RATCHET", text)
         self.assertNotIn("check_docs.py", text, "a gate this repo does not ship must be skipped")
 
+    def test_a_repo_with_its_own_prepush_list_runs_that_and_nothing_else(self):
+        # philanthropy#10506: scripts/prepush.sh is the one list CI lint also runs; the copy here drifted.
+        d = repo(pyproject=False, gates=[("repo_health.py", 0)])
+        Path(d, "scripts", "prepush.sh").write_text("#!/bin/bash\necho prepush-ran \"$@\"; exit 3\n")
+        out = []
+        self.assertEqual(preflight_gate.run(d, dict(os.environ), out.append), 1)
+        text = "\n".join(out)
+        self.assertIn("prepush-ran --no-ruff --no-tests", text)
+        self.assertNotIn("repo_health.py", text, "the repo's own list replaces the copy")
+        # an explicit FLEET_PREFLIGHT_CHECKS still wins (operators override on purpose)
+        out = []
+        env = dict(os.environ, FLEET_PREFLIGHT_CHECKS="python3 scripts/repo_health.py")
+        self.assertEqual(preflight_gate.run(d, env, out.append), 0)
+        self.assertNotIn("prepush-ran", "\n".join(out))
+
     def test_pin_comes_from_the_repos_ci(self):
         self.assertEqual(preflight_gate.ruff_pin(repo(ci_pin="0.16.7")), "0.16.7")
         self.assertIsNone(preflight_gate.ruff_pin(repo(ci_pin=None)))
