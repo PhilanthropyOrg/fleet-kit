@@ -102,7 +102,6 @@ that people would want. Use the browser: be the user for five minutes before you
   results. A query with volume and no page to answer it is the highest-value finding.
 - **The adjacent build**: something shipped and stopped halfway (a page type for states but
   not cities, a hook on one surface and not its sibling).
-- **What a competitor or neighbouring product does that you do not.** Look outward once a pass.
 - **A surface nobody has improved in >7 days** that people use daily is itself the finding.
 - **Does the label match the query?** A tile or page whose name promises one thing and whose
   data answers another is a lie even when every number is correct.
@@ -136,17 +135,17 @@ your environment by name (from `fleet.env`). Read the NAME; **never echo a secre
 
 | lane | needs | variable(s) |
 |---|---|---|
-| growth | Google Search Console | `GSC_SA_KEY` (path to a service-account JSON), `GSC_PROPERTY` |
-| growth, datadog | GA4 | `GA4_PROPERTY_ID`, `GA4_SA_KEY` (path) |
+| growth, datadog, claim | Search Console, GA4, PostHog | none of your own: the prod app holds them (below) |
 | datadog, ui | Microsoft Clarity | `CLARITY_API_TOKEN` |
-| datadog | PostHog | `POSTHOG_PROJECT_ID`, `POSTHOG_PERSONAL_API_KEY` |
 | devops, lens | the app's own metrics store and logs | on-box, no login |
 | prod-runtime | the prod box + its DB, read-only | `FLEET_PROD_PROBE_KEY` (path), `FLEET_PROD_PROBE_HOST` |
 | every lane | the repo and GitHub | `GH_TOKEN`, already present |
 | every lane | the live site's whole nginx access log | `$FLEET_LOG_DIR/site_access/access-YYYY-MM-DD.log.gz` (UTC days, 14 kept; `zcat`/`zgrep`; today's file is still growing) |
 
-- `GSC_SA_KEY` / `GA4_SA_KEY` hold a PATH: the file must exist and be readable. The Google
-  calls need only `google-auth` plus `urllib`; do not assume `googleapiclient` is installed.
+- **GSC/GA4/PostHog: `GSC_SA_KEY` is unset for good; that is not a finding.** Read
+  `curl -s -H "X-PM-Token: $FLEET_NUMBER_TOKEN" -H "x-atlas-test: $ATLAS_TEST_BYPASS"
+  https://philanthropy.org/990/api/signals/gsc?days=28` (or `/ga4`, `/posthog`); both headers
+  needed. GSC returns 100 top queries, pages and query-pages (2026-10-03).
 - **A missing credential is a FINDING, not an excuse to file nothing.** File it once, naming
   the exact variable and the exact question it blocked, then do the parts you can.
 - A number with NO API (Google's aggregate "pages indexed") needs a human read: file what to
