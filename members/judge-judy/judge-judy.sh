@@ -56,6 +56,21 @@ KIT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 REPO="${FLEET_REPO:?set FLEET_REPO in fleet.env}"
 LOG_DIR="${FLEET_LOG_DIR:-$HOME/Library/Logs/fleet-kit}"
 LOG="$LOG_DIR/judge-judy.log"
+
+# jefe msg#753 (philanthropy#10782): the fix items below inherit the blocked PR's Vision-link
+# line, but a PR may carry prose ("Atlas revenue (paid product)...") with no KR id, which
+# gru's gate reads as missing and parks fleet:needs-spec while the PR stays blocked. Keep the
+# PR's line only if vision_link_gate.py would accept it; otherwise write the fallback ($2).
+gate_valid_vision_link() {
+  [ -n "$1" ] && python3 - "$KIT_DIR/scripts" "$1" <<'PY' 2>/dev/null && return
+import sys
+sys.path.insert(0, sys.argv[1])
+import run_report, vision_link_gate as g
+claim = run_report._vision_claim(sys.argv[2])
+sys.exit(1 if claim is None or g._classify_value(claim)[0] == g.STATUS_MISSING else print(sys.argv[2]))
+PY
+  printf '%s\n' "$2"
+}
 MODEL="${FLEET_CODE_REVIEW_MODEL:-sonnet}"
 # Which vendor reviews (docs/providers.md). claude unless this instance says otherwise; codex
 # puts the review on a different vendor's model than the one that built the change.
@@ -659,8 +674,9 @@ This reflects a parse/format issue in the reviewer's own output, not a finding a
       # fleet:backlog candidates linked, measured live 2026-09-11), so that fallback silently
       # filed a fix item gru could never pick. Use a real, named guardrail link instead so the
       # filed item classifies as `linked`, not `maintenance`.
-      ERR_VISION_LINK=$(grep -iE '^[[:space:]]*#{0,6}[[:space:]]*[*_]{0,2}Vision-link' "$BODY_FILE" 2>/dev/null | head -1)
-      [ -z "$ERR_VISION_LINK" ] && ERR_VISION_LINK="Vision-link: okr.verified_claims -- guardrail: an errored review hands the PR to the fleet with a ticket gru can actually pick (inherits the blocked PR's link)"
+      ERR_VISION_LINK=$(gate_valid_vision_link \
+        "$(grep -iE '^[[:space:]]*#{0,6}[[:space:]]*[*_]{0,2}Vision-link' "$BODY_FILE" 2>/dev/null | head -1)" \
+        "Vision-link: okr.verified_claims -- guardrail: an errored review hands the PR to the fleet with a ticket gru can actually pick (inherits the blocked PR's link)")
       ERR_FIX_TITLE="fix: code review could not run on PR #$PR -- reviewer output failed schema validation"
       ERR_FIX_BODY="judge-judy dequeued PR #$PR at head ${HEAD_SHA:0:12} and disarmed auto-merge, but could NOT post a verdict: its own output failed schema validation ${N}x in a row ($PARSE_REASON).
 
@@ -740,8 +756,9 @@ print()' "$PR" "$HEAD_SHA" >> "$LOG_DIR/judge-judy-blocks.jsonl" 2>>"$LOG" \
     # Vision-link line (mandatory on every PR since gh#525/10d) forward onto the fix issue
     # instead of inventing one; a PR that predates the convention has none to carry, so fall
     # back to an honest "none (maintenance)" rather than leaving the line off entirely.
-    PR_VISION_LINK=$(grep -iE '^[[:space:]]*#{0,6}[[:space:]]*[*_]{0,2}Vision-link' "$BODY_FILE" 2>/dev/null | head -1)
-    [ -z "$PR_VISION_LINK" ] && PR_VISION_LINK="Vision-link: none (maintenance)"
+    PR_VISION_LINK=$(gate_valid_vision_link \
+      "$(grep -iE '^[[:space:]]*#{0,6}[[:space:]]*[*_]{0,2}Vision-link' "$BODY_FILE" 2>/dev/null | head -1)" \
+      "Vision-link: none (maintenance) -- the blocked PR's own line names no KR id")
     # jefe msg#23: quality_gate.py drops any item with no acceptance criterion, and this body
     # had none -- 6 of 7 items in two gate-drops on 2026-09-27 were these fix items. Same
     # carry-forward idea as the Vision-link above: the criterion is always "the re-review

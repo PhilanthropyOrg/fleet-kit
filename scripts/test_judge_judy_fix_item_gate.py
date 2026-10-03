@@ -42,5 +42,23 @@ class FixItemGateTest(unittest.TestCase):
         self.assertTrue(ok, reason)
 
 
+    def test_a_prose_vision_link_is_not_carried_onto_the_fix_item(self):
+        # jefe msg#753 (philanthropy#10782): PR #10781's free-text line was copied verbatim and
+        # gru's gate parked the fix item needs-spec. Only a gate-valid line may be inherited.
+        import re, subprocess, sys
+        sys.path.insert(0, str(ROOT / "scripts"))
+        import run_report, vision_link_gate as g
+        fn = re.search(r"^gate_valid_vision_link\(\) \{.*?^\}\n", self.src, re.S | re.M).group(0)
+        prose = "Vision-link: Atlas revenue (paid product). Moves no funnel KR"
+        for line, fallback in ((prose, "Vision-link: none (maintenance) -- x"),
+                               (prose, "Vision-link: okr.verified_claims -- guardrail"),
+                               ("", "Vision-link: none (maintenance) -- x"),
+                               ("Vision-link: okr.conversion -- claim page", "unused")):
+            out = subprocess.run(["bash", "-c", fn + 'gate_valid_vision_link "$1" "$2"', "_", line, fallback],
+                                 env={"KIT_DIR": str(ROOT), "PATH": "/usr/bin:/bin"},
+                                 capture_output=True, text=True).stdout.strip()
+            self.assertNotEqual(g._classify_value(run_report._vision_claim(out))[0], g.STATUS_MISSING, out)
+        self.assertIn("gate_valid_vision_link", self.tail, "the block path must use the helper")
+
 if __name__ == "__main__":
     unittest.main()
