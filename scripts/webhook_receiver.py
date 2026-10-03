@@ -330,6 +330,11 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         num = pr.get("number", "?")
+        if _dispatch_lock_held("judge-judy"):
+            # gh#9810: a launch that loses run_member.sh's dispatch lock only writes a
+            # dispatch_skipped row (147 in 6h). The running pass or the */15 cron picks the PR up.
+            log(f"ignored: pull_request {action} on PR #{num}, judge-judy already running")
+            return
         log(f"FIRE: pull_request {action} on PR #{num} -- launching judge-judy")
         _launch_member("judge-judy")
 
@@ -700,6 +705,25 @@ def _running_run_id(member: str) -> str | None:
         if r.get("member") == member:
             return r.get("run_id")
     return None
+
+
+def _dispatch_lock_held(name: str) -> bool:
+    """gh#9810: True when run_member.sh's per-member dispatch lock is held right now (same
+    path and key as run_member.sh's DISPATCH_LOCK_DIR). Probes with a non-blocking flock and
+    releases at once; any error reads as 'not held' so a launch is never suppressed by doubt."""
+    import fcntl
+
+    lock_dir = Path(os.environ.get("TMPDIR") or "/tmp") / "fleet-kit-member-locks"
+    try:
+        with open(lock_dir / f"{name}.lock", "a") as fh:
+            try:
+                fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return True
+            fcntl.flock(fh, fcntl.LOCK_UN)
+    except OSError:
+        return False
+    return False
 
 
 def _launch_member(name: str, args: list[str] | None = None) -> None:
