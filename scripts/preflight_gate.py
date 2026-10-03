@@ -135,8 +135,17 @@ def _run(cmd: list[str], cwd: str) -> tuple[int, str]:
         return 127, str(exc)
 
 
+PREPUSH = "bash scripts/prepush.sh --no-ruff --no-tests"
+
+
 def repo_checks(wt: str, env: dict) -> list[str]:
     raw = env.get("FLEET_PREFLIGHT_CHECKS")
+    if raw is None and (Path(wt) / "scripts" / "prepush.sh").is_file():
+        # philanthropy#10506: the repo ships its own one list, the same file its CI lint runs.
+        # DEFAULT_CHECKS is a copy that drifted (check_app_boundaries.py was never here): 19 of
+        # 37 red CI runs on 2026-10-02 were gates this copy skipped. ruff ran above; tests are
+        # verified_test.sh's job.
+        return [PREPUSH]
     cmds = [c.strip() for c in raw.split(";")] if raw is not None else list(DEFAULT_CHECKS)
     keep = []
     for c in cmds:
