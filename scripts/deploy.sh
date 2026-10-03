@@ -798,8 +798,9 @@ finish_deploy() {
     # FLEET_ENABLED=false), so after cutover nothing exercised the new build until the next tick,
     # up to an hour later. Kick one gru pass in the live container now -- detached, with the same
     # env the crontab line hands it -- so the build runs its real path within seconds of landing
-    # and the fanout the cordon ate is replaced. Best-effort: a failed kick is logged, never fatal.
-    if podman exec -d "$CONTAINER" bash -c 'set -a; eval "$(grep -hE "^[A-Z_]+=" /etc/cron.d/* 2>/dev/null)"; set +a; export GH_TOKEN=$(cat /root/.gh_token 2>/dev/null); cd /fleet-kit && bash scripts/run_gru_fanout.sh >> /var/log/fleet-kit/gru.log 2>&1' 9>&- 2>/dev/null; then
+    # and the fanout the cordon ate is replaced. gh#9840: run_gru_fanout.sh drops this kick when gru
+    # started under 45 min ago or is running. Best-effort: a failed kick is logged, never fatal.
+    if podman exec -d "$CONTAINER" bash -c 'set -a; eval "$(grep -hE "^[A-Z_]+=" /etc/cron.d/* 2>/dev/null)"; set +a; export FLEET_FIRED_BY=deploy_kick GH_TOKEN=$(cat /root/.gh_token 2>/dev/null); cd /fleet-kit && bash scripts/run_gru_fanout.sh >> /var/log/fleet-kit/gru.log 2>&1' 9>&- 2>/dev/null; then
         log "post-deploy: kicked one gru pass in $CONTAINER so the new build runs its real path now, not at the next cron tick (gh#622)"
     else
         log "post-deploy: could not kick a gru pass in $CONTAINER -- the next cron tick will run it (gh#622)"
