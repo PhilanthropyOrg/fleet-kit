@@ -36,5 +36,20 @@ class PlainFinding(unittest.TestCase):
         self.assertTrue(jv.parse(_envelope({"verdict": "approve", "findings": []}))["ok"])
 
 
+class RetriedAccount(unittest.TestCase):
+    """The pool's 429 envelope, then the second account's real answer, on one stdout."""
+
+    def test_the_answer_after_a_rate_limit_envelope_is_read(self):
+        limited = json.dumps({"is_error": True, "api_error_status": 429,
+                              "result": "You've hit your weekly limit"})
+        raw = limited + "\n" + _envelope({"verdict": "approve", "findings": []}) + "\n"
+        r = jv.parse(raw)
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(r["verdict"], "approve")
+
+    def test_garbage_still_strikes(self):
+        self.assertFalse(jv.parse('{"structured_output": {}}\nnot json')["ok"])
+
+
 if __name__ == "__main__":
     unittest.main()
