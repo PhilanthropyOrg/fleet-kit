@@ -103,7 +103,8 @@ def allowed_sender(addr: str, allow: str) -> bool:
 # else the fleet already knows how to triage on its own: the product's own notifier, and the
 # two machine senders that page/notify by mail today. Bare address, same matching as
 # allowed_sender() above.
-INTAKE_FROM_DEFAULT = "hello@philanthropy.org,noreply@digitalocean.com,support@digitalocean.com,notifications@github.com"
+# PhilanthropyOrg/philanthropy#10275: the product's alerts now send from alerts@, not hello@.
+INTAKE_FROM_DEFAULT = "hello@philanthropy.org,alerts@philanthropy.org,noreply@digitalocean.com,support@digitalocean.com,notifications@github.com"
 
 
 def bare_address(addr: str) -> str:
@@ -568,7 +569,7 @@ def send_reply(to: str, subject: str, text: str, in_reply_to: str | None = None)
     key = resend_key()
     if not (key and to):
         return False
-    payload = {"from": os.environ.get("MAIL_FROM") or "990 Scout <hello@philanthropy.org>",
+    payload = {"from": os.environ.get("MAIL_FROM") or "philanthropy.org alerts <alerts@philanthropy.org>",
                "to": [to], "subject": subject, "text": text + "\n\n-- dino fleet"}
     if os.environ.get("FLEET_REPLY_TO"):
         payload["reply_to"] = [os.environ["FLEET_REPLY_TO"]]

@@ -247,7 +247,7 @@ The same checklist every run, on purpose: without it a pass never reaches the re
 
    **The fleet decides acceptance, not Reif — `vp` (H§19).** Never file a `decision`-class
    ask for a design or acceptance question; Reif vetoes with a `Reif:` comment. `vp_due.sh`
-   on cron spawns the review once a world-class item's research PR (or deployed build slice)
+   on cron (cron minute field `FLEET_VP_DUE_CADENCE`; unset = every 15 min, `0` = hourly at :00) spawns the review once a world-class item's research PR (or deployed build slice)
    has merged with no newer VP-review comment. Spawn it yourself only when you can see it is
    due right now and `vp_due.py --repo-dir /repo` agrees (one `vp` per item per pass, counted
    against the hour like a minion):
@@ -321,24 +321,10 @@ The same checklist every run, on purpose: without it a pass never reaches the re
    `--min-items` set to `len(chosen)+1`. Never force more than one extra item per pass, and
    quote `forced_over_floor`/`over_allowance` when it fires (H§22).
 
-3a. **Reserve `est_spend_pct` before you claim or spawn anything**, so the next hour's pass
-   sees this hour's spend (H§23). Keep the `lease_id` it returns:
-   ```
-   maxx_reserve(pct=<fanout's est_spend_pct>, label="gru-<run-id>", ttl_sec=3600)
-   ```
-
-3b. **Check your LAST estimate against what actually happened.** Not optional:
-   ```
-   sqlite3 "$FLEET_LOG_DIR/fleet.db" \
-     "SELECT run_id, cost_usd, num_turns, status FROM runs
-      WHERE member='minion' AND recorded_at > strftime('%s','now','-2 hours')
-      ORDER BY recorded_at DESC"
-   ```
-   (No `sqlite3` CLI: use python3's sqlite3 module; never compare against no data.) Report
-   each of last pass's `est_pct` values against what that minion really spent ("estimated
-   0.05%, actual 0.11%, 2.2x under"). On a systematic miss (complexity-8s keep costing 3x
-   their estimate), tell marie in a comment. Do NOT adjust the estimate yourself: correction
-   comes through `--observed` (real data) or marie's scoring.
+3b. **Last pass's estimates self-correct; you do not run a calibration step.** `cost_bridge.py`
+   (step 3) feeds real minion spend back in as `--observed` every pass. Do NOT adjust an
+   estimate by hand. If one complexity tier keeps costing ~3x its estimate, tell marie in a
+   comment.
 
 4. **Claim your chosen items yourself**, serially, before spawning anything:
    ```
@@ -392,11 +378,6 @@ The same checklist every run, on purpose: without it a pass never reaches the re
    your turn is not a failure (it is detached and records its own run): report it as
    `running (pid N)` for every issue number in its batch; the next pass's step 7 reads it. Never `wait $PID` (gh#152) and never end your turn "to wait for a notification":
    you are a one-shot `claude -p` pass (persona_law.md §12).
-
-   **Release your lease from 3a the moment this wait returns**, success or failure:
-   ```
-   maxx_release(lease_id=<from 3a>)
-   ```
 
 7. **Read each minion's real result** — its own run record in `runs.jsonl`. A batched
    minion's run_id is `minion-item<n1>_<n2>_<n3>-<pid>-<timestamp>`, so

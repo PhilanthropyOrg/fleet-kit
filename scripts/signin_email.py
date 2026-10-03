@@ -110,7 +110,7 @@ def send_link(email: str, values: dict, now: float | None = None) -> str:
         _TOKENS[hashlib.sha256(token.encode()).hexdigest()] = (email, now + TOKEN_TTL_S)
     link = f"{base}/chat?signin={token}"
     payload = {
-        "from": _alert_env("MAIL_FROM") or "Fleet <hello@philanthropy.org>",
+        "from": _alert_env("MAIL_FROM") or "Fleet <alerts@philanthropy.org>",
         "to": [email],
         "subject": "Your fleet dashboard sign-in link",
         "text": (f"Click to sign in to the fleet dashboard:\n\n{link}\n\n"

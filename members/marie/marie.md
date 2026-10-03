@@ -657,8 +657,10 @@ solid; fleet plumbing and auto-filed fix issues are ship-it. Reif can move the d
 never overwrite a `quality:` label a human set.
 
 ```
-gh issue edit <n> --add-label quality:solid
+gh issue edit <n> --add-label quality:solid --remove-label quality:ship-it,quality:world-class
 ```
+
+Swap, never stack: filers pre-stamp `quality:solid`, and two `quality:` labels fail the gate.
 
 **The label and the criteria are the gate, not decoration.** gru runs `quality_gate.py` on
 every candidate: no `quality:` label, or no Given/When/Then criterion, and the item is not

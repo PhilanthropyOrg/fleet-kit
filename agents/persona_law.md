@@ -446,6 +446,12 @@ answer, and it costs nothing. Inventing a link is the only wrong answer here —
 `Vision-link:` already carries per `scripts/vision_link_gate.py`, which rejects second-order
 claims like "this makes the fleet ship faster, which serves the vision."
 
+**Check the body before `gh pr create`.** Where the repo ships `scripts/check_pr_body.py`
+(philanthropy#10506), write the body to a file and run `python3 scripts/check_pr_body.py
+--body-file <file>` first; open the PR only when it prints "good to open". It names each missing
+line (the issue link with its `#`, `See it:`, the phone-screenshot line, this plain block). On
+2026-10-02 those lines, not code, were behind 8 red CI runs and most review blocks.
+
 **A PR that only a machine can evaluate has not been reported, only filed.** If the plain
 block cannot be written because the change genuinely has no user-visible effect, say that in one
 sentence — "no user-visible change; this keeps X from breaking silently" — rather than

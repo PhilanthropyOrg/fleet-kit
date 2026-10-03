@@ -4690,7 +4690,7 @@ def _email_reply_answers_asks_and_files_backlog_without_a_model():
     ask = (ROOT / "scripts" / "ask.py").read_text()
     assert 'f"[dumbledore] fleet ask #{ask_id} from {sender}"' in ask and "Reply to this email with one line" in ask, "ask mail does not say how to reply"
     # Reif, 2026-09-28: "label these as officially from dumbledore" -- the From name too.
-    assert 'MAIL_FROM="Dumbledore (fleet) <hello@philanthropy.org>"' in ask, "ask mail is not branded from dumbledore"
+    assert 'MAIL_FROM="Dumbledore (fleet) <alerts@philanthropy.org>"' in ask, "ask mail is not branded from dumbledore"
 
 
 def _intake_classifies_and_dedupes_alerts_by_check():
@@ -4723,6 +4723,7 @@ def _intake_classifies_and_dedupes_alerts_by_check():
     # a hello@philanthropy.org mail is accepted (FLEET_INTAKE_FROM default) but never parsed
     # as an ask answer, even when its body is shaped exactly like one
     assert ib.intake_allowed("990 Scout <hello@philanthropy.org>")
+    assert ib.intake_allowed("philanthropy.org alerts <alerts@philanthropy.org>")  # philanthropy#10275
     assert ib.classify({"from": "990 Scout <hello@philanthropy.org>", "subject": "Re: brief", "text": "yes 12"}) == "unknown"
     # an address in neither FLEET_INBOX_FROM nor FLEET_INTAKE_FROM is still rejected (untrusted)
     assert not ib.intake_allowed("stranger@example.org")
@@ -6793,6 +6794,49 @@ def _git_pull_guard_serializes_via_a_lock_on_the_git_directory():
             "auto_deploy.sh no longer locks the same fleet_pull.lock inside its own .git dir"
 
 
+def _judge_judy_reviews_big_prs():
+    """philanthropy gh#9819: the review status is required to merge there, so a PR the
+    reviewer can never review waits forever. Two kinds never got a verdict (2026-10-01):
+
+    * a diff near 150 KB: the prompt is one command argument and Linux caps one argument at
+      128 KB, so `claude -p` died with rc 126 on every tick (#9811, #9844);
+    * more than 300 files: `gh pr diff` answers HTTP 406 (#9846, 526 files).
+    """
+    import subprocess
+    src = (ROOT / "members" / "judge-judy" / "judge-judy.sh").read_text()
+    caps = {k: int(re.search(rf"^{k}=(\d+)$", src, re.M).group(1))
+            for k in ("MAX_DIFF_BYTES", "MAX_BODY_BYTES", "MAX_INTENT_BYTES")}
+    start = src.index('PROMPT="You are the merge-blocking code reviewer')
+    fixed = len(src[start:src.index("RAW=$(account_pool_run", start)].encode())
+    assert sum(caps.values()) + fixed < 131072, \
+        f"the prompt can exceed Linux's 128 KB single-argument limit: {caps} + {fixed} fixed"
+    prompt = src[start:start + fixed]
+    assert 'head -c "$MAX_BODY_BYTES" "$BODY_FILE"' in prompt, "PR body goes into the prompt uncapped"
+    assert 'head -c "$MAX_INTENT_BYTES"' in prompt, "closed-issue text goes into the prompt uncapped"
+
+    assert '! gh pr diff "$PR" > "$DIFF_FILE" 2>/dev/null && ! pr_diff_local "$PR" > "$DIFF_FILE"' in src, \
+        "a failed gh pr diff no longer falls back to the local git diff"
+    fn = src[src.index("pr_diff_local() {"):src.index("pass_empty_pr() {")]
+    fn = fn[:fn.rindex("}") + 1]
+    with tempfile.TemporaryDirectory() as td:
+        sh = Path(td) / "t.sh"
+        sh.write_text(
+            "set -e; cd " + td + "\n"
+            "git init -q -b main origin; cd origin; git config user.email t@t; git config user.name t\n"
+            "echo one > a.txt; git add .; git commit -qm base\n"
+            "git checkout -q -b feat; echo two > b.txt; git add .; git commit -qm feat\n"
+            "git update-ref refs/pull/7/head HEAD; git checkout -q main\n"
+            "echo moved > c.txt; git add .; git commit -qm main-moved\n"
+            "cd ..; git clone -q origin clone; cd clone; set +e\n"
+            "gh() { echo main; }\n" + fn + "\npr_diff_local 7\n"
+            "echo \"rc=$? refs=$(git for-each-ref refs/fleet-review | wc -l | tr -d ' ')\"\n"
+        )
+        out = subprocess.run(["bash", str(sh)], capture_output=True, text=True)
+        assert "+++ b/b.txt" in out.stdout and "+two" in out.stdout, f"no PR diff: {out.stdout!r} {out.stderr!r}"
+        assert "c.txt" not in out.stdout, "main's own change leaked into the PR diff (not a three-dot diff)"
+        assert "rc=0 refs=0" in out.stdout, f"bad exit or leftover refs: {out.stdout[-80:]!r}"
+
+
 def _judge_block_pulls_the_pr_out_of_the_queue():
     """fleet-kit#523: `fleet-code-review` is not (cannot be) a required check on either repo,
     so a green CI run alone would merge a BLOCKed PR -- the verdict has to move the arm
@@ -7161,6 +7205,24 @@ def _judge_judy_skips_an_empty_diff_instead_of_blocking():
     assert "continue" in empty_branch, "an empty diff must continue the tick loop, not fall through into a verdict"
     assert "VERDICT" not in empty_branch, \
         "an empty diff must never reach a VERDICT -- it should skip before the model is ever called"
+
+    # gh#9819: the review status is required to merge on the product repo, so "skip" alone
+    # would leave a no-change PR waiting forever. It gets a pass, but only when GitHub says
+    # the PR changes 0 files -- an empty diff from a gh hiccup must not pass real code.
+    assert 'pass_empty_pr "$PR" "$HEAD_SHA"' in empty_branch, "an empty diff never tries pass_empty_pr"
+    fn = src[src.index("pass_empty_pr() {"):src.index("# --- pick ONE PR")]
+    import subprocess
+    with tempfile.TemporaryDirectory() as td:
+        for files, want in (("0", "POST success"), ("3", ""), ("", "")):
+            script = (
+                'REPO_SLUG=o/r; log() { :; }; timeout() { shift; "$@"; }\n'
+                'post_status() { echo "POST $2"; }\n'
+                f'gh() {{ echo "{files}"; }}\n' + fn + '\npass_empty_pr 7 abc\n'
+            )
+            sh = Path(td) / "t.sh"
+            sh.write_text(script)
+            out = subprocess.run(["bash", str(sh)], capture_output=True, text=True).stdout.strip()
+            assert out == want, f"changed_files={files!r}: wanted {want!r}, got {out!r}"
 
 
 def _judge_judy_verdict_reads_validated_json_not_prose():
@@ -8761,6 +8823,60 @@ def _hourly_at_minute_matches_entrypoint_cron_line():
         "entrypoint.sh's crontab disagrees with a member's own schedule.hourly_at_minute -- "
         "the fleet.json edit merged but the actual cron minute never changed, so the fix is a "
         "no-op in prod:\n" + "\n".join(mismatches))
+
+
+def _cron_spacing_s(minute: str, hour: str):
+    """Seconds between fires of a `minute hour * * *` cron line, or None if uneven/unknown."""
+    import re
+    minute, hour = (re.sub(r"\$\{[A-Z_]+:-([^}]*)\}", r"\1", f) for f in (minute, hour))
+
+    def step(field, span):
+        if field == "*":
+            return 1
+        if field.startswith("*/") and field[2:].isdigit() and span % int(field[2:]) == 0:
+            return int(field[2:])
+        vals = [int(v) for v in field.split(",")] if all(v.isdigit() for v in field.split(",")) else []
+        if len(vals) > 1:
+            gaps = {b - a for a, b in zip(vals, vals[1:])} | {span - vals[-1] + vals[0]}
+            return gaps.pop() if len(gaps) == 1 else None
+        return None
+
+    if minute.isdigit():
+        h = step(hour, 24)
+        return h * 3600 if h else None
+    if hour == "*":
+        m = step(minute, 60)
+        return m * 60 if m else None
+    return None
+
+
+def _interval_s_matches_entrypoint_cron_spacing():
+    """The interval_s half of the gh#754 check above. Nothing gates a pass on interval_s:
+    entrypoint.sh's cron line is the only clock. kit#1507 set dumbledore's interval_s to 7h
+    and its prediction (runs/day 10 -> 8) missed at 10.0, because cron still fired every 3h."""
+    import json, glob, re
+    root = Path(__file__).parent.parent
+    entry = (root / "entrypoint.sh").read_text()
+    mismatches = []
+    for f in sorted(glob.glob(str(root / "members" / "*" / "*.fleet.json"))):
+        spec = json.loads(Path(f).read_text())
+        name, sched = spec["name"], spec.get("schedule") or {}
+        if not spec.get("enabled") or "interval_s" not in sched:
+            continue
+        script = f"run_{name}_fanout.sh" if f"run_{name}_fanout.sh" in entry else f"run_member.sh {name}"
+        m = re.search(rf'echo "(\S+) (\S+) [^\n"]*{re.escape(script)}', entry)
+        if not m:
+            continue  # existence is _every_scheduled_member_is_actually_on_cron's job
+        actual = _cron_spacing_s(m.group(1), m.group(2))
+        if actual != sched["interval_s"]:
+            mismatches.append(f"{name}: interval_s={sched['interval_s']}, cron "
+                              f"{m.group(1)!r} {m.group(2)!r} fires every {actual}s")
+    assert not mismatches, (
+        "a member's schedule.interval_s disagrees with its entrypoint.sh cron line; the cron "
+        "line is what runs, so the fleet.json edit is a no-op in prod:\n" + "\n".join(mismatches))
+    assert _cron_spacing_s("17", "0,3,6,9,12,15,18,21") == 10800
+    assert _cron_spacing_s("*/15", "*") == 900
+    assert _cron_spacing_s("13", "*/3") == 10800 and _cron_spacing_s("13", "*/7") is None
 
 
 def _fleet_cron_members_gates_entrypoint_crontab():
@@ -14221,6 +14337,8 @@ def _dumbledore_cycles_every_3h_and_scores_each_change_in_a_day():
     line = next(l for l in entry.splitlines() if "run_member.sh dumbledore" in l)
     assert '"13 */3 * * * root' in line, line
     spec = _json.loads((ROOT / "members/dumbledore/dumbledore.fleet.json").read_text())
+    # kit#1507 set interval_s to 7h believing it gated a pass; nothing reads it for that, so
+    # runs/day stayed 10. The cron line is the clock; the two must agree.
     assert spec["schedule"]["interval_s"] == 3 * 3600, spec["schedule"]
     assert predict.DEFAULT_BY_HOURS == predict.RESOLVE_WINDOW_H == 24.0
     md = (ROOT / "members/dumbledore/dumbledore.md").read_text()
@@ -16055,6 +16173,7 @@ if __name__ == "__main__":
     check("board_github ensure_labels creates fleet:severity-live idempotently (gh#726)", _board_github_ensure_labels_creates_severity_live_gh726)
     check("judge-judy files a priority-high fix item when it blocks a PR", _judge_judy_files_a_fix_item_on_block)
     check("judge-judy skips an empty diff instead of blocking (gh#531)", _judge_judy_skips_an_empty_diff_instead_of_blocking)
+    check("judge-judy can review a big PR: prompt fits one argument, >300 files falls back to git (philanthropy gh#9819)", _judge_judy_reviews_big_prs)
     check("judge-judy's verdict is read from validated JSON, not prose (gh#806)", _judge_judy_verdict_reads_validated_json_not_prose)
     check("judge-judy holds a PR on a schema-invalid verdict, not just marks it (gh#806 AC2)", _judge_judy_holds_a_pr_on_schema_invalid_verdict_not_just_marks_it)
     check("judge-judy records block events for a later override audit (gh#806 AC4)", _judge_judy_records_block_events_for_override_audit)
@@ -16078,6 +16197,7 @@ if __name__ == "__main__":
     check("every pass files a written report", _every_pass_files_a_written_report)
     check("every scheduled member is actually on cron", _every_scheduled_member_is_actually_on_cron)
     check("schedule.hourly_at_minute matches entrypoint.sh's actual cron minute (gh#754)", _hourly_at_minute_matches_entrypoint_cron_line)
+    check("schedule.interval_s matches entrypoint.sh's actual cron spacing", _interval_s_matches_entrypoint_cron_spacing)
     check("FLEET_CRON_MEMBERS gates entrypoint.sh's generated crontab", _fleet_cron_members_gates_entrypoint_crontab)
     check("gru's cron line redirects to its own log file (gh#511)", _gru_cron_line_redirects_to_its_own_log_file)
     check("account + tunnel health checks are actually scheduled", _account_and_tunnel_health_checks_are_actually_scheduled)

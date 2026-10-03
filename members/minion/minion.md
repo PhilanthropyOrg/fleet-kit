@@ -94,11 +94,7 @@ work done).
    writing to it is not. Re-run the check any time a command's output looks unexpectedly large
    or unfamiliar — that's usually the first sign you're not where you think you are.
 1d. **Check what already landed — BEFORE you build, not after — for EACH item in your batch.**
-   This was step 4 until 2026-09-11, sitting after Build and Test, so "work them in order" put
-   the duplicate check after the money was spent. It also looked only at OPEN PRs, which cannot
-   see a sibling who merged while gru was spawning you — at this fleet's merge rate, the common
-   case. Cost on 2026-09-11 alone: two passes rebuilt merged work, PR #866 redoing two of five
-   findings that landed 33 minutes earlier (134 turns, $5.64).
+   Why first: on 2026-09-11 PR #866 rebuilt two findings merged 33 minutes earlier ($5.64).
    ```
    git fetch origin main
    git log --oneline HEAD..origin/main                        # landed since you branched
@@ -110,11 +106,15 @@ work done).
    A DRAFT PR titled `WIP (minion checkpoint)` on YOUR current branch is not a sibling's fix:
    it is an earlier pass's checkpoint that you are resuming (your prompt says RESUMING). Build
    on it; do not drop the item over it.
-   - **already fixed** (merged, or an open mergeable PR) — drop this item from your batch, say
-     so and name the PR that beat you, and move to your next item. Do not stop the whole batch
-     over one item that's already fixed — that is a successful outcome for that item, not a
-     reason to abandon the others. If EVERY item in your batch turns out already fixed, that's
-     when the whole pass is a successful `QUIET` report naming each PR, not a failure.
+   - **already fixed** (merged, or an open mergeable PR) — drop it, name the PR that beat you,
+     and move on; that is a success for that item. If EVERY item was already fixed, the pass is
+     a successful `QUIET` report naming each PR.
+     **Merged on main and every acceptance criterion covered? Close the issue yourself**, same
+     bar as `Closes #N` above:
+     `gh issue close <n> --reason completed --comment "Already fixed on main by #<PR>: <each criterion -> its evidence>"`.
+     Left open, gru re-dispatches it: on 2026-10-01, 21 of 135 minion passes opened no PR
+     because their items were already fixed (#7314, #7459, #7303 each re-picked 7-8 times in
+     a day). An open PR, a partial fix, or any doubt: leave it open and say why.
    - **partly fixed** — `git merge origin/main` first, build only what is still open for that
      item, and name in your PR body what a sibling already covered.
    - **untouched** — build.
@@ -225,15 +225,16 @@ work done).
    body) leaves draft ONLY via `python3 /fleet-kit/scripts/minion_checkpoint.py ready`.** Never
    `gh pr ready` / `gh pr merge` it yourself (#8110 merged a WIP title that way). Ship the
    slice: when HEAD is green and something real landed, `gh pr edit` the title (what it does,
-   no WIP) and body (`Closes #N` per finished item, `Part of #N` + a `Remaining:` line for the
-   rest), push, run `ready`. It lists any gap. A slice left in draft is lost: 37 of 47
+   no WIP) and body (`Closes #N` per finished item, `Part of #N` + a `Remaining:` line for one
+   you started, `Not started: #N` for one you never touched), push, run `ready`. It lists any gap. A slice left in draft is lost: 37 of 47
    checkpoints were closed unmerged in one week.
 7. **Open ONE PR for the whole batch** (or, if a checkpoint draft already exists for your
    branch, edit it and finish it through `minion_checkpoint.py ready` as above), referencing
    every issue number in the body — `Closes
    #N` for each item you fully finished with evidence, `Part of #N` + a `Remaining:` line for
-   each you didn't (see step 1's Closes/Fixes rule, applied per item, not once for the whole
-   PR). A batch PR that closes 2 of 3 items and states plainly what's left on the third is a
+   each you started but did not finish, and one `Not started: #a, #b` line for items this PR
+   has no code for (see step 1's Closes/Fixes rule, applied per item). Never `Part of` an
+   untouched item: a merged `Part of #N` sends VP to review it (#10066 did this to ten items). A batch PR that closes 2 of 3 items and states plainly what's left on the third is a
    normal, successful result — not a defect to hide.
 8. **Review your own diff** before pushing, if you have a review tool available.
 9. **Arm auto-merge, always** — this fleet merges on green gates with no human in the loop:

@@ -72,6 +72,11 @@ import pr_ci_wait  # noqa: E402 -- one definition of "the newest attempt of each
 MARKER = "<!-- fleet-checkpoint -->"
 TITLE_PREFIX = "WIP (minion checkpoint)"
 CLOSES_RE = re.compile(r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)\b", re.I)
+# `Not started: #a, #b` -- a batch item this pass never touched. NOT `Part of`: vp_due.py reads
+# a merged `Part of #N` as a delivered slice and spawns a VP review. PR #10066 (search KPIs)
+# merged `Part of #10030`..`#10039` for ten untouched OrgVerify items and vp ran ten passes on
+# nothing (all QUIET, "no merged slice"); 31 such passes 10-01..10-02.
+NOT_STARTED_RE = re.compile(r"(?im)^\W*not started\s*:(.*)$")
 BRANCH_RE = re.compile(r"^member/minion-item(\d+(?:_\d+)*)-(\d+)-(\d+)$")
 WIP_MAX_BYTES = 1_000_000  # an untracked file bigger than this is a screenshot or a dump, not work
 
@@ -277,9 +282,11 @@ def done_gaps(title: str, body: str, items: list[int]) -> list[str]:
         gaps.append("body is still the auto-written checkpoint text: say what this PR ships")
     closed = {int(n) for n in CLOSES_RE.findall(body or "")}
     part = {int(n) for n in re.findall(r"(?i)\bpart of #(\d+)", body or "")}
+    untouched = {int(n) for line in NOT_STARTED_RE.findall(body or "")
+                 for n in re.findall(r"#(\d+)", line)}
     for n in items:
-        if n not in closed | part:
-            gaps.append(f"#{n} is neither `Closes #{n}` nor `Part of #{n}` in the body")
+        if n not in closed | part | untouched:
+            gaps.append(f"#{n} is not `Closes #{n}`, `Part of #{n}` or `Not started: #{n}` in the body")
     if part and not re.search(r"(?im)^\W*remaining\s*:", body or ""):
         gaps.append("`Part of #N` with no `Remaining:` line: say what is left")
     return gaps

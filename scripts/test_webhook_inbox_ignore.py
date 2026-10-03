@@ -12,6 +12,7 @@ Run: python3 scripts/test_webhook_inbox_ignore.py
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import threading
@@ -166,6 +167,19 @@ class ReceiverTests(unittest.TestCase):
         with mock.patch.dict("os.environ", {"FLEET_INBOX_IGNORE_TO_DOMAINS": "reply.philanthropy.org"}):
             self.assertEqual(self.post({"to": ["fleet@reply.philanthropy.org"]}), (200, b"ignored"))
             self.assert_handled({"to": ["inbox@in.philanthropy.org"]})
+
+
+
+class ProductAlertsSenderTests(unittest.TestCase):
+    """PhilanthropyOrg/philanthropy#10275: the product's alerts send from alerts@, not hello@."""
+
+    def test_alerts_address_is_accepted_for_intake_but_cannot_steer(self):
+        with mock.patch.dict("os.environ", {"FLEET_INBOX_FROM": "reif@example.org"}):
+            os.environ.pop("FLEET_INTAKE_FROM", None)
+            sender = "philanthropy.org alerts <alerts@philanthropy.org>"
+            self.assertTrue(inbox.intake_allowed(sender))
+            self.assertEqual(inbox.classify({"from": sender, "subject": "990 Scout prod alert [app_error]: 3"}), "alert")
+            self.assertEqual(inbox.classify({"from": sender, "subject": "Re: brief", "text": "yes 12"}), "unknown")
 
 
 if __name__ == "__main__":
