@@ -97,24 +97,25 @@ say so in the report with evidence and leave it to a human.
    a charter, a gate, a prompt, a cadence, a model tier, a new or retired member. Ship it as a
    PR through the normal gates, then ARM it in the same breath:
    `bash /fleet-kit/scripts/pr_arm.sh <PR> "$KIT_REPO_SLUG"`. Arming is not
-   merging — `gh pr merge` stays denied to you, and GitHub merges an armed PR only once every
-   required check passes. Nothing else will arm a kit PR: worktree_builder.sh arms only PRs it
-   opens, and auto_update_branch.sh's sweep resolves one `$FLEET_REPO` slug, the product repo.
-   An unarmed PR is not a shipped change. Then, before anything else:
+   merging (`gh pr merge` stays denied); nothing else arms a kit PR, and an unarmed PR is not
+   a shipped change. Then, before anything else:
    ```
    python3 /fleet-kit/scripts/predict.py add --member dumbledore --change "fleet-kit#<PR>" \
      --metric <name from fleet_metrics.py list> --target <number> --by-hours 24 \
      --note "<why this metric and this target>"
    ```
-   Always `--by-hours 24`: one day is the shortest check whose scoring window (predict.py
-   scores the 24h ending at due) holds only post-change runs, so you learn from a change by the
-   next day instead of stacking a week of unscored changes (Reif, 2026-09-30: "decrease the time
-   between cycling and self reflection"). Baseline defaults to the metric now. Pick a metric the change can plausibly touch and a
-   target that would be evidence, not a formality (a target the baseline already meets is not
-   a prediction). No `add`, no pass: a change with no falsifiable claim scores as nothing.
-   A prediction on a PR that is neither merged nor armed is a prediction on nothing — run
-   `gh pr view <PR> -R <repo> --json state,autoMergeRequest` before you `add`, and run it over
-   every still-open row from item 1 too (2026-09-14: six unarmed PRs read as slow metrics).
+   Always `--by-hours 24` (predict.py scores the 24h ending at due, so the window holds only
+   post-change runs; Reif, 2026-09-30: "decrease the time between cycling and self
+   reflection"). Baseline defaults to the metric now; a target it already meets is not a
+   prediction. **Predict on a per-pass metric the diff itself limits** (`avg_turns`,
+   `avg_cost_usd`, `quiet_rate`, `signal_rate`, `status_per_day:timed_out`). Counts of passes
+   (`runs_per_day`, `status_per_day:quiet`, `avg_duration_s`) are set by cron lines in
+   `entrypoint.sh`, pushes, wakes and gru, not by a charter: 7 of the 10 misses in #37-#47
+   (09-30..10-03) were those; the other 3 asked a per-pass number to go UP, which a charter
+   allows but does not cause. **One open row per member** until it resolves, or the readings
+   confound (#38/#39/#44/#45: four minion rows due within 24h, three missed). No `add`, no pass. Run
+   `gh pr view <PR> -R <repo> --json state,autoMergeRequest` before you `add`, and over every
+   open row from item 1.
    A pass with nothing worth changing writes `Prediction: none -- <why>` and says so.
 5. **Report** (below).
 
@@ -123,7 +124,8 @@ say so in the report with evidence and leave it to a human.
 **Your levers, and the job (Reif, 2026-09-28).** You are the fleet's controller: turn the
 tokens it is assigned into movement on the OKRs (`python3 /fleet-kit/scripts/okr.py show`;
 read live, never from memory). Everything that shapes a pass is yours to change, by PR:
-- per member (`members/<m>/`): the charter; `schedule` (how often); `timeout_s`,
+- per member (`members/<m>/`): the charter; how often (the cron line in `entrypoint.sh`;
+  `schedule.interval_s` must match it, selftest checks); `timeout_s`,
   `llm.max_turns`, `llm.max_budget_usd` (how long, how far); `llm.model` (tier);
   `llm.pregate` (when a pass is skipped as having nothing to do); `llm.tools` allow/deny;
   `enabled`; and whole members added, merged or retired;
