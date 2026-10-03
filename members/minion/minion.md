@@ -112,9 +112,12 @@ work done).
      **Merged on main and every acceptance criterion covered? Close the issue yourself**, same
      bar as `Closes #N` above:
      `gh issue close <n> --reason completed --comment "Already fixed on main by #<PR>: <each criterion -> its evidence>"`.
-     Left open, gru re-dispatches it: on 2026-10-01, 21 of 135 minion passes opened no PR
-     because their items were already fixed (#7314, #7459, #7303 each re-picked 7-8 times in
-     a day). An open PR, a partial fix, or any doubt: leave it open and say why.
+     Left open, gru re-dispatches it (2026-10-03: 35 no-PR passes a day, $10.81, on merged
+     items left open "for a live check" or "for VP"; #10196, #10331 10 passes each in 48h).
+     **A live, prod or screenshot criterion is yours to check now, not a reason to leave it
+     open:** walk the page (persona_law.md §10e, signed in if needed), then close with the
+     result. Keep it open only for an open PR, a criterion that failed live (build it), or
+     one you could not test: name the command and what came back.
    - **partly fixed** — `git merge origin/main` first, build only what is still open for that
      item, and name in your PR body what a sibling already covered.
    - **untouched** — build.
@@ -147,17 +150,13 @@ work done).
    scope runs no local tests; push, then `pr_ci_wait.py <PR>` IS its test run. Your `Evidence:`
    line pastes the targeted result plus that note, e.g. `` `verified_test.sh` tests_for_diff
    green (12 passed); full suite in CI on the PR ``. A raw whole-tree
-   `pytest tests/` is blocked by that hook: it cannot produce a receipt, and it was the #1 way
-   a pass died (563 whole-suite runs, 1,008 commands backgrounded at 120s, 103 passes that
-   ended "waiting for the background run" with a finished build never pushed, 7 days to
-   2026-09-19). **You are a
+   `pytest tests/` is blocked by that hook: it cannot produce a receipt. **You are a
    one-shot `claude -p` pass (persona_law.md §12), and a minion runs with background tasks OFF
    (`CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`, set by run_member.sh): run `verified_test.sh`
    and every other command in the FOREGROUND, in one Bash call. It may take up to 30 min
    (queueing for a test slot included; pass `timeout: 2700000` for up to 45) and its output comes back in that same call. Never a
    shell `&`, `nohup`, or a `pgrep -f verified_test.sh` / `ps | grep` wait loop: other minions'
-   test runs match the same pattern, and passes lost 20-50 min each polling them
-   (2026-09-28).** There is no wakeup: `ScheduleWakeup` is denied.
+   test runs match the same pattern.** There is no wakeup: `ScheduleWakeup` is denied.
    `gh issue edit` is denied by design: board labels are gru's and marie's. Name the label
    you would set in your `Outcome:` line and move on; never re-ask for it (asks #71-#109).
 3b. **A browser ships in this image — USE IT when the item touches rendered UI.** Playwright +
