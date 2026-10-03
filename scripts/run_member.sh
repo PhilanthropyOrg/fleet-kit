@@ -1171,6 +1171,8 @@ export ACCOUNT_POOL_SELECTED_FILE ACCOUNT_POOL_REASON_FILE
 # ceiling is already held by $CLAUDE_CONCURRENCY_N other passes; see claude_concurrency.sh.
 . "$KIT_DIR/scripts/claude_concurrency.sh"
 claude_slot_acquire
+# pr_done_hook.py stops refusing a pass's stop this close to its kill (2026-10-03, rc=124 x23/day).
+export FLEET_PASS_DEADLINE="$(( $(date +%s) + TIMEOUT_S ))"
 log "pass start: acquired concurrency slot (ceiling=$CLAUDE_CONCURRENCY_N)"
 
 ( account_pool_run timeout "$TIMEOUT_S" claude -p "$PROMPT" \
