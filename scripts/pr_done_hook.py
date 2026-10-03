@@ -30,6 +30,14 @@ and the one-line reply to that became the pass's `result` -- the report was lost
 already said "TaskOutput(block: true) inside THIS turn"; prose again. So for any fleet pass
 (FLEET_RUN_ID set) this hook reads the session transcript Claude Code hands it and refuses the
 stop while a task it launched has no completion on record. Same bound, same fail-open.
+
+NEVER PAST THE PASS'S OWN CLOCK (2026-10-03). the-fixer --item passes timed out 1, 13, then 23
+times a day (the same red PRs: #10101 five times, #10340 and #10213 three). A refused stop with
+CI still pending sends the model into one more 9-minute `pr_ci_wait.py`, then rc=124 kills the
+pass: no report, no cost on record, and the PR gets the next fixer anyway. So once fewer than
+FLEET_PR_DONE_LEAD_S (720) seconds remain before $FLEET_PASS_DEADLINE (run_member.sh exports
+it), the stop is allowed: the pass writes its report, and a still-red PR is red_prs.py's to
+route, exactly as after the 4th refusal.
 """
 from __future__ import annotations
 
@@ -45,6 +53,17 @@ import pr_ci_wait  # noqa: E402
 
 FIXER_RUN = re.compile(r"^the-fixer-item(\d+)-")
 MINION_RUN = re.compile(r"^minion-")
+
+
+def near_deadline(env: dict, now: float | None = None) -> bool:
+    """True when the pass has too little time left for another CI wait plus its report."""
+    try:
+        deadline = float(env.get("FLEET_PASS_DEADLINE") or 0)
+        lead = float(env.get("FLEET_PR_DONE_LEAD_S") or 720)
+    except ValueError:
+        return False
+    import time
+    return deadline > 0 and (now if now is not None else time.time()) >= deadline - lead
 
 
 def max_blocks(env: dict) -> int:
@@ -162,6 +181,8 @@ def pending_tasks(transcript_path: str | None) -> list[str]:
 
 def decide(env: dict, gh=pr_ci_wait._gh, branch_of=_branch, payload: dict | None = None) -> str | None:
     """None = allow the stop. A string = why not, shown to the model."""
+    if near_deadline(env):
+        return None
     pending = pending_tasks((payload or {}).get("transcript_path")) if env.get("FLEET_RUN_ID") else []
     if pending:
         n = _bump(_counter(env, "-bg"), env)

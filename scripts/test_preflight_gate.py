@@ -246,6 +246,11 @@ class StopHook(unittest.TestCase):
         self.assertIsNotNone(results[0])
         self.assertIsNone(results[-1], "must let go after FLEET_PR_DONE_MAX_BLOCKS refusals")
 
+    def test_lets_go_near_the_pass_deadline(self):
+        red = _pr([_check("lint", "FAILURE")])
+        self.assertIsNone(self._decide(red, dict(self.env, FLEET_PASS_DEADLINE=str(time.time() + 300))))
+        self.assertIsNotNone(self._decide(red, dict(self.env, FLEET_PASS_DEADLINE=str(time.time() + 3000))))
+
     def test_inert_outside_a_builder_pass(self):
         red = _pr([_check("lint", "FAILURE")])
         self.assertIsNone(self._decide(red, {"TMPDIR": self.tmp}))  # no WT_PATH: a human session
