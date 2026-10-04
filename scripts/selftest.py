@@ -6900,7 +6900,9 @@ def _every_hold_hands_the_pr_to_the_fleet():
     sys.path.insert(0, str(ROOT / "scripts"))
     import vision_link_gate
 
-    fallback_match = re.search(r'ERR_VISION_LINK="(Vision-link:[^"]*)"', err_path)
+    # jefe msg#753: the literal is now gate_valid_vision_link's fallback argument.
+    fallback_match = re.search(r'ERR_VISION_LINK=\$\(gate_valid_vision_link.*?\n\s*"(Vision-link:[^"]*)"\)',
+                               err_path, re.S)
     assert fallback_match, "could not find the errored-review path's fallback Vision-link literal"
     status, _ = vision_link_gate.classify_candidate(fallback_match.group(1), None)
     assert status == vision_link_gate.STATUS_LINKED, (
