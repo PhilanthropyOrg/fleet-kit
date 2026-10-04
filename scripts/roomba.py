@@ -130,6 +130,29 @@ def is_pid_alive(pid: int) -> bool:
     return True
 
 
+def has_live_process_in(path: str, proc_root: str = "/proc") -> bool:
+    """True if any running process has its cwd inside `path` (gh#8357).
+
+    The PID in a `<member>-<pid>` worktree name is the launcher, which exits soon after
+    spawning the real pass, so a dead PID alone does not mean the pass is dead.
+    """
+    root = os.path.realpath(path)
+    try:
+        entries = os.listdir(proc_root)
+    except OSError:
+        return True  # cannot look: keep, never guess toward removal
+    for e in entries:
+        if not e.isdigit():
+            continue
+        try:
+            cwd = os.path.realpath(os.readlink(f"{proc_root}/{e}/cwd"))
+        except OSError:
+            continue
+        if cwd == root or cwd.startswith(root + os.sep):
+            return True
+    return False
+
+
 def worktree_age_hours(path: str) -> float | None:
     try:
         return (time.time() - Path(path).stat().st_ctime) / 3600
@@ -156,6 +179,9 @@ def sweep(repo_dir: str, protect: set[str], base: str, execute: bool) -> list[di
         age = worktree_age_hours(wt.path)
         dangling_pid = parse_dangling_pid(wt.path)
         if dangling_pid is not None and age is not None and age >= DANGLING_MIN_AGE_HOURS:
+            if not is_pid_alive(dangling_pid) and has_live_process_in(wt.path):
+                results.append({"path": wt.path, "action": "kept", "reason": "launcher pid dead but a live process runs inside it"})
+                continue
             if not is_pid_alive(dangling_pid):
                 reason = f"dangling builder worktree, pid {dangling_pid} confirmed dead"
                 results.append({"path": wt.path, "action": "removed" if execute else "would-remove", "reason": reason})
