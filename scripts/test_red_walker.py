@@ -133,7 +133,8 @@ class RunAttackExceptionHandlingTest(unittest.TestCase):
         def __init__(self):
             self.ctx = RunAttackExceptionHandlingTest._FakeCtx()
 
-        def new_context(self, viewport):
+        def new_context(self, viewport, user_agent=None):
+            self.user_agent = user_agent
             return self.ctx
 
     @staticmethod
@@ -148,6 +149,12 @@ class RunAttackExceptionHandlingTest(unittest.TestCase):
             result = rw.run_attack(self._attack(), rw.Config({}), browser, Path(tmp), "run1",
                                     "desktop", {"width": 100, "height": 100})
         return result, browser
+
+    def test_context_sends_a_real_browser_ua(self):
+        # "/" and "/login" 403 the default "HeadlessChrome" UA even with the bypass header.
+        _, browser = self._run(lambda page, cfg, attack, step: (False, "ok"))
+        self.assertNotIn("Headless", browser.user_agent)
+        self.assertIn("Chrome/", browser.user_agent)
 
     def test_criterion1_timeout_raises_blocked_not_a_fake_pass(self):
         def timeout_runner(page, cfg, attack, step):
