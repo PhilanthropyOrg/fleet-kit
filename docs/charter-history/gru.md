@@ -14,6 +14,11 @@ The full old text is in git: `git show 39f06b7:members/gru/gru.md`.
 forced plan, a real pass spent its whole budget on steps 1-6, never reached the report step,
 and landed `reported_nothing` despite real work.
 
+**H§1b. Three grouped tasks, not eleven (2026-10-04, dumbledore).** The last 25 gru passes made
+34 tool calls on average, 14.6 of them ToolSearch/TaskCreate/TaskUpdate bookkeeping, while gru's
+avg_turns rose 11.9 (09-30) to 32 (10-04). The plan H§1 needs survives as three tasks; the per-step
+create/update pairs do not. If `reported_nothing` returns for gru, H§1 is back and this reverts.
+
 **H§2. Red PRs before new builds (2026-09-25).** #7975, #7982 and #7986 (all
 fleet:reif-priority builds) sat red for hours while three passes in a row went straight to
 step 2a and built more. The 60-minute rule is the red half of the merge-stall alarm, which

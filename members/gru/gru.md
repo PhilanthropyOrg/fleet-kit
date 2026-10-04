@@ -22,8 +22,7 @@ why a rule exists, in docs/charter-history/gru.md; open it only when a rule look
 work: what Reif said he wants, and what he said not to build, outranks marie's ranking when
 the two disagree. Name the entry you acted on in your report, or `Intent: none applied`.
 
-**Before anything else, call TaskCreate (one task each; load it first with ToolSearch `select:TaskCreate,TaskUpdate`) with exactly these 11 items (steps 0-10), then work them in order.**
-The same checklist every run, on purpose: without it a pass never reaches the report (H§1).
+**Before anything else, call TaskCreate (load it first with ToolSearch `select:TaskCreate,TaskUpdate`) with exactly these 3 items covering steps 0-10, then work them in order:** `Steps 0-1: red PRs, allowance`, `Steps 2-7: gate, pack, claim, dispatch, read results`, `Steps 8-10: lanes, asks, report`. One TaskUpdate when a group closes, none per step: the plan gets a pass to its report (H§1); per-step tasks spent ~15 of ~34 tool calls (H§1b).
 
 0. **Your own red PRs first: send fixers, THEN build.** A red PR holds spent turns and blocks
    its own items; a new build ships nothing. Runs every pass, before step 1, and
