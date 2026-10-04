@@ -383,8 +383,26 @@ def find_newest_thread_url(page, users: "TestUsers") -> str:
     return f"/network/hq/messages/{ids[0]}"
 
 
-def submit_button(page, pattern=r"sign in|log in|submit"):
+def submit_button(page, pattern=r"sign[ -]?in|log in|submit"):
+    # fk#1134: the live button reads "Email me a sign-in link"; "sign in" never matched the hyphen.
     return page.get_by_role("button", name=re.compile(pattern, re.I))
+
+
+def sign_out_control(page, timeout=5000):
+    """The visible Sign out control. It lives in a closed menu: the hover account menu on desktop,
+    the Menu drawer on a phone. The page also carries hidden copies, so `.first` on plain text
+    resolved to a hidden button and every sign-in/sign-out walk timed out (fk#1134)."""
+    pattern = re.compile("sign out", re.I)
+    visible = lambda: page.locator(":is(button,a,[role=button],[role=menuitem]):visible", has_text=pattern)
+    if visible().count():
+        return visible().first
+    menu = page.get_by_role("button", name=re.compile(r"^menu$", re.I))
+    if menu.count() and menu.first.is_visible():
+        menu.first.click()
+    else:
+        page.get_by_role("link", name=re.compile(r"^account", re.I)).first.hover()
+    visible().first.wait_for(state="visible", timeout=timeout)
+    return visible().first
 
 
 def wait_path_no_longer_contains(page, substr: str, timeout=10000):
@@ -633,9 +651,7 @@ def run_sign_in(ctx: JourneyCtx):
         return
 
     def s2():
-        if ctx.viewport == "mobile_390":
-            page.get_by_role("button", name=re.compile("menu", re.I)).first.click()
-        expect_visible(page.get_by_text(re.compile("sign out", re.I)))
+        sign_out_control(page)
         assert page.get_by_role("link", name=re.compile(r"^sign in$", re.I)).count() == 0
 
     ctx.step(2, s2, page)
@@ -941,12 +957,10 @@ def run_sign_out(ctx: JourneyCtx):
     page = ctx.page("alice")
 
     def s0():
-        page.goto(users.url("https://philanthropy.org/990/login"), timeout=NAV_TIMEOUT_MS)
-        email_field(page).first.fill(alice["email"])
-        password_field(page).first.fill(alice["password"])
-        submit_button(page).first.click()
-        wait_path_no_longer_contains(page, "/login", timeout=10000)
-        page.get_by_text(re.compile("sign out", re.I)).first.click()
+        # fk#1070/#1119/#1232/#1253: alice has no password (magic link only), so the old inline
+        # form fill crashed on fill(None) before the product was ever touched. Reuse sign_in().
+        sign_in(page, users, alice)
+        sign_out_control(page).click()
         expect_visible(page.get_by_role("link", name=re.compile(r"^sign in$", re.I)))
 
     if not ctx.step(0, s0, page):
