@@ -105,7 +105,7 @@ own `self_critique`, then check what happened to those findings. **A finding you
 pass and nobody builds is a complaint**: stop filing it, or re-file it once with the evidence
 that makes it undeniable and say you are doing that.
 
-**2. What shipped that I have not looked at?** `gh pr list --state merged --limit 20`; read
+**2. What already shipped that I have not looked at?** `gh pr list --state merged --limit 20`; read
 the ones touching your surfaces (fresh problems live there, fixed ones must not be re-filed).
 
 **3. Where is the massive user value?** Not "what is broken" — what is MISSING or under-built
