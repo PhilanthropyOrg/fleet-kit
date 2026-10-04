@@ -58,7 +58,9 @@ class Charter(unittest.TestCase):
         self.assertNotIn("each `task_id` from steps 0 and 5", GRU)
 
     def test_todo_count_matches_steps(self):
-        self.assertIn("exactly these 11 items (steps 0-10)", GRU)
+        # H§1b: three grouped tasks cover steps 0-10; per-step tasks were ~15 of ~34 tool calls.
+        self.assertIn("exactly these 3 items covering steps 0-10", GRU)
+        self.assertIn("Steps 8-10: lanes, asks, report", GRU)
 
     def test_manifest_checklist_leads_with_it(self):
         first = SPEC["mandate"]["checklist"][0]
