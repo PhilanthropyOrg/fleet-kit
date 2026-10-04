@@ -444,6 +444,17 @@ while :; do
   fi
   gh pr view "$PR" --json title,body -q '"TITLE: \(.title)\n\n\(.body)"' > "$BODY_FILE" 2>/dev/null || true
   HEAD_REF=$(gh pr view "$PR" --json headRefName -q '.headRefName' 2>/dev/null || true)
+  # A dependabot PR that only moves version pins has no person-facing change to describe, and
+  # its body is upstream release notes nobody in the fleet rewrites: philanthropy#10116 was
+  # blocked twice on the plain-language rule and idled until watchdog escalated (fleet_msg #773).
+  # Such a PR is reviewed for correctness only; any other file in the diff keeps both rules.
+  BODY_RULES="The PR body must read in plain language (freshman 101): a smart person outside software can tell what the change lets a person do. If the first two paragraphs do not, set your verdict to block and add a finding saying so.
+
+If the diff touches a template, a static file, or a route (anything a person can see), the PR body must carry a line 'See it: <URL or path>' naming the live page where the change is visible, or 'See it: (internal)' when there is no such page. Missing: set your verdict to block and add a finding saying so."
+  if gh pr view "$PR" --json author,files -q 'select(.author.login == "app/dependabot" or .author.login == "dependabot[bot]" or .author.login == "dependabot") | [.files[].path | select(test("(^|/)(pyproject\\.toml|uv\\.lock|requirements[^/]*\\.txt|package(-lock)?\\.json|yarn\\.lock|pnpm-lock\\.yaml)$|^\\.github/workflows/") | not)] | length == 0' 2>/dev/null | grep -qx true; then
+    BODY_RULES="This PR is an automated dependency-version bump: its body is the upstream release notes, so do not block on plain language or a 'See it:' line. Block only if the new version would break this repo's code."
+    log "PR #$PR: dependabot version-pin-only diff -- plain-language/See-it rules waived"
+  fi
 
   # Carry an approval forward when only main moved. 2026-09-30: 48% of 3 days' review spend
   # ($76 of $158) re-reviewed PRs already reviewed; #8555 was approved 11 times, once per
@@ -506,9 +517,7 @@ $(printf '%s' "${GATE_INTENT:-(this PR closes no issue)}" | head -c "$MAX_INTENT
 
 A PR may close an issue only if this diff meets EVERY acceptance criterion above, with evidence in the PR body: a screenshot or short video for anything a person sees, a named test for anything else. If any criterion is not met, or has no evidence, set your verdict to block and add a finding naming the criterion; the author must change the closing keyword to Part of #N and list what remains.
 
-The PR body must read in plain language (freshman 101): a smart person outside software can tell what the change lets a person do. If the first two paragraphs do not, set your verdict to block and add a finding saying so.
-
-If the diff touches a template, a static file, or a route (anything a person can see), the PR body must carry a line 'See it: <URL or path>' naming the live page where the change is visible, or 'See it: (internal)' when there is no such page. Missing: set your verdict to block and add a finding saying so.
+${BODY_RULES}
 
 DIFF:
 $(cat "$DIFF_FILE")
