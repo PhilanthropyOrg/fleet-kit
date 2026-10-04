@@ -15,6 +15,29 @@ set -uo pipefail
 [ -f "${FLEET_ENV_FILE:-./fleet.env}" ] && { set -a; . "${FLEET_ENV_FILE:-./fleet.env}"; set +a; }
 KIT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
+# gh#9840: gru showed 38 starts in 24h against 24 cron slots, plus 20 dispatch_skipped rows per 6h.
+# Two extra launchers: finish_deploy's post-cutover kick (scripts/deploy.sh, gh#622) and a second
+# pass that only lost run_member.sh's gh#3220 flock AFTER the sweeps below ran and logged a skip
+# row. Exit here, before any sweep or run row, when (a) a gru pass already holds that same lock, or
+# (b) this is the deploy kick and gru started less than FLEET_GRU_KICK_MIN_GAP_MIN (45) min ago.
+GRU_LOCK_DIR="${TMPDIR:-/tmp}/fleet-kit-member-locks"
+GRU_START_STAMP="$GRU_LOCK_DIR/gru.last-start"
+mkdir -p "$GRU_LOCK_DIR" 2>/dev/null || true
+if [ "$#" -eq 0 ]; then
+  if ! ( exec 9>"$GRU_LOCK_DIR/gru.lock"; flock -n 9 ); then
+    echo "[run_gru_fanout] a gru pass is already running -- not starting another (gh#9840)"
+    exit 0
+  fi
+  if [ "${FLEET_FIRED_BY:-}" = "deploy_kick" ] && [ -f "$GRU_START_STAMP" ]; then
+    gap_s=$(( $(date +%s) - $(stat -c %Y "$GRU_START_STAMP" 2>/dev/null || echo 0) ))
+    if [ "$gap_s" -lt $(( ${FLEET_GRU_KICK_MIN_GAP_MIN:-45} * 60 )) ]; then
+      echo "[run_gru_fanout] deploy kick skipped: gru started ${gap_s}s ago (gh#9840)"
+      exit 0
+    fi
+  fi
+  touch "$GRU_START_STAMP" 2>/dev/null || true
+fi
+
 # Claims are leases (2026-09-26). Before gru's model starts, release every fleet:claimed item
 # nobody is working (no live runner, no PR/branch activity for FLEET_CLAIM_LEASE_MIN=60 min).
 # 12 hours of gru passes skipped 8 Reif-priority items a dead minion batch still "held", until
