@@ -23,6 +23,12 @@ and pr_done_hook.py's Stop check). It answers one question, "is this PR done?":
 The default --timeout (540s) fits inside one Bash tool call's 600s ceiling, so a caller can
 block on it in the foreground. Nothing here is run in the background.
 
+THE PASS'S OWN CLOCK (2026-10-04). pr_done_hook.py lets a pass stop once fewer than
+FLEET_PR_DONE_LEAD_S (720) seconds remain before $FLEET_PASS_DEADLINE, but a pass that never
+TRIES to stop still loops fix -> push -> 9-minute wait into rc=124: the-fixer timed out 11 times
+in the day to 10-04 08:00Z, three of them on #10830 alone, each with no report and no cost on
+record. So the wait is clamped to that same point, and past it the output says to stop.
+
 classify() is pure: red_prs.py and pr_done_hook.py import it, so "red" means the same thing to
 the detector, the router and the fixer.
 """
@@ -258,6 +264,18 @@ def wait(pr: int, repo: str | None, timeout: int, interval: int, gh=_gh,
         sleep(min(interval, max(1, deadline - now())))
 
 
+def clock_left(env: dict, now: float | None = None) -> float | None:
+    """Seconds until the pass should be writing its report, or None outside a timed pass."""
+    try:
+        deadline = float(env.get("FLEET_PASS_DEADLINE") or 0)
+        lead = float(env.get("FLEET_PR_DONE_LEAD_S") or 720)
+    except ValueError:
+        return None
+    if deadline <= 0:
+        return None
+    return deadline - lead - (now if now is not None else time.time())
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("pr", type=int)
@@ -267,7 +285,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--no-wait", action="store_true")
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args(argv)
-    info = wait(a.pr, a.repo, 0 if a.no_wait else a.timeout, a.interval)
+    left = clock_left(os.environ)
+    timeout = 0 if a.no_wait else a.timeout
+    if left is not None:
+        timeout = int(max(0, min(timeout, left)))
+    info = wait(a.pr, a.repo, timeout, a.interval)
     if info is None:
         print(f"pr_ci_wait: could not read PR #{a.pr}", file=sys.stderr)
         return 2
@@ -275,6 +297,10 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(info))
     else:
         print(render(info, a.repo))
+    if left is not None and left < a.timeout and info["state"] not in ("GREEN", "MERGED"):
+        print(f"\nPASS CLOCK: {max(0, int(left))}s left before this pass must report. Start no "
+              f"new fix or wait: comment the exact blocker on PR #{a.pr}, then write your "
+              f"Report / Outcome / Evidence block now. red_prs.py sends the next fixer.")
     return EXIT.get(info["state"], 2)
 
 

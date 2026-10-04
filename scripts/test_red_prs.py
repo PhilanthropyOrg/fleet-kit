@@ -122,6 +122,38 @@ class Classify(unittest.TestCase):
         self.assertEqual(info["state"], "GREEN")
         self.assertEqual(len(calls), 2)
 
+    def test_wait_stops_at_the_pass_clock_and_says_to_report(self):
+        # 2026-10-04: the-fixer looped fix -> push -> 9-minute wait into rc=124 on #10830
+        # three times; the wait now ends where pr_done_hook.py lets the pass stop.
+        import contextlib
+        import io
+        from unittest import mock
+        self.assertIsNone(pr_ci_wait.clock_left({}))
+        self.assertEqual(pr_ci_wait.clock_left({"FLEET_PASS_DEADLINE": "2000"}, now=1000), 280)
+        seen = {}
+
+        def fake_wait(pr_n, repo, timeout, interval):
+            seen["timeout"] = timeout
+            return {"state": "BLOCK"}
+        env = {"FLEET_PASS_DEADLINE": str(time.time() + 720 + 100)}
+        out = io.StringIO()
+        with mock.patch.dict(os.environ, env), mock.patch.object(pr_ci_wait, "wait", fake_wait), \
+                mock.patch.object(pr_ci_wait, "render", lambda info, repo: "BLOCK"), \
+                contextlib.redirect_stdout(out):
+            rc = pr_ci_wait.main(["10830"])
+        self.assertEqual(rc, 1)
+        self.assertLessEqual(seen["timeout"], 100)
+        self.assertIn("PASS CLOCK", out.getvalue())
+        # Plenty of clock: the full 540s wait, and no stop note.
+        env = {"FLEET_PASS_DEADLINE": str(time.time() + 3600)}
+        out = io.StringIO()
+        with mock.patch.dict(os.environ, env), mock.patch.object(pr_ci_wait, "wait", fake_wait), \
+                mock.patch.object(pr_ci_wait, "render", lambda info, repo: "BLOCK"), \
+                contextlib.redirect_stdout(out):
+            pr_ci_wait.main(["10830"])
+        self.assertEqual(seen["timeout"], 540)
+        self.assertNotIn("PASS CLOCK", out.getvalue())
+
 
 class Detector(unittest.TestCase):
     RED_LINT = [check("test"), check("test-postgres"), check("lint", "FAILURE")]
