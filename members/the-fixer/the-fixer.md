@@ -58,10 +58,9 @@ Fix that PR, nothing else, and do not fan out:
    Never build your own venv: the test interpreter is `bash /fleet-kit/scripts/test_python.sh`
    (cached per dependency set; verified_test.sh already uses it). A venv hunt is what timed out
    #7975's and #7982's first fixers with the fix committed and unpushed.
-5. `python3 /fleet-kit/scripts/pr_ci_wait.py <N>` in the foreground until GREEN (exit 3 =
-   still running: call again; exit 1 = red again: back to 3). Arm auto-merge if it is not
-   (`source /fleet-kit/scripts/merge_arm.sh; arm_pr_auto_merge <N>`). A Stop hook
-   (`pr_done_hook.py`) refuses to end this pass while the PR is RED/BLOCK/PENDING.
+5. `python3 /fleet-kit/scripts/pr_ci_wait.py <N>` in the foreground until GREEN (exit 3: call
+   again; exit 1: back to 3), or until it prints `PASS CLOCK` (then step 6, now). Arm
+   auto-merge if it is not (`source /fleet-kit/scripts/merge_arm.sh; arm_pr_auto_merge <N>`).
 6. If it cannot be fixed in this budget, comment on the PR naming the exact blocker and say so
    in your report; red_prs.py re-routes it (at most 3 fixer passes per unchanged content).
 
