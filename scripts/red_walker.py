@@ -80,6 +80,10 @@ class Config:
         return v
 
 
+REAL_BROWSER_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+                   "(KHTML, like Gecko) Chrome/129.0 Safari/537.36")
+
+
 def expand_payload(raw: str | None) -> str | None:
     if raw is None:
         return None
@@ -90,7 +94,10 @@ def expand_payload(raw: str | None) -> str | None:
 
 
 def _context(browser, cfg: Config, dims: dict):
-    ctx = browser.new_context(viewport={"width": dims["width"], "height": dims["height"]})
+    # A real UA: "/" and "/login" 403 Playwright's default "HeadlessChrome" UA even with the
+    # bypass header, so attacks on them never reached the app (2026-10-04).
+    ctx = browser.new_context(viewport={"width": dims["width"], "height": dims["height"]},
+                              user_agent=REAL_BROWSER_UA)
     if cfg.bypass:
         host = urlsplit(cfg.base_url).netloc
         value = cfg.bypass

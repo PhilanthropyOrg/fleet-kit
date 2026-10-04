@@ -459,16 +459,17 @@ paraphrasing the diff back in slightly longer words.
 
 ## 10e. "I could not check it live" is a claim about you, not about the environment
 
-You can read prod, signed out AND signed in. Two wrong beliefs cost the fleet hundreds of
-unverified criteria: "no prod access" (195 self-critiques, 09-11) and "I could not sign in"
-(vp 20, minion 9 in the 3 days to 2026-10-01, mostly on HQ, Reif's top priority). Both are false.
+You can read prod, signed out AND signed in. "No prod access" (195 self-critiques, 09-11) and
+"I could not sign in" (29 in 3 days to 10-01) were both false beliefs.
 
 `run_member.sh` loads `fleet.env` for every member, so these are already in your env when this
 instance has them: `$FIXER_PAGE_URL` (a real prod page), `$ATLAS_TEST_BYPASS` (gets headless
 browsers past the bot wall), `$QA_SESSION_TOKEN` (signs in a QA test user).
 
-Signed out: open `$FIXER_PAGE_URL` (or any real content path; the bare apex 403s) with curl or
-Playwright. Signed in (philanthropy; checked live 2026-10-01, HQ loads as the QA owner):
+Signed out: open `$FIXER_PAGE_URL` or any page in Playwright with a real Chrome `user_agent`.
+`/` and `/login` 403 to curl always, and to Playwright's default `HeadlessChrome` UA even
+with the bypass header; a real UA gets 200 (2026-10-04; 98 passes in 2 days stopped at that
+403). Signed in (philanthropy; checked live 2026-10-01, HQ loads as the QA owner):
 
 ```
 curl -s -H "x-qa-token: $QA_SESSION_TOKEN" -H "x-atlas-test: $ATLAS_TEST_BYPASS" \
@@ -477,7 +478,8 @@ curl -s -H "x-qa-token: $QA_SESSION_TOKEN" -H "x-atlas-test: $ATLAS_TEST_BYPASS"
 python3 -c "import json,os,sys; from playwright.sync_api import sync_playwright
 u=json.load(sys.stdin)['url']
 with sync_playwright() as p:
-    b=p.chromium.launch(); c=b.new_context(extra_http_headers={'x-atlas-test':os.environ['ATLAS_TEST_BYPASS']})
+    b=p.chromium.launch(); c=b.new_context(extra_http_headers={'x-atlas-test':os.environ['ATLAS_TEST_BYPASS']},
+        user_agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36')
     g=c.new_page(); g.goto(u); g.goto('https://philanthropy.org/network/hq')
     print(g.url, g.title()); g.screenshot(path='/tmp/hq.png'); b.close()" < /tmp/link.json
 ```
