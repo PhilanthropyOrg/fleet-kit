@@ -48,6 +48,10 @@ class Charter(unittest.TestCase):
         self.assertIn("DETACHED", step0)
         self.assertIn("even when step 1 ends the pass early", step0)
         self.assertIn("Review findings are included", step0)
+        # 2026-10-05: a fixer deferred by the cap is no fixer; its fix item must still go out.
+        self.assertIn("NO fixer this pass", step0)
+        fix_rule = GRU[GRU.index("2a-bis."):GRU.index("2b. **Otherwise")]
+        self.assertIn("DISPATCHED in step 0 this pass (not `deferred`)", fix_rule)
 
     def test_reif_priority_never_outranks_step_zero(self):
         self.assertIn("never step 0", GRU[GRU.index("2a. **First"):GRU.index("2a-bis.")])
