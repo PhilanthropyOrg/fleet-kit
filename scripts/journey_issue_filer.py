@@ -584,24 +584,51 @@ def process(results_path: Path, state_path: Path = DEFAULT_STATE_PATH, runner=_r
     return summary
 
 
-def message_fixer(summary: dict, send=None) -> "list | None":
+# Issues already named to the-fixer inside this window are not named again: 2026-10-05, 80% of
+# the 1,248 issue mentions in 7 days of journey-failing mail were the same 256 long-open issues
+# re-confirmed each walk, and the-fixer re-triaged the same list every pass to answer "not a
+# prod incident" again. A still-failing issue stays open on the board; only news is mail.
+TOLD_WINDOW_S = float(os.environ.get("FLEET_JOURNEY_TOLD_WINDOW_S", 86400))
+
+
+def already_told(conn, now: float | None = None, window: float = TOLD_WINDOW_S) -> set:
+    """Issue numbers named in any journey-failing message to the-fixer within `window`."""
+    now = time.time() if now is None else now
+    told = set()
+    for (items,) in conn.execute(
+            "SELECT items FROM msgs WHERE recipient = 'the-fixer' AND kind = 'journey-failing' "
+            "AND sent_at > ?", (now - window,)):
+        try:
+            told.update(int(n) for n in json.loads(items or "[]"))
+        except (ValueError, TypeError):
+            continue
+    return told
+
+
+def message_fixer(summary: dict, send=None, told=None) -> "list | None":
     """philanthropy#8215 amendment: sentry -> the-fixer on a failing prod journey. One message
-    per distinct set of failing issues (fleet_msg dedupes the same set for 6h), sent whether the
-    issue was just filed or was already open and failed again. Best-effort: never fails the run."""
+    per walk naming only the failing issues the-fixer has not been told about in the last
+    TOLD_WINDOW_S (`told`), whether just filed or already open and failing again.
+    Best-effort: never fails the run."""
     failing = sorted({e["issue"] for e in summary.get("filed", []) + summary.get("commented", [])
                       if e.get("issue")})
     if not failing:
         return None
-    body = ("sentry's journey walk on prod found failing step(s), filed or re-confirmed as "
-            + ", ".join(f"#{n}" for n in failing)
-            + ". A broken journey is a prod incident: open a fix-or-revert PR, or reply with why "
-              "it is not yours (flaky walker, a data issue, a missing credential).")
     try:
         if send is None:
             import fleet_db
             import fleet_msg
             conn = fleet_db.connect()
             send = lambda *a: fleet_msg.send(conn, *a)  # noqa: E731
+            if told is None:
+                told = already_told(conn)
+        failing = [n for n in failing if n not in (told or set())]
+        if not failing:
+            return None
+        body = ("sentry's journey walk on prod found failing step(s), filed or re-confirmed as "
+                + ", ".join(f"#{n}" for n in failing)
+                + ". A broken journey is a prod incident: open a fix-or-revert PR, or reply with why "
+                  "it is not yours (flaky walker, a data issue, a missing credential).")
         return send("sentry", ["the-fixer"], "journey-failing",
                     "journeys:" + ",".join(map(str, failing)), body, failing)
     except Exception as exc:  # noqa: BLE001
