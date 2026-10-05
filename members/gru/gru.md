@@ -477,6 +477,8 @@ the two disagree. Name the entry you acted on in your report, or `Intent: none a
      KPI value + delta you read>"
    ```
    The `lane=` prefix is load-bearing: it is how the nerd knows which lane it owns.
+   A `skipped nerd lane=<lane>: ...` line (no pid) means its last full pass was quiet under
+   4h ago; report that line for the lane, there is nothing to wait for.
 
    9e. **Wait for every nerd, then read its REAL result**: `dispatch_member.sh --wait <pid> ...`
    as in step 6, then its runs.jsonl record. A nerd still running when your budget ends is
