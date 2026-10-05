@@ -41,11 +41,14 @@ def _hook_commands() -> list[str]:
     getting its own entrypoint. So does checkpoint_pr_hook.py (2026-09-26, #8110: a minion
     checkpoint PR leaves draft only through `minion_checkpoint.py ready`). So does
     issue_create_hook.py (philanthropy#8215: raw `gh issue create` is deduped here, not denied).
+    So does pass_clock_hook.py (2026-10-04: a minion in its last 12 minutes reports instead of
+    starting one more wait).
     """
     scripts = Path(__file__).resolve().parent
     return [f"python3 {scripts / name}" for name in
             ("worktree_guard_hook.py", "pretest_push_hook.py", "checkpoint_pr_hook.py",
-             "issue_create_hook.py", f"worktree_guard_hook.py {READ_GUARD_ARG}")]
+             "issue_create_hook.py", "pass_clock_hook.py",
+             f"worktree_guard_hook.py {READ_GUARD_ARG}")]
 
 
 def _stop_hook_commands() -> list[str]:
