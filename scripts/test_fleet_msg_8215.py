@@ -195,6 +195,22 @@ class OtherSenders(Base):
         self.assertEqual((sender, to, kind, key, items), ("sentry", ["the-fixer"], "journey-failing", "journeys:9,12", [9, 12]))
         self.assertIsNone(journey_issue_filer.message_fixer({"filed": [], "commented": []}, send=lambda *a: 1/0))
 
+    def test_a_journey_issue_already_named_today_is_not_named_again(self):
+        fleet_msg.send(self.conn, "sentry", ["the-fixer"], "journey-failing", "journeys:9", "b", [9], None, 10 * H)
+        fleet_msg.send(self.conn, "sentry", ["the-fixer"], "journey-failing", "journeys:7", "b", [7], None, 1 * H)
+        self.assertEqual(journey_issue_filer.already_told(self.conn, now=20 * H), {7, 9})
+        told = journey_issue_filer.already_told(self.conn, now=26 * H)
+        self.assertEqual(told, {9})  # #7 was named 25h ago, outside the 24h window
+        sent = []
+        journey_issue_filer.message_fixer(
+            {"filed": [{"issue": 12}], "commented": [{"issue": 9}]},
+            send=lambda *a: sent.append(a) or [], told=told)
+        (_, _, _, key, body, items), = sent
+        self.assertEqual((key, items), ("journeys:12", [12]))
+        self.assertNotIn("#9", body)
+        self.assertIsNone(journey_issue_filer.message_fixer(
+            {"commented": [{"issue": 9}]}, send=lambda *a: 1/0, told=told))
+
 
 class MetricsNeverHoldTheWriteLock(Base):
     """2026-09-26 22:21-23:07 UTC: metrics_snapshot() held fleet.db's write lock across every
