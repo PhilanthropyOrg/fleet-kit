@@ -257,6 +257,19 @@ class Dedup(unittest.TestCase):
         self.assertEqual(red_prs.verdict(ledger["1"], "def", NOW), "go")
         self.assertEqual(red_prs.record(ledger, 1, "def", NOW)["attempts"], 1)
 
+    def test_a_pr_that_never_converges_is_exhausted_across_pushes(self):
+        # #11085: every fixer pass pushed new content, so the per-content cap never bound.
+        ledger = {}
+        for i in range(red_prs.MAX_TOTAL):
+            self.assertEqual(red_prs.verdict(ledger.get("1"), f"c{i}", NOW), "go")
+            red_prs.record(ledger, 1, f"c{i}", NOW)
+        self.assertEqual(ledger["1"]["total"], red_prs.MAX_TOTAL)
+        self.assertEqual(red_prs.verdict(ledger["1"], "fresh", NOW + 99999), "exhausted")
+
+    def test_an_old_entry_without_total_starts_from_its_attempts(self):
+        ledger = {"1": {"content": "a", "attempts": 2, "last": NOW, "since": NOW}}
+        self.assertEqual(red_prs.record(ledger, 1, "b", NOW)["total"], 3)
+
     def test_killed_passes_are_refunded(self):
         # #7982: 3 attempts on one content, two of them killed when the dispatcher ended.
         entry = {"content": "c", "attempts": 3, "last": NOW - 60, "since": NOW - 7200}

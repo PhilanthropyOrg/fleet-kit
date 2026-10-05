@@ -27,7 +27,11 @@ Dedup is keyed on the PR's last REAL commit, not its head: auto_update_branch.sh
 into open PRs every tick, which moves the head without fixing anything. A new real push resets
 the attempt count; the same content gets FLEET_RED_PR_MAX_ATTEMPTS (3) fixer passes, at most one
 per FLEET_RED_PR_REDISPATCH_MIN (45) minutes, then shows as `exhausted` for a human-readable
-report instead of being re-sent every hour.
+report instead of being re-sent every hour. Across ALL content a PR gets FLEET_RED_PR_MAX_TOTAL
+(6) fixer passes, then is `exhausted` too (2026-10-05): every fixer pass pushes, and each push
+reset the count, so the cap never bound a PR whose review kept finding something new. #11085
+took 11 passes and $6.26 in one day and was then closed over a pricing decision; in 7 days 21
+PRs took 118 passes beyond their 4th.
 
 A "fleet PR" is one on a `member/...` or `minion/...` branch -- the convention run_member.sh
 stamps and auto_update_branch.sh already keys on. A human's branch is never touched.
@@ -74,6 +78,7 @@ def _env_int(name: str, default: int) -> int:
 STALL_MIN = _env_int("FLEET_RED_PR_STALL_MIN", 60)
 REDISPATCH_MIN = _env_int("FLEET_RED_PR_REDISPATCH_MIN", 45)
 MAX_ATTEMPTS = _env_int("FLEET_RED_PR_MAX_ATTEMPTS", 3)
+MAX_TOTAL = _env_int("FLEET_RED_PR_MAX_TOTAL", 6)
 PRIORITY_LABEL = os.environ.get("FLEET_REIF_PRIORITY_LABEL", "fleet:reif-priority")
 HANDS_OFF_LABEL = "fleet:hands-off"
 
@@ -205,6 +210,8 @@ def effective(entry: dict | None, killed: list[float]) -> dict | None:
     mine = [t for t in killed if t >= since]
     e = dict(entry)
     e["attempts"] = max(0, int(entry.get("attempts", 0)) - len(mine))
+    if "total" in entry:
+        e["total"] = max(0, int(entry["total"]) - len(mine))
     if mine and max(mine) >= float(entry.get("last", 0)):
         e["last"] = 0.0  # the newest dispatch was cut short: re-send now
     return e
@@ -212,6 +219,8 @@ def effective(entry: dict | None, killed: list[float]) -> dict | None:
 
 def verdict(entry: dict | None, content: str, now: float) -> str:
     """'go', 'recent' or 'exhausted' for sending one more fixer at this content. Pure."""
+    if entry and int(entry.get("total", 0)) >= MAX_TOTAL:
+        return "exhausted"
     if not entry or entry.get("content") != content:
         return "go"
     if int(entry.get("attempts", 0)) >= MAX_ATTEMPTS:
@@ -224,11 +233,13 @@ def verdict(entry: dict | None, content: str, now: float) -> str:
 def record(ledger: dict, pr: int, content: str, now: float, killed: list[float] = ()) -> dict:
     entry = ledger.get(str(pr))
     if not entry or entry.get("content") != content:
-        entry = {"content": content, "attempts": 0, "since": now}
+        prior = int((entry or {}).get("total", (entry or {}).get("attempts", 0)))
+        entry = {"content": content, "attempts": 0, "since": now, "total": prior}
     else:
         entry = effective(entry, list(killed)) or entry
         entry["since"] = now  # refunded kills are folded into attempts; count only newer ones
     entry["attempts"] = int(entry.get("attempts", 0)) + 1
+    entry["total"] = int(entry.get("total", entry["attempts"] - 1)) + 1
     entry["last"] = now
     ledger[str(pr)] = entry
     return entry
@@ -353,12 +364,12 @@ def main(argv: list[str] | None = None) -> int:
             v = verdict(effective(box["data"].get(str(a.pr)), kills), content, now)
             if v != "go":
                 e = effective(box["data"].get(str(a.pr)), kills) or {}
-                print(f"red_prs: SKIP PR #{a.pr} -- {v}: {e.get('attempts')} fixer pass(es) already "
+                print(f"red_prs: SKIP PR #{a.pr} -- {v}: {e.get('attempts')} fixer pass(es) ({e.get('total', '?')} in all) already "
                       f"sent for content {content[:12]}, last {int((now - e.get('last', now)) // 60)} min ago")
                 return 1
             e = record(box["data"], a.pr, content, now, kills)
         print(f"red_prs: dispatch PR #{a.pr} ({info['state']}), attempt {e['attempts']}/{MAX_ATTEMPTS} "
-              f"at content {content[:12]}")
+              f"at content {content[:12]}, {e['total']}/{MAX_TOTAL} in all")
         return 0
 
     rows = rows_now(a.repo, kit=a.kit)
