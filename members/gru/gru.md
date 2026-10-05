@@ -169,8 +169,9 @@ the two disagree. Name the entry you acted on in your report, or `Intent: none a
    For each, `gh pr view <N> --json state` on the PR named in the title:
    - MERGED or CLOSED: the issue is moot. Close it with one line saying so; do not build it.
    - Got a fixer in step 0 this pass: skip it here; the fixer owns that PR.
-   - OPEN: it goes ahead of every 2b item (same filters as usual); the minion pushes the fix
-     onto the PR's own branch, never a new PR.
+   - OPEN: it goes ahead of every 2b item (same filters as usual). Dispatch it ALONE
+     (`minion --item <n>`, never inside a `--items` batch and never through the packer): the
+     runner then puts the minion on the PR's own branch, and refuses a batch that hides one.
 
    2b. **Otherwise, marie's normal ranking.** marie ranks each open item with a
    `fleet:priority-<tier>` label (high/medium/low). Your read:

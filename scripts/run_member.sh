@@ -128,6 +128,18 @@ if [ "$MEMBER" = "minion" ] && [ -n "${RAW_ITEMS:-}" ] && [ "${FLEET_MINION_TARG
   fi
 fi
 
+# 2026-10-05: a "fix: PR #N failed code review" item is built ON PR #N's own branch (below, via
+# minion_checkpoint.py find), which only works when it is the minion's ONLY item. gru batched
+# four of them into a ten-item minion (#11156) and the four blocked PRs sat untouched for
+# hours. Refuse the batch in a second so gru re-dispatches each fix item alone.
+if [ "$MEMBER" = "minion" ] && [ -n "${RAW_ITEMS:-}" ] && [ "${RAW_ITEMS#*,}" != "$RAW_ITEMS" ]; then
+  FIX_IN_BATCH=$(python3 "$KIT_DIR/scripts/minion_checkpoint.py" fix-items --items "$RAW_ITEMS" --repo "$REPO" 2>/dev/null | awk '{printf "%s#%s (PR #%s)", (NR>1?", ":""), $1, $2}')
+  if [ -n "$FIX_IN_BATCH" ]; then
+    echo "FATAL: minion --items batches a PR-fix item with other work: $FIX_IN_BATCH. A fix item runs ALONE (minion --item <n>) so it is built on the blocked PR's own branch. Re-dispatch each one alone and re-pack the rest." >&2
+    exit 2
+  fi
+fi
+
 # Structured mirror of a dispatcher's `lane=<name>` --task prefix (nerd.md's contract with
 # datta). Extracted here, once, rather than left for every consumer to re-parse free text --
 # datta's own self-critique flagged repeated turns lost to fragile keyword-matching of
@@ -841,7 +853,20 @@ fi
 # ITEM_LIST (only set by --items, the human-readable "#1, #2, #3" form) takes priority over
 # ITEM's underscore-joined RUN_ID form -- #123_456 read literally as a prompt would look like
 # one mangled issue number instead of three separate ones (2026-09-14, batching for minion.md).
-if [ -n "${RESUME_BRANCH:-}" ]; then
+FIX_PR=""
+if [ -n "${RESUME_BRANCH:-}" ] && [ "$MEMBER" = "minion" ]; then
+  FIX_PR=$(python3 "$KIT_DIR/scripts/minion_checkpoint.py" fix-items --items "$ITEM" --repo "$REPO" 2>/dev/null | awk -v b="$RESUME_BRANCH" '$3==b{print $2; exit}')
+fi
+if [ -n "$FIX_PR" ]; then
+  PROMPT="FIXING A BLOCKED PR: your item is the review (or CI) finding against open PR #$FIX_PR, and
+your worktree is ON that PR's own branch \`$RESUME_BRANCH\`. Fix what the item's findings ask
+for, here, and push to this same branch -- never open a second PR and never restart from main.
+Then \`gh pr edit $FIX_PR\` so the body answers each finding in one line and adds
+\`Closes #$ITEM\`. The push makes the reviewer look again; a clean verdict is the done-criterion.
+If a finding is wrong, say why in the PR body with evidence instead of changing code.
+
+$PROMPT"
+elif [ -n "${RESUME_BRANCH:-}" ]; then
   PROMPT="RESUMING: a previous pass on these items ran out of time. Your worktree is ON its branch
 \`$RESUME_BRANCH\` (git log origin/main..HEAD shows what it built; a 'wip(checkpoint)' commit is
 untested work saved at the timeout). Its open DRAFT PR for this branch is YOURS, not a
