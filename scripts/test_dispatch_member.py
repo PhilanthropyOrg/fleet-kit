@@ -28,7 +28,8 @@ class DispatchMember(unittest.TestCase):
         self.stub = Path(self.d, "run_member.sh")
         self.stub.write_text(f'sleep 2; echo "$FLEET_RUN_NOW $@" >> {self.d}/done\n')
         self.env = dict(os.environ, FLEET_RUN_MEMBER=str(self.stub), FLEET_LOG_DIR=self.d,
-                        FLEET_DISPATCH_POLL_S="0.2")
+                        FLEET_DISPATCH_POLL_S="0.2",
+                        FLEET_NODE_DIR=self.d)  # a host worker-node config reroutes minions
 
     def _wait_done(self, lines=1):
         deadline = time.time() + 10
@@ -71,6 +72,33 @@ class DispatchMember(unittest.TestCase):
             self.assertEqual(r.returncode, 2, args)
         time.sleep(2.5)
         self.assertFalse(Path(self.d, "done").exists())
+
+    def _seed(self, rows):
+        import sqlite3
+        con = sqlite3.connect(Path(self.d, "fleet.db"))
+        con.execute("CREATE TABLE runs (member TEXT, lane TEXT, status TEXT, outcome TEXT, recorded_at REAL)")
+        con.executemany("INSERT INTO runs VALUES ('nerd',?,?,?,?)", rows)
+        con.commit()
+        con.close()
+
+    def test_repeat_quiet_lane_spawns_no_nerd(self):
+        now = time.time()
+        self._seed([("claim", "quiet", "QUIET: examined KPI", now - 3600),
+                    ("claim", "quiet", "QUIET-REPEAT lane claim: ...", now - 600),
+                    ("growth", "ok", "filed #12", now - 3600),
+                    ("datadog", "quiet", "QUIET: examined", now - 5 * 3600)])
+        r = subprocess.run(["bash", str(SCRIPT), "nerd", "--task", "lane=claim why"], env=self.env,
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("skipped nerd lane=claim: last full pass", r.stdout)
+        self.assertNotIn("pid=", r.stdout)
+        for lane in ("growth", "datadog", "ui"):  # last full pass ok / older than 4h / never run
+            out = subprocess.run(["bash", str(SCRIPT), "nerd", "--task", f"lane={lane} why"],
+                                 env=self.env, capture_output=True, text=True).stdout
+            self.assertIn("pid=", out, lane)
+        done = self._wait_done(3)
+        self.assertNotIn("lane=claim", done)
+        self.assertEqual(len(done.splitlines()), 3)
 
     def test_gru_md_dispatches_detached(self):
         gru = (HERE.parent / "members" / "gru" / "gru.md").read_text()

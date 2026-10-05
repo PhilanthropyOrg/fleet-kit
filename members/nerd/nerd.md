@@ -66,20 +66,10 @@ you examined and why nothing qualified.** "QUIET, nothing new" without that line
 valid pass. A backlog cap never binds your ideas: at cap, file as **displacing** and name
 the lower-value item yours beats. Pruning is marie's job (H§3).
 
-## Repeat-quiet lane: a short pass
+## Repeat-quiet lane
 
-gru sends a nerd to each standing lane every pass, so the same look repeats hourly. Measured
-10-04: claim, datadog and growth ran 14-16 times a day each, 44 of 48 QUIET, $9.69/day for the
-same answer. **First, before TaskCreate**, read your lane's newest FULL pass:
-```
-sqlite3 "$FLEET_LOG_DIR/fleet.db" "SELECT recorded_at, status FROM runs WHERE member='nerd'
-  AND lane='<your lane>' AND status IN ('ok','quiet') AND outcome NOT LIKE 'QUIET-REPEAT%'
-  ORDER BY recorded_at DESC LIMIT 1"
-```
-If it was `quiet`, under 4 hours old, and `gh pr list --state merged --search "merged:>=<its
-time, ISO>"` shows nothing touching your lane, write `Outcome: QUIET-REPEAT lane <x>: full pass
-<time> was QUIET, nothing merged in lane since`, that query as `Evidence:`, and stop. No KPI
-read, checklist, browser or filing. Otherwise (older, `ok`, or a lane merge) run the full pass.
+`dispatch_member.sh` no longer spawns you for a lane whose last full pass was quiet under 4h
+ago (`scripts/nerd_repeat_quiet.py`), so if you are running, run the full pass.
 
 ## The two halves
 

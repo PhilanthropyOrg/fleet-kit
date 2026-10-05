@@ -3,6 +3,7 @@
 #
 #   bash /fleet-kit/scripts/dispatch_member.sh minion --items <n1,n2,n3>     # returns at once
 #   bash /fleet-kit/scripts/dispatch_member.sh nerd --task "lane=<lane> ..."  # returns at once
+#     (or prints `skipped nerd lane=<lane>: ...`, no pid, when its last full pass was quiet <4h ago)
 #   bash /fleet-kit/scripts/dispatch_member.sh --wait <pid> [<pid> ...]      # blocks <= 540s
 #
 # THE GAP (2026-09-26). gru spawned minions with Bash(run_in_background). A background task
@@ -53,5 +54,14 @@ if [ "$member" = minion ] && [ -f "${FLEET_NODE_DIR:-/root/.fleet-node}/config" 
   RUN_MEMBER="${FLEET_NODE_MINION:-$KIT_DIR/scripts/node_minion.sh}"
 fi
 log="$LOG_DIR/$member-$tag.dispatch.log"
+# Repeat-quiet lane: a lane whose last full pass was quiet under 4h ago gets no nerd -- no pid,
+# no run row. scripts/nerd_repeat_quiet.py decides it for $0 (it cost ~3 model turns, 28x/day).
+if [ "$member" = nerd ]; then
+  skip="$(python3 "$KIT_DIR/scripts/nerd_repeat_quiet.py" "${tag#lane-}" "$LOG_DIR/fleet.db" 2>/dev/null)"
+  if [ -n "$skip" ]; then
+    echo "skipped nerd lane=${tag#lane-}: $skip (repeat-quiet, no pass spawned)" | tee -a "$log"
+    exit 0
+  fi
+fi
 FLEET_RUN_NOW=1 setsid nohup bash "$RUN_MEMBER" "$@" >>"$log" 2>&1 </dev/null &
 echo "dispatched $member ${3:-} (detached, pid=$!, log $log)"
