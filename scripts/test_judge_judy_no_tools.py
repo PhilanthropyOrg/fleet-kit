@@ -16,7 +16,7 @@ SPEC = json.loads((ROOT / "members" / "judge-judy" / "judge-judy.fleet.json").re
 
 class NoToolsTest(unittest.TestCase):
     def test_the_review_call_disables_every_tool(self):
-        calls = re.findall(r'claude -p "\$PROMPT".*\n.*', SRC)
+        calls = re.findall(r'exec claude -p "\$@" < "\$JJ_PROMPT_FILE".*\n.*', SRC)
         self.assertEqual(len(calls), 1, calls)
         self.assertIn('--tools ""', calls[0])
         self.assertIn("--json-schema", calls[0])

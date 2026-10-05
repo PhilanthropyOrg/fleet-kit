@@ -580,8 +580,7 @@ Answer with a verdict of block unless there is truly nothing blocking, plus one 
   export JJ_PROMPT_FILE
   # shellcheck disable=SC2016  # $JJ_PROMPT_FILE and "$@" expand in the inner shell, on purpose
   RAW=$(account_pool_run timeout "$TIMEOUT_S" sh -c 'exec claude -p "$@" < "$JJ_PROMPT_FILE"' judge-judy \
-    --model "$MODEL" --tools "" \
-    --output-format json --json-schema "$VERDICT_SCHEMA" --max-budget-usd "${FLEET_MAX_BUDGET_USD:-5}" 2>>"$LOG")
+    --model "$MODEL" --tools "" --output-format json --json-schema "$VERDICT_SCHEMA" --max-budget-usd "${FLEET_MAX_BUDGET_USD:-5}" 2>>"$LOG")
   RC=$?
   rm -f "$JJ_PROMPT_FILE"
   else
