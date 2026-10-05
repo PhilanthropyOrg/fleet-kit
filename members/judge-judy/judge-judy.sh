@@ -86,6 +86,8 @@ MAX_PARSE_STRIKES=2
 STRIKE_DIR="$HOME/.cache/fleet-kit/judge-judy-strikes"
 APPROVED_DIR="$HOME/.cache/fleet-kit/judge-judy-approved"  # pr-<N>.fp: "<patch-id> <body sha>" + head
 TICK_BUDGET_USD="${FLEET_TICK_BUDGET_USD:-15}"
+# A head younger than this is left to a later tick (pick_pr); 0 turns the wait off.
+SETTLE_S="${JUDGE_JUDY_SETTLE_S:-600}"
 # The diff is capped, not because big diffs don't deserve review, but because an unbounded
 # prompt can blow the context window and produce an unparseable half-answer — which then
 # reads as a reviewer outage.
@@ -192,7 +194,7 @@ pass_empty_pr() { # <pr> <sha>
 #        per-PR scan -- the queue was NOT fully accounted for, so this must never be reported
 #        the same as case 1.
 pick_pr() {
-  local pr head statuses review_seen checks explicit="${1:-}" skip_list="${2:-}"
+  local pr head pushed_at age statuses review_seen checks explicit="${1:-}" skip_list="${2:-}"
   local gh_failure=0 pr_list_json pr_list_rc view_rc api_rc
   # Oldest-created first: gh pr list's default (newest-first) order lets a steady stream of
   # new PRs starve a long-lived one indefinitely -- fleet-kit#181 measured PR#149 skipped 8
@@ -205,13 +207,28 @@ pick_pr() {
   for pr in $(printf '%s' "$pr_list_json" | jq -r 'sort_by(.createdAt) | .[] | select(.isDraft | not) | .number' 2>/dev/null); do
     [ -n "$explicit" ] && [ "$pr" != "$explicit" ] && continue
     case " $skip_list " in *" $pr "*) continue ;; esac
-    head=$(gh pr view "$pr" --json headRefOid -q '.headRefOid' 2>/dev/null)
+    head=$(gh pr view "$pr" --json headRefOid,commits -q '.headRefOid + " " + (.commits[-1] | if ((.messageHeadline // "") | startswith("Merge ")) then "" else .committedDate end)' 2>/dev/null)
     view_rc=$?
     if [ "$view_rc" -ne 0 ]; then
       gh_failure=1
       continue
     fi
+    pushed_at=${head#* }
+    head=${head%% *}
     [ -z "$head" ] && continue
+    # Settle window: every push fires this script through the webhook, so a head seconds old
+    # got reviewed while its author was still pushing. 172 of 565 reviews in 2026-10-03..04
+    # ($18) were replaced by the next head within 10 minutes (one PR got 22 reviews in a day).
+    # Leave a fresh head to the */15 cron tick; an explicit `judge-judy.sh <pr>` still reviews now.
+    # A main-merge head is exempt: the carry-forward below approves it with no model call, and
+    # waiting on it could chase a busy main forever.
+    if [ -z "$explicit" ] && [ "$SETTLE_S" -gt 0 ] && [ -n "$pushed_at" ]; then
+      age=$(( $(date -u +%s) - $(date -u -d "$pushed_at" +%s 2>/dev/null || echo 0) ))
+      if [ "$age" -lt "$SETTLE_S" ]; then
+        log "PR #$pr head ${head:0:12} is ${age}s old -- waiting ${SETTLE_S}s for pushes to settle"
+        continue
+      fi
+    fi
     statuses=$(timeout 25s gh api "repos/${REPO_SLUG}/statuses/${head}" 2>/dev/null)
     api_rc=$?
     if [ "$api_rc" -ne 0 ]; then

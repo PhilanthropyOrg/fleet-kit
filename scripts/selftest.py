@@ -7578,6 +7578,7 @@ set -uo pipefail
 REPO_SLUG="acme/widgets"
 CONTEXT="fleet-code-review"
 REQUIRED_CHECKS=""
+SETTLE_S=0
 {fn_src}
 pick_pr "" ""
 """
