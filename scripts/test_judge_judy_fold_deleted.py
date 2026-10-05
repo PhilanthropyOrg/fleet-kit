@@ -1,6 +1,7 @@
 """A cleanup PR that deletes big files must still be reviewable (philanthropy gh#11182)."""
 
 import importlib.util
+import unittest
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent.parent / "members" / "judge-judy"
@@ -33,19 +34,24 @@ EDITED = (
 )
 
 
-def test_deleted_file_body_becomes_one_line_and_keeps_its_name():
-    out = fold_mod.fold(DELETED + EDITED)
-    assert "--- a/data/big.csv" in out
-    assert "[whole file deleted: 3 lines]" in out
-    assert "-a,b" not in out
+class FoldDeletedFiles(unittest.TestCase):
+    def test_deleted_file_body_becomes_one_line_and_keeps_its_name(self):
+        out = fold_mod.fold(DELETED + EDITED)
+        self.assertIn("--- a/data/big.csv", out)
+        self.assertIn("[whole file deleted: 3 lines]", out)
+        self.assertNotIn("-a,b", out)
+
+    def test_edited_file_is_untouched(self):
+        out = fold_mod.fold(DELETED + EDITED)
+        self.assertTrue(out.endswith(EDITED))
+        self.assertEqual(fold_mod.fold(EDITED), EDITED)
+
+    def test_reviewer_folds_before_it_cuts(self):
+        sh = (HERE / "judge-judy.sh").read_text()
+        self.assertLess(
+            sh.index("fold_deleted_files.py"), sh.index('head -c "$MAX_DIFF_BYTES"')
+        )
 
 
-def test_edited_file_is_untouched():
-    out = fold_mod.fold(DELETED + EDITED)
-    assert out.endswith(EDITED)
-    assert fold_mod.fold(EDITED) == EDITED
-
-
-def test_reviewer_folds_before_it_cuts():
-    sh = (HERE / "judge-judy.sh").read_text()
-    assert sh.index("fold_deleted_files.py") < sh.index('head -c "$MAX_DIFF_BYTES"')
+if __name__ == "__main__":
+    unittest.main()
