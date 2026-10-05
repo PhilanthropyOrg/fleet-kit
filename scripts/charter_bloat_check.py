@@ -40,7 +40,9 @@ import re
 import subprocess
 import sys
 
-REPO_SLUG_DEFAULT = "The-Good-Project-Team/fleet-kit"
+# GitHub search does not follow a repo rename: `gh issue list --label`/`--search` with the old
+# The-Good-Project-Team slug returns [] with exit 0, so every dedupe looked empty (2026-10-05).
+REPO_SLUG_DEFAULT = "PhilanthropyOrg/fleet-kit"
 CONSOLIDATION_THRESHOLD = 5
 
 

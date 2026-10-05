@@ -131,7 +131,9 @@ DEFAULT_STATE_PATH = Path(
 
 # gh#770: journeys.yaml's own URLs are all philanthropy.org, so an explicit target repo (not
 # whatever `gh` defaults to for the sandbox's ambient checkout, gh#151) is the correct default.
-DEFAULT_REPO = "The-Good-Project-Team/philanthropy"
+# GitHub search does not follow a repo rename: `gh issue list --label`/`--search` with the old
+# The-Good-Project-Team slug returns [] with exit 0, so every dedupe looked empty (2026-10-05).
+DEFAULT_REPO = "PhilanthropyOrg/philanthropy"
 
 def _marker_re(tag):
     return re.compile(r"<!--\s*fleet:" + re.escape(tag) + r"\s+key=([^\s]+?)\s*-->")

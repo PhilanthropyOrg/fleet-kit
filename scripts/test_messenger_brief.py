@@ -40,9 +40,9 @@ class WorldClassOpenTests(unittest.TestCase):
 
     def test_open_world_class_issues_are_returned_with_link_and_age(self):
         issues = {
-            "The-Good-Project-Team/fleet-kit": [
+            "PhilanthropyOrg/fleet-kit": [
                 {"number": 42, "title": "Telegram-level thread view",
-                 "url": "https://github.com/The-Good-Project-Team/fleet-kit/issues/42",
+                 "url": "https://github.com/PhilanthropyOrg/fleet-kit/issues/42",
                  "createdAt": "2026-09-01T00:00:00Z"},
             ]
         }
@@ -51,7 +51,7 @@ class WorldClassOpenTests(unittest.TestCase):
         self.assertEqual(len(out), 1)
         self.assertEqual(out[0]["number"], 42)
         self.assertEqual(out[0]["title"], "Telegram-level thread view")
-        self.assertEqual(out[0]["url"], issues["The-Good-Project-Team/fleet-kit"][0]["url"])
+        self.assertEqual(out[0]["url"], issues["PhilanthropyOrg/fleet-kit"][0]["url"])
         self.assertEqual(out[0]["created_at"], "2026-09-01T00:00:00Z")
 
     def test_malformed_gh_output_is_skipped_not_fatal(self):

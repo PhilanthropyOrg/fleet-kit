@@ -71,7 +71,7 @@ def sh(cmd: list[str], timeout: int = 60, cwd: str | None = None) -> str:
 # ---------------------------------------------------------------- collect
 
 def repo_slugs() -> list[str]:
-    slugs = ["The-Good-Project-Team/fleet-kit"]
+    slugs = ["PhilanthropyOrg/fleet-kit"]  # old slug: search returns [] (see journey_issue_filer)
     url = os.environ.get("FLEET_REPO_URL", "")
     m = re.search(r"github\.com[:/]([^/]+/[^/.]+)", url)
     if m and m.group(1) not in slugs:
@@ -171,7 +171,7 @@ def number_header() -> str:
     return sh([sys.executable, str(KIT / "scripts" / "number_read.py"), "--render"], timeout=60).strip()
 
 
-def _plan_blocking_note(repo_slug: str = "The-Good-Project-Team/fleet-kit") -> str:
+def _plan_blocking_note(repo_slug: str = "PhilanthropyOrg/fleet-kit") -> str:
     """One line naming what would create the plan file and what it is waiting on -- fk#559 VP
     review round 2 fix 3: "no plan file yet" alone leaves Reif unable to tell an empty plan
     from a dead end with nobody working it. #570 owns writing the plan file itself; checked
