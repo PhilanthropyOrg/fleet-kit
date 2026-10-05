@@ -141,7 +141,7 @@ def fix_pr_of(title: str | None) -> int | None:
 
 def fix_branch_from(title: str | None, pr: dict | None) -> str | None:
     """The branch a fix item must be built ON: the blocked PR's own, when that PR is open and
-    the fleet's (`member/...`, same repo). Pure.
+    in this repo (never a fork). Pure.
 
     2026-10-05: 14 fix items were open on philanthropy, most claimed, and no blocked PR got a
     push for hours. gru.md said "the minion pushes the fix onto the PR's own branch", but the
@@ -150,7 +150,11 @@ def fix_branch_from(title: str | None, pr: dict | None) -> str | None:
     if fix_pr_of(title) is None or not pr:
         return None
     branch = pr.get("headRefName") or ""
-    if pr.get("state") != "OPEN" or pr.get("isCrossRepository") or not branch.startswith("member/"):
+    # Any open PR in this repo, a person's included: a fix item that names it exists only because
+    # someone asked the fleet to fix that PR. Leaving a person's branch out (the first cut of
+    # this rule) made the minion start a new branch, push the same commits to the PR by hand,
+    # and leave its own branch behind as a duplicate draft (philanthropy #11211 beside #11169).
+    if pr.get("state") != "OPEN" or pr.get("isCrossRepository") or not branch:
         return None
     return branch
 

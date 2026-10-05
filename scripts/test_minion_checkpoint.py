@@ -381,10 +381,11 @@ def test_fix_branch_is_the_blocked_prs_own_when_open_and_the_fleets() -> None:
     assert mc.fix_pr_of("Fix the header") is None
     assert mc.fix_branch_from(title, pr) == "member/minion-item9286-1-2"
     assert mc.fix_branch_from(title, {**pr, "state": "MERGED"}) is None
-    assert mc.fix_branch_from(title, {**pr, "headRefName": "a-persons-branch"}) is None
+    assert mc.fix_branch_from(title, {**pr, "headRefName": "a-persons-branch"}) == "a-persons-branch"
+    assert mc.fix_branch_from(title, {**pr, "headRefName": ""}) is None
     assert mc.fix_branch_from(title, {**pr, "isCrossRepository": True}) is None
     assert mc.fix_branch_from("Meta links go to hub pages", pr) is None
-    print("ok  fix item -> the blocked PR's branch, only for an open fleet PR")
+    print("ok  fix item -> the blocked PR's branch, for any open PR in this repo")
 
 
 def test_find_puts_a_lone_fix_item_on_the_pr_branch() -> None:
@@ -393,10 +394,11 @@ def test_find_puts_a_lone_fix_item_on_the_pr_branch() -> None:
         [sys.executable, str(HERE / "minion_checkpoint.py"), *args, "--repo", str(tmp)],
         env=env, capture_output=True, text=True, timeout=60).stdout.strip()
     assert run("find", "--items", "11138") == "member/minion-item9286_9174-52430-1791203464"
-    assert run("find", "--items", "11171") == "", "a person's PR branch is never taken over"
+    # a fix item for a person's PR builds on that PR too: a new branch made duplicate #11211
+    assert run("find", "--items", "11171") == "report-hero-compact"
     assert run("fix-items", "--items", "11149,11138") == (
         "11138 11137 member/minion-item9286_9174-52430-1791203464")
-    print("ok  find: a lone fix item resumes PR #11137's branch; a person's PR is left alone")
+    print("ok  find: a lone fix item resumes the PR's own branch, a person's PR included")
 
 
 def test_run_member_refuses_a_fix_item_hidden_in_a_batch() -> None:
