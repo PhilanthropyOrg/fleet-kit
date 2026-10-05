@@ -438,12 +438,35 @@ def intake_plan(backlog: list[dict], prod_access: list[dict], run_id: str,
 INTAKE_FIELDS = "number,title,labels,body,comments,createdAt"
 
 
-def list_open(label: str, repo: str | None, fields: str = INTAKE_FIELDS, run=None) -> list[dict]:
-    r = (run or _gh)(["gh", "issue", "list", "--state", "open", "--label", label, "--limit", "2000",
-             "--json", fields, *(["--repo", repo] if repo else [])])
-    if r.returncode != 0:
-        raise RuntimeError(f"gh issue list --label {label} failed: {(r.stderr or '')[:200]}")
-    return json.loads(r.stdout or "[]")
+# The whole-backlog read (~550 issues with bodies and comments) is one heavy GraphQL call, and
+# GitHub answers it with a 504 or a cut-off body ("unexpected end of JSON input") about one pass
+# in three: 133 of 363 intake runs in gru.log failed that way, two in a row on 2026-10-05, so
+# five items marie had already fixed kept fleet:needs-spec for 2h+ (jefe msg#834). The same
+# read retried a moment later goes through, so try it LIST_OPEN_TRIES times before giving up.
+LIST_OPEN_TRIES = int(os.environ.get("FLEET_GATE_DROP_LIST_TRIES", "3"))
+
+
+def list_open(label: str, repo: str | None, fields: str = INTAKE_FIELDS, run=None,
+              sleep=time.sleep) -> list[dict]:
+    cmd = ["gh", "issue", "list", "--state", "open", "--label", label, "--limit", "2000",
+           "--json", fields, *(["--repo", repo] if repo else [])]
+    err = ""
+    for attempt in range(max(1, LIST_OPEN_TRIES)):
+        if attempt:
+            sleep(10 * attempt)
+        try:
+            r = (run or _gh)(cmd)
+        except subprocess.TimeoutExpired:
+            err = "timed out"
+            continue
+        if r.returncode == 0:
+            try:
+                return json.loads(r.stdout or "[]")
+            except ValueError as e:
+                err = f"bad JSON: {e}"
+                continue
+        err = (r.stderr or "")[:200]
+    raise RuntimeError(f"gh issue list --label {label} failed: {err}")
 
 
 def apply(p: dict, repo: str | None, run_id: str, run=_gh, db_path: str | None = None) -> dict:
