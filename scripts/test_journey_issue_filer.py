@@ -546,7 +546,7 @@ class RepoArgTest(unittest.TestCase):
         finally:
             sys.argv, jif.process = orig_argv, orig_process
         self.assertEqual(captured["repo"], jif.DEFAULT_REPO)
-        self.assertEqual(jif.DEFAULT_REPO, "The-Good-Project-Team/philanthropy")
+        self.assertEqual(jif.DEFAULT_REPO, "PhilanthropyOrg/philanthropy")
 
     def test_ac2_build_file_cmd_includes_repo_and_label(self):
         cmd = jif.build_file_cmd("t", "b", repo="owner/name")

@@ -45,7 +45,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import quality_gate  # noqa: E402
 
 INCIDENT_LABEL = "incident"
-INCIDENT_REPO = "The-Good-Project-Team/philanthropy"
+# GitHub search does not follow a repo rename: `gh issue list --label`/`--search` with the old
+# The-Good-Project-Team slug returns [] with exit 0, so every dedupe looked empty (2026-10-05).
+INCIDENT_REPO = "PhilanthropyOrg/philanthropy"
 # Shared across both filers (gh#728 VP fix 3) -- whichever one notices an outage first, the
 # other's search finds ITS issue by this marker and comments rather than filing a second one.
 INCIDENT_MARKER = "<!-- fleet-prod-incident -->"
