@@ -188,6 +188,10 @@ the two disagree. Name the entry you acted on in your report, or `Intent: none a
    - Filter out anything `fleet:claimed`, `fleet:needs-human-op`, or
      `fleet:needs-prod-access` (HQ's: prod DB, secrets, Cloudflare; philanthropy#8218):
      re-claiming a blocked item only re-confirms the block (H§14).
+   - Filter out every `fix: PR #` / `CI RED: PR #` item too: 2a-bis already sent it alone or
+     skipped it. One that reaches the packer rides in a batch, the runner refuses the whole
+     batch (exit 2), and nothing in it is built (2026-10-05: #11131 rode in a 10-item batch
+     that way; the kept items got no second send).
    - Append `fleet:priority-medium` after high, then `-low`, until the gated list holds more
      than the hour funds (step 3's `room_for_items`). The packer cuts in this order, so a
      lower tier only gets the room a higher one left.

@@ -52,6 +52,8 @@ class Charter(unittest.TestCase):
         self.assertIn("NO fixer this pass", step0)
         fix_rule = GRU[GRU.index("2a-bis."):GRU.index("2b. **Otherwise")]
         self.assertIn("DISPATCHED in step 0 this pass (not `deferred`)", fix_rule)
+        rank = GRU[GRU.index("2b. **Otherwise"):GRU.index("**Gates run on the survivors")]
+        self.assertIn("Filter out every `fix: PR #`", rank)
 
     def test_reif_priority_never_outranks_step_zero(self):
         self.assertIn("never step 0", GRU[GRU.index("2a. **First"):GRU.index("2a-bis.")])
