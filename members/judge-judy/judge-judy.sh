@@ -455,6 +455,12 @@ while :; do
   # blob ids, so merging main into the branch leaves it unchanged unless the PR's lines moved.
   DIFF_ID=$(git patch-id --stable < "$DIFF_FILE" 2>/dev/null | cut -d' ' -f1)
   TRUNC_NOTE=""
+  # A diff over the limit first folds whole-file deletions to one line each (name kept), so a
+  # cleanup PR does not spend the whole budget on text that is going away (philanthropy gh#11182).
+  if [ "$(wc -c < "$DIFF_FILE")" -gt "$MAX_DIFF_BYTES" ]; then
+    python3 "$(dirname "$0")/fold_deleted_files.py" < "$DIFF_FILE" > "${DIFF_FILE}.f" 2>>"$LOG" && [ -s "${DIFF_FILE}.f" ] && mv "${DIFF_FILE}.f" "$DIFF_FILE"
+    rm -f "${DIFF_FILE}.f"
+  fi
   if [ "$(wc -c < "$DIFF_FILE")" -gt "$MAX_DIFF_BYTES" ]; then
     head -c "$MAX_DIFF_BYTES" "$DIFF_FILE" > "${DIFF_FILE}.t" && mv "${DIFF_FILE}.t" "$DIFF_FILE"
     TRUNC_NOTE="NOTE: the diff was truncated at ${MAX_DIFF_BYTES} bytes; flag that in your review if it limits confidence."

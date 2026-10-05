@@ -192,6 +192,8 @@ jobs:
         run: python3 scripts/test_staff_journeys_7988.py
       - name: run test_judge_judy_dedupe_comment_gh6483.py
         run: python3 scripts/test_judge_judy_dedupe_comment_gh6483.py
+      - name: run test_judge_judy_fold_deleted.py
+        run: python3 scripts/test_judge_judy_fold_deleted.py
       - name: run test_judge_judy_settle.py
         run: python3 scripts/test_judge_judy_settle.py
       - name: run test_liveness_blocked_fleet.py
