@@ -173,21 +173,18 @@ the two disagree. Name the entry you acted on in your report, or `Intent: none a
      (`minion --item <n>`, never inside a `--items` batch and never through the packer): the
      runner then puts the minion on the PR's own branch, and refuses a batch that hides one.
 
-   2b. **Otherwise, marie's normal ranking.** marie ranks each open item with a
-   `fleet:priority-<tier>` label (high/medium/low). Your read:
+   2b. **Otherwise, marie's normal ranking: every tier, in ONE call.** marie ranks each open
+   item `fleet:priority-<tier>` (high/medium/low; unlabeled is lowest, not an oversight):
    ```
-   gh issue list --state open --label fleet:backlog --label fleet:priority-high \
-     --json number,title,body,labels,createdAt,comments --limit 200 --jq 'sort_by(.createdAt)'
+   python3 /fleet-kit/scripts/gate_drops.py candidates --out /tmp/gru_items.json
+   # {"by_tier": {"high":..,"medium":..,"low":..,"unranked":..}, "numbers": [<pack order>],
+   #  "written": 80, "beyond_first": <items past --first>}  (the file holds full bodies)
    ```
-   - Filter out anything `fleet:claimed`, `fleet:needs-human-op`, or
-     `fleet:needs-prod-access` (HQ's: prod DB, secrets, Cloudflare; philanthropy#8218):
-     re-claiming a blocked item only re-confirms the block (H§14).
-   - Append `fleet:priority-medium` after high, then `-low`, until the gated list holds more
-     than the hour funds (step 3's `room_for_items`). The packer cuts in this order, so a
-     lower tier only gets the room a higher one left.
-   - You choose FROM marie's ranking. An unlabeled item is lowest priority by default, not an
-     oversight you correct.
-   - Within a tier, walk oldest-`createdAt`-first, never raw API order (H§15).
+   It already drops `fleet:claimed`, `fleet:needs-human-op`, `fleet:needs-prod-access` and
+   `fleet:parked`, and orders high -> medium -> low -> unranked, oldest first (H§14, H§15).
+   Gate `numbers` in that order; the packer cuts it, so a lower tier only gets the room a
+   higher one left. Never stop after the high tier: 15 of 36 passes on 10-05 did, and left
+   36-87% of the hour unspent with 189 medium items waiting. Quote `by_tier` in the report.
 
    **Gates run on the survivors in this order: needs-human-op (above), dead-end, Vision-link,
    quality.** Never claim or spawn against a dropped candidate, and **never drop one
@@ -306,11 +303,9 @@ the two disagree. Name the entry you acted on in your report, or `Intent: none a
      `over`, not unreadable) AND `week_bank_pct >= 0`, add
      `--min-items ${FLEET_MINION_TARGET_ITEMS:-8}` and quote the result's
      `forced_over_floor`/`over_allowance`. Bank negative, or maxx unreadable: no floor (H§21).
-   - **`binding: candidates_exhausted` means YOUR list ran out, not the backlog.** While
-     `room_for_items` is above 0 and any tier is left, gate the next tier's items (loop
-     `claim_history.py` in ONE Bash call, then one `gate_drops.py run`), append them in order,
-     and re-run `fanout.py`. Stop when `binding` is `allowance` or every tier is exhausted.
-     Never re-run `gru_allowance.py`/`maxx_reader.py` for this: step 1's number holds all pass.
+   - **`binding: candidates_exhausted`** with `beyond_first > 0`: re-run step 2b's command
+     with `--first <double>`, gate, pack again. With `beyond_first: 0` the backlog ran out:
+     report it. Never re-run `gru_allowance.py`/`maxx_reader.py`.
    - **Quote the returned JSON verbatim in your report.** If the derivation looks wrong, say
      so and act on what you can defend — never silently substitute a number you like better.
 
