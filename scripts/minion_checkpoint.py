@@ -129,7 +129,62 @@ def remote_minion_branches(repo: str) -> list[str]:
     return [line.split("refs/heads/", 1)[1] for line in out.splitlines() if "refs/heads/" in line]
 
 
+# "fix: PR #11137 failed code review -- ..." (judge-judy) / "CI RED: PR #9802 ..." (CI): an item
+# whose whole job is to repair one open PR.
+FIX_ITEM_RE = re.compile(r"^\s*(?:fix|CI RED):\s*PR\s*#(\d+)", re.I)
+
+
+def fix_pr_of(title: str | None) -> int | None:
+    m = FIX_ITEM_RE.match(title or "")
+    return int(m.group(1)) if m else None
+
+
+def fix_branch_from(title: str | None, pr: dict | None) -> str | None:
+    """The branch a fix item must be built ON: the blocked PR's own, when that PR is open and
+    the fleet's (`member/...`, same repo). Pure.
+
+    2026-10-05: 14 fix items were open on philanthropy, most claimed, and no blocked PR got a
+    push for hours. gru.md said "the minion pushes the fix onto the PR's own branch", but the
+    runner always cut a new branch from main, and four fix items rode in a ten-item batch
+    (#11156). A fix that lands in another PR leaves the blocked one blocked."""
+    if fix_pr_of(title) is None or not pr:
+        return None
+    branch = pr.get("headRefName") or ""
+    if pr.get("state") != "OPEN" or pr.get("isCrossRepository") or not branch.startswith("member/"):
+        return None
+    return branch
+
+
+def fix_items(repo: str, items: list[int]) -> list[dict]:
+    """Items in `items` that are fix items for an open fleet PR -> [{"item", "pr", "branch"}].
+    A failed lookup drops the item from the list (fail open: the run goes ahead as before)."""
+    out = []
+    for item in items:
+        rc, raw = _gh(["issue", "view", str(item), "--json", "title"], cwd=repo, timeout=30)
+        try:
+            title = json.loads(raw).get("title") if rc == 0 else None
+        except json.JSONDecodeError:
+            title = None
+        n = fix_pr_of(title)
+        if n is None:
+            continue
+        rc, raw = _gh(["pr", "view", str(n), "--json", "state,headRefName,isCrossRepository"],
+                      cwd=repo, timeout=30)
+        try:
+            pr = json.loads(raw) if rc == 0 else None
+        except json.JSONDecodeError:
+            pr = None
+        branch = fix_branch_from(title, pr)
+        if branch:
+            out.append({"item": item, "pr": n, "branch": branch})
+    return out
+
+
 def find(repo: str, items: list[int]) -> str | None:
+    if len(items) == 1:
+        fixes = fix_items(repo, items)
+        if fixes:
+            return fixes[0]["branch"]
     return pick_resume_branch(remote_minion_branches(repo), items)
 
 
@@ -436,6 +491,9 @@ def main(argv: list[str] | None = None) -> int:
     f = sub.add_parser("find")
     f.add_argument("--items", required=True)
     f.add_argument("--repo", default=".")
+    fx = sub.add_parser("fix-items")
+    fx.add_argument("--items", required=True)
+    fx.add_argument("--repo", default=".")
     w = sub.add_parser("watch")
     w.add_argument("--wt", required=True)
     w.add_argument("--branch", required=True)
@@ -490,6 +548,10 @@ def main(argv: list[str] | None = None) -> int:
         b = find(a.repo, items)
         if b:
             print(b)
+        return 0
+    if a.cmd == "fix-items":
+        for f_ in fix_items(a.repo, items):
+            print(f"{f_['item']} {f_['pr']} {f_['branch']}")
         return 0
     if a.cmd == "save":
         print(json.dumps(save(a.wt, a.branch, items, a.reason)))

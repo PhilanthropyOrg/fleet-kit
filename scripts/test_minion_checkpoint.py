@@ -346,6 +346,73 @@ def test_resumable_lists_minion_drafts_not_human_or_ready_prs() -> None:
     print("ok  resumable: minion drafts are resumable work, human/ready PRs are not; gru 2a reads it")
 
 
+# --- a fix item is built on the blocked PR's own branch (2026-10-05) -----------------------
+
+FAKE_GH_FIX = r"""#!/usr/bin/env python3
+import json, sys
+a = sys.argv[1:]
+ISSUES = {"11138": "fix: PR #11137 failed code review -- the test proves nothing",
+          "11149": "Meta links go to hub pages",
+          "11171": "fix: PR #11147 failed code review -- phone restyle leaks to desktop"}
+PRS = {"11137": {"state": "OPEN", "headRefName": "member/minion-item9286_9174-52430-1791203464",
+                 "isCrossRepository": False},
+       "11147": {"state": "OPEN", "headRefName": "report-hero-compact", "isCrossRepository": False}}
+if a[:2] == ["issue", "view"]:
+    print(json.dumps({"title": ISSUES.get(a[2], "something else")}))
+elif a[:2] == ["pr", "view"]:
+    print(json.dumps(PRS[a[2]])) if a[2] in PRS else sys.exit(1)
+else:
+    sys.exit(1)
+"""
+
+
+def _fake_gh_fix() -> tuple[Path, dict]:
+    tmp = Path(tempfile.mkdtemp(prefix="fix-item-"))
+    gh = tmp / "gh"
+    gh.write_text(FAKE_GH_FIX)
+    gh.chmod(0o755)
+    return tmp, {**os.environ, "FLEET_GH_BIN": str(gh)}
+
+
+def test_fix_branch_is_the_blocked_prs_own_when_open_and_the_fleets() -> None:
+    title = "fix: PR #11137 failed code review -- the test proves nothing"
+    pr = {"state": "OPEN", "headRefName": "member/minion-item9286-1-2", "isCrossRepository": False}
+    assert mc.fix_pr_of(title) == 11137 and mc.fix_pr_of("CI RED: PR #9802 is red") == 9802
+    assert mc.fix_pr_of("Fix the header") is None
+    assert mc.fix_branch_from(title, pr) == "member/minion-item9286-1-2"
+    assert mc.fix_branch_from(title, {**pr, "state": "MERGED"}) is None
+    assert mc.fix_branch_from(title, {**pr, "headRefName": "a-persons-branch"}) is None
+    assert mc.fix_branch_from(title, {**pr, "isCrossRepository": True}) is None
+    assert mc.fix_branch_from("Meta links go to hub pages", pr) is None
+    print("ok  fix item -> the blocked PR's branch, only for an open fleet PR")
+
+
+def test_find_puts_a_lone_fix_item_on_the_pr_branch() -> None:
+    tmp, env = _fake_gh_fix()
+    run = lambda *args: subprocess.run(  # noqa: E731
+        [sys.executable, str(HERE / "minion_checkpoint.py"), *args, "--repo", str(tmp)],
+        env=env, capture_output=True, text=True, timeout=60).stdout.strip()
+    assert run("find", "--items", "11138") == "member/minion-item9286_9174-52430-1791203464"
+    assert run("find", "--items", "11171") == "", "a person's PR branch is never taken over"
+    assert run("fix-items", "--items", "11149,11138") == (
+        "11138 11137 member/minion-item9286_9174-52430-1791203464")
+    print("ok  find: a lone fix item resumes PR #11137's branch; a person's PR is left alone")
+
+
+def test_run_member_refuses_a_fix_item_hidden_in_a_batch() -> None:
+    tmp, env = _fake_gh_fix()
+    env = {**env, "FLEET_ENV_FILE": "/dev/null", "FLEET_REPO": str(tmp), "FLEET_LOG_DIR": str(tmp)}
+    p = subprocess.run(["bash", str(HERE / "run_member.sh"), "minion", "--items", "11149,11138"],
+                       cwd=tmp, env=env, capture_output=True, text=True, timeout=60)
+    assert p.returncode == 2 and "#11138 (PR #11137)" in p.stderr and "ALONE" in p.stderr, (
+        p.returncode, p.stderr[-500:])
+    gru = (HERE.parent / "members/gru/gru.md").read_text()
+    assert "Dispatch it ALONE" in gru[gru.index("2a-bis."):gru.index("2b. **Otherwise")]
+    rm = (HERE / "run_member.sh").read_text()
+    assert "FIXING A BLOCKED PR" in rm
+    print("ok  run_member.sh refuses a batch that hides a PR-fix item; gru 2a-bis says alone")
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_") and callable(fn):
