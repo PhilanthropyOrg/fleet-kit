@@ -236,12 +236,14 @@ def test_judge_judy_default_call_is_unchanged() -> None:
         # origin/main: claude -p "$PROMPT" --model "$MODEL" --tools "" --output-format json
         #              --json-schema "$VERDICT_SCHEMA" --max-budget-usd "${FLEET_MAX_BUDGET_USD:-5}"
         # (--tools "": the review runs with no tools, test_judge_judy_no_tools.py)
-        assert calls[0]["argv"] == ["-p", "review this diff", "--model", "sonnet", "--tools", "",
+        # The prompt is NOT an argument: it goes in on stdin from a file, so a diff over Linux's
+        # 128 KB single-argument cap can be reviewed (philanthropy #11156).
+        assert calls[0]["argv"] == ["-p", "--model", "sonnet", "--tools", "",
                                     "--output-format", "json",
                                     "--json-schema", got["schema"], "--max-budget-usd", "5"], calls[0]["argv"]
         assert "RECEIPT=\n" in got["stdout"], got["stdout"]   # subscription: the run record is unchanged
         assert judge_judy_verdict.parse(got["raw"])["ok"]
-        print("ok  judge-judy on claude: same argv as before, no codex call, no receipt flags")
+        print("ok  judge-judy on claude: prompt on stdin, same flags as before, no codex call, no receipt flags")
     finally:
         box.close()
 

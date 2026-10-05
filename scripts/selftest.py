@@ -5467,7 +5467,7 @@ def _judge_runs_the_closes_gate_and_reads_the_issue():
     exists.
     """
     js = (ROOT / "members" / "judge-judy" / "judge-judy.sh").read_text()
-    gate = js.index('closes_gate.py" "$PR"'); call = js.index('claude -p "$PROMPT"')
+    gate = js.index('closes_gate.py" "$PR"'); call = js.index('exec claude -p "$@" < "$JJ_PROMPT_FILE"')
     assert gate < call, "closes gate must run before the review model call"
     assert 'VERDICT="VERDICT: block"' in js[gate:call], "a gate block must set the verdict the shared handler reads"
     assert 'if [ "$GATE_VERDICT" != "block" ]; then' in js[gate:call], "the model call must be skipped when the gate blocked"
@@ -6804,12 +6804,17 @@ def _judge_judy_reviews_big_prs():
     """
     import subprocess
     src = (ROOT / "members" / "judge-judy" / "judge-judy.sh").read_text()
-    caps = {k: int(re.search(rf"^{k}=(\d+)$", src, re.M).group(1))
+    caps = {k: int(re.search(rf'^{k}=(?:"\$\{{[A-Z_]+:-)?(\d+)', src, re.M).group(1))
             for k in ("MAX_DIFF_BYTES", "MAX_BODY_BYTES", "MAX_INTENT_BYTES")}
     start = src.index('PROMPT="You are the merge-blocking code reviewer')
     fixed = len(src[start:src.index("RAW=$(account_pool_run", start)].encode())
-    assert sum(caps.values()) + fixed < 131072, \
-        f"the prompt can exceed Linux's 128 KB single-argument limit: {caps} + {fixed} fixed"
+    # The prompt is never a command argument (Linux caps one argument at 128 KB): the claude
+    # call reads it from a file on stdin, so a 191 KB diff (philanthropy #11156) is reviewable.
+    call = src[src.index("RAW=$(account_pool_run", start):]
+    call = call[:call.index("RC=$?")]
+    assert '< "$JJ_PROMPT_FILE"' in call and '"$PROMPT"' not in call, \
+        "judge-judy passes the prompt as an argument again: >128 KB dies with rc 126"
+    assert caps["MAX_DIFF_BYTES"] >= 300000, caps
     prompt = src[start:start + fixed]
     assert 'head -c "$MAX_BODY_BYTES" "$BODY_FILE"' in prompt, "PR body goes into the prompt uncapped"
     assert 'head -c "$MAX_INTENT_BYTES"' in prompt, "closed-issue text goes into the prompt uncapped"

@@ -91,12 +91,13 @@ SETTLE_S="${JUDGE_JUDY_SETTLE_S:-600}"
 # The diff is capped, not because big diffs don't deserve review, but because an unbounded
 # prompt can blow the context window and produce an unparseable half-answer — which then
 # reads as a reviewer outage.
-# 100 KB, not 150: the prompt goes to the model as ONE command argument and Linux refuses any
-# single argument over 128 KB ("Argument list too long", rc 126). At 150 KB every big PR failed
-# that way on every tick and never got a verdict (philanthropy #9811 #9844, 2026-10-01). The
-# PR body and the closed-issue text are capped below for the same reason: 100+12+8 KB plus the
-# fixed prompt text stays under the limit.
-MAX_DIFF_BYTES=100000
+# 400 KB. The limit used to be 100 KB because the prompt went to the model as ONE command
+# argument and Linux refuses any single argument over 128 KB ("Argument list too long", rc 126;
+# philanthropy #9811 #9844, 2026-10-01). The claude call below now reads the prompt from a file
+# on stdin, so that cap is gone. 400 KB is about 100k tokens, inside the model's window with
+# room for the body and the verdict. A PR over it is still cut and told so (philanthropy
+# #11156, 191 KB: its payment code was past the cut and it could never pass review).
+MAX_DIFF_BYTES="${JUDGE_JUDY_MAX_DIFF_BYTES:-400000}"
 MAX_BODY_BYTES=12000
 MAX_INTENT_BYTES=8000
 CONTEXT="fleet-code-review"
@@ -572,9 +573,16 @@ Answer with a verdict of block unless there is truly nothing blocking, plus one 
   # 2026-10-02 ran 3-16 turns reading the repo, and every call paid ~19k tokens of tool and
   # agent prompt it does not use ($0.079 vs $0.003 on the same tiny schema prompt, measured).
   # --json-schema's verdict still comes back with no tools enabled.
-  RAW=$(account_pool_run timeout "$TIMEOUT_S" claude -p "$PROMPT" --model "$MODEL" --tools "" \
-    --output-format json --json-schema "$VERDICT_SCHEMA" --max-budget-usd "${FLEET_MAX_BUDGET_USD:-5}" 2>>"$LOG")
+  # The prompt goes in on stdin from a file, never as an argument (see MAX_DIFF_BYTES). A file,
+  # not a pipe: account_pool_run may run the command once per account, and each try re-reads it.
+  JJ_PROMPT_FILE=$(mktemp "${TMPDIR:-/tmp}/judge_judy_prompt.XXXXXX")
+  printf '%s' "$PROMPT" > "$JJ_PROMPT_FILE"
+  export JJ_PROMPT_FILE
+  # shellcheck disable=SC2016  # $JJ_PROMPT_FILE and "$@" expand in the inner shell, on purpose
+  RAW=$(account_pool_run timeout "$TIMEOUT_S" sh -c 'exec claude -p "$@" < "$JJ_PROMPT_FILE"' judge-judy \
+    --model "$MODEL" --tools "" --output-format json --json-schema "$VERDICT_SCHEMA" --max-budget-usd "${FLEET_MAX_BUDGET_USD:-5}" 2>>"$LOG")
   RC=$?
+  rm -f "$JJ_PROMPT_FILE"
   else
     # A provider this script cannot call. No review is better than a review by the wrong
     # vendor that nobody asked for: no status is posted and the next tick retries.
