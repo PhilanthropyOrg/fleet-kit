@@ -41,10 +41,10 @@ pr_is_checkpoint() {
 # own PRs, armed through pr_arm.sh) are unchanged.
 review_passed() {
   local pr="$1" repo="${2:-}" slug head state
-  slug="${repo:-$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null)}"
+  slug="${repo:-$(timeout 25s gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null)}"
   [ "$slug" = "${PRODUCT_REPO_SLUG:-PhilanthropyOrg/philanthropy}" ] || return 0
-  head="$(gh pr view "$pr" -R "$slug" --json headRefOid -q .headRefOid 2>/dev/null)" || return 1
-  state="$(gh api "repos/$slug/statuses/$head" \
+  head="$(timeout 25s gh pr view "$pr" -R "$slug" --json headRefOid -q .headRefOid 2>/dev/null)" || return 1
+  state="$(timeout 25s gh api "repos/$slug/statuses/$head" \
     --jq '[.[] | select(.context=="fleet-code-review")][0].state' 2>/dev/null)"
   [ "$state" = "success" ]
 }
