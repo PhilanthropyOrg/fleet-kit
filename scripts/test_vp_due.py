@@ -28,6 +28,16 @@ class DueTests(unittest.TestCase):
         ok, why = vp_due.is_due(item(1, merged=[T1]))
         self.assertTrue(ok); self.assertEqual(why, "no verdict yet")
 
+    def test_merge_not_live_yet_is_not_due(self):
+        ok, why = vp_due.is_due(item(1, merged=[T2]), deployed_at=T1)
+        self.assertFalse(ok); self.assertIn("not live yet", why)
+
+    def test_merge_live_is_due(self):
+        self.assertTrue(vp_due.is_due(item(1, merged=[T1]), deployed_at=T2)[0])
+
+    def test_unknown_deploy_fails_open(self):
+        self.assertTrue(vp_due.is_due(item(1, merged=[T2]), deployed_at=None)[0])
+
     def test_nothing_merged_is_not_due(self):
         self.assertFalse(vp_due.is_due(item(2))[0])
 

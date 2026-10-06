@@ -315,15 +315,28 @@ def test_hook_blocks_raw_ready_and_merge_on_a_checkpoint_only() -> None:
 def test_merge_arm_and_judge_judy_never_arm_a_checkpoint() -> None:
     tmp = Path(tempfile.mkdtemp(prefix="arm-"))
     (tmp / "gh").write_text('#!/bin/sh\necho "$@" >> "$ARM_LOG"\n'
-                            'case "$*" in *"pr view"*) echo "$FAKE_CKPT";; esac\nexit 0\n')
+                            'case "$*" in *"repo view"*) echo PhilanthropyOrg/philanthropy;;\n'
+                            '*headRefOid*) echo abc123;; *statuses/abc123*) echo "$FAKE_REVIEW";;\n'
+                            '*"pr view"*) echo "$FAKE_CKPT";; esac\nexit 0\n')
     (tmp / "gh").chmod(0o755)
     for ckpt, rc_want, merged in (("true", 3, False), ("false", 0, True)):
         log = tmp / f"log-{ckpt}"
         env = {**os.environ, "PATH": f"{tmp}:{os.environ['PATH']}", "ARM_LOG": str(log),
-               "FAKE_CKPT": ckpt}
+               "FAKE_CKPT": ckpt, "FAKE_REVIEW": "success"}
         p = subprocess.run(["bash", "-c", f". {HERE / 'merge_arm.sh'}; arm_pr_auto_merge 8110"],
                            env=env, capture_output=True, text=True, timeout=30)
         assert p.returncode == rc_want, (ckpt, p.returncode, p.stdout, p.stderr)
+        assert ("pr merge 8110" in log.read_text()) is merged, log.read_text()
+    # 2026-10-06: a product PR with no fleet-code-review pass on its head never arms (rc 4);
+    # another repo (fleet-kit's own PRs) arms without one.
+    for review, repo, rc_want, merged in (("", "", 4, False), ("failure", "", 4, False),
+                                          ("", "PhilanthropyOrg/fleet-kit", 0, True)):
+        log = tmp / f"log-review-{review or 'none'}-{bool(repo)}"
+        env = {**os.environ, "PATH": f"{tmp}:{os.environ['PATH']}", "ARM_LOG": str(log),
+               "FAKE_CKPT": "false", "FAKE_REVIEW": review}
+        p = subprocess.run(["bash", "-c", f". {HERE / 'merge_arm.sh'}; arm_pr_auto_merge 8110 {repo}"],
+                           env=env, capture_output=True, text=True, timeout=30)
+        assert p.returncode == rc_want, (review, repo, p.returncode, p.stdout, p.stderr)
         assert ("pr merge 8110" in log.read_text()) is merged, log.read_text()
     jj = (HERE.parent / "members/judge-judy/judge-judy.sh").read_text()
     arm = jj.index('gh pr merge "$PR" --auto')
