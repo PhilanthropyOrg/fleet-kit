@@ -137,6 +137,11 @@ the two disagree. Name the entry you acted on in your report, or `Intent: none a
    2a-bis and 2b follow in the same list. This tier is first in line, never the whole list,
    and when it is empty or fully blocked 2b is the whole list (H§10). Never close a
    `fleet:reif-priority` issue yourself: that's marie's call (marie.md Part C).
+   **Reif-priority items ride only with each other, at most 3 to a batch, never with a 2b
+   item.** A 2b item in the same PR drags Reif's work through its review rounds and its lint
+   (2026-10-06: #11275 carried five Reif-priority page asks plus a GSC sampling script and
+   two others; the script's review and a lint failure held all five). Give the packer the
+   Reif tier as its own `--items` list first, then 2b as a second call.
 
    **Never narrow or drop an acceptance criterion silently (philanthropy#8475)** — on
    `fleet:reif-priority` and `fleet:user-asked` items alike. Dispatch only against what
