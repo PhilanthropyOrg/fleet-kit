@@ -199,8 +199,9 @@ class OtherSenders(Base):
         fleet_msg.send(self.conn, "sentry", ["the-fixer"], "journey-failing", "journeys:9", "b", [9], None, 10 * H)
         fleet_msg.send(self.conn, "sentry", ["the-fixer"], "journey-failing", "journeys:7", "b", [7], None, 1 * H)
         self.assertEqual(journey_issue_filer.already_told(self.conn, now=20 * H), {7, 9})
-        told = journey_issue_filer.already_told(self.conn, now=26 * H)
-        self.assertEqual(told, {9})  # #7 was named 25h ago, outside the 24h window
+        self.assertEqual(journey_issue_filer.already_told(self.conn, now=26 * H), {7, 9})
+        told = journey_issue_filer.already_told(self.conn, now=7 * 24 * H + 5 * H)
+        self.assertEqual(told, {9})  # #7 was named 7d4h ago, outside the 7-day window
         sent = []
         journey_issue_filer.message_fixer(
             {"filed": [{"issue": 12}], "commented": [{"issue": 9}]},
