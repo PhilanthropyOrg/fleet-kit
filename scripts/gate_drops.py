@@ -517,6 +517,46 @@ def list_open_paged(label: str, repo: str | None, run=None, sleep=time.sleep) ->
         after = issues["pageInfo"]["endCursor"]
 
 
+# gru step 2b reads the backlog tier by tier. 2026-10-05: in 15 of 36 passes gru stopped after
+# the high tier (67 open) and never read medium (189) or low (200), leaving 36-87% of the hour
+# unspent. One call returns every tier in the order the packer cuts, so there is no next read.
+# The order comes from a light list (labels only); bodies are read per item for the first
+# --first of it, because the whole-backlog body read failed 3 of 3 tries on 2026-10-05.
+CANDIDATE_LIST_FIELDS = "number,labels,createdAt"
+CANDIDATE_FIELDS = "number,title,labels,body,comments,createdAt"
+TIERS = (f"{PREFIX}priority-high", f"{PREFIX}priority-medium", LOW)
+
+
+def candidates(backlog: list[dict]) -> list[dict]:
+    """Pure. Open backlog items gru may build, high -> medium -> low -> unranked, oldest first."""
+    skip = INTAKE_SKIP | {PARKED}
+
+    def tier(i):
+        names = _names(i.get("labels"))
+        return next((k for k, t in enumerate(TIERS) if t in names), len(TIERS))
+    todo = [i for i in backlog if not set(_names(i.get("labels"))) & skip]
+    return sorted(todo, key=lambda i: (tier(i), i.get("createdAt") or ""))
+
+
+def hydrate(numbers: list[int], repo: str | None, run=None, workers: int = 8) -> list[dict]:
+    """Full {body, comments, ...} for each number, same order; an unreadable one is left out."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    def one(n):
+        cmd = ["gh", "issue", "view", str(n), "--json", CANDIDATE_FIELDS, *(["--repo", repo] if repo else [])]
+        for _ in range(2):
+            try:
+                r = (run or _gh)(cmd)
+                if r.returncode == 0:
+                    return json.loads(r.stdout)
+            except (subprocess.TimeoutExpired, ValueError):
+                pass
+        print(f"gate_drops candidates: #{n} unreadable, left out", file=sys.stderr)
+        return None
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        return [i for i in ex.map(one, numbers) if i]
+
+
 def apply(p: dict, repo: str | None, run_id: str, run=_gh, db_path: str | None = None) -> dict:
     """Exec seam: gh calls, the drop log, and the ask. Best-effort per action, reported."""
     repo_args = ["--repo", repo] if repo else []
@@ -604,11 +644,33 @@ def main(argv=None) -> int:
     i.add_argument("--repo", default=None)
     i.add_argument("--db-path", default=None)
     i.add_argument("--dry-run", action="store_true", help="print the plan, run no gh writes")
+    k = sub.add_parser("candidates", help="every buildable backlog item, all tiers, in pack order (gru step 2b)")
+    k.add_argument("--out", required=True, help="write the ordered items here, for `run --items <file>`")
+    k.add_argument("--first", type=int, default=80, help="read full text for this many, in order")
+    k.add_argument("--repo", default=None)
     c = sub.add_parser("count", help="distinct items dropped in the last N hours")
     c.add_argument("--hours", type=float, default=6.0)
     a = ap.parse_args(argv)
     if a.cmd == "count":
         print(json.dumps(count(a.hours)))
+        return 0
+    if a.cmd == "candidates":
+        try:
+            backlog = list_open(f"{PREFIX}backlog", a.repo, CANDIDATE_LIST_FIELDS)
+        except (RuntimeError, ValueError, subprocess.TimeoutExpired) as exc:
+            print(f"gate_drops candidates: {exc}", file=sys.stderr)
+            return 1
+        todo = candidates(backlog)
+        full = hydrate([i["number"] for i in todo[:a.first]], a.repo)
+        Path(a.out).write_text(json.dumps(fill_capped_comments(full, a.repo)))
+        tiers = [t.rsplit("-", 1)[-1] for t in TIERS] + ["unranked"]
+        by = {t: [] for t in tiers}
+        for i in todo:
+            names = _names(i.get("labels"))
+            by[next((t for t, full in zip(tiers, TIERS) if full in names), "unranked")].append(i["number"])
+        print(json.dumps({"out": a.out, "scanned": len(backlog), "skipped": len(backlog) - len(todo),
+                          "by_tier": {t: len(v) for t, v in by.items()}, "written": len(full),
+                          "numbers": [i["number"] for i in full], "beyond_first": len(todo) - len(todo[:a.first])}))
         return 0
     if a.cmd == "intake":
         try:
