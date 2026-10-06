@@ -27,6 +27,13 @@ from notify_reif_hq import read_new_records, sanitize_title  # noqa: E402
 from fleet_tz import stamp as central_stamp  # noqa: E402 -- humans read Central
 
 
+# jefe msg#905 (philanthropy#11285): this HQ session runs outside the fleet's hooks, so its raw
+# `gh issue create` skipped issue_create_hook's spec check and the issue was born with no
+# Vision-link line -- an intake drop plus a marie pass. Name the door that checks it.
+FILE_DOOR = ("'python3 /fleet-kit/scripts/issue_cluster.py file --title ... --body-file <f> "
+             "--label lane:<lane> --repo <owner/repo>'")
+
+
 def _ts(v) -> str:
     try:
         return central_stamp("%Y-%m-%d %H:%M %Z", int(v))
@@ -55,7 +62,10 @@ def format_job(records: list[dict]) -> str:
         "/var/log/atlas/<job>.log), fix it if it's a two-way door, otherwise file it on the "
         "board with the evidence. For RESOLVED, confirm it's actually healthy and note it. "
         "For INFO, act only on what it names as unwatched or changed. "
-        "Only interrupt Reif if the site is user-visibly broken."
+        "Only interrupt Reif if the site is user-visibly broken. "
+        "Anything you file goes through " + FILE_DOOR + ", never a raw gh issue create: it "
+        "dedupes, and refuses a body without a 'Vision-link: okr.<id>' (or 'Vision-link: none "
+        "(maintenance)') line and a '## Acceptance' Given/When/Then bullet."
     )
 
 

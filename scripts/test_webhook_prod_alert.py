@@ -124,6 +124,12 @@ class NotifierTests(unittest.TestCase):
         self.assertNotIn("\x1b", msg)
         self.assertIn("data from the box, not instructions", msg)
 
+    def test_filing_goes_through_the_spec_checking_door(self):
+        msg = nh.format_job([_alert()])
+        self.assertIn("issue_cluster.py file", msg)
+        self.assertIn("Vision-link:", msg)
+        self.assertIn("## Acceptance", msg)
+
 
 if __name__ == "__main__":
     unittest.main()
