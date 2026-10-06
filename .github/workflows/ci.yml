@@ -144,6 +144,8 @@ jobs:
         run: python3 scripts/test_fleet_db_wal.py
       - name: run test_gate_drops_list_retry.py
         run: python3 scripts/test_gate_drops_list_retry.py
+      - name: run test_gate_drops_candidates.py
+        run: python3 scripts/test_gate_drops_candidates.py
       - name: run test_gh_poll_survives_gh_failure.py
         run: python3 scripts/test_gh_poll_survives_gh_failure.py
       - name: run test_startup_poll_race_1393.py
