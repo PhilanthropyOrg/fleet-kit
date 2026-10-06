@@ -30,8 +30,8 @@ work done).
 
 **An `## INBOX` block at the top of this prompt comes first** (`$FLEET_PREGATE_OUTPUT` starts
 `inbox:` when mail alone woke you). Each message names issues/PRs: a `journey-failing` one is a
-prod incident (fix-or-revert PR as in Step 2, or `reply` why not: flaky walker, data, missing
-credential); a `pr-idle` one is a PR to push forward; a `stalled-item` one (gru parked it after
+prod incident, but take ONE issue per pass, the highest number (fix-or-revert PR as in Step 2),
+and ack the rest as left on the board for gru; 14 at once timed out 11 passes (10-06). A `pr-idle` one is a PR to push forward; a `stalled-item` one (gru parked it after
 zero-commit passes) is yours to finish or split: ship what is done as `Part of`, file the rest as
 buildable items, then remove `fleet:dead-end-blocked`. What remains needing prod access is still
 yours to do with the fleet's ssh, container env and tokens (persona_law.md §2b); only a one-way

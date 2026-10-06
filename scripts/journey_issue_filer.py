@@ -588,7 +588,9 @@ def process(results_path: Path, state_path: Path = DEFAULT_STATE_PATH, runner=_r
 # the 1,248 issue mentions in 7 days of journey-failing mail were the same 256 long-open issues
 # re-confirmed each walk, and the-fixer re-triaged the same list every pass to answer "not a
 # prod incident" again. A still-failing issue stays open on the board; only news is mail.
-TOLD_WINDOW_S = float(os.environ.get("FLEET_JOURNEY_TOLD_WINDOW_S", 86400))
+# 7 days, not 24h (2026-10-06, jefe msg#935): at 24h the whole list (#8298..#11372, 14 issues)
+# came back each day as one message, and the-fixer timed out 11 times that day working it.
+TOLD_WINDOW_S = float(os.environ.get("FLEET_JOURNEY_TOLD_WINDOW_S", 7 * 86400))
 
 
 def already_told(conn, now: float | None = None, window: float = TOLD_WINDOW_S) -> set:
