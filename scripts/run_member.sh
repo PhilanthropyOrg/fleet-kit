@@ -202,7 +202,9 @@ NERD_FLEETKIT_LANES="growth searchquality ui datadog devops lens revenue"
 NERD_CANONICAL_LANES="$NERD_FLEETKIT_LANES"
 NERD_LANE_REGISTRY_FILE=""
 if [ "$MEMBER" = "nerd" ] && [ -n "$LANE" ] && [ -n "${REPO:-}" ]; then
-  NERD_LANE_REGISTRY_FILE=$(find "$REPO/src" -maxdepth 3 -path '*/ops/lane_kpis.py' 2>/dev/null | head -1)
+  # maxdepth 4: the product moved the registry to src/philanthropy/apps/ops/ on 2026-10-06;
+  # at depth 3 every lane=claim dispatch was rejected as non-canonical.
+  NERD_LANE_REGISTRY_FILE=$(find "$REPO/src" -maxdepth 4 -path '*/ops/lane_kpis.py' 2>/dev/null | head -1)
   if [ -n "$NERD_LANE_REGISTRY_FILE" ]; then
     REGISTRY_LANES=$(python3 "$KIT_DIR/scripts/lane_registry_lanes.py" "$NERD_LANE_REGISTRY_FILE" 2>>"$LOG")
     if [ -n "$REGISTRY_LANES" ]; then

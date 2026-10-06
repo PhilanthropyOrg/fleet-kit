@@ -8585,7 +8585,8 @@ def _nerd_lane_validation_reads_target_own_registry():
     )
 
     fake_target = Path(tmp) / "fake_philanthropy"
-    ops_dir = fake_target / "src" / "philanthropy" / "ops"
+    # The real layout since 2026-10-06 (one level deeper than the old src/philanthropy/ops/).
+    ops_dir = fake_target / "src" / "philanthropy" / "apps" / "ops"
     ops_dir.mkdir(parents=True, exist_ok=True)
     (ops_dir / "lane_kpis.py").write_text(
         "REGISTRY = {\n"
