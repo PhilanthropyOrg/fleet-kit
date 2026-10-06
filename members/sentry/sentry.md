@@ -37,7 +37,11 @@ its path there for 4xx/5xx and slow responses, and put the count in the issue.
    in the background at the top of the pass and read it when it finishes:
    ```
    cd /repo && python3 /fleet-kit/scripts/journey_walker.py --out qa-out > /tmp/sentry-walk.log 2>&1 &
+   echo $! > /tmp/sentry-walk.pid
    ```
+   This is the pass's ONLY walker run: step 5 reads it, it never starts another. Do steps 1-4
+   while it runs; when you reach step 5, block once with
+   `timeout 1800 tail --pid=$(cat /tmp/sentry-walk.pid) -f /dev/null`, not a polling loop.
    Use the IMAGE's `python3` for the walker and filer, not `/repo/.venv`: the image's Playwright
    matches the Chromium baked into it, the product venv's does not (2026-09-24 19:56Z: venv
    Playwright 1.62 wanted chromium-1234, the image ships 1243, launch failed; a hand-made
@@ -128,10 +132,9 @@ its path there for 4xx/5xx and slow responses, and put the count in the issue.
 5. **Walk the journeys.** `members/sentry/journeys.yaml` (gh#656) is the catalog of the ten
    things a person actually comes to do -- sign in, search, open a report, message, claim an
    org, and so on. `scripts/journey_walker.py` (gh#657) drives Playwright through every one of
-   them, as the existing test users, and writes `qa-out/<run>/journeys/results.json`:
-   ```
-   cd /repo && python3 /fleet-kit/scripts/journey_walker.py --out qa-out
-   ```
+   them, as the existing test users, and writes `qa-out/<run>/journeys/results.json`. Read the
+   run you started in step 0; never start a second walker (10-05/06: three passes re-ran it in
+   the foreground and spent the budget waiting).
    The catalog includes the HQ feed ACTIONS (React picker hover/slow-move/pick/switch/remove,
    Reply post+reload, Share, Save, Follow, logo/name links, claim-to-verified seen live in
    another person's feed), walked as the product's QA personas -- owner, verified, operator,
@@ -147,8 +150,10 @@ its path there for 4xx/5xx and slow responses, and put the count in the issue.
    Then hand its output to the filer, which turns each failed step into a deduped,
    self-closing issue (gh#660) instead of a line in a log nobody reads:
    ```
-   python3 /fleet-kit/scripts/journey_issue_filer.py --results qa-out/<run>/journeys/results.json
+   python3 /fleet-kit/scripts/journey_issue_filer.py --results qa-out/<run>/journeys/results.json > /tmp/sentry-filer.log 2>&1; cat /tmp/sentry-filer.log
    ```
+   Run it ONCE and quote its counts from that log. A second run reports 0 filed (it dedupes),
+   so it can never recover the first run's numbers (9 self-critiques in 2 days lost them to `tail`).
    **Run it on EVERY pass that produced a results.json, without exception, and paste its
    output.** Deduplication is the filer's job, not yours: it keys each failure on
    journey+step+deploy-sha against `journey_last_pass.json`, so a break a sibling pass already
@@ -156,11 +161,7 @@ its path there for 4xx/5xx and slow responses, and put the count in the issue.
    arithmetic by reading a sibling's report, and when you try, the failures reach the human as
    the word QUIET.
 
-   That is not hypothetical. Run `sentry-294-1789853475` (2026-09-19 21:37Z) walked the
-   journeys, got **4 passed / 12 failed / 4 blocked**, never invoked the filer, and reported
-   `QUIET -- no new issues filed ... every failure duplicates a sibling pass's findings from
-   15 minutes earlier`. Twelve real failures reached the operator as one word. The sibling had
-   found the same breaks because they were REAL, which is an argument for filing, not against.
+   (2026-09-19: a pass skipped the filer on 12 failures and reported them as QUIET.)
 
    **A pass with `journeys_failed > 0` may never report QUIET.** Report `ISSUES` and say how
    many the filer opened, skipped as already-open, and closed as recovered. If the filer itself
