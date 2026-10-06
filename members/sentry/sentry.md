@@ -161,7 +161,7 @@ its path there for 4xx/5xx and slow responses, and put the count in the issue.
    arithmetic by reading a sibling's report, and when you try, the failures reach the human as
    the word QUIET.
 
-   (2026-09-19: a pass skipped the filer on 12 failures and reported them as QUIET.)
+   (Run `sentry-294-1789853475`, 2026-09-19: 4 passed / 12 failed / 4 blocked, filer skipped, reported QUIET.)
 
    **A pass with `journeys_failed > 0` may never report QUIET.** Report `ISSUES` and say how
    many the filer opened, skipped as already-open, and closed as recovered. If the filer itself
