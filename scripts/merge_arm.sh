@@ -33,6 +33,22 @@ pr_is_checkpoint() {
   [ "$out" = "true" ]
 }
 
+# review_passed PR [REPO] -- exit 0 iff the PR may arm: on the product repo that means an explicit
+# fleet-code-review "success" on its current head. That check is not required on main, so an
+# arm before it lands merges unreviewed code as soon as CI is green (2026-10-06: #11352 and
+# #11192 sat armed on a BLOCK, #11374 and #11275 were armed before any review ran). judge-judy
+# arms on its own approve, so a refused arm here only waits for that. Other repos (fleet-kit's
+# own PRs, armed through pr_arm.sh) are unchanged.
+review_passed() {
+  local pr="$1" repo="${2:-}" slug head state
+  slug="${repo:-$(timeout 25s gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null)}"
+  [ "$slug" = "${PRODUCT_REPO_SLUG:-PhilanthropyOrg/philanthropy}" ] || return 0
+  head="$(timeout 25s gh pr view "$pr" -R "$slug" --json headRefOid -q .headRefOid 2>/dev/null)" || return 1
+  state="$(timeout 25s gh api "repos/$slug/statuses/$head" \
+    --jq '[.[] | select(.context=="fleet-code-review")][0].state' 2>/dev/null)"
+  [ "$state" = "success" ]
+}
+
 # arm_pr_auto_merge PR_NUMBER
 #
 # On success: prints nothing, returns 0.
@@ -45,6 +61,10 @@ arm_pr_auto_merge() {
   if pr_is_checkpoint "$pr" "$repo"; then
     printf 'refused: PR #%s is a minion checkpoint (draft WIP) and never auto-merges; only `minion_checkpoint.py ready` finishes one, when every item is done' "$pr"
     return 3
+  fi
+  if ! review_passed "$pr" "$repo"; then
+    printf 'refused: PR #%s has no fleet-code-review pass on its head yet; judge-judy arms it when it approves' "$pr"
+    return 4
   fi
   if err="$(gh pr merge "$pr" ${R[@]+"${R[@]}"} --auto --squash 2>&1 >/dev/null)"; then
     return 0
