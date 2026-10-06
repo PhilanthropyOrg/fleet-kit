@@ -446,10 +446,8 @@ INTAKE_FIELDS = "number,title,labels,body,comments,createdAt"
 LIST_OPEN_TRIES = int(os.environ.get("FLEET_GATE_DROP_LIST_TRIES", "3"))
 
 
-def list_open(label: str, repo: str | None, fields: str = INTAKE_FIELDS, run=None,
-              sleep=time.sleep) -> list[dict]:
-    cmd = ["gh", "issue", "list", "--state", "open", "--label", label, "--limit", "2000",
-           "--json", fields, *(["--repo", repo] if repo else [])]
+def _gh_json(cmd: list[str], what: str, run=None, sleep=time.sleep):
+    """Run one gh read, retried LIST_OPEN_TRIES times on a non-zero exit, a timeout or cut-off JSON."""
     err = ""
     for attempt in range(max(1, LIST_OPEN_TRIES)):
         if attempt:
@@ -461,12 +459,62 @@ def list_open(label: str, repo: str | None, fields: str = INTAKE_FIELDS, run=Non
             continue
         if r.returncode == 0:
             try:
-                return json.loads(r.stdout or "[]")
+                return json.loads(r.stdout or "null")
             except ValueError as e:
                 err = f"bad JSON: {e}"
                 continue
         err = (r.stderr or "")[:200]
-    raise RuntimeError(f"gh issue list --label {label} failed: {err}")
+    raise RuntimeError(f"{what} failed: {err}")
+
+
+def list_open(label: str, repo: str | None, fields: str = INTAKE_FIELDS, run=None,
+              sleep=time.sleep) -> list[dict]:
+    cmd = ["gh", "issue", "list", "--state", "open", "--label", label, "--limit", "2000",
+           "--json", fields, *(["--repo", repo] if repo else [])]
+    return _gh_json(cmd, f"gh issue list --label {label}", run, sleep) or []
+
+
+# The retries above did not save the whole-backlog read: after they shipped, 31 of the next 33
+# intake runs still failed (gru.log, 2026-10-05: 504s and cut-off JSON), because every retry
+# re-asks for ~570 issues with bodies and 100 comments each in one GraphQL answer. So
+# needs-spec labels marie had already earned off stayed on (jefe msg#897: #11116, #11176,
+# #11239). Read the backlog in pages of PAGE_SIZE instead, each page retried on its own.
+PAGE_SIZE = int(os.environ.get("FLEET_GATE_DROP_PAGE_SIZE", "25"))
+_PAGE_QUERY = """query($owner:String!,$name:String!,$label:String!,$first:Int!,$after:String){
+ repository(owner:$owner,name:$name){issues(states:OPEN,labels:[$label],first:$first,after:$after,
+  orderBy:{field:CREATED_AT,direction:ASC}){pageInfo{hasNextPage endCursor}
+  nodes{number title body createdAt labels(first:50){nodes{name}}
+   comments(last:100){nodes{body createdAt author{login}}}}}}}"""
+
+
+def _repo_slug(repo: str | None, run=None) -> str:
+    if repo:
+        return repo
+    out = _gh_json(["gh", "repo", "view", "--json", "nameWithOwner"], "gh repo view", run,
+                   lambda s: None)
+    return out["nameWithOwner"]
+
+
+def list_open_paged(label: str, repo: str | None, run=None, sleep=time.sleep) -> list[dict]:
+    """Same items and shape as list_open(label, INTAKE_FIELDS), read one small page at a time.
+    Comments are the NEWEST 100 (list_open got the oldest); the gates read the newest anyway."""
+    owner, name = _repo_slug(repo, run).split("/", 1)
+    out, after = [], None
+    while True:
+        cmd = ["gh", "api", "graphql", "-f", f"query={_PAGE_QUERY}", "-f", f"owner={owner}",
+               "-f", f"name={name}", "-f", f"label={label}", "-F", f"first={PAGE_SIZE}",
+               *(["-f", f"after={after}"] if after else [])]
+        data = _gh_json(cmd, f"backlog page after {after or 'start'} (--label {label})", run, sleep)
+        issues = data["data"]["repository"]["issues"]
+        for n in issues["nodes"]:
+            out.append({"number": n["number"], "title": n["title"], "body": n["body"],
+                        "createdAt": n["createdAt"],
+                        "labels": [{"name": l["name"]} for l in n["labels"]["nodes"]],
+                        "comments": [dict(c, author=c.get("author") or {"login": ""})
+                                     for c in n["comments"]["nodes"]]})
+        if not issues["pageInfo"]["hasNextPage"]:
+            return out
+        after = issues["pageInfo"]["endCursor"]
 
 
 def apply(p: dict, repo: str | None, run_id: str, run=_gh, db_path: str | None = None) -> dict:
@@ -564,7 +612,7 @@ def main(argv=None) -> int:
         return 0
     if a.cmd == "intake":
         try:
-            backlog = list_open(f"{PREFIX}backlog", a.repo, run=lambda c: _gh(c, 300))
+            backlog = list_open_paged(f"{PREFIX}backlog", a.repo, run=lambda c: _gh(c, 120))
             prod = list_open(LABEL_PROD_ACCESS, a.repo, "number,title,labels")
             fill_capped_comments(backlog, a.repo)
         except (RuntimeError, ValueError, subprocess.TimeoutExpired) as exc:
