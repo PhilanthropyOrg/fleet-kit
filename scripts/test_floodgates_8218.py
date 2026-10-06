@@ -210,14 +210,19 @@ def test_intake_apply_messages_marie_jefe_and_hq_once() -> None:
     print("ok  intake apply: one gate-drop to marie+jefe, one prod-access to hq, deduped")
 
 
-def test_intake_cli_lists_backlog_in_one_call() -> None:
+def test_intake_cli_reads_backlog_in_small_pages() -> None:
+    # jefe msg#897: the one-call read of ~570 issues failed 31 of 33 intake runs (504s).
     seen = []
+    one = _issue(30, ["fleet:backlog", "quality:solid"])
+    node = dict(one, createdAt="2026-10-01T00:00:00Z", labels={"nodes": one["labels"]}, comments={"nodes": one.get("comments") or []})
 
     def fake(cmd, timeout=60):
         seen.append(cmd)
-        label = cmd[cmd.index("--label") + 1]
-        out = [_issue(30, ["fleet:backlog", "quality:solid"])] if label == "fleet:backlog" else []
-        return SimpleNamespace(returncode=0, stdout=json.dumps(out), stderr="")
+        if cmd[1] == "api":
+            page = {"pageInfo": {"hasNextPage": False, "endCursor": None}, "nodes": [node]}
+            return SimpleNamespace(returncode=0, stdout=json.dumps(
+                {"data": {"repository": {"issues": page}}}), stderr="")
+        return SimpleNamespace(returncode=0, stdout="[]", stderr="")
 
     old = gd._gh
     gd._gh = fake
@@ -229,11 +234,11 @@ def test_intake_cli_lists_backlog_in_one_call() -> None:
         gd._gh = old
     out = json.loads(buf.getvalue())
     assert out["scanned"] == 1 and out["eligible"] == 1, out
-    backlog_calls = [c for c in seen if "fleet:backlog" in c]
-    assert len(backlog_calls) == 1 and "number,title,labels,body,comments,createdAt" in backlog_calls[0]
+    pages = [c for c in seen if c[1] == "api"]
+    assert len(pages) == 1 and "label=fleet:backlog" in pages[0] and f"first={gd.PAGE_SIZE}" in pages[0]
     sh = (HERE / "run_gru_fanout.sh").read_text()
     assert sh.index("stale_claims.py") < sh.index("gate_drops.py\" intake") < sh.index("exec bash")
-    print("ok  intake CLI: one gh list of the whole backlog; run_gru_fanout runs it after stale_claims")
+    print("ok  intake CLI: backlog read in pages; run_gru_fanout runs it after stale_claims")
 
 
 def test_capped_comments_are_refetched_so_a_late_criterion_counts() -> None:
