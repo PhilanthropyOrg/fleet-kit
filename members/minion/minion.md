@@ -20,11 +20,11 @@ real turn-cost packing, not a fixed count) in your prompt. You do not choose you
 you do not claim them — gru already did both before spawning you. A batch of 1 is a normal,
 common case — everything below still applies, just with N=1.
 
-**Before anything else, call TaskCreate (one task each; load it first with ToolSearch `select:TaskCreate,TaskUpdate`) with exactly these 11 items, then work them in order.**
-A pilot's checklist is identical every run, on purpose (confirmed live 2026-08-23 on
-dont-shoot-the-messenger: without a forced plan, a real pass burned its whole turn budget on
-early steps and never reached the report at all — landed as `reported_nothing` despite real
-work done).
+**Work these 11 steps in order; the numbered list IS your plan. Do not TaskCreate it.**
+A forced plan keeps a pass from burning its turns on early steps (2026-08-23), but copying it
+into TaskCreate bought nothing: 10-04..06, 1,241 TaskCreate calls in 123 passes (34% of all
+minion tool calls, ~2.6 turns a pass with the ToolSearch) and only 72 TaskUpdates; self-critiques
+said "created the 11 tasks but never updated them" again and again.
 
 1. **Read every item in your batch.** Your prompt names the exact, comma-separated issue
    numbers — read each with `gh issue view <n> --comments` for its title, body AND comments
@@ -216,7 +216,10 @@ work done).
 6b. **Checkpoint early: push and open a DRAFT PR after your first green commit** (2026-09-26:
    two 5400s batches timed out with nothing pushed and the next pass restarted from zero).
    Once `verified_test.sh` is green on your first real commit: `git push -u origin HEAD`, then
-   `gh pr create --draft` naming every item as `Part of #N`. run_member.sh also does this for
+   `gh pr create --draft` naming every item as `Part of #N`. Write every PR body inside YOUR
+   worktree's git dir (`--body-file "$(git rev-parse --git-dir)/pr_body.md"`, never committed),
+   never `/tmp/body.md`: minions share `/tmp`, and
+   three passes on 10-05 lost time, one a whole CI round, to another minion's body. run_member.sh also does this for
    you (on the first green commit, again ~10 min before your timeout, and with a WIP commit if
    the timeout kills you), so a draft PR may already exist for your branch — then step 7 edits
    that PR instead of opening a new one.
