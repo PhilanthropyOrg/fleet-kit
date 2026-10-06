@@ -48,6 +48,11 @@ the two disagree. Name the entry you acted on in your report, or `Intent: none a
    - Do not claim or re-batch into a new minion this pass any issue in a `due` PR's `items`.
    - `held` already has a fixer: do not re-send. `exhausted` had 3 fixer passes on unchanged
      content: name each in your report as needing a look, never re-send.
+   - A `deferred the-fixer --item <N>` line (the cap, FLEET_FIXER_ITEM_MAX) means that PR has
+     NO fixer this pass. Its `fix: PR #<N>` item is still yours in 2a-bis: dispatch it alone,
+     never release it as "has a fixer". (2026-10-05: #11126, #11141, #11202, #11207 sat
+     review-blocked 5-10 hours because every pass deferred their fixers and dropped the
+     fix items the same way.)
    - An `error` from `red_prs.py` is a blind step, not an empty one: say so, go on to step 1.
 
    **`resume` lists a minion's red DRAFT PRs** (checkpoints, part-done work). Those get a
@@ -168,7 +173,8 @@ the two disagree. Name the entry you acted on in your report, or `Intent: none a
    ```
    For each, `gh pr view <N> --json state` on the PR named in the title:
    - MERGED or CLOSED: the issue is moot. Close it with one line saying so; do not build it.
-   - Got a fixer in step 0 this pass: skip it here; the fixer owns that PR.
+   - Got a fixer DISPATCHED in step 0 this pass (not `deferred`): skip it here; the fixer
+     owns that PR.
    - OPEN: it goes ahead of every 2b item (same filters as usual). Dispatch it ALONE
      (`minion --item <n>`, never inside a `--items` batch and never through the packer): the
      runner then puts the minion on the PR's own branch, and refuses a batch that hides one.
@@ -182,6 +188,10 @@ the two disagree. Name the entry you acted on in your report, or `Intent: none a
    - Filter out anything `fleet:claimed`, `fleet:needs-human-op`, or
      `fleet:needs-prod-access` (HQ's: prod DB, secrets, Cloudflare; philanthropy#8218):
      re-claiming a blocked item only re-confirms the block (H§14).
+   - Filter out every `fix: PR #` / `CI RED: PR #` item too: 2a-bis already sent it alone or
+     skipped it. One that reaches the packer rides in a batch, the runner refuses the whole
+     batch (exit 2), and nothing in it is built (2026-10-05: #11131 rode in a 10-item batch
+     that way; the kept items got no second send).
    - Append `fleet:priority-medium` after high, then `-low`, until the gated list holds more
      than the hour funds (step 3's `room_for_items`). The packer cuts in this order, so a
      lower tier only gets the room a higher one left.
