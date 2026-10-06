@@ -70,7 +70,7 @@ def _newest(stamps):
 
 def is_due(item: dict, running: set[int] | None = None, running_minions: set[int] | None = None,
            is_open=None, looked_at: float | None = None,
-           now: float | None = None) -> tuple[bool, str]:
+           now: float | None = None, deployed_at: str | None = None) -> tuple[bool, str]:
     """item = {number, comments:[{body, createdAt}], merged_prs:[{number, mergedAt}],
     labels?, subIssues?}. ISO-8601 Zulu timestamps compare correctly as strings. `is_open(n)`
     answers for an epic child named only in a `decomposed into` comment (subIssues nodes carry
@@ -87,6 +87,8 @@ def is_due(item: dict, running: set[int] | None = None, running_minions: set[int
     merge = _newest(pr.get("mergedAt") for pr in item.get("merged_prs") or [])
     if not merge:
         return False, "nothing merged yet"
+    if deployed_at and merge > deployed_at:
+        return False, f"newest merge {merge} is not live yet (last good deploy started {deployed_at})"
     comments = item.get("comments") or []
     verdict = _newest(c.get("createdAt") for c in comments if VERDICT_RE.search(c.get("body") or ""))
     reif = _newest(c.get("createdAt") for c in comments if REIF_RE.search(c.get("body") or ""))
@@ -138,11 +140,13 @@ def running_minion_items() -> set[int]:
 
 def due_items(items: list[dict], running: set[int] | None = None,
               running_minions: set[int] | None = None, is_open=None,
-              looked: dict[int, float] | None = None, now: float | None = None) -> dict:
+              looked: dict[int, float] | None = None, now: float | None = None,
+              deployed_at: str | None = None) -> dict:
     due, skipped = [], []
     looked = looked or {}
     for it in items:
-        ok, why = is_due(it, running, running_minions, is_open, looked.get(it["number"]), now)
+        ok, why = is_due(it, running, running_minions, is_open, looked.get(it["number"]), now,
+                         deployed_at)
         (due if ok else skipped).append({"number": it["number"], "why": why})
     return {"due": [d["number"] for d in due], "skipped": skipped}
 
@@ -442,6 +446,23 @@ def _runs_rows() -> list[dict]:
     return rows
 
 
+# NOT LIVE IS NOT DUE. A vp pass walks the live site, so a merge prod is not serving yet has
+# nothing to walk: 9 of vp's 20 QUIET passes in the day to 2026-10-06 were "merged but not live"
+# (#11139, #11148, #11153, #11170, #11219, #11304 ...), and each then held the item for the 6h
+# re-look below. A main DEPLOY run checks out main at its start, so a merge at or before the start
+# of the newest successful one is live. Fails open: no such workflow, or gh down, means no gate.
+DEPLOY_WORKFLOW = os.environ.get("FLEET_DEPLOY_WORKFLOW", "DEPLOY")
+
+
+def deployed_at(repo_dir: str) -> str | None:
+    try:
+        runs = _gh(["run", "list", "--workflow", DEPLOY_WORKFLOW, "--branch", "main",
+                    "--status", "success", "--limit", "1", "--json", "createdAt"], repo_dir)
+    except (RuntimeError, ValueError, OSError, subprocess.TimeoutExpired):
+        return None
+    return runs[0].get("createdAt") if runs else None
+
+
 def running_vp_items() -> set[int]:
     return running_items(_runs_rows(), "vp")
 
@@ -492,7 +513,8 @@ def main(argv=None) -> int:
     minions = running_minion_items()
     rows = _runs_rows()
     out = due_items(items, running_items(rows, "vp"), minions,
-                    is_open=lambda n: _issue_open(a.repo_dir, n), looked=last_look_at(rows))
+                    is_open=lambda n: _issue_open(a.repo_dir, n), looked=last_look_at(rows),
+                    deployed_at=None if a.items else deployed_at(a.repo_dir))
     out.update(redo_items(items, minions,
                           is_open=lambda n: _valid_redo_target(a.repo_dir, n),
                           dispatched=last_minion_dispatch()))
