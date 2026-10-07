@@ -319,7 +319,7 @@ def main() -> int:
     if not args:
         print("usage: board_github.py file <title> [--context <body>] [--lane <lane>] "
               "[--priority <high|medium|low>] | "
-              "claim <worker> <n> | claim-item <worker> <number> | list | done <number> [note] | release <number> [note]",
+              "claim <worker> <n> | claim-item <worker> <number>... | list | done <number> [note] | release <number> [note]",
               file=sys.stderr)
         return 2
     cmd = args[0]
@@ -348,10 +348,12 @@ def main() -> int:
         print(json.dumps(claim_next_n(args[1], int(args[2]))))
         return 0
     if cmd == "claim-item":
-        if len(args) != 3:
-            print("claim-item needs <worker> <number>", file=sys.stderr)
+        # Several numbers claim each in turn and print one list: gru's serial one-call-per-item
+        # loops timed out or cost a turn per item on 9 of 97 passes, 10-04..10-07.
+        if len(args) < 3:
+            print("claim-item needs <worker> <number> [<number> ...]", file=sys.stderr)
             return 2
-        print(json.dumps(claim_item(args[1], int(args[2]))))
+        print(json.dumps([it for n in args[2:] for it in claim_item(args[1], int(n))]))
         return 0
     if cmd == "list":
         print(json.dumps(list_unclaimed()))
