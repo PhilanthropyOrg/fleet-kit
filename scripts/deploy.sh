@@ -788,6 +788,24 @@ prune_dangling_images() {
     nohup podman image prune -f >/dev/null 2>&1 9>&- &
     log "post-deploy: pruning dangling images in the background"
 }
+# gh#11534: 2026-10-06 the new container sat in podman state Created and deploy.sh still logged
+# DEPLOYED (the health check passed against the alt-port candidate, not the renamed live one);
+# the fleet was paused ~4h. Before DEPLOYED is printed, the live container must be running: start it
+# once if it is not, and if it still is not, the caller rolls back and the deploy fails with why.
+live_container_running_or_start() {
+    local st
+    running "$CONTAINER" && return 0
+    st="$(podman inspect "$CONTAINER" --format '{{.State.Status}}' 2>/dev/null || echo gone)"
+    log "DEPLOY CHECK: $CONTAINER is '$st', not running -- starting it once"
+    podman start "$CONTAINER" >/dev/null 2>&1 9>&- || true
+    sleep 5
+    if running "$CONTAINER"; then
+        log "DEPLOY CHECK: $CONTAINER was '$st'; the start brought it up"
+        return 0
+    fi
+    log "DEPLOY FAILED: $CONTAINER is '$(podman inspect "$CONTAINER" --format '{{.State.Status}}' 2>/dev/null || echo gone)' after a start (was '$st') -- not DEPLOYED"
+    return 1
+}
 finish_deploy() {
     prune_dangling_images
     log "DEPLOYED: $CONTAINER live on $VIEW_PORT/$WEBHOOK_PORT, running $(podman exec "$CONTAINER" sh -c 'cd /fleet-kit && git log -1 --oneline' 2>/dev/null)"
@@ -826,6 +844,7 @@ finish_deploy() {
 
 if proxy_mode; then
     proxy_deploy || exit 1
+    live_container_running_or_start || { proxy_rollback; exit 1; }
     finish_deploy
     exit 0
 fi
@@ -916,6 +935,16 @@ trap - ERR EXIT
 set +e
 if ! health_check "$VIEW_PORT"; then
     log "FAILED after cutover -- rolling back to $RETIRED_MARKER"
+    podman stop -t 5 "$CONTAINER" >/dev/null 2>&1 || true
+    podman rename "$CONTAINER" "${CONTAINER}-broken-$(date +%s)"
+    podman rename "$RETIRED_MARKER" "$CONTAINER"
+    podman start "$CONTAINER"
+    log "ROLLED BACK: $CONTAINER restored to the pre-deploy build and running"
+    exit 1
+fi
+
+if ! live_container_running_or_start; then
+    log "FAILED after cutover (container not running) -- rolling back to $RETIRED_MARKER"
     podman stop -t 5 "$CONTAINER" >/dev/null 2>&1 || true
     podman rename "$CONTAINER" "${CONTAINER}-broken-$(date +%s)"
     podman rename "$RETIRED_MARKER" "$CONTAINER"
