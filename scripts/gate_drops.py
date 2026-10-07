@@ -77,6 +77,7 @@ RESEND_S = float(os.environ.get("FLEET_GATE_DROP_RESEND_H", "72")) * 3600
 # (label, no more re-sends). 2026-09-30: 8 low items sent twice in 3 days, specced by nobody.
 LOW = f"{PREFIX}priority-low"
 PARKED = f"{PREFIX}parked"
+DEAD_END = f"{PREFIX}dead-end-blocked"
 MAX_SENDS_LOW = int(os.environ.get("FLEET_GATE_DROP_MAX_SENDS_LOW", "2"))
 
 # What each gate's drop reason means for the person who has to fix it.
@@ -538,6 +539,21 @@ def candidates(backlog: list[dict]) -> list[dict]:
     return sorted(todo, key=lambda i: (tier(i), i.get("createdAt") or ""))
 
 
+# 2026-10-07: 77 of the 80 items `candidates` read were already `dead-end-blocked` (oldest
+# first puts them in front), so gru's dead-end gate emptied the set and 28 of ~30 passes
+# reported `binding: candidates_exhausted` with 456 items never read. Fresh items fill the read
+# first; up to RECHECK labelled ones still ride along so a dead end whose count expired can clear.
+RECHECK = 10
+
+
+def read_slice(todo: list[dict], first: int, recheck: int = RECHECK) -> list[dict]:
+    """Pure. The `first` items to read in full: fresh ones in pack order, then labelled dead ends."""
+    dead = [i for i in todo if DEAD_END in _names(i.get("labels"))]
+    fresh = [i for i in todo if DEAD_END not in _names(i.get("labels"))]
+    keep = fresh[:max(first - min(recheck, len(dead)), 0)]
+    return keep + dead[:first - len(keep)]
+
+
 def hydrate(numbers: list[int], repo: str | None, run=None, workers: int = 8) -> list[dict]:
     """Full {body, comments, ...} for each number, same order; an unreadable one is left out."""
     from concurrent.futures import ThreadPoolExecutor
@@ -661,7 +677,7 @@ def main(argv=None) -> int:
             print(f"gate_drops candidates: {exc}", file=sys.stderr)
             return 1
         todo = candidates(backlog)
-        full = hydrate([i["number"] for i in todo[:a.first]], a.repo)
+        full = hydrate([i["number"] for i in read_slice(todo, a.first)], a.repo)
         Path(a.out).write_text(json.dumps(fill_capped_comments(full, a.repo)))
         tiers = [t.rsplit("-", 1)[-1] for t in TIERS] + ["unranked"]
         by = {t: [] for t in tiers}
@@ -670,7 +686,7 @@ def main(argv=None) -> int:
             by[next((t for t, full in zip(tiers, TIERS) if full in names), "unranked")].append(i["number"])
         print(json.dumps({"out": a.out, "scanned": len(backlog), "skipped": len(backlog) - len(todo),
                           "by_tier": {t: len(v) for t, v in by.items()}, "written": len(full),
-                          "numbers": [i["number"] for i in full], "beyond_first": len(todo) - len(todo[:a.first])}))
+                          "numbers": [i["number"] for i in full], "beyond_first": len(todo) - len(full)}))
         return 0
     if a.cmd == "intake":
         try:

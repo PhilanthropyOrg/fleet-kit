@@ -46,6 +46,16 @@ def test_the_cli_writes_the_file_and_counts_each_tier(tmp_path, monkeypatch, cap
     assert [i["body"] for i in json.loads(out.read_text())] == ["b"]
 
 
+def test_fresh_items_fill_the_read_before_labelled_dead_ends():
+    dead = [_item(n, f"2026-09-0{n}", "fleet:priority-high", gate_drops.DEAD_END) for n in range(1, 6)]
+    fresh = [_item(n, "2026-10-01", "fleet:priority-medium") for n in (10, 11, 12)]
+    todo = gate_drops.candidates(dead + fresh)
+    assert [i["number"] for i in gate_drops.read_slice(todo, 5, recheck=2)] == [10, 11, 12, 1, 2]
+    # few fresh items: dead ends fill the rest; many fresh: only the recheck share is dead ends
+    assert [i["number"] for i in gate_drops.read_slice(todo, 8, recheck=2)] == [10, 11, 12, 1, 2, 3, 4, 5]
+    assert [i["number"] for i in gate_drops.read_slice(todo, 3, recheck=1)] == [10, 11, 1]
+
+
 def test_hydrate_keeps_order_and_leaves_out_an_unreadable_item():
     import json
     import subprocess
