@@ -2,6 +2,7 @@
 # dispatch_member.sh -- start one minion or nerd pass DETACHED from the caller (gru).
 #
 #   bash /fleet-kit/scripts/dispatch_member.sh minion --items <n1,n2,n3>     # returns at once
+#   bash /fleet-kit/scripts/dispatch_member.sh minion --item <n>             # a fix item, alone
 #   bash /fleet-kit/scripts/dispatch_member.sh nerd --task "lane=<lane> ..."  # returns at once
 #     (or prints `skipped nerd lane=<lane>: ...`, no pid, when its last full pass was quiet <4h ago)
 #   bash /fleet-kit/scripts/dispatch_member.sh --wait <pid> [<pid> ...]      # blocks <= 540s
@@ -23,7 +24,7 @@ KIT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 RUN_MEMBER="${FLEET_RUN_MEMBER:-$KIT_DIR/scripts/run_member.sh}"
 LOG_DIR="${FLEET_LOG_DIR:-/var/log/fleet-kit}"
 mkdir -p "$LOG_DIR" 2>/dev/null || true
-USAGE="usage: dispatch_member.sh minion --items <n,..> | nerd --task \"lane=...\" | --wait <pid> ..."
+USAGE="usage: dispatch_member.sh minion --items <n,..> | minion --item <n> | nerd --task \"lane=...\" | --wait <pid> ..."
 
 if [ "${1:-}" = "--wait" ]; then
   shift
@@ -42,8 +43,13 @@ fi
 
 member="${1:-}"
 case "$member" in
-  minion) [ "${2:-}" = "--items" ] && [ -n "${3:-}" ] || { echo "$USAGE" >&2; exit 2; }
-          tag="items${3//,/_}" ;;
+  # --item <n>: a fix item runs ALONE on its PR's branch (gru.md 2a-bis). gru typed it as the
+  # charter says and got exit 2 on 10 of 97 passes, 10-04..10-07, after its claims had landed.
+  minion) case "${2:-}" in
+            --items) [ -n "${3:-}" ] || { echo "$USAGE" >&2; exit 2; }; tag="items${3//,/_}" ;;
+            --item)  case "${3:-x}" in (*[!0-9]*) echo "$USAGE" >&2; exit 2 ;; esac; tag="item$3" ;;
+            *)       echo "$USAGE" >&2; exit 2 ;;
+          esac ;;
   nerd)   [ "${2:-}" = "--task" ] && [ -n "${3:-}" ] || { echo "$USAGE" >&2; exit 2; }
           tag="$(printf '%s' "$3" | sed -n 's/^lane=\([A-Za-z0-9_-]*\).*/\1/p')"; tag="lane-${tag:-x}" ;;
   *)      echo "$USAGE" >&2; exit 2 ;;

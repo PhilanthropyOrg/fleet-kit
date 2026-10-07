@@ -66,8 +66,26 @@ class DispatchMember(unittest.TestCase):
         finally:
             sleeper.kill()
 
+    def test_minion_item_runs_one_fix_item_alone(self):
+        out = subprocess.run(["bash", str(SCRIPT), "minion", "--item", "11601"], env=self.env,
+                             capture_output=True, text=True).stdout
+        self.assertIn("pid=", out)
+        self.assertIn("1 minion --item 11601", self._wait_done())
+        self.assertTrue(Path(self.d, "minion-item11601.dispatch.log").exists())
+
+    def test_claim_item_takes_several_numbers(self):
+        import json
+        stub = Path(self.d, "gh")
+        stub.write_text('#!/bin/sh\n[ "$2" = view ] && echo "{\\"number\\": $3, \\"title\\": \\"t$3\\", \\"body\\": \\"\\", \\"labels\\": []}"\nexit 0\n')
+        stub.chmod(0o755)
+        env = dict(self.env, PATH=f"{self.d}:{os.environ['PATH']}")
+        r = subprocess.run(["python3", str(HERE / "board_github.py"), "claim-item", "gru", "11", "12"],
+                           env=env, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual([i["id"] for i in json.loads(r.stdout)], [11, 12])
+
     def test_bad_usage_launches_nothing(self):
-        for args in (["minion"], ["minion", "--item", "1"], ["the-fixer", "--item", "1"], []):
+        for args in (["minion"], ["minion", "--item"], ["minion", "--item", "1,2"], ["the-fixer", "--item", "1"], []):
             r = subprocess.run(["bash", str(SCRIPT), *args], env=self.env, capture_output=True, text=True)
             self.assertEqual(r.returncode, 2, args)
         time.sleep(2.5)

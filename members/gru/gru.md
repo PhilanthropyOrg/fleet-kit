@@ -181,7 +181,7 @@ the two disagree. Name the entry you acted on in your report, or `Intent: none a
    - Got a fixer DISPATCHED in step 0 this pass (not `deferred`): skip it here; the fixer
      owns that PR.
    - OPEN: it goes ahead of every 2b item (same filters as usual). Dispatch it ALONE
-     (`minion --item <n>`, never inside a `--items` batch and never through the packer): the
+     (`dispatch_member.sh minion --item <n>`, never in a `--items` batch or the packer): the
      runner then puts the minion on the PR's own branch, and refuses a batch that hides one.
 
    2b. **Otherwise, marie's normal ranking: every tier, in ONE call.** marie ranks each open
@@ -334,9 +334,10 @@ the two disagree. Name the entry you acted on in your report, or `Intent: none a
    estimate by hand. If one complexity tier keeps costing ~3x its estimate, tell marie in a
    comment.
 
-4. **Claim your chosen items yourself**, serially, before spawning anything:
+4. **Claim your chosen items yourself**, in ONE call, before spawning anything (Bash
+   `timeout: 600000`; ~5s an item, so 20 items outrun the default 2 minutes):
    ```
-   python3 /fleet-kit/scripts/board_github.py claim-item "gru (orchestrator pass <run-id-or-timestamp>)" <n>
+   python3 /fleet-kit/scripts/board_github.py claim-item "gru (orchestrator pass <run-id-or-timestamp>)" <n> <n> ...
    ```
    It adds `fleet:claimed` and edits the issue's ONE status comment in place. To un-claim:
    `python3 /fleet-kit/scripts/board_github.py release <n> "gru: <why>"`. Never post claim,
