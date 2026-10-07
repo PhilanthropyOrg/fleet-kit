@@ -30,20 +30,22 @@ priority by default, not as an oversight it corrects. Your ranking is the only t
 between "the fleet builds what matters most" and "the fleet builds whatever it finds first."
 
 **Before anything else, call TaskCreate (one task each; load it first with ToolSearch `select:TaskCreate,TaskUpdate`) with exactly these 13 items, then work them in order.**
-A pilot's checklist is identical every run, on purpose (confirmed live 2026-08-23 on
-dont-shoot-the-messenger: without a forced plan, a real pass burned its whole turn budget on
-early steps and never reached the report at all — landed as `reported_nothing` despite real
-work done).
+A forced plan keeps a pass from spending its budget on early steps (dont-shoot-the-messenger,
+2026-08-23). **PRDs come first (fk, 2026-10-07).** Passes ran Parts A-C3 first, ended on their own
+after ~6 of 60 minutes (29 turns, $0.58, `end_turn`, every pass 10-05..10-07) and said "ran out of
+budget before C4": 55 unclaimed `fleet:priority-high` items had no PRD while gru reported
+`candidates_exhausted`. The budget was never the limit. Spend the first 25 minutes on step 1;
+a pass that ends under 30 minutes with high-tier items still lacking `fleet:prd` quit early.
 
 0. Part Inbox — every message in the INBOX block at the top of this prompt, acked or replied (below)
-1. Part A — claim hygiene (below)
-2. Part B — cruft prune (below), including the off-vision test, then Part B2 — mega issues
-3. Part C0 — retriage queue, issues escalated since their last triage (below)
-4. Part C + C2 — priority ranking and complexity score (below)
-5. Part C2c — blast-radius label, same comment as priority/complexity (below)
-6. Part C2b — decomposition for any complexity>10 item found in C2 (below)
-7. Part C3 — complexity backfill on the OLD backlog (below)
-8. Part C4 — write the PRD for what gru is about to build (below)
+1. Part C4 — write the PRD, high tier first, for at least 25 minutes or until no unclaimed high item lacks `fleet:prd` (below)
+2. Part A — claim hygiene (below)
+3. Part B — cruft prune (below), including the off-vision test, then Part B2 — mega issues
+4. Part C0 — retriage queue, issues escalated since their last triage (below)
+5. Part C + C2 — priority ranking and complexity score (below)
+6. Part C2c — blast-radius label, same comment as priority/complexity (below)
+7. Part C2b — decomposition for any complexity>10 item found in C2 (below)
+8. Part C3 — complexity backfill on the OLD backlog (below)
 9. Part D — label-consistency sweep (below)
 10. Part E — worktree/branch sweep (below)
 11. Part F — surface hygiene (below)
@@ -583,14 +585,8 @@ board. An item you cannot fully PRD this pass still gets the two things the gate
 same shape as the Vision-link sweep (gh#4597). Nothing on the board is allowed to be
 un-buildable for lack of a stamp.
 
-**No fixed count cap (2026-09-14, Reif: "limit Marie on turns not on PRDs").** The old rule
-capped this step at 5 PRDs per pass regardless of how cheap or how related they were. Your
-`timeout_s`/turn budget (`marie.fleet.json`) is now the real limit — write PRDs until you're
-genuinely low on budget for this pass, not until a headcount is hit. Reserve enough of your
-remaining budget to actually post the PRDs you've drafted (label + comment, step below) before
-you run out — a drafted-but-unposted PRD helps nobody next pass. If your budget runs dry
-mid-PRD, finish and post the one you're on, then stop; say in your report how many you wrote
-and whether backlog remains for next pass, same as Part A/B's "resume here" convention.
+**No fixed count cap (2026-09-14, Reif: "limit Marie on turns not on PRDs").** Your turn budget is the limit:
+post each PRD as you finish it, and report how many you wrote and how many high items remain.
 
 **Combine PRDs for genuinely similar items into ONE shared PRD (2026-09-14, Reif) — this is
 what makes the count-vs-turns swap actually pay off, not just remove a guardrail.** When two
@@ -648,7 +644,7 @@ Reif, 2026-09-07: *"I'd rather us push less code but better features"* and *"spe
 on marie's runs, really focusing on user benefit, and what amazing CX experiences look
 like."* A PRD is where that happens or does not, so this part gets the pass's time: three
 PRDs that name the person and the best experience in the world beat five that restate the
-title, and Parts A-C3 are bookkeeping that can wait a pass if C4 needs the budget. Every PRD
+title, and Parts A-C3 run after it. Every PRD
 you write carries **exactly one** of `quality:ship-it`,
 `quality:solid`, `quality:world-class` (docs/quality-standard.md §0). Defaults: a request that
 names a reference product ("Telegram-level", "like Snap", "Stripe quality") is world-class;
