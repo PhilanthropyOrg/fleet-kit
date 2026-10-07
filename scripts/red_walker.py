@@ -93,6 +93,17 @@ def expand_payload(raw: str | None) -> str | None:
     return raw
 
 
+# Navigation waits for the page's own HTML, not every subresource: on 10-06..10-07, 2-6 attacks
+# a pass came back BLOCKED on a 20s "load" timeout. Measured live 2026-10-07 on /990/?q=<payload>:
+# "load" 19-21s, "domcontentloaded" 11-15s. The console attack keeps "load", since errors that
+# fire late are what it looks for; it gets the same longer budget.
+NAV_TIMEOUT_MS = 45000
+
+
+def _goto(page, url, wait_until="domcontentloaded"):
+    return page.goto(url, timeout=NAV_TIMEOUT_MS, wait_until=wait_until)
+
+
 def _context(browser, cfg: Config, dims: dict):
     # A real UA: "/" and "/login" 403 Playwright's default "HeadlessChrome" UA even with the
     # bypass header, so attacks on them never reached the app (2026-10-04).
@@ -115,7 +126,7 @@ def _context(browser, cfg: Config, dims: dict):
 def _sign_in(page, cfg: Config, user: str):
     email = cfg.require(f"{user.upper()}_EMAIL")
     password = cfg.require(f"{user.upper()}_PASSWORD")
-    resp = page.goto(cfg.url("/login"), timeout=15000)
+    resp = _goto(page, cfg.url("/login"))
     if resp is not None and resp.status == 403:
         raise Blocked("login returned 403 (WAF challenge)", status=403)
     page.get_by_label(re.compile("e-?mail", re.I)).first.fill(email)
@@ -133,7 +144,7 @@ def _guard_403(resp):
 
 def run_reflection(page, cfg, attack, step):
     payload = expand_payload(step.get("payload")) or "<img src=x onerror=window.__redpwn=1>"
-    resp = page.goto(cfg.url(attack["target"]["path"] + "?q=" + payload), timeout=20000)
+    resp = _goto(page, cfg.url(attack["target"]["path"] + "?q=" + payload))
     _guard_403(resp)
     page.wait_for_timeout(1500)
     flagged = page.evaluate("() => !!window.__redpwn")
@@ -147,7 +158,7 @@ def run_reflection(page, cfg, attack, step):
 
 def run_overflow(page, cfg, attack, step):
     payload = expand_payload(step.get("payload")) or ("A" * 10000)
-    resp = page.goto(cfg.url(attack["target"]["path"] + "?q=" + payload[:6000]), timeout=25000)
+    resp = _goto(page, cfg.url(attack["target"]["path"] + "?q=" + payload[:6000]))
     _guard_403(resp)
     if resp is not None and resp.status >= 500:
         return True, f"status {resp.status} on an overlong query"
@@ -160,7 +171,7 @@ def run_overflow(page, cfg, attack, step):
 def run_param_range(page, cfg, attack, step):
     base = attack["target"]["path"].rstrip("/")
     for probe in ("NOT-AN-EIN", "0"):
-        resp = page.goto(cfg.url(f"{base}/{probe}"), timeout=20000)
+        resp = _goto(page, cfg.url(f"{base}/{probe}"))
         _guard_403(resp)
         status = resp.status if resp else 0
         body = page.evaluate("() => document.body.innerText.slice(0, 4000)")
@@ -172,7 +183,7 @@ def run_param_range(page, cfg, attack, step):
 def run_idor(page, cfg, attack, step):
     _sign_in(page, cfg, attack["target"].get("user", "alice"))
     url = cfg.require("FIXTURE_OTHER_ORG_ADMIN_URL")
-    resp = page.goto(cfg.url(url), timeout=20000)
+    resp = _goto(page, cfg.url(url))
     _guard_403(resp)
     status = resp.status if resp else 0
     path = urlsplit(page.url).path
@@ -187,7 +198,7 @@ def run_idor(page, cfg, attack, step):
 def run_double_submit(page, cfg, attack, step):
     _sign_in(page, cfg, attack["target"].get("user", "alice"))
     url = cfg.require("FIXTURE_CLAIM_URL")
-    resp = page.goto(cfg.url(url), timeout=20000)
+    resp = _goto(page, cfg.url(url))
     _guard_403(resp)
     submit = page.get_by_role("button", name=re.compile("claim|submit|confirm", re.I)).first
     submit.wait_for(state="visible", timeout=8000)
@@ -210,7 +221,7 @@ def run_double_submit(page, cfg, attack, step):
 def run_console(page, cfg, attack, step):
     errors = []
     page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
-    resp = page.goto(cfg.url(attack["target"]["path"]), timeout=20000)
+    resp = _goto(page, cfg.url(attack["target"]["path"]), wait_until="load")
     _guard_403(resp)
     try:
         box = page.get_by_role("searchbox").or_(page.get_by_label(re.compile("search", re.I))).first
