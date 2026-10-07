@@ -18,13 +18,27 @@ TEST_SLOT_N="${FLEET_TEST_SLOTS:-$(( $(nproc 2>/dev/null || echo 4) / 2 ))}"
 # up 17 times against 25 successes -- each give-up a retry that queued all over again.
 TEST_SLOT_WAIT_S="${FLEET_TEST_SLOT_WAIT_S:-900}"
 TEST_SLOT_PROGRESS_S="${FLEET_TEST_SLOT_PROGRESS_S:-30}"
+# 2026-10-07: the wait also stops where the pass clock leaves too little for the run itself.
+# 4 of 5 the-fixer timeouts that day were exactly 60 min, and the two traced ended inside a
+# verified_test.sh started 3 and 14 min before the kill: queued, ran, killed with the fix
+# committed and unpushed. A run holds its slot ~458s at p75, so with less than this reserve
+# left on $FLEET_PASS_DEADLINE (run_member.sh) nothing is queued and the caller is told why.
+TEST_SLOT_RUN_RESERVE_S="${FLEET_TEST_SLOT_RUN_RESERVE_S:-540}"
 
 # test_slot_acquire: holds one slot on fd 8 for the life of the caller's shell. Returns 0 with
-# a slot, 1 (after printing why) when none freed within TEST_SLOT_WAIT_S.
+# a slot, 1 (after printing why) when none freed within TEST_SLOT_WAIT_S or the pass clock.
 test_slot_acquire() {
-  local n="$TEST_SLOT_N" i start now next
+  local n="$TEST_SLOT_N" i start now next wait="$TEST_SLOT_WAIT_S" left=""
   mkdir -p "$TEST_SLOT_DIR" 2>/dev/null || true
   start=$(date +%s); next=$start
+  if [ -n "${FLEET_PASS_DEADLINE:-}" ] && [ "$FLEET_PASS_DEADLINE" -gt 0 ] 2>/dev/null; then
+    left=$(( FLEET_PASS_DEADLINE - start - TEST_SLOT_RUN_RESERVE_S ))
+    [ "$left" -lt "$wait" ] && wait="$left"
+  fi
+  if [ "$wait" -le 0 ]; then
+    echo "verified_test: PASS CLOCK -- $(( FLEET_PASS_DEADLINE - start ))s left on this pass, under the ${TEST_SLOT_RUN_RESERVE_S}s a test run needs. Nothing ran. Do not retry: commit what you have, comment the exact blocker on the PR or issue, and write your report now." >&2
+    return 1
+  fi
   while :; do
     for ((i = 0; i < n; i++)); do
       exec 8>"$TEST_SLOT_DIR/slot-$i.lock"
@@ -35,6 +49,10 @@ test_slot_acquire() {
       exec 8>&-
     done
     now=$(date +%s)
+    if [ -n "$left" ] && [ "$wait" -lt "$TEST_SLOT_WAIT_S" ] && [ $(( now - start )) -ge "$wait" ]; then
+      echo "verified_test: PASS CLOCK -- no test slot freed in ${wait}s, and the rest of this pass is too short to run the tests. Nothing ran. Do not retry: commit what you have, comment the exact blocker on the PR or issue, and write your report now." >&2
+      return 1
+    fi
     if [ $(( now - start )) -ge "$TEST_SLOT_WAIT_S" ]; then
       echo "verified_test: NO TEST SLOT -- all $n slots stayed busy for ${TEST_SLOT_WAIT_S}s (other passes' test runs). Nothing ran and no receipt was written. Re-run this same command; it queues again." >&2
       return 1
