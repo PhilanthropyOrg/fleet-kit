@@ -88,6 +88,43 @@ class TestSlots(unittest.TestCase):
         self.assertLess(took, 20)
         self.assertFalse(os.path.exists(self.log), "tests ran without a slot")
 
+    def test_a_pass_near_its_deadline_is_told_at_once_not_queued(self):
+        # 2026-10-07: the-fixer passes died at their 60 min kill inside a test run queued with
+        # 3-14 min left. Under the run reserve, verified_test.sh must refuse at once and say so.
+        d = _repo()
+        t = time.time()
+        r = subprocess.run(["bash", str(VT)], cwd=d, capture_output=True, text=True, timeout=60,
+                           env=self._env(d, FLEET_TEST_SLOTS="1",
+                                         FLEET_PASS_DEADLINE=str(int(time.time()) + 120)))
+        self.assertEqual(r.returncode, 75, r.stdout + r.stderr)
+        self.assertIn("PASS CLOCK", r.stderr)
+        self.assertLess(time.time() - t, 20)
+        self.assertFalse(os.path.exists(self.log), "tests ran with no time left to finish them")
+
+    def test_the_pass_clock_shortens_the_wait_for_a_busy_slot(self):
+        holder = subprocess.Popen(["bash", "-c", f'exec 8>"{self.slots}/slot-0.lock"; flock 8; sleep 30'])
+        try:
+            time.sleep(0.5)
+            d = _repo()
+            t = time.time()
+            r = subprocess.run(["bash", str(VT)], cwd=d, capture_output=True, text=True, timeout=60,
+                               env=self._env(d, FLEET_TEST_SLOTS="1", FLEET_TEST_SLOT_RUN_RESERVE_S="10",
+                                             FLEET_PASS_DEADLINE=str(int(time.time()) + 13)))
+            took = time.time() - t
+        finally:
+            holder.kill()
+        self.assertEqual(r.returncode, 75, r.stdout + r.stderr)
+        self.assertIn("PASS CLOCK -- no test slot freed", r.stderr)
+        self.assertLess(took, 15)
+
+    def test_a_far_deadline_changes_nothing(self):
+        d = _repo()
+        r = subprocess.run(["bash", str(VT)], cwd=d, capture_output=True, text=True, timeout=60,
+                           env=self._env(d, FLEET_TEST_SLOTS="1",
+                                         FLEET_PASS_DEADLINE=str(int(time.time()) + 3600)))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("got test slot 1/1", r.stdout)
+
     def test_the_wait_plus_a_typical_run_fits_one_minion_bash_call(self):
         # 2026-09-29, 6h live on dino: runs held a slot p75 458s / p90 743s, and a 600s wait gave
         # up 17 times against 25 successes. The wait must outlast a p90 hold, and the wait plus a
