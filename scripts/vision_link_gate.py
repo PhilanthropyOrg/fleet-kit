@@ -129,7 +129,19 @@ def _classify_value(raw: str) -> tuple[str, str]:
     low = raw.lower()
     if any(k in low for k in kr_ids()):
         return STATUS_LINKED, raw
+    # jefe msg#964: Reif's own session files "KR 3,000 claimed orgs by 2026-12-31" (14 issues
+    # 10-02..10-05; 6 parked in needs-spec 5 days). A value carrying every figure of the
+    # objective's own label (its target and its date) names the objective; vaguer prose does not.
+    if _restates_objective(low):
+        return STATUS_LINKED, raw
     return STATUS_MISSING, raw
+
+
+def _restates_objective(low: str) -> bool:
+    import okr
+    label = (okr.load().get("objective") or {}).get("label") or ""
+    figures = re.findall(r"\d[\d,.-]*\d|\d", label)
+    return bool(figures) and all(f in low for f in figures)
 
 
 REIF_ASK_LABELS = ("fleet:reif-priority", "fleet:user-asked")

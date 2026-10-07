@@ -1330,6 +1330,10 @@ def _vision_link_gate_eligibility_rule():
     # matcher only recognized the maintenance token before a " -- "/" — " dash separator.
     assert vlg.classify_candidate(
         "Vision-link: none (fleet guardrail/maintenance).", [])[0] == vlg.STATUS_MAINTENANCE
+    # jefe msg#964: restating the objective's target AND date names it; the target alone does not.
+    assert vlg.classify_candidate("Vision-link: KR 3,000 claimed orgs by 2026-12-31", [])[0] == \
+        vlg.STATUS_LINKED
+    assert vlg.classify_candidate("Vision-link: helps reach 3,000 orgs", [])[0] == vlg.STATUS_MISSING
     status, raw = vlg.classify_candidate("just a bug report", [{"body": "claimed-by: gru"}])
     assert status == vlg.STATUS_MISSING and raw is None
 
