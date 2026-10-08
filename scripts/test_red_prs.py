@@ -268,6 +268,25 @@ class Detector(unittest.TestCase):
         self.assertFalse(rows[1]["review_blocked"])
         self.assertEqual([r["number"] for r in red_prs.plan(rows, {}, NOW, 6)["due"]], [22, 21, 20])
 
+    def test_merge_ready_conflict_is_not_exhausted_by_the_all_content_total(self):
+        # 2026-10-08 11:30Z: #11569 (armed, review-green, DIRTY) showed `exhausted` with
+        # total=6, all six passes 60-second quits on the old false GREEN. The all-content cap
+        # is for PRs the fixer cannot land; a merge of main is the cheapest landing there is.
+        green = pr(number=21, branch="member/minion-item3-1-2", checks=[check("test"), check("lint")],
+                   commits=[commit("w", 400, "e" * 40)])
+        green["mergeStateStatus"] = "DIRTY"
+        red = pr(number=20, branch="member/minion-item2-1-2", checks=self.RED_LINT,
+                 commits=[commit("w", 900, "f" * 40)])
+        rows = [red_prs.describe(green, {7000}, NOW), red_prs.describe(red, {7000}, NOW)]
+        ledger = {"21": {"content": "old", "attempts": 1, "last": 0, "total": red_prs.MAX_TOTAL},
+                  "20": {"content": "old", "attempts": 1, "last": 0, "total": red_prs.MAX_TOTAL}}
+        out = red_prs.plan(rows, ledger, NOW, 6)
+        self.assertEqual([r["number"] for r in out["due"]], [21])
+        self.assertEqual(out["exhausted"], [20])
+        # the same conflict content tried MAX_ATTEMPTS times is still exhausted: no endless merges
+        ledger["21"] = {"content": "e" * 40, "attempts": red_prs.MAX_ATTEMPTS, "last": 0, "total": 9}
+        self.assertEqual(red_prs.plan(rows, ledger, NOW, 6)["exhausted"], [21, 20])
+
     def test_items_parse_from_branch(self):
         self.assertEqual(red_prs.items_of("member/minion-item7942_7950_7948-5046-1790343860"),
                          [7942, 7950, 7948])

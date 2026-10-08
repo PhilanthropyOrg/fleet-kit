@@ -217,9 +217,14 @@ def effective(entry: dict | None, killed: list[float]) -> dict | None:
     return e
 
 
-def verdict(entry: dict | None, content: str, now: float) -> str:
-    """'go', 'recent' or 'exhausted' for sending one more fixer at this content. Pure."""
-    if entry and int(entry.get("total", 0)) >= MAX_TOTAL:
+def verdict(entry: dict | None, content: str, now: float, merge_ready: bool = False) -> str:
+    """'go', 'recent' or 'exhausted' for sending one more fixer at this content. Pure.
+    `merge_ready` (a green, review-passed PR that only needs main merged in): the all-content
+    total does not hold it. 2026-10-08: #11569 sat armed and CONFLICTING with total=6, every
+    one of those six passes a 60-second quit on the old false GREEN (fleet-kit #1612); the
+    cap meant for PRs the fixer cannot land kept it from the one merge that lands it. The
+    per-content attempts still cap a conflict the fixer cannot resolve."""
+    if entry and int(entry.get("total", 0)) >= MAX_TOTAL and not merge_ready:
         return "exhausted"
     if not entry or entry.get("content") != content:
         return "go"
@@ -264,7 +269,7 @@ def plan(rows: list[dict], ledger: dict, now: float, limit: int,
                                -r["minutes_since_real_push"]))
     for r in wanted:
         v = verdict(effective(ledger.get(str(r["number"])), (killed or {}).get(r["number"], [])),
-                    r["content"], now)
+                    r["content"], now, merge_ready=merge_ready(r))
         if v == "go" and r.get("kind") == "resume" and len(resume) < resume_limit:
             resume.append(r)
         elif v == "go" and r.get("kind") != "resume" and len(due) < limit:
@@ -367,7 +372,8 @@ def main(argv: list[str] | None = None) -> int:
         content = info["last_real_commit"] or info["head"]
         with _locked_ledger(ledger_path(a.kit)) as box:
             kills = killed_fixer_runs(ledger_path(a.kit).parent).get(a.pr, [])
-            v = verdict(effective(box["data"].get(str(a.pr)), kills), content, now)
+            v = verdict(effective(box["data"].get(str(a.pr)), kills), content, now,
+                        merge_ready=info["state"] == "CONFLICT" and not info.get("review_blocked"))
             if v != "go":
                 e = effective(box["data"].get(str(a.pr)), kills) or {}
                 print(f"red_prs: SKIP PR #{a.pr} -- {v}: {e.get('attempts')} fixer pass(es) ({e.get('total', '?')} in all) already "
