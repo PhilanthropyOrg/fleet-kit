@@ -15,7 +15,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-import ci_minutes  # noqa: E402
+import ci_minutes
 
 
 def _mandate_block() -> str:
@@ -64,7 +64,7 @@ class MandateTests(unittest.TestCase):
 
     def test_ci_minutes_fails_open_without_gh(self):
         env = {**os.environ, "PATH": "/nonexistent"}
-        out = subprocess.run([sys.executable, str(HERE / "ci_minutes.py")], capture_output=True, text=True, env=env)
+        out = subprocess.run([sys.executable, str(HERE / "ci_minutes.py")], capture_output=True, text=True, env=env, check=False)
         self.assertEqual(out.returncode, 0)
         self.assertIn("today=unavailable", out.stdout)
 
