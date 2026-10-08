@@ -100,6 +100,25 @@ class Classify(unittest.TestCase):
         status = {"__typename": "StatusContext", "context": "fleet-code-review", "state": "FAILURE"}
         self.assertEqual(pr_ci_wait.classify(pr(checks=GREEN + [status]))["state"], "BLOCK")
 
+    def test_green_but_conflicting_is_conflict_not_green(self):
+        # 2026-10-08 06:49Z: the fixer sent to #11604 (armed, review green, CONFLICTING since
+        # 10-07) ran `pr_ci_wait.py 11604 --no-wait`, read "GREEN (auto-merge armed)", wrote
+        # "nothing to fix" and quit in 60s. Four such PRs sat a day. GitHub runs no checks on a
+        # DIRTY PR, so green checks there are stale: the state is CONFLICT and the fix is a
+        # merge of main.
+        dirty = pr(checks=GREEN)
+        dirty["mergeStateStatus"] = "DIRTY"
+        info = pr_ci_wait.classify(dirty)
+        self.assertEqual(info["state"], "CONFLICT")
+        text = pr_ci_wait.render(info, None, with_logs=False)
+        self.assertIn("CONFLICT", text)
+        self.assertIn("git merge origin/main", text)
+        self.assertEqual(pr_ci_wait.EXIT["CONFLICT"], 1)
+        # A red PR that is also dirty stays RED: the failing check is the first thing to read.
+        red = pr(checks=[check("test"), check("lint", "FAILURE")])
+        red["mergeStateStatus"] = "DIRTY"
+        self.assertEqual(pr_ci_wait.classify(red)["state"], "RED")
+
     def test_last_real_commit_skips_sync_merges(self):
         cs = [commit("Real work", 90, "a" * 40), commit("Merge branch 'main' into x", 10),
               commit("Merge remote-tracking branch 'origin/main' into x", 5)]
