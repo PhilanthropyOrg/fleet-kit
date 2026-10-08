@@ -45,6 +45,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from items_arg import load_items  # noqa: E402
+import build_lane_rule  # noqa: E402
 
 # marie's ladder. Base and anchor must match members/marie/marie.md's Part C2 table exactly --
 # if one moves without the other, gru silently mis-sizes every item it schedules.
@@ -411,6 +412,13 @@ def _run_pack_batches(a) -> int:
     except ValueError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
+    # 2026-10-08 (Reif: "one per hour"): FLEET_MINION_MAX_PER_HOUR caps the batches this pass
+    # may spawn by what the last hour already started (runs.jsonl); the rest are `deferred`.
+    cap = build_lane_rule.hour_cap()
+    if cap:
+        runs = Path(os.environ.get("FLEET_LOG_DIR") or Path.home() / "Library/Logs/fleet-kit") / "runs.jsonl"
+        started = build_lane_rule.started_in_window(runs.read_text().splitlines()) if runs.exists() else 0
+        result = build_lane_rule.cap_batches(result, build_lane_rule.remaining(cap, started), cap, started)
     print(json.dumps(result, indent=2))
     return 0
 

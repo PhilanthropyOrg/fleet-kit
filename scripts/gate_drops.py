@@ -41,8 +41,10 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -54,6 +56,7 @@ import quality_gate  # noqa: E402
 import vision_link_gate  # noqa: E402
 from board_github import LABEL_CLAIMED, LABEL_PROD_ACCESS, NOT_FOR_MINIONS, blocked_by_numbers  # noqa: E402
 from items_arg import HELP as ITEMS_HELP, load_items  # noqa: E402
+import build_lane_rule  # noqa: E402
 
 PREFIX = os.environ.get("FLEET_LABEL_PREFIX", "fleet:")
 NEEDS_SPEC = f"{PREFIX}needs-spec"
@@ -528,14 +531,126 @@ CANDIDATE_FIELDS = "number,title,labels,body,comments,createdAt"
 TIERS = (f"{PREFIX}priority-high", f"{PREFIX}priority-medium", LOW)
 
 
-def candidates(backlog: list[dict]) -> list[dict]:
-    """Pure. Open backlog items gru may build, high -> medium -> low -> unranked, oldest first."""
+BUILT_HOURS = 24.0
+_PR_REF = re.compile(r"\b(?:Part of|Closes|Fixes|Resolves|Built in|Builds)\s+#(\d+)", re.IGNORECASE)
+
+
+def built_by_prs(prs: list[dict], now: float, hours: float = BUILT_HOURS) -> dict[int, str]:
+    """Pure. item -> why, for every item an open PR or one merged in the last `hours` already
+    builds (branch item ids, or 'Part of #N' in the body). 2026-10-08: the hour's one minion
+    slot went three times to items like that (#11634 under open #11741; #11712/#11713 under
+    #11739, merged 20 min earlier and waiting on deploy and the prod walk before the issue
+    closes); each minion read the PRs, built nothing and burned the slot."""
+    import red_prs
+    out: dict[int, str] = {}
+    for pr in prs:
+        state = (pr.get("state") or "").upper()
+        if state == "OPEN":
+            why = f"PR #{pr.get('number')} open"
+        elif state == "MERGED":
+            t = _ts(pr.get("mergedAt") or "")
+            if t is None or now - t > hours * 3600:
+                continue
+            why = f"PR #{pr.get('number')} merged {time.strftime('%Y-%m-%d %H:%MZ', time.gmtime(t))}"
+        else:
+            continue
+        nums = set(red_prs.items_of(pr.get("headRefName") or ""))
+        nums |= {int(m) for m in _PR_REF.findall(pr.get("body") or "")}
+        for n in nums:
+            out.setdefault(n, why)
+    return out
+
+
+TRIED_HOURS = 24.0
+
+
+def tried_by_runs(runs: list[dict], now: float, hours: float = TRIED_HOURS) -> dict[int, str]:
+    """Pure. item -> why, for every item a minion already tried in the last `hours` and left
+    with no commit and no PR (status ok or quiet, commits 0, no checkpoint_pr). 2026-10-08,
+    after built_by_prs landed: the hour's one slot went to #10032+#10034, which two minions had
+    already read that day and dropped as 'too wide, needs slicing'; the third read the same and
+    opened nothing. A re-read a few hours later finds the same item; marie must slice it first."""
+    out: dict[int, str] = {}
+    import red_prs
+    for r in runs:
+        if (r.get("member") or "") != "minion" or (r.get("kind") or "llm") != "llm":
+            continue
+        if (r.get("status") or "") not in ("ok", "quiet"):
+            continue
+        if (r.get("commits") or 0) or r.get("checkpoint_pr") or r.get("pr"):
+            continue
+        t = r.get("recorded_at")
+        if not isinstance(t, (int, float)) or now - t > hours * 3600:
+            continue
+        why = f"minion tried {time.strftime('%Y-%m-%d %H:%MZ', time.gmtime(t))}, no commit, no PR"
+        for n in red_prs.items_of(f"minion-item{r.get('item_id') or ''}-0-0"):
+            out.setdefault(n, why)
+    return out
+
+
+def fetch_minion_runs(now: float, hours: float = TRIED_HOURS, db_path=None) -> list[dict]:
+    """Minion llm runs that ended in the last `hours`, from fleet.db. Fails open ([])."""
+    try:
+        import fleet_db
+        conn = fleet_db.connect(Path(db_path) if db_path else None)
+        rows = conn.execute(
+            "select member, kind, item_id, status, commits, checkpoint_pr, pr, recorded_at from runs "
+            "where member='minion' and recorded_at > ?", (now - hours * 3600,)).fetchall()
+        conn.close()
+    except Exception as exc:  # noqa: BLE001 -- a missing or locked db must not stop the pass
+        print(f"gate_drops candidates: runs read failed ({exc}); tried items not dropped", file=sys.stderr)
+        return []
+    keys = ("member", "kind", "item_id", "status", "commits", "checkpoint_pr", "pr", "recorded_at")
+    return [dict(zip(keys, row)) for row in rows]
+
+
+def _ts(iso: str) -> float | None:
+    try:
+        return datetime.datetime.strptime(iso[:19], "%Y-%m-%dT%H:%M:%S").replace(
+            tzinfo=datetime.timezone.utc).timestamp()
+    except ValueError:
+        return None
+
+
+def fetch_prs_touching(repo: str | None, now: float, run=None) -> list[dict]:
+    """Open PRs plus those merged in the last day, light fields, one gh call. Fails open ([])."""
+    since = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now - BUILT_HOURS * 3600))
+    cmd = ["gh", "pr", "list", "--state", "all", "--limit", "200", "--search", f"updated:>={since}",
+           "--json", "number,state,headRefName,body,mergedAt"]
+    if repo:
+        cmd += ["--repo", repo]
+    try:
+        r = (run or _gh)(cmd)
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        print(f"gate_drops candidates: PR read failed ({exc}); built items not dropped", file=sys.stderr)
+        return []
+    if r.returncode != 0:
+        print(f"gate_drops candidates: PR read failed ({(r.stderr or '').strip()[:120]}); built items not dropped",
+              file=sys.stderr)
+        return []
+    try:
+        return json.loads(r.stdout or "[]")
+    except ValueError:
+        return []
+
+
+def candidates(backlog: list[dict], only_labels: list[str] | None = None,
+               built: dict[int, str] | None = None) -> list[dict]:
+    """Pure. Open backlog items gru may build, high -> medium -> low -> unranked, oldest first.
+    `only_labels` (FLEET_BUILD_ONLY_LABELS, 2026-10-08): when given, an item must carry one of
+    them or it is not a candidate at all -- gru never claims it. See build_lane_rule.py.
+    `built` (built_by_prs, and tried_by_runs): items a PR already builds, or a minion already
+    tried today and left with no commit and no PR, are not candidates either."""
     skip = INTAKE_SKIP | {PARKED}
+    want = set(only_labels or ())
+    held = set(built or {})
 
     def tier(i):
         names = _names(i.get("labels"))
         return next((k for k, t in enumerate(TIERS) if t in names), len(TIERS))
-    todo = [i for i in backlog if not set(_names(i.get("labels"))) & skip]
+    todo = [i for i in backlog if not set(_names(i.get("labels"))) & skip
+            and (not want or want & set(_names(i.get("labels"))))
+            and i.get("number") not in held]
     return sorted(todo, key=lambda i: (tier(i), i.get("createdAt") or ""))
 
 
@@ -676,7 +791,14 @@ def main(argv=None) -> int:
         except (RuntimeError, ValueError, subprocess.TimeoutExpired) as exc:
             print(f"gate_drops candidates: {exc}", file=sys.stderr)
             return 1
-        todo = candidates(backlog)
+        only = build_lane_rule.allowed_labels()
+        built = built_by_prs(fetch_prs_touching(a.repo, time.time()), time.time())
+        tried = tried_by_runs(fetch_minion_runs(time.time()), time.time())
+        held = {**tried, **built}
+        todo = candidates(backlog, only, held)
+        built_dropped = {i["number"]: built[i["number"]] for i in candidates(backlog, only) if i["number"] in built}
+        tried_dropped = {i["number"]: tried[i["number"]] for i in candidates(backlog, only)
+                         if i["number"] in tried and i["number"] not in built}
         full = hydrate([i["number"] for i in read_slice(todo, a.first)], a.repo)
         Path(a.out).write_text(json.dumps(fill_capped_comments(full, a.repo)))
         tiers = [t.rsplit("-", 1)[-1] for t in TIERS] + ["unranked"]
@@ -685,6 +807,8 @@ def main(argv=None) -> int:
             names = _names(i.get("labels"))
             by[next((t for t, full in zip(tiers, TIERS) if full in names), "unranked")].append(i["number"])
         print(json.dumps({"out": a.out, "scanned": len(backlog), "skipped": len(backlog) - len(todo),
+                          "lane_rule": only, "lane_rule_dropped": (len(candidates(backlog)) - len(candidates(backlog, only))) if only else 0,
+                          "built_dropped": built_dropped, "tried_dropped": tried_dropped,
                           "by_tier": {t: len(v) for t, v in by.items()}, "written": len(full),
                           "numbers": [i["number"] for i in full], "beyond_first": len(todo) - len(full)}))
         return 0

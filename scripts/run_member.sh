@@ -140,6 +140,29 @@ if [ "$MEMBER" = "minion" ] && [ -n "${RAW_ITEMS:-}" ] && [ "${RAW_ITEMS#*,}" !=
   fi
 fi
 
+# 2026-10-08 (Reif: "only build fixes for issues, and then the one funnel thing we need -
+# orgverify ... cut the prs way down, one per hour"): the instance's build lane rule and hour
+# cap, enforced at dispatch so no prompt path (2a reif-priority, 8b standing lanes) builds
+# around them. gate_drops.py candidates and fanout.py batches apply the same two dials
+# earlier; this is the backstop. Both unset = nothing changes. See scripts/build_lane_rule.py.
+if [ "$MEMBER" = "minion" ] && [ -n "${RAW_ITEMS:-${ITEM:-}}" ] && [ -n "${FLEET_BUILD_ONLY_LABELS:-}" ]; then
+  OFF_LANE=$(python3 "$KIT_DIR/scripts/build_lane_rule.py" check --items "${RAW_ITEMS:-$ITEM}" --repo "$REPO" 2>/dev/null)
+  if [ -n "$OFF_LANE" ]; then
+    echo "FATAL: minion item(s) $OFF_LANE carry none of FLEET_BUILD_ONLY_LABELS=$FLEET_BUILD_ONLY_LABELS. The instance builds only those lanes now; release the item (board_github.py release) and leave it for marie." >&2
+    exit 2
+  fi
+fi
+if [ "$MEMBER" = "minion" ] && [ "${FLEET_MINION_MAX_PER_HOUR:-0}" -gt 0 ] 2>/dev/null; then
+  # reserve = count + take the slot under one lock; a bare count raced (4 starts in 11s, 10-08).
+  STARTED_HOUR=$(python3 "$KIT_DIR/scripts/build_lane_rule.py" reserve --runs "$LOG_DIR/runs.jsonl" \
+    --ledger "$LOG_DIR/minion_hour_starts.log" --cap "$FLEET_MINION_MAX_PER_HOUR" 2>/dev/null)
+  RESERVE_RC=$?
+  if [ "$RESERVE_RC" -eq 3 ]; then
+    echo "FATAL: $STARTED_HOUR minion(s) already started in the last hour; FLEET_MINION_MAX_PER_HOUR=$FLEET_MINION_MAX_PER_HOUR. Release the item(s) and dispatch next pass." >&2
+    exit 2
+  fi
+fi
+
 # Structured mirror of a dispatcher's `lane=<name>` --task prefix (nerd.md's contract with
 # datta). Extracted here, once, rather than left for every consumer to re-parse free text --
 # datta's own self-critique flagged repeated turns lost to fragile keyword-matching of
@@ -214,6 +237,12 @@ if [ "$MEMBER" = "nerd" ] && [ -n "$LANE" ] && [ -n "${REPO:-}" ]; then
       log "nerd lane validation: $NERD_LANE_REGISTRY_FILE found but yielded no REGISTRY lanes -- falling back to fleet-kit list ($NERD_FLEETKIT_LANES)"
     fi
   fi
+fi
+# The operator's FLEET_STANDING_LANES are canonical too: gru step 8b dispatches a nerd to each
+# one every pass, so rejecting them left the top-weighted KR's lane (orgverify, 2026-10-08)
+# with no finder at all.
+if [ "$MEMBER" = "nerd" ] && [ -n "${FLEET_STANDING_LANES:-}" ]; then
+  NERD_CANONICAL_LANES="$NERD_CANONICAL_LANES $(printf '%s' "$FLEET_STANDING_LANES" | tr ',' ' ')"
 fi
 if [ "$MEMBER" = "nerd" ] && [ -n "$LANE" ]; then
   case " $NERD_CANONICAL_LANES " in

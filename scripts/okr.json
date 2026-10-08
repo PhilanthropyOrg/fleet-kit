@@ -7,6 +7,11 @@
   },
   "key_results": [
     {
+      "id": "okr.orgverify",
+      "label": "OrgVerify: approved orgs that come back, start, prove and earn the badge (the ladder in /api/signals/funnel)",
+      "metric": null
+    },
+    {
       "id": "okr.traffic",
       "label": "Traffic: weekly search-driven visits to org pages",
       "metric": null

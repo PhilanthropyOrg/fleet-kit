@@ -100,6 +100,25 @@ class Classify(unittest.TestCase):
         status = {"__typename": "StatusContext", "context": "fleet-code-review", "state": "FAILURE"}
         self.assertEqual(pr_ci_wait.classify(pr(checks=GREEN + [status]))["state"], "BLOCK")
 
+    def test_green_but_conflicting_is_conflict_not_green(self):
+        # 2026-10-08 06:49Z: the fixer sent to #11604 (armed, review green, CONFLICTING since
+        # 10-07) ran `pr_ci_wait.py 11604 --no-wait`, read "GREEN (auto-merge armed)", wrote
+        # "nothing to fix" and quit in 60s. Four such PRs sat a day. GitHub runs no checks on a
+        # DIRTY PR, so green checks there are stale: the state is CONFLICT and the fix is a
+        # merge of main.
+        dirty = pr(checks=GREEN)
+        dirty["mergeStateStatus"] = "DIRTY"
+        info = pr_ci_wait.classify(dirty)
+        self.assertEqual(info["state"], "CONFLICT")
+        text = pr_ci_wait.render(info, None, with_logs=False)
+        self.assertIn("CONFLICT", text)
+        self.assertIn("git merge origin/main", text)
+        self.assertEqual(pr_ci_wait.EXIT["CONFLICT"], 1)
+        # A red PR that is also dirty stays RED: the failing check is the first thing to read.
+        red = pr(checks=[check("test"), check("lint", "FAILURE")])
+        red["mergeStateStatus"] = "DIRTY"
+        self.assertEqual(pr_ci_wait.classify(red)["state"], "RED")
+
     def test_last_real_commit_skips_sync_merges(self):
         cs = [commit("Real work", 90, "a" * 40), commit("Merge branch 'main' into x", 10),
               commit("Merge remote-tracking branch 'origin/main' into x", 5)]
@@ -231,6 +250,23 @@ class Detector(unittest.TestCase):
                 for n, i, age in [(10, 1, 400), (11, 7000, 5), (12, 2, 900)]]
         self.assertEqual([r["number"] for r in red_prs.plan(rows, {}, NOW, 6)["due"]], [11, 12, 10])
         self.assertEqual(len(red_prs.plan(rows, {}, NOW, 1)["due"]), 1)
+
+    def test_merge_ready_conflict_goes_before_other_red(self):
+        # 2026-10-08 live: #11604 and #11717 were armed, review-green and only CONFLICTING since
+        # 10-07, yet got no fixer in 24h while older review-blocked PRs took every slot. A green
+        # PR that only needs a merge of main is the cheapest landing there is: it goes first,
+        # after Reif-priority.
+        green = pr(number=21, branch="member/minion-item3-1-2", checks=[check("test"), check("lint")],
+                   commits=[commit("w", 400)])
+        green["mergeStateStatus"] = "DIRTY"
+        rows = [red_prs.describe(pr(number=20, branch="member/minion-item2-1-2", checks=self.RED_LINT,
+                                    commits=[commit("w", 900)]), {7000}, NOW),
+                red_prs.describe(green, {7000}, NOW),
+                red_prs.describe(pr(number=22, branch="member/minion-item7000-1-2", checks=self.RED_LINT,
+                                    commits=[commit("w", 5)]), {7000}, NOW)]
+        self.assertEqual(rows[1]["state"], "CONFLICT")
+        self.assertFalse(rows[1]["review_blocked"])
+        self.assertEqual([r["number"] for r in red_prs.plan(rows, {}, NOW, 6)["due"]], [22, 21, 20])
 
     def test_items_parse_from_branch(self):
         self.assertEqual(red_prs.items_of("member/minion-item7942_7950_7948-5046-1790343860"),

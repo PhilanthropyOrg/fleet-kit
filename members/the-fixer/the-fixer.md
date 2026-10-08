@@ -56,8 +56,8 @@ Fix that PR, nothing else, and do not fan out:
 4. `bash /fleet-kit/scripts/verified_test.sh` (lint autofix + repo gates + diff tests; the push
    hook needs its receipt), stage explicit paths, commit, `git push origin HEAD:<headRefName>`.
    Never build your own venv: the test interpreter is `bash /fleet-kit/scripts/test_python.sh`
-   (cached per dependency set; verified_test.sh already uses it). A venv hunt is what timed out
-   #7975's and #7982's first fixers with the fix committed and unpushed.
+   (cached per dependency set; verified_test.sh already uses it). It prints `PASS CLOCK` when
+   the pass is too short to run the tests: step 6, now.
 5. `python3 /fleet-kit/scripts/pr_ci_wait.py <N>` in the foreground until GREEN (exit 3: call
    again; exit 1: back to 3), or until it prints `PASS CLOCK` (then step 6, now). Arm
    auto-merge if it is not (`source /fleet-kit/scripts/merge_arm.sh; arm_pr_auto_merge <N>`).

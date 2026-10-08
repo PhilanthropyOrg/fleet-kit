@@ -22,6 +22,15 @@ why a rule exists, in docs/charter-history/gru.md; open it only when a rule look
 work: what Reif said he wants, and what he said not to build, outranks marie's ranking when
 the two disagree. Name the entry you acted on in your report, or `Intent: none applied`.
 
+**Build lane rule (2026-10-08, Reif: "only build fixes for issues, and then the one funnel
+thing we need - orgverify ... one per hour - big moves").** When `FLEET_BUILD_ONLY_LABELS` is
+set, every item you claim -- 2a, 2a-bis, 2b, 8b alike -- must carry one of those labels;
+`gate_drops.py candidates` already drops the rest (and, since 2026-10-08, every item an open PR or a PR merged in the last day already builds: `built_dropped` names each with its PR, and every item a minion already tried today and left with no commit and no PR: `tried_dropped` names each with the run time; do not re-read or re-dispatch either kind, marie slices them) and `run_member.sh` refuses any that slips
+through (FATAL, one second). When `FLEET_MINION_MAX_PER_HOUR` is set, `fanout.py batches`
+returns only the batches the hour still has room for; spawn exactly those, release the
+`deferred`. Never work around either dial. Report one line:
+`lane rule: <labels or none> · hour cap <started>/<cap>`.
+
 **Before anything else, call TaskCreate (load it first with ToolSearch `select:TaskCreate,TaskUpdate`) with exactly these 3 items covering steps 0-10, then work them in order:** `Steps 0-1: red PRs, allowance`, `Steps 2-7: gate, pack, claim, dispatch, read results`, `Steps 8-10: lanes, asks, report`. One TaskUpdate when a group closes, none per step: the plan gets a pass to its report (H§1); per-step tasks spent ~15 of ~34 tool calls (H§1b).
 
 0. **Your own red PRs first: send fixers, THEN build.** A red PR holds spent turns and blocks
@@ -32,7 +41,8 @@ the two disagree. Name the entry you acted on in your report, or `Intent: none a
    python3 /fleet-kit/scripts/red_prs.py due
    ```
    `due` is already ordered and capped: red or review-BLOCKed PRs of fleet:reif-priority
-   items at once, then any other fleet PR red with no real push for 60+ minutes. Dispatch a
+   items at once, then green review-passed PRs that are only CONFLICTING (one merge of main
+   lands them), then any other fleet PR red with no real push for 60+ minutes. Dispatch a
    fixer to EVERY entry in ONE call, which returns at once:
    ```
    bash /fleet-kit/scripts/dispatch_fixer.sh <PR> <PR> ...
@@ -416,6 +426,9 @@ the two disagree. Name the entry you acted on in your report, or `Intent: none a
    - **Find:** in step 9, dispatch a nerd to every standing lane FIRST, before worst-first
      ranking spends the remaining nerd slots.
    - Report one line per standing lane: `lane · built #N (or none open) · nerd filed #N`.
+   - **The hour's plan (gh#11787):** when `NORTH.md` has a `## This hour` block, the
+     `orgverify` lane's item is the one marie ranked `fleet:priority-high` for that step (her
+     `plan:` line); it goes into this pass's batch before any other lane item.
    Unset or empty: no standing lanes. The allowance still wins: no headroom, they wait.
 
 9. **Lane coverage: spawn nerd on demand (folded from datta, fk#1195).** Runs once per pass,

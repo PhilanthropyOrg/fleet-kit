@@ -58,9 +58,14 @@ NONE_WORDS = (r"\bci\b", r"\bworkflow", r"\bdeploy", r"\bfleet", r"\brunner", r"
               r"\binventory", r"\bretire", r"\breview\b", r"\bmerge queue", r"\bpromote", r"\bpytest",
               r"\bpostgres", r"\bhack-solo", r"\bblacksmith", r"\bgithub-hosted")
 KR_WORDS: list[tuple[str, tuple[str, ...]]] = [
+    # gh#11787: the ladder after the claim is its own KR; checked first, so "verified badge"
+    # lands here and not on conversion.
+    ("okr.orgverify", (r"\borg ?verify", r"\bbadge", r"\bproof", r"\bprove", r"\battest", r"\bsite code",
+                       r"\bdomain (?:e-?)?mail", r"\bsigned statement", r"\bid check", r"\bverified sheet",
+                       r"\bsuperpage")),
     ("okr.conversion", (r"\bclaim", r"\bverif", r"\bhq\b", r"\bowner", r"\bonboard", r"\bsign-?in\b", r"\bmagic",
-                        r"\bbadge", r"\bapprov", r"\bheld question", r"\bupload", r"\borg console", r"\binvite",
-                        r"\battest", r"\bwelcome")),
+                        r"\bapprov", r"\bheld question", r"\bupload", r"\borg console", r"\binvite",
+                        r"\bwelcome")),
     ("okr.clicks", (r"\bcta\b", r"\bfollow", r"\bscout\b", r"\borg page", r"\breport page", r"/990/report",
                     r"\bcontact", r"\bperson page", r"\bprofile", r"\bsalar", r"\bofficer", r"\bboard member",
                     r"\broster", r"\binquir", r"\bmessag")),
@@ -237,8 +242,19 @@ def load_funnel(url: str | None = None, token: str | None = None) -> tuple[dict,
     return body, None
 
 
+def ladder(funnel: dict) -> dict:
+    """gh#11787: the product's after-claim ladder (approved -> back in HQ -> OrgVerify started
+    -> proved -> badge) when the feed carries one, else {}."""
+    lad = funnel.get("ladder") if isinstance(funnel, dict) else None
+    return lad if isinstance(lad, dict) and lad.get("stages") else {}
+
+
 def worst_step_kr(funnel: dict) -> str | None:
-    """Which KR the funnel's worst step belongs to. Steps are named by the product."""
+    """Which KR the funnel's worst step belongs to. Steps are named by the product. gh#11787:
+    while the feed carries the after-claim ladder, ITS worst step is the leak (Reif, 2026-10-08:
+    "something has to drive it to do orgverify and get people through that funnel")."""
+    if ladder(funnel).get("worst_step"):
+        return "okr.orgverify"
     step = (funnel.get("funnel") or {}).get("worst_step") or funnel.get("worst_step") or ""
     if isinstance(step, dict):
         step = " ".join(str(step.get(k) or "") for k in ("from_key", "to_key", "from_label", "to_label"))
@@ -319,6 +335,29 @@ def tier_for(weight: float) -> str:
     return "high" if weight >= 0.4 else "medium" if weight >= 0.2 else "low"
 
 
+def this_hour(funnel: dict) -> list[str]:
+    """gh#11787, Reif 2026-10-08: "someone needs to make a plan hourly to drive the fleet to
+    making stuff that achieves the target ... nothing says, given funnel, and everything we
+    know, we should do this". These lines are that plan: the after-claim ladder's counts, the
+    step losing the most orgs, and the one item the fleet builds for it. Empty when the feed
+    carries no ladder, so a product without one reads exactly as before."""
+    lad = ladder(funnel)
+    if not lad:
+        return []
+    out = ["", f"## This hour: the ladder after the claim, last {lad.get('days', '?')} days"]
+    out.append(" · ".join(f"{s.get('label')} {s.get('orgs')}" for s in lad["stages"]))
+    step = lad.get("worst_step")
+    if not step:
+        out.append("no step loses anyone yet: build the next rung the ladder has no numbers for")
+        return out
+    out.append(f"Build this: close **{step.get('from_label')} -> {step.get('to_label')}** "
+               f"({step.get('lost')} orgs lost, {step.get('drop_pct')}%) -> `okr.orgverify`")
+    out.append("The item: the open `lane:orgverify` issue whose Vision-link is `okr.orgverify` and that closes "
+               "this step. marie ranks it `fleet:priority-high` and files one when none is open; gru's "
+               "`orgverify` standing lane builds it before anything else.")
+    return out
+
+
 def render(reif: list[dict], reif_err: str | None, okr: dict, funnel: dict, funnel_err: str | None,
            burn: dict[str, float], burn_total: float, now: float) -> str:
     labels = {k["id"]: k["label"] for k in okr.get("key_results", [])}
@@ -351,10 +390,13 @@ def render(reif: list[dict], reif_err: str | None, okr: dict, funnel: dict, funn
         step = f.get("worst_step")
         if isinstance(step, dict):  # the product's shape: {from_label, to_label, lost, drop_pct}
             step = f"{step.get('from_label')} -> {step.get('to_label')}: {step.get('lost')} lost ({step.get('drop_pct')}%)"
-        out.append(f"funnel worst step: **{step}** -> `{leak or 'unmapped'}`" if step else "funnel: no worst_step in the response")
+        # the claim funnel's own KR on this line (gh#11787: `leak` may be the ladder's okr.orgverify)
+        step_kr = worst_step_kr({"funnel": f})
+        out.append(f"funnel worst step: **{step}** -> `{step_kr or 'unmapped'}`" if step else "funnel: no worst_step in the response")
         for key in ("cta_clicked", "page_viewed", "submitted"):
             if key in f:
                 out.append(f"- {key}: {f[key]}")
+        out += this_hour(funnel)
     out += ["", f"## 3. Where the fleet's tokens went, last 7 days (${burn_total:,.0f})"]
     if not burn:
         out.append("unreadable: no priced runs in runs.jsonl")

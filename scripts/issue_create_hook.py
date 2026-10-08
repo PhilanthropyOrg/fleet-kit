@@ -38,6 +38,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import issue_cluster as ic  # noqa: E402
 
 CREATE = re.compile(r"\bgh\s+issue\s+create\b")
+# philanthropy#11715/#11738 (jefe msg#1005): both were born with no Vision-link line through two
+# body shapes this hook could not read, so it failed open: `--body "$(cat FILE)"` and
+# `--body-file - <<'EOF'`. Each cost gru intake passes and a needs-spec cycle.
+CAT_FILE = re.compile(r"\$\(\s*cat\s+(['\"]?)([^\s'\"()<>|;&]+)\1\s*\)")
 LOG_DIR = Path(os.environ.get("FLEET_LOG_DIR", Path.home() / "Library" / "Logs" / "fleet-kit")).expanduser()
 REDIRECTS = LOG_DIR / "dedupe_redirects.jsonl"
 
@@ -78,9 +82,16 @@ def parse(command: str) -> dict | None:
             elif key in ("--repo", "-R"):
                 out["repo"] = val
             elif key in ("--body", "-b"):
-                out["body"] = (doc.group(2) if doc else None) if "$(" in val else val
+                cat = CAT_FILE.fullmatch(val.strip())
+                if cat:  # `--body "$(cat /tmp/b.md)"`: read the file (dumbledore msg#1005)
+                    out["body_file"] = cat.group(2)
+                else:
+                    out["body"] = (doc.group(2) if doc else None) if "$(" in val else val
             elif key in ("--body-file", "-F"):
-                out["body_file"] = val
+                if val == "-" and doc:  # `--body-file - <<'EOF'`: the heredoc is the body
+                    out["body"] = doc.group(2)
+                else:
+                    out["body_file"] = val
             else:
                 out["labels"] += [x for x in val.split(",") if x]
         i += 1

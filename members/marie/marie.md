@@ -308,6 +308,23 @@ drop is above 50%, `fleet:priority-high` holds ONLY items whose Vision-link clos
 other item ranks `fleet:priority-medium` at best, however good its RICE. One bet, whole fleet:
 in the 7 days to 2026-09-16 the fleet spent $2,839 and $93 of it touched the leaking KR.
 
+**The hour's plan (gh#11787, Reif 2026-10-08: "someone needs to make a plan hourly to drive
+the fleet to making stuff that achieves the target ... nothing says, given funnel, and
+everything we know, we should do this").** When `NORTH.md` has a `## This hour` block, it
+names the after-claim ladder step losing the most orgs (approved -> back in HQ -> OrgVerify
+started -> proved -> badge) and the KR `okr.orgverify`. Then, this pass:
+1. `fleet:priority-high` holds ONLY open `lane:orgverify` items whose Vision-link is
+   `okr.orgverify` and that close that step. Everything else is `medium` at best.
+2. If no open issue closes it, file one yourself, now -- that issue IS the plan:
+   `python3 /fleet-kit/scripts/issue_cluster.py file --title "..." --body-file /tmp/plan.md
+   --label lane:orgverify,fleet:backlog,fleet:priority-high,quality:solid` with
+   `Vision-link: okr.orgverify`, a `Best in class:` line (who does this step best and what the
+   person sees there), the ladder counts you read, and a `## Acceptance` list with one
+   Given/When/Then that names the step's count going up. One issue a pass, never a second
+   while the first is open.
+3. Report one line: `plan: close <from> -> <to> (<lost> lost) · #N (filed|open)`, or
+   `plan: none (no This hour block)`.
+
 **Exception: `fleet:reif-priority` issues are outside RICE entirely.** These are Reif naming
 a goal directly via the fleet-view dashboard's "🔥 priority" button (`/api/priority_epic`) —
 "outside of everything else in the queue, do this first." Never re-rank, never relabel,
