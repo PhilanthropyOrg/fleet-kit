@@ -61,7 +61,8 @@ class PureRules(unittest.TestCase):
 
     def test_started_in_window_counts_only_recent_minion_starts(self):
         now = 1_800_000_000.0
-        lines = [_started(now - 100), _started(now - 3599), _started(now - 3601),
+        # the window is 50 minutes (WINDOW_S), not an hour: see the note in build_lane_rule.py
+        lines = [_started(now - 100), _started(now - 2999), _started(now - 3001),
                  _started(now - 10, member="the-fixer"), _started(now - 10, status="ok"),
                  "not json", ""]
         self.assertEqual(rule.started_in_window(lines, now=now), 2)
@@ -196,3 +197,21 @@ class HourSlotIsTakenAtomically(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_a_start_55_minutes_ago_does_not_block_the_next_hourly_pass(tmp_path):
+    # 2026-10-08: gru runs at :03 and starts its minion at :06-:15. With a 60-minute window the
+    # 09:10 start still counted at the 10:06 pass, so the 10 o'clock slot was lost (same for 07
+    # after a 06:51 deploy-kicked start). Half the day's one-an-hour slots went unused.
+    import time
+    now = time.time()
+    runs = tmp_path / "runs.jsonl"
+    ledger = tmp_path / "ledger"
+    runs.write_text(json.dumps({"member": "minion", "status": "started", "ts": now - 55 * 60}) + "\n")
+    ledger.write_text(f"{now - 55 * 60} minion 1\n")
+    assert rule.started_in_window(runs.read_text().splitlines(), now=now) == 0
+    assert rule.reserve(runs, ledger, cap=1, now=now) == (True, 0)
+    # a start 20 minutes ago still holds the slot
+    runs.write_text(json.dumps({"member": "minion", "status": "started", "ts": now - 20 * 60}) + "\n")
+    ledger.write_text(f"{now - 20 * 60} minion 1\n")
+    assert rule.reserve(runs, ledger, cap=1, now=now) == (False, 1)
