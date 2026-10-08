@@ -41,8 +41,10 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -529,18 +531,82 @@ CANDIDATE_FIELDS = "number,title,labels,body,comments,createdAt"
 TIERS = (f"{PREFIX}priority-high", f"{PREFIX}priority-medium", LOW)
 
 
-def candidates(backlog: list[dict], only_labels: list[str] | None = None) -> list[dict]:
+BUILT_HOURS = 24.0
+_PR_REF = re.compile(r"\b(?:Part of|Closes|Fixes|Resolves|Built in|Builds)\s+#(\d+)", re.IGNORECASE)
+
+
+def built_by_prs(prs: list[dict], now: float, hours: float = BUILT_HOURS) -> dict[int, str]:
+    """Pure. item -> why, for every item an open PR or one merged in the last `hours` already
+    builds (branch item ids, or 'Part of #N' in the body). 2026-10-08: the hour's one minion
+    slot went three times to items like that (#11634 under open #11741; #11712/#11713 under
+    #11739, merged 20 min earlier and waiting on deploy and the prod walk before the issue
+    closes); each minion read the PRs, built nothing and burned the slot."""
+    import red_prs
+    out: dict[int, str] = {}
+    for pr in prs:
+        state = (pr.get("state") or "").upper()
+        if state == "OPEN":
+            why = f"PR #{pr.get('number')} open"
+        elif state == "MERGED":
+            t = _ts(pr.get("mergedAt") or "")
+            if t is None or now - t > hours * 3600:
+                continue
+            why = f"PR #{pr.get('number')} merged {time.strftime('%Y-%m-%d %H:%MZ', time.gmtime(t))}"
+        else:
+            continue
+        nums = set(red_prs.items_of(pr.get("headRefName") or ""))
+        nums |= {int(m) for m in _PR_REF.findall(pr.get("body") or "")}
+        for n in nums:
+            out.setdefault(n, why)
+    return out
+
+
+def _ts(iso: str) -> float | None:
+    try:
+        return datetime.datetime.strptime(iso[:19], "%Y-%m-%dT%H:%M:%S").replace(
+            tzinfo=datetime.timezone.utc).timestamp()
+    except ValueError:
+        return None
+
+
+def fetch_prs_touching(repo: str | None, now: float, run=None) -> list[dict]:
+    """Open PRs plus those merged in the last day, light fields, one gh call. Fails open ([])."""
+    since = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now - BUILT_HOURS * 3600))
+    cmd = ["gh", "pr", "list", "--state", "all", "--limit", "200", "--search", f"updated:>={since}",
+           "--json", "number,state,headRefName,body,mergedAt"]
+    if repo:
+        cmd += ["--repo", repo]
+    try:
+        r = (run or _gh)(cmd)
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        print(f"gate_drops candidates: PR read failed ({exc}); built items not dropped", file=sys.stderr)
+        return []
+    if r.returncode != 0:
+        print(f"gate_drops candidates: PR read failed ({(r.stderr or '').strip()[:120]}); built items not dropped",
+              file=sys.stderr)
+        return []
+    try:
+        return json.loads(r.stdout or "[]")
+    except ValueError:
+        return []
+
+
+def candidates(backlog: list[dict], only_labels: list[str] | None = None,
+               built: dict[int, str] | None = None) -> list[dict]:
     """Pure. Open backlog items gru may build, high -> medium -> low -> unranked, oldest first.
     `only_labels` (FLEET_BUILD_ONLY_LABELS, 2026-10-08): when given, an item must carry one of
-    them or it is not a candidate at all -- gru never claims it. See build_lane_rule.py."""
+    them or it is not a candidate at all -- gru never claims it. See build_lane_rule.py.
+    `built` (built_by_prs): items a PR already builds are not candidates either."""
     skip = INTAKE_SKIP | {PARKED}
     want = set(only_labels or ())
+    held = set(built or {})
 
     def tier(i):
         names = _names(i.get("labels"))
         return next((k for k, t in enumerate(TIERS) if t in names), len(TIERS))
     todo = [i for i in backlog if not set(_names(i.get("labels"))) & skip
-            and (not want or want & set(_names(i.get("labels"))))]
+            and (not want or want & set(_names(i.get("labels"))))
+            and i.get("number") not in held]
     return sorted(todo, key=lambda i: (tier(i), i.get("createdAt") or ""))
 
 
@@ -682,7 +748,9 @@ def main(argv=None) -> int:
             print(f"gate_drops candidates: {exc}", file=sys.stderr)
             return 1
         only = build_lane_rule.allowed_labels()
-        todo = candidates(backlog, only)
+        built = built_by_prs(fetch_prs_touching(a.repo, time.time()), time.time())
+        todo = candidates(backlog, only, built)
+        built_dropped = {i["number"]: built[i["number"]] for i in candidates(backlog, only) if i["number"] in built}
         full = hydrate([i["number"] for i in read_slice(todo, a.first)], a.repo)
         Path(a.out).write_text(json.dumps(fill_capped_comments(full, a.repo)))
         tiers = [t.rsplit("-", 1)[-1] for t in TIERS] + ["unranked"]
@@ -691,7 +759,8 @@ def main(argv=None) -> int:
             names = _names(i.get("labels"))
             by[next((t for t, full in zip(tiers, TIERS) if full in names), "unranked")].append(i["number"])
         print(json.dumps({"out": a.out, "scanned": len(backlog), "skipped": len(backlog) - len(todo),
-                          "lane_rule": only, "lane_rule_dropped": (len(candidates(backlog)) - len(todo)) if only else 0,
+                          "lane_rule": only, "lane_rule_dropped": (len(candidates(backlog)) - len(candidates(backlog, only))) if only else 0,
+                          "built_dropped": built_dropped,
                           "by_tier": {t: len(v) for t, v in by.items()}, "written": len(full),
                           "numbers": [i["number"] for i in full], "beyond_first": len(todo) - len(full)}))
         return 0
