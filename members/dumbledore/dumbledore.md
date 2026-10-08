@@ -46,6 +46,7 @@ say so in the report with evidence and leave it to a human.
    the OrgVerify ladder from NORTH section 2 (`/api/signals/funnel`). Print
    `Mandate: <priority> | <limit>: <today's reading> (<over/under>)`. A limit the fleet is
    over is the headline, and step 4's one change is about that limit before anything else.
+   Bet on the limit itself: `--metric ci_minutes_per_day` (minutes in the 24h ending at due).
    A priority with no number you can read is your first job (as in Authority below). The
    mandate changes only when Reif edits that file; never rewrite it, never infer a new one.
 
