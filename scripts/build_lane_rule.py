@@ -9,7 +9,8 @@ the 24h before this landed.
 
 Two dials, both read from fleet.env. Unset = the old behaviour, nothing changes.
   FLEET_BUILD_ONLY_LABELS    comma list. A minion item must carry at least one of them.
-  FLEET_MINION_MAX_PER_HOUR  at most this many minion starts in any rolling hour.
+  FLEET_MINION_MAX_PER_HOUR  at most this many minion starts in any rolling 50 minutes
+                             (one per hourly gru pass; see WINDOW_S).
 
 Three places enforce them, so a prompt cannot build around the rule:
   gate_drops.py candidates   drops off-lane items before gru claims them (step 2b);
@@ -58,7 +59,15 @@ def hour_cap(env: Mapping[str, str] | None = None) -> int:
         return 0
 
 
-def started_in_window(lines: Iterable[str], member: str = "minion", window_s: float = 3600,
+# The cap's window is 50 minutes, not 60. gru's pass runs at :03 every hour and its minion
+# starts at :06-:15; a rolling 60-minute window then sees last hour's start every other pass,
+# and the slot is lost (2026-10-08: starts 06:51, 08:06, 09:10, none in the 07 and 10 hours:
+# "started_last_hour is already at the cap, fanout defers every item"). 50 minutes still means
+# one start per hourly pass, and a deploy-kicked pass right after a start still waits.
+WINDOW_S = 3000.0
+
+
+def started_in_window(lines: Iterable[str], member: str = "minion", window_s: float = WINDOW_S,
                       now: float | None = None) -> int:
     """Pure. `started` rows for `member` in runs.jsonl whose ts is inside the last window_s.
     A malformed line, or a row with no usable ts, is skipped (it cannot be inside the window)."""
@@ -83,7 +92,7 @@ def started_in_window(lines: Iterable[str], member: str = "minion", window_s: fl
     return n
 
 
-def reserve(runs: Path, ledger: Path, cap: int, member: str = "minion", window_s: float = 3600,
+def reserve(runs: Path, ledger: Path, cap: int, member: str = "minion", window_s: float = WINDOW_S,
             now: float | None = None) -> tuple[bool, int]:
     """Count and take an hour slot as one step, under a lock on `ledger`. Returns (taken, count
     before). 2026-10-08 04:12Z: four minions launched within 11s and each wrote its `started`
@@ -164,13 +173,13 @@ def main(argv: list[str] | None = None) -> int:
     h = sub.add_parser("hour-count", help="print minion starts in the last hour from runs.jsonl")
     h.add_argument("--runs", required=True)
     h.add_argument("--member", default="minion")
-    h.add_argument("--window-s", type=float, default=3600)
+    h.add_argument("--window-s", type=float, default=WINDOW_S)
     r = sub.add_parser("reserve", help="take one hour slot atomically; exit 3 and print the count when full")
     r.add_argument("--runs", required=True)
     r.add_argument("--ledger", required=True)
     r.add_argument("--cap", type=int, required=True)
     r.add_argument("--member", default="minion")
-    r.add_argument("--window-s", type=float, default=3600)
+    r.add_argument("--window-s", type=float, default=WINDOW_S)
     a = ap.parse_args(argv)
     if a.cmd == "check":
         allowed = allowed_labels()
