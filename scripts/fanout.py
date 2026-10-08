@@ -419,6 +419,14 @@ def _run_pack_batches(a) -> int:
         runs = Path(os.environ.get("FLEET_LOG_DIR") or Path.home() / "Library/Logs/fleet-kit") / "runs.jsonl"
         started = build_lane_rule.started_in_window(runs.read_text().splitlines()) if runs.exists() else 0
         result = build_lane_rule.cap_batches(result, build_lane_rule.remaining(cap, started), cap, started)
+    # MANDATE.md 2026-10-08 ("max CI mins used today 500"): a spent day spawns nothing.
+    ci_cap = build_lane_rule.ci_daily_max()
+    if ci_cap:
+        today = build_lane_rule.ci_minutes_today()
+        if build_lane_rule.ci_spent(ci_cap, today):
+            result = build_lane_rule.cap_batches(
+                result, 0, why=f"CI day spent: {int(today)} of FLEET_CI_MINUTES_DAILY_MAX="
+                               f"{ci_cap} Actions minutes used today (UTC); tomorrow")
     print(json.dumps(result, indent=2))
     return 0
 
