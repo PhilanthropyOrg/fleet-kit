@@ -991,6 +991,18 @@ if [ "${FLEET_NORTH:-1}" = "1" ] && FLEET_LOG_DIR="$LOG_DIR" python3 "$KIT_DIR/s
 
 $PROMPT"
 fi
+# MANDATE (Reif, 2026-10-08: "we should have a specific mandate - and then dumbledore makes the
+# calls ... each new priority, we just have to touch one file"). $LOG_DIR/MANDATE.md is that file:
+# the priority, the limits, and "do what you must". Prepended to EVERY pass, above NORTH, so one
+# edit on the host steers the whole fleet; dumbledore turns it into lever changes (dumbledore.md).
+MANDATE_FILE="$LOG_DIR/MANDATE.md"
+if [ -s "$MANDATE_FILE" ]; then
+  PROMPT="$(head -c 1500 "$MANDATE_FILE")
+
+---
+
+$PROMPT"
+fi
 # INBOX (philanthropy#8215): messages other members sent this one (fleet_msg.py). Prepended
 # LAST so it is the FIRST thing read: a member handles its mail before its charter, acks or
 # replies to each one, and the watchdog escalates what it leaves. Marked read on delivery.
