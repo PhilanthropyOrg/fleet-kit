@@ -485,6 +485,7 @@ If the diff touches a template, a static file, or a route (anything a person can
   # auto_update_branch "Merge main" head, same diff each time. Same diff + same body at a new
   # head gets the same verdict with no model call. Only approvals carry; a block re-reviews.
   FP_FILE="$APPROVED_DIR/pr-${PR}.fp"
+  BLOCK_FILE="$APPROVED_DIR/pr-${PR}.block"  # head + findings of the last BLOCK
   FP=""
   [ -n "$DIFF_ID" ] && FP="$DIFF_ID $(sha256sum < "$BODY_FILE" | cut -d' ' -f1)"
   if [ -n "$FP" ] && [ -f "$FP_FILE" ] && [ "$(head -1 "$FP_FILE")" = "$FP" ]; then
@@ -524,6 +525,18 @@ This PR closes an issue it does not finish (closes_gate.py, fk#629). Change the 
   # lands in the ONE approve/block handler below (status, comment, unqueue, fix item, report).
   if [ "$GATE_VERDICT" != "block" ]; then
 
+  # A re-review used to start from nothing, so each round found something new and nothing
+  # converged: 2026-10-07/08, 80 PRs took 216 reviews, #11647 was blocked 6 times on 6
+  # different findings and then closed, #11694 blocked 7 of 9. The last block's findings now
+  # come along: fix those, and only a new HIGH blocks.
+  PRIOR_NOTE=""
+  if [ -s "$BLOCK_FILE" ]; then
+    PRIOR_NOTE="This PR was reviewed before. At head $(head -1 "$BLOCK_FILE" | cut -c1-12) the review blocked it with:
+$(tail -n +2 "$BLOCK_FILE" | head -c 4000)
+
+Check each of those first: one still not fixed stays a block. A NEW finding blocks this round only if its severity is high (a person loses data, money or access, or a page breaks) or it sits in code this push changed. Anything else the earlier round could have raised goes in findings with severity low and does not block: approve once every earlier finding is fixed and nothing new is high."
+  fi
+
 # See judge-judy.md (this member's own charter) for the annotated version of this template.
 PROMPT="You are the merge-blocking code reviewer for this repo. Review the diff below for
 CORRECTNESS defects only: bugs, broken call paths, security regressions, tests that cannot
@@ -542,6 +555,8 @@ $(printf '%s' "${GATE_INTENT:-(this PR closes no issue)}" | head -c "$MAX_INTENT
 A PR may close an issue only if this diff meets EVERY acceptance criterion above, with evidence in the PR body: a screenshot or short video for anything a person sees, a named test for anything else. If any criterion is not met, or has no evidence, set your verdict to block and add a finding naming the criterion; the author must change the closing keyword to Part of #N and list what remains.
 
 ${BODY_RULES}
+
+${PRIOR_NOTE}
 
 DIFF:
 $(cat "$DIFF_FILE")
@@ -754,6 +769,7 @@ $ERR_VISION_LINK"
       && log "PR #$PR: APPROVED -- status posted" \
       || log "PR #$PR: WARN approved but status POST failed"
     [ -n "$FP" ] && printf '%s\n%s\n' "$FP" "$HEAD_SHA" > "$FP_FILE"
+    rm -f "$BLOCK_FILE"
     # fleet-kit#523: the queue merges whatever is armed, so the verdict moves the arm.
     # 2026-09-26 #8110: an approve is not "done" for a minion checkpoint; never arm one.
     if pr_is_checkpoint "$PR"; then log "PR #$PR: minion checkpoint -- approved, NOT arming auto-merge"
@@ -761,6 +777,7 @@ $ERR_VISION_LINK"
     report_run "$PR" "$HEAD_SHA" "$USAGE_FILE" "approved PR #$PR" "head ${HEAD_SHA:0:12}, fleet-code-review: success" "$SELF_CRITIQUE" "${FINDINGS:-approved -- no findings}"
   else
     rm -f "$FP_FILE"
+    printf '%s\n%s\n' "$HEAD_SHA" "$FINDINGS" > "$BLOCK_FILE"
     # Findings comment first, status second: a failure status pointing at nothing is worse
     # than no status at all.
     gh pr comment "$PR" --body "**fleet-code-review: BLOCK** ($REVIEWER_LABEL, head ${HEAD_SHA:0:12})
