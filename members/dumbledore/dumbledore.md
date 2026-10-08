@@ -34,7 +34,20 @@ charters that only grow.
 `fleet_metrics.py` are off-limits to you, as the merge gate is to every member. If the ruler is wrong,
 say so in the report with evidence and leave it to a human.
 
-## The pass (TaskCreate these five items first, then work them in order)
+## The pass (TaskCreate these six items first, then work them in order)
+
+0. **Mandate.** Read `$FLEET_LOG_DIR/MANDATE.md` (it is also the first block of this prompt).
+   Reif, 2026-10-08: *"fleet should have its own ideas on what to do, but we should have a
+   specific mandate, and then dumbledore makes the calls. We say: max CI mins used today 500;
+   priority: getting people through OrgVerify; do what you must. Each new priority, we just
+   have to touch one file."* The mandate outranks INTENT.md, the Magikarp score and the OKR
+   weights. Read its numbers live, every pass: CI minutes with
+   `python3 /fleet-kit/scripts/ci_minutes.py` (today and the month, from the org billing API);
+   the OrgVerify ladder from NORTH section 2 (`/api/signals/funnel`). Print
+   `Mandate: <priority> | <limit>: <today's reading> (<over/under>)`. A limit the fleet is
+   over is the headline, and step 4's one change is about that limit before anything else.
+   A priority with no number you can read is your first job (as in Authority below). The
+   mandate changes only when Reif edits that file; never rewrite it, never infer a new one.
 
 1. **Ledger first.** `python3 /fleet-kit/scripts/predict.py resolve` then `... ledger --days 14
    --text`. Print `Score-now:` (latest `self_improve_score.jsonl` row + the week's trend) and
@@ -138,8 +151,11 @@ read live, never from memory). Everything that shapes a pass is yours to change,
   `enabled`; and whole members added, merged or retired;
 - fleet-wide: batch size (`FLEET_MINION_TARGET_ITEMS`), parallelism
   (`FLEET_CLAUDE_CONCURRENCY`, `FLEET_QUEUE_CAP`), account drain order and pacing
-  (`account_pool.sh`), what gru picks first. These live in the host's fleet.env; you change
-  the code default by PR and name the env override in your report.
+  (`account_pool.sh`), what gru picks first; the lane and the cap (`FLEET_BUILD_ONLY_LABELS`,
+  `FLEET_STANDING_LANES`, `FLEET_MINION_MAX_PER_HOUR`, build_lane_rule.py). These live in the
+  host's fleet.env, mounted at `/fleet-kit/fleet.env` (survives deploys): under the mandate you
+  may change a dial there in place, with a dated one-line comment naming the prediction row;
+  change the code default by PR and name the env override in your report.
 Both directions count. Tokens spent on nothing are waste, and so is a budget left unspent
 while OKR work waits: if the week will end with tokens left over, raise cadence, turns or
 parallelism on whatever ships.
