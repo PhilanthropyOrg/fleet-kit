@@ -153,8 +153,11 @@ if [ "$MEMBER" = "minion" ] && [ -n "${RAW_ITEMS:-${ITEM:-}}" ] && [ -n "${FLEET
   fi
 fi
 if [ "$MEMBER" = "minion" ] && [ "${FLEET_MINION_MAX_PER_HOUR:-0}" -gt 0 ] 2>/dev/null; then
-  STARTED_HOUR=$(python3 "$KIT_DIR/scripts/build_lane_rule.py" hour-count --runs "$LOG_DIR/runs.jsonl" 2>/dev/null || echo 0)
-  if [ "${STARTED_HOUR:-0}" -ge "$FLEET_MINION_MAX_PER_HOUR" ] 2>/dev/null; then
+  # reserve = count + take the slot under one lock; a bare count raced (4 starts in 11s, 10-08).
+  STARTED_HOUR=$(python3 "$KIT_DIR/scripts/build_lane_rule.py" reserve --runs "$LOG_DIR/runs.jsonl" \
+    --ledger "$LOG_DIR/minion_hour_starts.log" --cap "$FLEET_MINION_MAX_PER_HOUR" 2>/dev/null)
+  RESERVE_RC=$?
+  if [ "$RESERVE_RC" -eq 3 ]; then
     echo "FATAL: $STARTED_HOUR minion(s) already started in the last hour; FLEET_MINION_MAX_PER_HOUR=$FLEET_MINION_MAX_PER_HOUR. Release the item(s) and dispatch next pass." >&2
     exit 2
   fi

@@ -19,10 +19,13 @@ Three places enforce them, so a prompt cannot build around the rule:
 
 Run: python3 scripts/build_lane_rule.py check --items 1,2 --repo owner/repo
      python3 scripts/build_lane_rule.py hour-count --runs /var/log/fleet-kit/runs.jsonl
+     python3 scripts/build_lane_rule.py reserve --runs /var/log/fleet-kit/runs.jsonl \
+         --ledger /var/log/fleet-kit/minion_hour_starts.log --cap 1   # exit 3 = hour full
 """
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import os
 import subprocess
@@ -80,6 +83,35 @@ def started_in_window(lines: Iterable[str], member: str = "minion", window_s: fl
     return n
 
 
+def reserve(runs: Path, ledger: Path, cap: int, member: str = "minion", window_s: float = 3600,
+            now: float | None = None) -> tuple[bool, int]:
+    """Count and take an hour slot as one step, under a lock on `ledger`. Returns (taken, count
+    before). 2026-10-08 04:12Z: four minions launched within 11s and each wrote its `started`
+    row 9-30s after its own cap check, so all four counted 0 against a cap of 1. The ledger line
+    is written before the lock is released, so the next dispatcher sees this start at once.
+    count = the larger of runs.jsonl starts and ledger lines, so starts from any path count."""
+    now = time.time() if now is None else now
+    ledger.parent.mkdir(parents=True, exist_ok=True)
+    with open(ledger, "a+") as fh:
+        fcntl.flock(fh, fcntl.LOCK_EX)
+        fh.seek(0)
+        held = 0
+        for line in fh.read().splitlines():
+            try:
+                ts = float(line.split()[0])
+            except (ValueError, IndexError):
+                continue
+            if now - window_s < ts <= now:
+                held += 1
+        lines = runs.read_text().splitlines() if runs.exists() else []
+        count = max(held, started_in_window(lines, member=member, window_s=window_s, now=now))
+        if count >= cap:
+            return False, count
+        fh.write(f"{now} {member} {os.getpid()}\n")
+        fh.flush()
+        return True, count
+
+
 def remaining(cap: int, started: int) -> int | None:
     """Pure. Minion starts the hour still allows; None when there is no cap."""
     if cap <= 0:
@@ -130,6 +162,12 @@ def main(argv: list[str] | None = None) -> int:
     h.add_argument("--runs", required=True)
     h.add_argument("--member", default="minion")
     h.add_argument("--window-s", type=float, default=3600)
+    r = sub.add_parser("reserve", help="take one hour slot atomically; exit 3 and print the count when full")
+    r.add_argument("--runs", required=True)
+    r.add_argument("--ledger", required=True)
+    r.add_argument("--cap", type=int, required=True)
+    r.add_argument("--member", default="minion")
+    r.add_argument("--window-s", type=float, default=3600)
     a = ap.parse_args(argv)
     if a.cmd == "check":
         allowed = allowed_labels()
@@ -151,6 +189,10 @@ def main(argv: list[str] | None = None) -> int:
         lines = p.read_text().splitlines() if p.exists() else []
         print(started_in_window(lines, member=a.member, window_s=a.window_s))
         return 0
+    if a.cmd == "reserve":
+        taken, count = reserve(Path(a.runs), Path(a.ledger), a.cap, a.member, a.window_s)
+        print(count)
+        return 0 if taken else 3
     return 2
 
 
