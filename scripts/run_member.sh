@@ -238,6 +238,12 @@ if [ "$MEMBER" = "nerd" ] && [ -n "$LANE" ] && [ -n "${REPO:-}" ]; then
     fi
   fi
 fi
+# The operator's FLEET_STANDING_LANES are canonical too: gru step 8b dispatches a nerd to each
+# one every pass, so rejecting them left the top-weighted KR's lane (orgverify, 2026-10-08)
+# with no finder at all.
+if [ "$MEMBER" = "nerd" ] && [ -n "${FLEET_STANDING_LANES:-}" ]; then
+  NERD_CANONICAL_LANES="$NERD_CANONICAL_LANES $(printf '%s' "$FLEET_STANDING_LANES" | tr ',' ' ')"
+fi
 if [ "$MEMBER" = "nerd" ] && [ -n "$LANE" ]; then
   case " $NERD_CANONICAL_LANES " in
     *" $LANE "*) ;;  # valid lane -- fall through, no behavior change

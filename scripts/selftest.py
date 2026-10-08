@@ -8508,6 +8508,17 @@ def _nerd_invalid_lane_rejected_before_lane_work():
     assert "REJECTED" not in proc2.stdout and "REJECTED" not in proc2.stderr, \
         "a valid canonical lane was rejected -- AC4 behavior change"
 
+    # A lane the operator named in FLEET_STANDING_LANES is canonical: gru dispatches a nerd
+    # to it every pass (8b), and `orgverify` was rejected there on 2026-10-08.
+    proc3 = subprocess.run(
+        ["bash", str(ROOT / "scripts" / "run_member.sh"), "nerd",
+         "--dry-run", "--task", "lane=orgverify — standing lane"],
+        capture_output=True, text=True, timeout=30,
+        env={**env, "FLEET_STANDING_LANES": "orgverify,conversion"},
+    )
+    assert proc3.returncode == 0, f"standing lane broke: rc={proc3.returncode} stderr={proc3.stderr}"
+    assert "REJECTED" not in proc3.stdout + proc3.stderr, "a standing lane was rejected"
+
 
 def _mcp_capability_slots_wire_dry_run_flags():
     """Per-member MCP servers, built as named capability SLOTS (Reif, cross-session design
