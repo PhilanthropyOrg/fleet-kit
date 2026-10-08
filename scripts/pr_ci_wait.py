@@ -164,6 +164,11 @@ def classify(pr: dict) -> dict:
         verdict = "PENDING"
     else:
         verdict = "GREEN"
+    # GitHub runs no checks on a CONFLICTING PR, so green or pending checks there are stale.
+    # 2026-10-08: the fixer read "GREEN (auto-merge armed)" on #11604 and quit; four armed,
+    # review-passed PRs sat DIRTY for a day. red_prs.conflict_aware says the same thing.
+    if verdict in ("GREEN", "PENDING") and (pr.get("mergeStateStatus") or "").upper() == "DIRTY":
+        verdict = "CONFLICT"
 
     real = last_real_commit(pr.get("commits") or [])
     return {
@@ -184,7 +189,7 @@ def classify(pr: dict) -> dict:
     }
 
 
-EXIT = {"GREEN": 0, "MERGED": 0, "RED": 1, "BLOCK": 1, "PENDING": 3, "CLOSED": 4}
+EXIT = {"GREEN": 0, "MERGED": 0, "RED": 1, "BLOCK": 1, "CONFLICT": 1, "PENDING": 3, "CLOSED": 4}
 
 
 def _gh(args: list[str], timeout: int = 60) -> tuple[int, str]:
@@ -244,6 +249,11 @@ def render(info: dict, repo: str | None, gh=_gh, with_logs: bool = True) -> str:
     if info["review_blocked"]:
         lines.append(f"\n--- REVIEW BLOCK ({REVIEW_CONTEXT}) -- fix every finding below, push, "
                      "and the reviewer re-reads the new head:\n" + info["review_findings"])
+    if info["state"] == "CONFLICT":
+        lines.append("\n--- CONFLICT: this branch no longer merges into main, and GitHub runs no "
+                     "checks until that is fixed. NEXT: `git fetch origin main && git merge "
+                     "origin/main`, resolve every conflict reading both sides, run "
+                     "`bash /fleet-kit/scripts/verified_test.sh`, push, then run this command again.")
     if info["state"] in ("RED", "BLOCK"):
         lines.append("\nNEXT: fix the above on this PR's own branch, run "
                      "`bash /fleet-kit/scripts/verified_test.sh` (lint autofix + tests + repo "
