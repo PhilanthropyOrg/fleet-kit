@@ -101,7 +101,10 @@ def reserve(runs: Path, ledger: Path, cap: int, member: str = "minion", window_s
                 ts = float(line.split()[0])
             except (ValueError, IndexError):
                 continue
-            if now - window_s < ts <= now:
+            # No upper bound: a line is only written under this lock, so one stamped a few ms
+            # after our `now` is a racer that won the lock first (CI 2026-10-08: two of four
+            # dispatchers got the one slot when the loser's clock read before the winner's write).
+            if ts > now - window_s:
                 held += 1
         lines = runs.read_text().splitlines() if runs.exists() else []
         count = max(held, started_in_window(lines, member=member, window_s=window_s, now=now))
