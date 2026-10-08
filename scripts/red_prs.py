@@ -248,14 +248,20 @@ def record(ledger: dict, pr: int, content: str, now: float, killed: list[float] 
 def plan(rows: list[dict], ledger: dict, now: float, limit: int,
          killed: dict[int, list[float]] | None = None, resume_limit: int = 3) -> dict:
     """Which red PRs get a fixer (`due`) or a resuming minion (`resume`, red minion drafts) this
-    pass. Reif-priority first, then oldest quiet. Pure."""
+    pass. Reif-priority first, then merge-ready conflicts (a green, review-passed PR that only
+    needs main merged in: the cheapest landing there is -- 2026-10-08, #11604 and #11717 sat
+    CONFLICTING and armed for a day with no fixer while review-blocked PRs took every slot),
+    then oldest quiet. Pure."""
     due, held, exhausted, resume = [], [], [], []
     # A red draft may be a minion mid-build: only an idle one (stalled) is resumed.
     superseded = [{"number": r["number"], "items": r["items"], "by": r["by"]}
                   for r in rows if r.get("kind") == "superseded"]
     rows = [r for r in rows if r.get("kind") != "superseded"]
     wanted = [r for r in rows if r["stalled"] or (r["reif_priority"] and r.get("kind") != "resume")]
-    wanted.sort(key=lambda r: (0 if r["reif_priority"] else 1, -r["minutes_since_real_push"]))
+    def merge_ready(r):
+        return r["state"] == "CONFLICT" and not r["review_blocked"]
+    wanted.sort(key=lambda r: (0 if r["reif_priority"] else 1, 0 if merge_ready(r) else 1,
+                               -r["minutes_since_real_push"]))
     for r in wanted:
         v = verdict(effective(ledger.get(str(r["number"])), (killed or {}).get(r["number"], [])),
                     r["content"], now)

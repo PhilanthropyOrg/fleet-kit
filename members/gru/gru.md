@@ -41,7 +41,8 @@ returns only the batches the hour still has room for; spawn exactly those, relea
    python3 /fleet-kit/scripts/red_prs.py due
    ```
    `due` is already ordered and capped: red or review-BLOCKed PRs of fleet:reif-priority
-   items at once, then any other fleet PR red with no real push for 60+ minutes. Dispatch a
+   items at once, then green review-passed PRs that are only CONFLICTING (one merge of main
+   lands them), then any other fleet PR red with no real push for 60+ minutes. Dispatch a
    fixer to EVERY entry in ONE call, which returns at once:
    ```
    bash /fleet-kit/scripts/dispatch_fixer.sh <PR> <PR> ...

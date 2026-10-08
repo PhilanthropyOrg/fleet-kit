@@ -232,6 +232,23 @@ class Detector(unittest.TestCase):
         self.assertEqual([r["number"] for r in red_prs.plan(rows, {}, NOW, 6)["due"]], [11, 12, 10])
         self.assertEqual(len(red_prs.plan(rows, {}, NOW, 1)["due"]), 1)
 
+    def test_merge_ready_conflict_goes_before_other_red(self):
+        # 2026-10-08 live: #11604 and #11717 were armed, review-green and only CONFLICTING since
+        # 10-07, yet got no fixer in 24h while older review-blocked PRs took every slot. A green
+        # PR that only needs a merge of main is the cheapest landing there is: it goes first,
+        # after Reif-priority.
+        green = pr(number=21, branch="member/minion-item3-1-2", checks=[check("test"), check("lint")],
+                   commits=[commit("w", 400)])
+        green["mergeStateStatus"] = "DIRTY"
+        rows = [red_prs.describe(pr(number=20, branch="member/minion-item2-1-2", checks=self.RED_LINT,
+                                    commits=[commit("w", 900)]), {7000}, NOW),
+                red_prs.describe(green, {7000}, NOW),
+                red_prs.describe(pr(number=22, branch="member/minion-item7000-1-2", checks=self.RED_LINT,
+                                    commits=[commit("w", 5)]), {7000}, NOW)]
+        self.assertEqual(rows[1]["state"], "CONFLICT")
+        self.assertFalse(rows[1]["review_blocked"])
+        self.assertEqual([r["number"] for r in red_prs.plan(rows, {}, NOW, 6)["due"]], [22, 21, 20])
+
     def test_items_parse_from_branch(self):
         self.assertEqual(red_prs.items_of("member/minion-item7942_7950_7948-5046-1790343860"),
                          [7942, 7950, 7948])
