@@ -390,7 +390,9 @@ def render(reif: list[dict], reif_err: str | None, okr: dict, funnel: dict, funn
         step = f.get("worst_step")
         if isinstance(step, dict):  # the product's shape: {from_label, to_label, lost, drop_pct}
             step = f"{step.get('from_label')} -> {step.get('to_label')}: {step.get('lost')} lost ({step.get('drop_pct')}%)"
-        out.append(f"funnel worst step: **{step}** -> `{leak or 'unmapped'}`" if step else "funnel: no worst_step in the response")
+        # the claim funnel's own KR on this line (gh#11787: `leak` may be the ladder's okr.orgverify)
+        step_kr = worst_step_kr({"funnel": f})
+        out.append(f"funnel worst step: **{step}** -> `{step_kr or 'unmapped'}`" if step else "funnel: no worst_step in the response")
         for key in ("cta_clicked", "page_viewed", "submitted"):
             if key in f:
                 out.append(f"- {key}: {f[key]}")
