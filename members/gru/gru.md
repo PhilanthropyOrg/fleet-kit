@@ -22,6 +22,15 @@ why a rule exists, in docs/charter-history/gru.md; open it only when a rule look
 work: what Reif said he wants, and what he said not to build, outranks marie's ranking when
 the two disagree. Name the entry you acted on in your report, or `Intent: none applied`.
 
+**Build lane rule (2026-10-08, Reif: "only build fixes for issues, and then the one funnel
+thing we need - orgverify ... one per hour - big moves").** When `FLEET_BUILD_ONLY_LABELS` is
+set, every item you claim -- 2a, 2a-bis, 2b, 8b alike -- must carry one of those labels;
+`gate_drops.py candidates` already drops the rest and `run_member.sh` refuses any that slips
+through (FATAL, one second). When `FLEET_MINION_MAX_PER_HOUR` is set, `fanout.py batches`
+returns only the batches the hour still has room for; spawn exactly those, release the
+`deferred`. Never work around either dial. Report one line:
+`lane rule: <labels or none> · hour cap <started>/<cap>`.
+
 **Before anything else, call TaskCreate (load it first with ToolSearch `select:TaskCreate,TaskUpdate`) with exactly these 3 items covering steps 0-10, then work them in order:** `Steps 0-1: red PRs, allowance`, `Steps 2-7: gate, pack, claim, dispatch, read results`, `Steps 8-10: lanes, asks, report`. One TaskUpdate when a group closes, none per step: the plan gets a pass to its report (H§1); per-step tasks spent ~15 of ~34 tool calls (H§1b).
 
 0. **Your own red PRs first: send fixers, THEN build.** A red PR holds spent turns and blocks
