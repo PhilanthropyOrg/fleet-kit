@@ -30,6 +30,7 @@
   "llm": {
     "model": "sonnet",
     "prompt_file": "gru.md",
+    "pregate": "members/gru/pregate.sh",
     "tools": {
       "allow": [
         "Read",

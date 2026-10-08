@@ -14105,6 +14105,8 @@ def _run_member_pregate_short_circuits_in_shell_fk1093():
     # (Reif, 2026-09-26) as the fleet's own fixer, every 7h, since archiving him moved his duty
     # to no one.
     assert specs["jefe"]["llm"].get("pregate") == "members/jefe/pregate.sh", "jefe must be pregated"
+    # MANDATE 2026-10-08: a spent CI day leaves gru nothing it can dispatch; its pregate is $0.
+    assert specs["gru"]["llm"].get("pregate") == "members/gru/pregate.sh", "gru must be pregated on a spent CI day"
     assert specs["dumbledore"]["enabled"] is True, "dumbledore is the fleet's own fixer again"
     vp_due = (HERE / "vp_due.sh").read_text()
     assert 'VP_ENABLED' in vp_due and vp_due.find("VP_ENABLED") < vp_due.find("run_member.sh\" vp"), "vp_due must check enabled before spawning vp"
