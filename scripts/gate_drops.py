@@ -561,6 +561,49 @@ def built_by_prs(prs: list[dict], now: float, hours: float = BUILT_HOURS) -> dic
     return out
 
 
+TRIED_HOURS = 24.0
+
+
+def tried_by_runs(runs: list[dict], now: float, hours: float = TRIED_HOURS) -> dict[int, str]:
+    """Pure. item -> why, for every item a minion already tried in the last `hours` and left
+    with no commit and no PR (status ok or quiet, commits 0, no checkpoint_pr). 2026-10-08,
+    after built_by_prs landed: the hour's one slot went to #10032+#10034, which two minions had
+    already read that day and dropped as 'too wide, needs slicing'; the third read the same and
+    opened nothing. A re-read a few hours later finds the same item; marie must slice it first."""
+    out: dict[int, str] = {}
+    import red_prs
+    for r in runs:
+        if (r.get("member") or "") != "minion" or (r.get("kind") or "llm") != "llm":
+            continue
+        if (r.get("status") or "") not in ("ok", "quiet"):
+            continue
+        if (r.get("commits") or 0) or r.get("checkpoint_pr") or r.get("pr"):
+            continue
+        t = r.get("recorded_at")
+        if not isinstance(t, (int, float)) or now - t > hours * 3600:
+            continue
+        why = f"minion tried {time.strftime('%Y-%m-%d %H:%MZ', time.gmtime(t))}, no commit, no PR"
+        for n in red_prs.items_of(f"minion-item{r.get('item_id') or ''}-0-0"):
+            out.setdefault(n, why)
+    return out
+
+
+def fetch_minion_runs(now: float, hours: float = TRIED_HOURS, db_path=None) -> list[dict]:
+    """Minion llm runs that ended in the last `hours`, from fleet.db. Fails open ([])."""
+    try:
+        import fleet_db
+        conn = fleet_db.connect(Path(db_path) if db_path else None)
+        rows = conn.execute(
+            "select member, kind, item_id, status, commits, checkpoint_pr, pr, recorded_at from runs "
+            "where member='minion' and recorded_at > ?", (now - hours * 3600,)).fetchall()
+        conn.close()
+    except Exception as exc:  # noqa: BLE001 -- a missing or locked db must not stop the pass
+        print(f"gate_drops candidates: runs read failed ({exc}); tried items not dropped", file=sys.stderr)
+        return []
+    keys = ("member", "kind", "item_id", "status", "commits", "checkpoint_pr", "pr", "recorded_at")
+    return [dict(zip(keys, row)) for row in rows]
+
+
 def _ts(iso: str) -> float | None:
     try:
         return datetime.datetime.strptime(iso[:19], "%Y-%m-%dT%H:%M:%S").replace(
@@ -596,7 +639,8 @@ def candidates(backlog: list[dict], only_labels: list[str] | None = None,
     """Pure. Open backlog items gru may build, high -> medium -> low -> unranked, oldest first.
     `only_labels` (FLEET_BUILD_ONLY_LABELS, 2026-10-08): when given, an item must carry one of
     them or it is not a candidate at all -- gru never claims it. See build_lane_rule.py.
-    `built` (built_by_prs): items a PR already builds are not candidates either."""
+    `built` (built_by_prs, and tried_by_runs): items a PR already builds, or a minion already
+    tried today and left with no commit and no PR, are not candidates either."""
     skip = INTAKE_SKIP | {PARKED}
     want = set(only_labels or ())
     held = set(built or {})
@@ -749,8 +793,12 @@ def main(argv=None) -> int:
             return 1
         only = build_lane_rule.allowed_labels()
         built = built_by_prs(fetch_prs_touching(a.repo, time.time()), time.time())
-        todo = candidates(backlog, only, built)
+        tried = tried_by_runs(fetch_minion_runs(time.time()), time.time())
+        held = {**tried, **built}
+        todo = candidates(backlog, only, held)
         built_dropped = {i["number"]: built[i["number"]] for i in candidates(backlog, only) if i["number"] in built}
+        tried_dropped = {i["number"]: tried[i["number"]] for i in candidates(backlog, only)
+                         if i["number"] in tried and i["number"] not in built}
         full = hydrate([i["number"] for i in read_slice(todo, a.first)], a.repo)
         Path(a.out).write_text(json.dumps(fill_capped_comments(full, a.repo)))
         tiers = [t.rsplit("-", 1)[-1] for t in TIERS] + ["unranked"]
@@ -760,7 +808,7 @@ def main(argv=None) -> int:
             by[next((t for t, full in zip(tiers, TIERS) if full in names), "unranked")].append(i["number"])
         print(json.dumps({"out": a.out, "scanned": len(backlog), "skipped": len(backlog) - len(todo),
                           "lane_rule": only, "lane_rule_dropped": (len(candidates(backlog)) - len(candidates(backlog, only))) if only else 0,
-                          "built_dropped": built_dropped,
+                          "built_dropped": built_dropped, "tried_dropped": tried_dropped,
                           "by_tier": {t: len(v) for t, v in by.items()}, "written": len(full),
                           "numbers": [i["number"] for i in full], "beyond_first": len(todo) - len(full)}))
         return 0
