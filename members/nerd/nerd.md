@@ -124,6 +124,7 @@ the guardrail degrades is a BREACH: a failed pass, not a win.**
 | **devops** | `deploy_success_rate` UP | `deploy_count_7d` must not fall | ship nothing: 100% of zero deploys |
 | **prod-runtime** | `prod_runtime_breaches` DOWN | every probe section reads (no `probe-error`) | raise a threshold until the breach goes away |
 | **lens** | `stale_tiles` DOWN | `tile_count` must not fall | delete tiles until none can be stale |
+| **orgverify** | the ladder's worst step loses fewer orgs | `approved` must not fall | count QA or fixture orgs as proved |
 | **revenue** | `paying_accounts` UP | `refund_or_churn_rate` must not rise | book conversions that refund or churn. A signup is not a payment |
 
 You do NOT compute your KPI; an independent job does. Open every pass by reading it: state
@@ -236,8 +237,8 @@ On fleet-kit the spine is `fleet.db`'s `runs` table and `runs.jsonl`: same stand
 
 **Doubt the number (folded from signals, fk#1195).** Before you file ANYTHING off a metric in
 this lane, cross-check it: stage monotonicity (a funnel stage cannot show more people than the
-stage that fed it), bot share (a crawler spike is not a product change), and PostHog vs
-`dash_events` agreeing within noise. A number that fails any of the three is itself the
+stage that fed it) and bot share (a crawler spike is not a product change). PostHog is shut
+down (Reif, 2026-10-07); our own tables are the source. A number that fails either is the
 finding — file THAT, not what the wrong number implied.
 
 **The product funnel, daily (folded from signals, fk#1195).**
@@ -287,6 +288,11 @@ expensive lie on a dashboard); every tile has its 24h/7d toggle; and for every t
 the label match the query its data actually answers?** Use the browser: a dashboard is judged
 rendered, not as JSON. Deleting tiles until none can be stale is the cheat, so `tile_count`
 must not fall.
+
+**orgverify** — the ladder after the claim: approved, back in HQ, OrgVerify started, proved,
+badge (`cd /fleet-kit/scripts && python3 -c "import north; print(north.load_funnel()[0]['ladder'])"`).
+Walk the worst step live as the QA `owner` (§10e) and file what stops a real owner there,
+`Vision-link: okr.orgverify`.
 
 **revenue** — the path from free product to paid. **A signup is not a payment.** The ordering
 inverts the obvious: audience capture (accounts, follows, emails) is the revenue PRECURSOR and
