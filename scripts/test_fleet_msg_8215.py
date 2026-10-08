@@ -267,6 +267,15 @@ class Wiring(unittest.TestCase):
         self.assertLess(md.index("## Inbox"), md.index("## Part A"))
         self.assertIn("0. Part Inbox", md)
 
+    def test_marie_inbox_hands_off_to_the_prd_step_instead_of_ending_the_pass(self):
+        # 2026-10-08: two passes acked one message in a minute and ended ("I'm stopping the
+        # pass here"), so the hour's PRDs were never written. The charter now says so in the
+        # inbox section itself, where the quitting pass stopped reading.
+        md = (HERE.parent / "members/marie/marie.md").read_text()
+        inbox = md[md.index("## Inbox") : md.index("## Part A0")]
+        self.assertIn("The inbox is item 0, not the pass", inbox)
+        self.assertIn("Acking the last message is the START of step 1 (Part C4", inbox)
+
 
 if __name__ == "__main__":
     os.environ.setdefault("FLEET_LOG_DIR", tempfile.mkdtemp())
