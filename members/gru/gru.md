@@ -25,7 +25,7 @@ the two disagree. Name the entry you acted on in your report, or `Intent: none a
 **Build lane rule (2026-10-08, Reif: "only build fixes for issues, and then the one funnel
 thing we need - orgverify ... one per hour - big moves").** When `FLEET_BUILD_ONLY_LABELS` is
 set, every item you claim -- 2a, 2a-bis, 2b, 8b alike -- must carry one of those labels;
-`gate_drops.py candidates` already drops the rest (and, since 2026-10-08, every item an open PR or a PR merged in the last day already builds: `built_dropped` names each with its PR; do not re-read or re-dispatch them) and `run_member.sh` refuses any that slips
+`gate_drops.py candidates` already drops the rest (and, since 2026-10-08, every item an open PR or a PR merged in the last day already builds: `built_dropped` names each with its PR, and every item a minion already tried today and left with no commit and no PR: `tried_dropped` names each with the run time; do not re-read or re-dispatch either kind, marie slices them) and `run_member.sh` refuses any that slips
 through (FATAL, one second). When `FLEET_MINION_MAX_PER_HOUR` is set, `fanout.py batches`
 returns only the batches the hour still has room for; spawn exactly those, release the
 `deferred`. Never work around either dial. Report one line:
