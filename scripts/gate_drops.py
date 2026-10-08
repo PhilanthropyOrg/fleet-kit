@@ -54,6 +54,7 @@ import quality_gate  # noqa: E402
 import vision_link_gate  # noqa: E402
 from board_github import LABEL_CLAIMED, LABEL_PROD_ACCESS, NOT_FOR_MINIONS, blocked_by_numbers  # noqa: E402
 from items_arg import HELP as ITEMS_HELP, load_items  # noqa: E402
+import build_lane_rule  # noqa: E402
 
 PREFIX = os.environ.get("FLEET_LABEL_PREFIX", "fleet:")
 NEEDS_SPEC = f"{PREFIX}needs-spec"
@@ -528,14 +529,18 @@ CANDIDATE_FIELDS = "number,title,labels,body,comments,createdAt"
 TIERS = (f"{PREFIX}priority-high", f"{PREFIX}priority-medium", LOW)
 
 
-def candidates(backlog: list[dict]) -> list[dict]:
-    """Pure. Open backlog items gru may build, high -> medium -> low -> unranked, oldest first."""
+def candidates(backlog: list[dict], only_labels: list[str] | None = None) -> list[dict]:
+    """Pure. Open backlog items gru may build, high -> medium -> low -> unranked, oldest first.
+    `only_labels` (FLEET_BUILD_ONLY_LABELS, 2026-10-08): when given, an item must carry one of
+    them or it is not a candidate at all -- gru never claims it. See build_lane_rule.py."""
     skip = INTAKE_SKIP | {PARKED}
+    want = set(only_labels or ())
 
     def tier(i):
         names = _names(i.get("labels"))
         return next((k for k, t in enumerate(TIERS) if t in names), len(TIERS))
-    todo = [i for i in backlog if not set(_names(i.get("labels"))) & skip]
+    todo = [i for i in backlog if not set(_names(i.get("labels"))) & skip
+            and (not want or want & set(_names(i.get("labels"))))]
     return sorted(todo, key=lambda i: (tier(i), i.get("createdAt") or ""))
 
 
@@ -676,7 +681,8 @@ def main(argv=None) -> int:
         except (RuntimeError, ValueError, subprocess.TimeoutExpired) as exc:
             print(f"gate_drops candidates: {exc}", file=sys.stderr)
             return 1
-        todo = candidates(backlog)
+        only = build_lane_rule.allowed_labels()
+        todo = candidates(backlog, only)
         full = hydrate([i["number"] for i in read_slice(todo, a.first)], a.repo)
         Path(a.out).write_text(json.dumps(fill_capped_comments(full, a.repo)))
         tiers = [t.rsplit("-", 1)[-1] for t in TIERS] + ["unranked"]
@@ -685,6 +691,7 @@ def main(argv=None) -> int:
             names = _names(i.get("labels"))
             by[next((t for t, full in zip(tiers, TIERS) if full in names), "unranked")].append(i["number"])
         print(json.dumps({"out": a.out, "scanned": len(backlog), "skipped": len(backlog) - len(todo),
+                          "lane_rule": only, "lane_rule_dropped": (len(candidates(backlog)) - len(todo)) if only else 0,
                           "by_tier": {t: len(v) for t, v in by.items()}, "written": len(full),
                           "numbers": [i["number"] for i in full], "beyond_first": len(todo) - len(full)}))
         return 0

@@ -140,6 +140,26 @@ if [ "$MEMBER" = "minion" ] && [ -n "${RAW_ITEMS:-}" ] && [ "${RAW_ITEMS#*,}" !=
   fi
 fi
 
+# 2026-10-08 (Reif: "only build fixes for issues, and then the one funnel thing we need -
+# orgverify ... cut the prs way down, one per hour"): the instance's build lane rule and hour
+# cap, enforced at dispatch so no prompt path (2a reif-priority, 8b standing lanes) builds
+# around them. gate_drops.py candidates and fanout.py batches apply the same two dials
+# earlier; this is the backstop. Both unset = nothing changes. See scripts/build_lane_rule.py.
+if [ "$MEMBER" = "minion" ] && [ -n "${RAW_ITEMS:-${ITEM:-}}" ] && [ -n "${FLEET_BUILD_ONLY_LABELS:-}" ]; then
+  OFF_LANE=$(python3 "$KIT_DIR/scripts/build_lane_rule.py" check --items "${RAW_ITEMS:-$ITEM}" --repo "$REPO" 2>/dev/null)
+  if [ -n "$OFF_LANE" ]; then
+    echo "FATAL: minion item(s) $OFF_LANE carry none of FLEET_BUILD_ONLY_LABELS=$FLEET_BUILD_ONLY_LABELS. The instance builds only those lanes now; release the item (board_github.py release) and leave it for marie." >&2
+    exit 2
+  fi
+fi
+if [ "$MEMBER" = "minion" ] && [ "${FLEET_MINION_MAX_PER_HOUR:-0}" -gt 0 ] 2>/dev/null; then
+  STARTED_HOUR=$(python3 "$KIT_DIR/scripts/build_lane_rule.py" hour-count --runs "$LOG_DIR/runs.jsonl" 2>/dev/null || echo 0)
+  if [ "${STARTED_HOUR:-0}" -ge "$FLEET_MINION_MAX_PER_HOUR" ] 2>/dev/null; then
+    echo "FATAL: $STARTED_HOUR minion(s) already started in the last hour; FLEET_MINION_MAX_PER_HOUR=$FLEET_MINION_MAX_PER_HOUR. Release the item(s) and dispatch next pass." >&2
+    exit 2
+  fi
+fi
+
 # Structured mirror of a dispatcher's `lane=<name>` --task prefix (nerd.md's contract with
 # datta). Extracted here, once, rather than left for every consumer to re-parse free text --
 # datta's own self-critique flagged repeated turns lost to fragile keyword-matching of
