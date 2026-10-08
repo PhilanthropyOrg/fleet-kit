@@ -218,6 +218,8 @@ jobs:
         run: python3 scripts/test_fleet_msg_8215.py
       - name: run test_mandate.py
         run: python3 scripts/test_mandate.py
+      - name: run test_ci_minutes_metric.py
+        run: python3 scripts/test_ci_minutes_metric.py
       - name: run test_fleet_msg_wake.py
         run: python3 scripts/test_fleet_msg_wake.py
       - name: run test_floodgates_8218.py

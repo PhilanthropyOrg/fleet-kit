@@ -21,6 +21,8 @@ METRICS (name[:member]; every one is computed over a window of `hours` ending at
   avg_duration_s:<member>         mean tokens.duration_ms / 1000 over executed rows
   self_critique_rate:<member>     rows whose Self-critique is not empty/none / executed
   runs_per_day[:<member>]         executed rows per day (any status that ran)
+  ci_minutes_per_day              GitHub Actions minutes used in the window, per day (org-wide;
+                                  read from ci_minutes.py's cache, the mandate's own number)
 `<member>` may be `*` (or omitted where shown optional) for the whole fleet.
 
 None means "unavailable" (no rows in the window, or a zero denominator) -- never 0, so a
@@ -34,6 +36,8 @@ $FLEET_LOG_DIR/runs.jsonl.
 from __future__ import annotations
 
 import argparse
+import calendar
+import itertools
 import json
 import os
 import sys
@@ -63,6 +67,9 @@ CATALOG = {
     # function and simply reads that cache. Same network/arithmetic split as cost_bridge.
     "rework_pct": "share of recently merged PRs whose title reads as rework (cache)",
     "churn_ratio": "additions/deletions across recently merged PRs (cache)",
+    # Reif 2026-10-08 mandate: "max CI mins used today 500". dumbledore could only bet on
+    # turns and run counts, never on the limit it was told to hold. Cache: ci_minutes.py.
+    "ci_minutes_per_day": "GitHub Actions minutes used in the window, per day (ci_minutes.py cache)",
 }
 
 # gh#789: direction only for metrics whose "better" is unambiguous from CATALOG's own
@@ -81,6 +88,7 @@ DIRECTION = {
     "avg_duration_s": "lower",
     "rework_pct": "lower",
     "items_per_run": "higher",
+    "ci_minutes_per_day": "lower",
 }
 
 
@@ -166,6 +174,65 @@ def _rework_cache(path: Path | None = None, now: float | None = None) -> dict | 
     return row
 
 
+# The cache must have been read at or after the window's end, give or take this much (the
+# pass reads CI minutes in step 0, a few minutes before it adds or resolves a prediction).
+CI_CACHE_SLACK_S = 3600.0
+
+
+def _day_start(day: str) -> float:
+    return float(calendar.timegm(time.strptime(day, "%Y-%m-%d")))
+
+
+def ci_minutes_in_window(cache: dict | None, at: float, hours: float) -> float | None:
+    """Minutes used in (at - hours, at], per day. The billing API only gives per-day totals,
+    so the running total is known exactly at each UTC midnight and at the read time, and
+    taken as linear in between. None when the cache does not cover the whole window."""
+    if not cache or not isinstance(cache.get("days"), dict):
+        return None
+    ts = cache.get("ts")
+    if not isinstance(ts, (int, float)) or at > float(ts) + CI_CACHE_SLACK_S:
+        return None
+    points: list[tuple[float, float]] = []
+    cum = 0.0
+    for day, mins in sorted(cache["days"].items()):
+        try:
+            start = _day_start(day)
+            mins = float(mins)
+        except (ValueError, TypeError):
+            return None
+        if start > float(ts):
+            break
+        points.append((start, cum))
+        cum += mins
+    if not points:
+        return None
+    points.append((max(float(ts), points[-1][0]), cum))
+
+    def total_at(t: float) -> float | None:
+        if t < points[0][0]:
+            return None
+        if t >= points[-1][0]:
+            return points[-1][1]
+        for (t0, c0), (t1, c1) in itertools.pairwise(points):
+            if t0 <= t <= t1:
+                return c0 if t1 == t0 else c0 + (c1 - c0) * (t - t0) / (t1 - t0)
+        return None
+
+    hi, lo = total_at(at), total_at(at - hours * 3600.0)
+    if hi is None or lo is None:
+        return None
+    return (hi - lo) / (hours / 24.0)
+
+
+def _ci_cache() -> dict | None:
+    p = Path(os.environ.get("FLEET_LOG_DIR", "/var/log/fleet-kit")) / "ci_minutes.json"
+    try:
+        row = json.loads(p.read_text())
+    except (OSError, ValueError):
+        return None
+    return row if isinstance(row, dict) else None
+
+
 def compute(name: str, rows: list[dict], at: float | None = None, hours: float = 24.0) -> float | None:
     base, args = parse(name)
     at = time.time() if at is None else float(at)
@@ -229,6 +296,8 @@ def compute(name: str, rows: list[dict], at: float | None = None, hours: float =
         key = "title_rework_pct" if base == "rework_pct" else "churn_ratio"
         v = cache.get(key)
         return float(v) if v is not None else None
+    if base == "ci_minutes_per_day":
+        return ci_minutes_in_window(_ci_cache(), at, hours)
     raise ValueError(base)  # unreachable: parse() already rejected unknown names
 
 
