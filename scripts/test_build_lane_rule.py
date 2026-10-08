@@ -174,6 +174,16 @@ class HourSlotIsTakenAtomically(unittest.TestCase):
             rcs = sorted(p.wait(timeout=20) for p in procs)
             self.assertEqual(rcs, [0, 3, 3, 3])
 
+    def test_a_racers_newer_ledger_line_still_counts(self):
+        # CI 2026-10-08 05:43Z: two of four got a slot. Each dispatcher read the clock BEFORE
+        # the lock; the one that lost the lock race then filtered out the winner's line because
+        # its timestamp was a few ms after the loser's `now`. A ledger line is only ever written
+        # under the lock, so a newer one is a real start and counts.
+        with tempfile.TemporaryDirectory() as d:
+            runs, ledger = Path(d, "runs.jsonl"), Path(d, "slots.log")
+            ledger.write_text(f"{time.time() + 2} minion 1\n")
+            self.assertEqual(rule.reserve(runs, ledger, cap=1, now=time.time()), (False, 1))
+
     def test_a_started_row_still_counts_and_an_old_slot_does_not(self):
         with tempfile.TemporaryDirectory() as d:
             runs, ledger = Path(d, "runs.jsonl"), Path(d, "slots.log")
