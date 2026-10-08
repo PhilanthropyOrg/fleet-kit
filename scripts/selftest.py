@@ -5112,11 +5112,24 @@ def _north_weights_every_kr_by_what_reif_shipped_and_where_the_funnel_leaks():
     assert w["okr.conversion"] > w["okr.clicks"] > w["okr.traffic"] == 0.0, w
     assert n.tier_for(w["okr.conversion"]) == "high" and n.tier_for(w["okr.traffic"]) == "low"
     eq = n.weights([], None)
-    assert all(abs(eq[k] - 0.33) < 0.01 for k in n.KR_IDS), "nothing readable -> the equal split"
+    assert all(abs(eq[k] - 1 / len(n.KR_IDS)) < 0.01 for k in n.KR_IDS), "nothing readable -> the equal split"
     assert n.worst_step_kr({"funnel": {"worst_step": "cta_clicked->page_viewed"}}) == "okr.conversion"
     assert n.worst_step_kr({}) is None
     live = {"funnel": {"worst_step": {"from_label": "Clicked claim", "to_label": "Reached claim page", "lost": 203, "drop_pct": 65.5}}}
     assert n.worst_step_kr(live) == "okr.conversion", "the product's dict-shaped worst_step must map"
+    # gh#11787: the after-claim ladder, when the feed carries it, is the leak and the hour's plan
+    lad = {"funnel": live["funnel"], "ladder": {"days": 30, "stages": [
+        {"key": "approved", "label": "Claim approved", "orgs": 52}, {"key": "back_in_hq", "label": "Back in HQ", "orgs": 30},
+        {"key": "orgverify_started", "label": "OrgVerify started", "orgs": 4}],
+        "worst_step": {"from_label": "Back in HQ", "to_label": "OrgVerify started", "lost": 26, "drop_pct": 86.7}}}
+    assert n.worst_step_kr(lad) == "okr.orgverify", "the ladder's worst step outranks the claim funnel's"
+    assert n.attribute("Verified badge shows on the org page") == "okr.orgverify"
+    assert n.attribute("OrgVerify proof code page heals itself") == "okr.orgverify"
+    plan = n.render([], None, {}, lad, None, {}, 0, 1_800_000_000.0)
+    assert "## This hour" in plan and "Claim approved 52 · Back in HQ 30 · OrgVerify started 4" in plan, plan
+    assert "Build this: close **Back in HQ -> OrgVerify started** (26 orgs lost, 86.7%) -> `okr.orgverify`" in plan, plan
+    assert "## This hour" not in n.render([], None, {}, live, None, {}, 0, 1_800_000_000.0), "no ladder, no plan block"
+    assert "## This hour" in marie_text() and "plan:" in marie_text(), "marie must turn the plan into the top item"
     assert "Clicked claim -> Reached claim page: 203 lost (65.5%)" in n.render([], None, {}, live, None, {}, 0, 1_800_000_000.0), "and read as words, not a dict"
     # burn: a run with a pr inherits the PR's KR; a PR-less run is named by member
     now = 1_800_000_000.0
@@ -5142,8 +5155,13 @@ def _north_weights_every_kr_by_what_reif_shipped_and_where_the_funnel_leaks():
     assert rm.index('HANDOFF_FILE="$LOG_DIR/HANDOFF.md"') < rm.index('NORTH_FILE="$LOG_DIR/NORTH.md"'), "NORTH follows HANDOFF"
     ep = (ROOT / "entrypoint.sh").read_text()
     assert "python3 /fleet-kit/scripts/north.py write >> $LOG_DIR/north.log" in ep, "no cron line for north.py"
-    marie = (ROOT / "members" / "marie" / "marie.md").read_text()
+    marie = marie_text()
     assert "NORTH.md" in marie and "at most ONE tier" in marie, "marie's tier must start from NORTH"
+    assert "23 * * * * root" in ep.split("north.py write")[0][-400:], "north.py runs hourly: it carries the hour's plan (gh#11787)"
+
+
+def marie_text() -> str:
+    return (ROOT / "members" / "marie" / "marie.md").read_text()
 
 
 def _an_open_ask_also_lands_on_the_board_for_an_agent():

@@ -62,7 +62,7 @@ class LiveInstanceIsUnchanged(unittest.TestCase):
             self.assertEqual(okr.source(), ROOT / "scripts" / "okr.json")
             self.assertEqual(okr.load(), KIT)
             self.assertEqual(north.load_okr(), KIT)
-            self.assertEqual(vlg.kr_ids(), ["okr.verified_claims", "okr.traffic", "okr.clicks", "okr.conversion"])
+            self.assertEqual(vlg.kr_ids(), ["okr.verified_claims", "okr.orgverify", "okr.traffic", "okr.clicks", "okr.conversion"])
         with env():
             self.assertEqual(okr.load(), KIT, "FLEET_REPO unset: the kit's file, nothing guessed")
 
@@ -128,7 +128,7 @@ class ProductGoals(unittest.TestCase):
                 with contextlib.redirect_stderr(err):
                     self.assertEqual(okr.load(), KIT, bad)
                     self.assertEqual(north.load_okr(), KIT)
-                    self.assertEqual(len(vlg.kr_ids()), 4)
+                    self.assertEqual(len(vlg.kr_ids()), 1 + len(KIT["key_results"]))
                 self.assertIn(str(repo / "fleet" / "okr.json"), err.getvalue())
                 self.assertIn(why, err.getvalue())
                 r = subprocess.run([sys.executable, str(ROOT / "scripts" / "north.py"), "write", "--no-gh", "--stdout"],
