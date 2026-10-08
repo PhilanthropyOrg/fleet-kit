@@ -308,6 +308,8 @@ jobs:
         run: python3 scripts/test_gru_kick_gate_9840.py
       - name: run test_judge_judy_carry_forward.py
         run: python3 scripts/test_judge_judy_carry_forward.py
+      - name: run test_judge_judy_prior_block.py
+        run: python3 scripts/test_judge_judy_prior_block.py
       - name: run test_judge_judy_no_tools.py
         run: python3 scripts/test_judge_judy_no_tools.py
       - name: run test_inbox_came_in.py
