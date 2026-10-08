@@ -66,3 +66,27 @@ def test_hydrate_keeps_order_and_leaves_out_an_unreadable_item():
             return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="HTTP 504")
         return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps({"number": n}), stderr="")
     assert [i["number"] for i in gate_drops.hydrate([3, 2, 1], None, run=run)] == [3, 1]
+
+
+def test_items_a_pr_already_builds_are_not_candidates():
+    # 2026-10-08: the hour's one minion slot went three times to items already built: #11634
+    # (open PR #11741 names it), #11712/#11713 (PR #11739 merged 20 min earlier, waiting on
+    # deploy and the prod walk before the issue closes). Each minion read the PRs, built
+    # nothing and burned the slot. An open PR or one merged in the last day holds the item.
+    prs = [
+        {"number": 11741, "state": "OPEN", "headRefName": "member/minion-item11646_11635_11634-32-1", "body": ""},
+        {"number": 11739, "state": "MERGED", "headRefName": "x", "body": "Part of #11712\nPart of #11713",
+         "mergedAt": "2026-10-08T07:46:28Z"},
+        {"number": 11000, "state": "MERGED", "headRefName": "member/minion-item9000-1-1", "body": "",
+         "mergedAt": "2026-10-05T07:46:28Z"},
+        {"number": 11001, "state": "CLOSED", "headRefName": "member/minion-item9001-1-1", "body": ""},
+    ]
+    import calendar
+    import time
+    now = calendar.timegm(time.strptime("2026-10-08T08:30:00Z", "%Y-%m-%dT%H:%M:%SZ"))
+    built = gate_drops.built_by_prs(prs, now)
+    assert set(built) == {11634, 11635, 11646, 11712, 11713}
+    assert built[11712] == "PR #11739 merged 2026-10-08 07:46Z"
+    assert built[11634] == "PR #11741 open"
+    items = [_item(n, "2026-10-01", "fleet:backlog", "fleet:priority-high") for n in (11634, 11712, 9000, 9001, 10950)]
+    assert [i["number"] for i in gate_drops.candidates(items, built=built)] == [9000, 9001, 10950]
