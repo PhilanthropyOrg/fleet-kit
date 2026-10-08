@@ -160,5 +160,29 @@ class DispatchGuard(unittest.TestCase):
             self.assertEqual(out, "0")
 
 
+class HourSlotIsTakenAtomically(unittest.TestCase):
+    """2026-10-08 04:12Z: four minions launched within 11s against a cap of 1. Each counted
+    runs.jsonl before any of them had written its `started` row, so all four saw 0. RED with a
+    bare hour-count: four concurrent dispatchers all pass. GREEN with reserve: exactly one does."""
+
+    def test_four_dispatchers_at_once_get_one_slot(self):
+        with tempfile.TemporaryDirectory() as d:
+            cmd = [sys.executable, str(HERE / "build_lane_rule.py"), "reserve",
+                   "--runs", str(Path(d, "runs.jsonl")), "--ledger", str(Path(d, "slots.log")),
+                   "--cap", "1"]
+            procs = [subprocess.Popen(cmd, stdout=subprocess.PIPE, text=True) for _ in range(4)]
+            rcs = sorted(p.wait(timeout=20) for p in procs)
+            self.assertEqual(rcs, [0, 3, 3, 3])
+
+    def test_a_started_row_still_counts_and_an_old_slot_does_not(self):
+        with tempfile.TemporaryDirectory() as d:
+            runs, ledger = Path(d, "runs.jsonl"), Path(d, "slots.log")
+            ledger.write_text(f"{time.time() - 3700} minion 1\n")
+            self.assertEqual(rule.reserve(runs, ledger, cap=1), (True, 0))
+            self.assertEqual(rule.reserve(runs, ledger, cap=1), (False, 1))
+            runs.write_text(_started(time.time() - 60) + "\n")
+            self.assertEqual(rule.reserve(runs, Path(d, "fresh.log"), cap=1), (False, 1))
+
+
 if __name__ == "__main__":
     unittest.main()
