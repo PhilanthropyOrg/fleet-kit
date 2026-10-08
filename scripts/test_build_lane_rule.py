@@ -195,6 +195,36 @@ class HourSlotIsTakenAtomically(unittest.TestCase):
             self.assertEqual(rule.reserve(runs, Path(d, "fresh.log"), cap=1), (False, 1))
 
 
+
+class CiDailyBudgetTests(unittest.TestCase):
+    """MANDATE.md 2026-10-08, "max CI mins used today 500": 2,581 read that day, 5,000+ before."""
+
+    def test_the_dial_reads_like_the_hour_cap(self):
+        self.assertEqual(rule.ci_daily_max({"FLEET_CI_MINUTES_DAILY_MAX": "500"}), 500)
+        self.assertEqual(rule.ci_daily_max({}), 0)
+        self.assertEqual(rule.ci_daily_max({"FLEET_CI_MINUTES_DAILY_MAX": "lots"}), 0)
+
+    def test_a_spent_day_stops_and_an_unread_meter_fails_open(self):
+        self.assertTrue(rule.ci_spent(500, 2581))
+        self.assertTrue(rule.ci_spent(500, 500))
+        self.assertFalse(rule.ci_spent(500, 499))
+        self.assertFalse(rule.ci_spent(500, None))
+        self.assertFalse(rule.ci_spent(0, 9999))
+
+    def test_a_spent_day_defers_every_batch_and_names_the_dial(self):
+        result = {"batches": [{"items": [{"number": 1}]}, {"items": [{"number": 2}]}],
+                  "n_batches": 2, "deferred": []}
+        out = rule.cap_batches(result, 0, why="CI day spent: 2581 of FLEET_CI_MINUTES_DAILY_MAX=500")
+        self.assertEqual(out["n_batches"], 0)
+        self.assertEqual([d["number"] for d in out["deferred"]], [1, 2])
+        self.assertIn("FLEET_CI_MINUTES_DAILY_MAX", out["deferred"][0]["why"])
+
+    def test_dispatch_refuses_a_minion_when_the_day_is_spent(self):
+        src = (HERE / "run_member.sh").read_text()
+        gate = src.index('"${FLEET_CI_MINUTES_DAILY_MAX:-0}" -gt 0')
+        self.assertLess(gate, src.index("build_lane_rule.py\" reserve"))
+        self.assertIn("ci-budget", src[gate:gate + 300])
+
 if __name__ == "__main__":
     unittest.main()
 

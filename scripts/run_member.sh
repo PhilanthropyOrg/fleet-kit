@@ -152,6 +152,15 @@ if [ "$MEMBER" = "minion" ] && [ -n "${RAW_ITEMS:-${ITEM:-}}" ] && [ -n "${FLEET
     exit 2
   fi
 fi
+# MANDATE.md 2026-10-08 ("max CI mins used today 500"): every minion PR push is a ~13-minute
+# CI run, so a spent day starts no minion. Checked before the hour slot so a refusal keeps it.
+if [ "$MEMBER" = "minion" ] && [ "${FLEET_CI_MINUTES_DAILY_MAX:-0}" -gt 0 ] 2>/dev/null; then
+  CI_READ=$(python3 "$KIT_DIR/scripts/build_lane_rule.py" ci-budget 2>/dev/null)
+  if [ $? -eq 3 ]; then
+    echo "FATAL: CI minutes today $CI_READ (FLEET_CI_MINUTES_DAILY_MAX). The day's Actions budget is spent; release the item(s) and dispatch after 00:00 UTC." >&2
+    exit 2
+  fi
+fi
 if [ "$MEMBER" = "minion" ] && [ "${FLEET_MINION_MAX_PER_HOUR:-0}" -gt 0 ] 2>/dev/null; then
   # reserve = count + take the slot under one lock; a bare count raced (4 starts in 11s, 10-08).
   STARTED_HOUR=$(python3 "$KIT_DIR/scripts/build_lane_rule.py" reserve --runs "$LOG_DIR/runs.jsonl" \

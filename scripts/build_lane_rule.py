@@ -11,6 +11,10 @@ Two dials, both read from fleet.env. Unset = the old behaviour, nothing changes.
   FLEET_BUILD_ONLY_LABELS    comma list. A minion item must carry at least one of them.
   FLEET_MINION_MAX_PER_HOUR  at most this many minion starts in any rolling 50 minutes
                              (one per hourly gru pass; see WINDOW_S).
+  FLEET_CI_MINUTES_DAILY_MAX no minion starts once the org's Actions minutes today (UTC, from
+                             ci_minutes.py) reach this. MANDATE.md 2026-10-08: "max 500"; the
+                             day it landed read 2,581, 5,000-7,700 every day before. Fails open
+                             when the billing API cannot be read.
 
 Three places enforce them, so a prompt cannot build around the rule:
   gate_drops.py candidates   drops off-lane items before gru claims them (step 2b);
@@ -22,6 +26,7 @@ Run: python3 scripts/build_lane_rule.py check --items 1,2 --repo owner/repo
      python3 scripts/build_lane_rule.py hour-count --runs /var/log/fleet-kit/runs.jsonl
      python3 scripts/build_lane_rule.py reserve --runs /var/log/fleet-kit/runs.jsonl \
          --ledger /var/log/fleet-kit/minion_hour_starts.log --cap 1   # exit 3 = hour full
+     python3 scripts/build_lane_rule.py ci-budget                        # exit 3 = day spent
 """
 from __future__ import annotations
 
@@ -124,6 +129,32 @@ def reserve(runs: Path, ledger: Path, cap: int, member: str = "minion", window_s
         return True, count
 
 
+def ci_daily_max(env: Mapping[str, str] | None = None) -> int:
+    """FLEET_CI_MINUTES_DAILY_MAX as an int; 0 when unset, blank or not a number (= no cap)."""
+    raw = (env if env is not None else os.environ).get("FLEET_CI_MINUTES_DAILY_MAX", "")
+    try:
+        return max(0, int(raw))
+    except (TypeError, ValueError):
+        return 0
+
+
+def ci_spent(cap: int, today: float | None) -> bool:
+    """Pure. True when a cap is set and today's minutes, read, have reached it."""
+    return cap > 0 and today is not None and today >= cap
+
+
+def ci_minutes_today() -> float | None:
+    """The org's Actions minutes today (UTC); None when the billing API cannot be read."""
+    try:
+        import ci_minutes
+        now = time.gmtime()
+        items = ci_minutes.fetch(os.environ.get("FLEET_GH_ORG", "PhilanthropyOrg"),
+                                 now.tm_year, now.tm_mon)
+        return ci_minutes.minutes(items, time.strftime("%Y-%m-%d", now))
+    except Exception:  # noqa: BLE001 -- fail open: an unread meter never stops the fleet
+        return None
+
+
 def remaining(cap: int, started: int) -> int | None:
     """Pure. Minion starts the hour still allows; None when there is no cap."""
     if cap <= 0:
@@ -131,7 +162,8 @@ def remaining(cap: int, started: int) -> int | None:
     return max(0, cap - started)
 
 
-def cap_batches(result: dict, room: int | None, cap: int = 0, started: int = 0) -> dict:
+def cap_batches(result: dict, room: int | None, cap: int = 0, started: int = 0,
+                why: str | None = None) -> dict:
     """Pure. Keep the first `room` batches of a fanout.py `batches` result; the rest of the
     items go to `deferred` with a why that names the dial. None = no cap, result untouched."""
     if room is None:
@@ -141,8 +173,8 @@ def cap_batches(result: dict, room: int | None, cap: int = 0, started: int = 0) 
         return result
     out = dict(result)
     kept, dropped = batches[:room], batches[room:]
-    why = (f"hour cap: FLEET_MINION_MAX_PER_HOUR={cap}, {started} minion(s) already started "
-           f"in the last hour; next pass")
+    why = why or (f"hour cap: FLEET_MINION_MAX_PER_HOUR={cap}, {started} minion(s) already "
+                  f"started in the last hour; next pass")
     out["batches"] = kept
     out["n_batches"] = len(kept)
     out["deferred"] = list(result.get("deferred") or []) + [
@@ -180,6 +212,7 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--cap", type=int, required=True)
     r.add_argument("--member", default="minion")
     r.add_argument("--window-s", type=float, default=WINDOW_S)
+    sub.add_parser("ci-budget", help="print today's Actions minutes/cap; exit 3 when the day is spent")
     a = ap.parse_args(argv)
     if a.cmd == "check":
         allowed = allowed_labels()
@@ -205,6 +238,11 @@ def main(argv: list[str] | None = None) -> int:
         taken, count = reserve(Path(a.runs), Path(a.ledger), a.cap, a.member, a.window_s)
         print(count)
         return 0 if taken else 3
+    if a.cmd == "ci-budget":
+        cap = ci_daily_max()
+        today = ci_minutes_today() if cap else None
+        print(f"{'unread' if today is None else int(today)}/{cap or 'none'}")
+        return 3 if ci_spent(cap, today) else 0
     return 2
 
 
