@@ -5129,6 +5129,8 @@ def _north_weights_every_kr_by_what_reif_shipped_and_where_the_funnel_leaks():
     assert "## This hour" in plan and "Claim approved 52 · Back in HQ 30 · OrgVerify started 4" in plan, plan
     assert "Build this: close **Back in HQ -> OrgVerify started** (26 orgs lost, 86.7%) -> `okr.orgverify`" in plan, plan
     assert "## This hour" not in n.render([], None, {}, live, None, {}, 0, 1_800_000_000.0), "no ladder, no plan block"
+    assert "Reached claim page: 188 lost" not in plan or "-> `okr.conversion`" in plan.split("## This hour")[0], "the claim funnel's line keeps its own KR"
+    assert "Clicked claim -> Reached claim page: 203 lost (65.5%)** -> `okr.conversion`" in plan, "the claim funnel's line keeps its own KR when the ladder leaks"
     assert "## This hour" in marie_text() and "plan:" in marie_text(), "marie must turn the plan into the top item"
     assert "Clicked claim -> Reached claim page: 203 lost (65.5%)" in n.render([], None, {}, live, None, {}, 0, 1_800_000_000.0), "and read as words, not a dict"
     # burn: a run with a pr inherits the PR's KR; a PR-less run is named by member
