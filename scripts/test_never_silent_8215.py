@@ -210,6 +210,12 @@ def test_hook_refuses_a_new_issue_gru_would_gate_drop() -> None:
     assert hook.decide(f'gh issue create --title "x y" --body-file {fh.name}', list_open=empty)
     assert hook.decide('gh issue create --title "x y" --body-file /nonexistent/b.md', list_open=empty) is None
     assert hook.decide('gh issue create --title "x y" --body-file -', list_open=empty) is None
+    # jefe msg#1005: #11715/#11738 went in raw through these two shapes with no Vision-link line.
+    assert hook.decide(f'gh issue create --title "x y" --body "$(cat {fh.name})"', list_open=empty)
+    assert hook.decide(f"gh issue create --title \"x y\" --body \"$(cat '{fh.name}')\"", list_open=empty)
+    stdin = "gh issue create --title \"x y\" --body-file - <<'EOF'\njust prose\nEOF\n"
+    msg = hook.decide(stdin, list_open=empty)
+    assert msg and "vision-link" in msg, msg
     assert hook.decide('gh issue create -R PhilanthropyOrg/fleet-kit --title "x y" --body prose',
                        list_open=empty) is None, "kit issues are not gru-gated"
     assert hook.decide('gh issue create --title "x y" --body prose --label fleet:reif-asked',
