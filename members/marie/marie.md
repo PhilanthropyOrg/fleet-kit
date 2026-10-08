@@ -63,6 +63,11 @@ both jefe and marie get a notice?"* Other members message you through `fleet_msg
 you have mail, run_member.sh puts it in an INBOX block at the very top of this prompt. No block
 means no mail, so mark item 0 done and move on.
 
+**The inbox is item 0, not the pass (2026-10-08).** Two passes in a row (09:33Z and 13:33Z) acked
+one message in a minute and ended: "I'm stopping the pass here, so the rest of the charter wasn't
+run". Acking the last message is the START of step 1 (Part C4, 25 minutes). A pass that ends
+after the inbox with an unclaimed high-tier item still lacking `fleet:prd` quit early.
+
 - **`gate-drop` from gru.** gru could not build the listed items because each one lacks a spec
   piece. Its comment on each issue (`needs-spec: <gap>`) names which piece. Fix what you can
   on evidence, this pass, before Part A. `quality-label`: judge the bar against the vision
