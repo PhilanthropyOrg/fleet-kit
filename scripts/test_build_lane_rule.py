@@ -93,7 +93,9 @@ class PureRules(unittest.TestCase):
 
 class PackerHourCap(unittest.TestCase):
     def _cli(self, items, runs_dir: str, **env):
-        e = {k: v for k, v in os.environ.items() if not k.startswith("FLEET_MINION_")}
+        # A member host's fleet.env sets the CI day cap; past 500 minutes every batch was deferred.
+        e = {k: v for k, v in os.environ.items()
+             if not k.startswith("FLEET_MINION_") and k != "FLEET_CI_MINUTES_DAILY_MAX"}
         e.update(env, FLEET_LOG_DIR=runs_dir)
         r = subprocess.run([sys.executable, str(HERE / "fanout.py"), "batches", "--turn-budget", "0",
                             "--unit-turns", "30", "--items", json.dumps(items)],
@@ -224,6 +226,13 @@ class CiDailyBudgetTests(unittest.TestCase):
         gate = src.index('"${FLEET_CI_MINUTES_DAILY_MAX:-0}" -gt 0')
         self.assertLess(gate, src.index("build_lane_rule.py\" reserve"))
         self.assertIn("ci-budget", src[gate:gate + 300])
+
+    def test_a_fixer_pr_push_waits_too_but_its_bare_pass_does_not(self):
+        # 10-08: after the minion cap, the-fixer --item pushes were most of the day's PR CI.
+        src = (HERE / "run_member.sh").read_text()
+        gate = src.index('"${FLEET_CI_MINUTES_DAILY_MAX:-0}" -gt 0')
+        head = src[src.rindex("\nif ", 0, gate):gate]
+        self.assertIn('[ "$MEMBER" = "the-fixer" ] && [ -n "$ITEM" ]', head)
 
 if __name__ == "__main__":
     unittest.main()

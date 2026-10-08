@@ -154,10 +154,13 @@ if [ "$MEMBER" = "minion" ] && [ -n "${RAW_ITEMS:-${ITEM:-}}" ] && [ -n "${FLEET
 fi
 # MANDATE.md 2026-10-08 ("max CI mins used today 500"): every minion PR push is a ~13-minute
 # CI run, so a spent day starts no minion. Checked before the hour slot so a refusal keeps it.
-if [ "$MEMBER" = "minion" ] && [ "${FLEET_CI_MINUTES_DAILY_MAX:-0}" -gt 0 ] 2>/dev/null; then
+# the-fixer --item <PR> pushes to a PR too (3 CI runs on one branch in 80 min after the minion
+# cap, 10-08), so it waits for the new day as well; its bare pass (red main, prod down) does not.
+if { [ "$MEMBER" = "minion" ] || { [ "$MEMBER" = "the-fixer" ] && [ -n "$ITEM" ]; }; } \
+   && [ "${FLEET_CI_MINUTES_DAILY_MAX:-0}" -gt 0 ] 2>/dev/null; then
   CI_READ=$(python3 "$KIT_DIR/scripts/build_lane_rule.py" ci-budget 2>/dev/null)
   if [ $? -eq 3 ]; then
-    echo "FATAL: CI minutes today $CI_READ (FLEET_CI_MINUTES_DAILY_MAX). The day's Actions budget is spent; release the item(s) and dispatch after 00:00 UTC." >&2
+    echo "FATAL: CI minutes today $CI_READ (FLEET_CI_MINUTES_DAILY_MAX). The day's Actions budget is spent; $MEMBER ${ITEM:+(item $ITEM) }waits; release the item(s) and dispatch after 00:00 UTC." >&2
     exit 2
   fi
 fi
