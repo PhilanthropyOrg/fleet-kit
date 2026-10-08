@@ -13471,8 +13471,10 @@ def _filer_comments_recurred_once_per_run_gh7099():
     assert second["commented"] == [], f"second run re-commented (gh#7099): {second}"
     assert second["skipped"] == [{"key": key, "issue": 41, "reason": "already_commented_this_run"}], second
     assert len(comments) == 1, f"a second identical comment was posted: {comments}"
-    # a NEW run on the same still-open issue is a real recurrence and does comment again
+    # a NEW run on a NEW deploy sha is a real recurrence and does comment again (same sha
+    # within a day is skipped as recurred_same_sha_today)
     results["run"] = "20260921T160000Z"
+    results["deploy_sha"] = "abc1234"
     (d / "results.json").write_text(json.dumps(results))
     third = jif.process(d / "results.json", d / "state.json", runner=recording, repo="owner/name")
     assert third["commented"] == [{"issue": 41, "key": key}] and len(comments) == 2, (third, comments)

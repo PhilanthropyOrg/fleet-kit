@@ -469,6 +469,9 @@ def iter_steps(results: dict):
             yield journey, step
 
 
+RECUR_COMMENT_EVERY_S = 86400  # one "Recurred again" per issue per day unless the sha changed
+
+
 def group_by_key(results: dict) -> "dict[str, list[tuple[dict, dict]]]":
     """Groups this run's (journey, step) pairs by their dedupe key, so a step-0 failure that
     ran at two viewports (same key, per VIEWPORT COLLAPSING above) is decided ONCE -- filed
@@ -485,7 +488,7 @@ def group_by_key(results: dict) -> "dict[str, list[tuple[dict, dict]]]":
     return groups
 
 
-def process(results_path: Path, state_path: Path = DEFAULT_STATE_PATH, runner=_run, dry_run: bool = False, profile: "Profile" = SENTRY, repo: str | None = None) -> dict:
+def process(results_path: Path, state_path: Path = DEFAULT_STATE_PATH, runner=_run, dry_run: bool = False, profile: "Profile" = SENTRY, repo: str | None = None, now: float | None = None) -> dict:
     """Walks one results.json, files/comments/closes as needed. Returns a summary dict of
     what happened -- never raises on a `gh` failure, since one bad call must not stop the rest
     of the run from being processed (same non-crashing-on-a-single-failure shape #657's own
@@ -524,13 +527,22 @@ def process(results_path: Path, state_path: Path = DEFAULT_STATE_PATH, runner=_r
                 if state.get(key, {}).get("last_fail_run") == run:
                     summary["skipped"].append({"key": key, "issue": existing, "reason": "already_commented_this_run"})
                     continue
+                # Same sha, commented within a day: a "Recurred again" adds nothing (#11127 drew 45,
+                # all on sha `unknown`, ~200/day across issues) and spends the shared gh write cap.
+                prior = state.get(key, {})
+                if (prior.get("last_comment_sha") == (deploy_sha or "unknown")
+                        and (now or time.time()) - prior.get("last_comment_ts", 0) < RECUR_COMMENT_EVERY_S):
+                    state[key] = {**prior, "last_fail_run": run, "last_fail_issue": existing}
+                    summary["skipped"].append({"key": key, "issue": existing, "reason": "recurred_same_sha_today"})
+                    continue
                 note = f"Recurred again on run `{run}` (sha `{deploy_sha or 'unknown'}`)."
                 if not dry_run:
                     rc, out = runner(build_comment_cmd(existing, note, repo))
                     if rc != 0:
                         summary["errors"].append(f"comment #{existing} failed: {out[:200]}")
                         continue
-                state[key] = {**state.get(key, {}), "last_fail_run": run, "last_fail_issue": existing}
+                state[key] = {**state.get(key, {}), "last_fail_run": run, "last_fail_issue": existing,
+                              "last_comment_sha": deploy_sha or "unknown", "last_comment_ts": now or time.time()}
                 summary["commented"].append({"issue": existing, "key": key})
             elif not dry_run and (reopened := reopen_recent(
                     state.get(key, {}),

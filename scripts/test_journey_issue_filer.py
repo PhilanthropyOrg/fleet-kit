@@ -185,6 +185,19 @@ class ProcessEndToEndTest(unittest.TestCase):
         self.assertNotEqual(new_issue_no, issue_no, "closed issue must not be reused")
         self.assertIn("sha2", self.gh.issues[new_issue_no]["body"])
 
+    def test_recurrence_comments_once_a_day_per_sha(self):
+        # #11127 drew 45 "Recurred again" comments on one sha in 3 days; one a day is enough.
+        jif.process(self._write("r1.json", _results("fail", "run-1", "")), self.state_path, runner=self.gh, now=1000.0)
+        s2 = jif.process(self._write("r2.json", _results("fail", "run-2", "")), self.state_path, runner=self.gh, now=2000.0)
+        self.assertEqual(len(s2["commented"]), 1)
+        s3 = jif.process(self._write("r3.json", _results("fail", "run-3", "")), self.state_path, runner=self.gh, now=9000.0)
+        self.assertEqual(s3["commented"], [])
+        self.assertEqual(s3["skipped"][0]["reason"], "recurred_same_sha_today")
+        s4 = jif.process(self._write("r4.json", _results("fail", "run-4", "sha9")), self.state_path, runner=self.gh, now=9500.0)
+        self.assertEqual(len(s4["commented"]), 1, "a new deploy sha is news")
+        s5 = jif.process(self._write("r5.json", _results("fail", "run-5", "sha9")), self.state_path, runner=self.gh, now=9500.0 + 86400)
+        self.assertEqual(len(s5["commented"]), 1, "a day later it says so again")
+
     def test_pass_with_no_prior_issue_is_a_noop(self):
         r = self._write("clean.json", _results("pass", "run-1", "sha1"))
         summary = jif.process(r, self.state_path, runner=self.gh)
