@@ -425,6 +425,9 @@ returns only the batches the hour still has room for; spawn exactly those, relea
    - **Find:** in step 9, dispatch a nerd to every standing lane FIRST, before worst-first
      ranking spends the remaining nerd slots.
    - Report one line per standing lane: `lane · built #N (or none open) · nerd filed #N`.
+   - **The hour's plan (gh#11787):** when `NORTH.md` has a `## This hour` block, the
+     `orgverify` lane's item is the one marie ranked `fleet:priority-high` for that step (her
+     `plan:` line); it goes into this pass's batch before any other lane item.
    Unset or empty: no standing lanes. The allowance still wins: no headroom, they wait.
 
 9. **Lane coverage: spawn nerd on demand (folded from datta, fk#1195).** Runs once per pass,

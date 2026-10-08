@@ -56,7 +56,7 @@ class ClassifyValueTests(unittest.TestCase):
         self.assertEqual(status, vlg.STATUS_MISSING)
         status, _ = vlg._classify_value("Stripe MRR -- the number")
         self.assertEqual(status, vlg.STATUS_MISSING)
-        self.assertEqual(set(vlg.kr_ids()), {"okr.verified_claims", "okr.traffic", "okr.clicks", "okr.conversion"})
+        self.assertEqual(set(vlg.kr_ids()), {"okr.verified_claims", "okr.orgverify", "okr.traffic", "okr.clicks", "okr.conversion"})
 
 
 class ClassifyCandidateTests(unittest.TestCase):
