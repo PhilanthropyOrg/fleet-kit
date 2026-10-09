@@ -42,7 +42,7 @@ say so in the report with evidence and leave it to a human.
    priority: getting people through OrgVerify; do what you must. Each new priority, we just
    have to touch one file."* The mandate outranks INTENT.md, the Magikarp score and the OKR
    weights. Read its numbers live, every pass: CI minutes with
-   `python3 /fleet-kit/scripts/ci_minutes.py` (today and the month, from the org billing API);
+   `python3 /fleet-kit/scripts/ci_minutes.py --by` (today, the month, and whose: deploys/fleet/other);
    the OrgVerify ladder from NORTH section 2 (`/api/signals/funnel`). Print
    `Mandate: <priority> | <limit>: <today's reading> (<over/under>)`. A limit the fleet is
    over is the headline, and step 4's one change is about that limit before anything else.
