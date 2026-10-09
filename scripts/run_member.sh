@@ -463,7 +463,14 @@ elif [ -n "$PREGATE" ] && [ "$DRY_RUN" -ne 1 ]; then
     MAIL="$(FLEET_LOG_DIR="$LOG_DIR" python3 "$KIT_DIR/scripts/fleet_msg.py" pregate --me "$MEMBER" 2>>"$LOG")"
     case "$MAIL" in
       ''|green*) ;;  # empty inbox, or fleet.db unreadable: stay quiet as before
-      *) PREGATE_OUT="inbox: $MAIL (pregate: $PREGATE_OUT)"; export FLEET_PREGATE_OUTPUT="$PREGATE_OUT"
+      *) PREGATE_OUT="inbox: $MAIL (pregate: $PREGATE_OUT)"
+         # MANDATE CI cap: a mail-woken pass pushed PR #11903 at 1,009/500 min (10-09); the
+         # --item gate above never sees it. Name the spent day so the charter acks instead.
+         if [ "$MEMBER" = "the-fixer" ] && [ "${FLEET_CI_MINUTES_DAILY_MAX:-0}" -gt 0 ] 2>/dev/null; then
+           CI_READ=$(python3 "$KIT_DIR/scripts/build_lane_rule.py" ci-budget 2>/dev/null)
+           [ $? -eq 3 ] && PREGATE_OUT="ci-day-spent: $CI_READ; $PREGATE_OUT"
+         fi
+         export FLEET_PREGATE_OUTPUT="$PREGATE_OUT"
          log "$MEMBER: pregate green but $MAIL -- proceeding to the model" ;;
     esac ;;
   esac
