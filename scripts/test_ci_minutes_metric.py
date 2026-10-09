@@ -86,5 +86,26 @@ class CiMinutesMetricTests(unittest.TestCase):
         self.assertEqual((r["status"], r["actual"]), ("hit", 480.0))
 
 
+class BySource(unittest.TestCase):
+    """Given today's runs, When `--by` splits them, Then deploys, fleet branches and the rest
+    are named apart, so the over-limit report says whose minutes they were."""
+
+    def test_buckets(self):
+        def r(name: str, branch: str, mins: int) -> dict:
+            return {"name": name, "head_branch": branch, "run_started_at": "2026-10-09T01:00:00Z",
+                    "updated_at": f"2026-10-09T01:{mins:02d}:00Z"}
+
+        got = ci_minutes.by_source({
+            "O/philanthropy": [r("DEPLOY", "main", 25), r("CI", "member/minion-x", 10),
+                               r("CI", "hq", 7), r("CI", "dependabot/uv", 3), r("OPS", "main", 1)],
+            "O/fleet-kit": [r("CI", "dumbledore/y", 2)],
+        })
+        self.assertEqual(got, {"deploy": 25, "fleet": 12, "other-branches": 7,
+                               "dependabot": 3, "main-ops": 1})
+
+    def test_bad_timestamps_count_zero(self):
+        self.assertEqual(ci_minutes.wall_minutes({"run_started_at": None}), 0.0)
+
+
 if __name__ == "__main__":
     unittest.main()

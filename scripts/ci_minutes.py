@@ -9,10 +9,16 @@ exits 0 when gh or the API fails (a pass never blocks on it; the report says it 
 Each successful read also saves the per-day totals to $FLEET_LOG_DIR/ci_minutes.json
 ({"ts": <read time>, "days": {"YYYY-MM-DD": minutes}}), merged with what was saved before, so
 fleet_metrics.py can score a prediction on `ci_minutes_per_day` (the mandate's own number).
+
+`--by` adds one line naming who used today's minutes: deploys, the fleet's own branches
+(`member/`, and every fleet-kit run), dependabot, other main-branch jobs, and everyone else's
+branches. Billing has no per-run split, so this sums run wall time from the runs API (approx;
+a matrix job bills more than its wall time). dumbledore hand-built it 2 passes running.
 """
 
 from __future__ import annotations
 
+import calendar
 import json
 import os
 import subprocess
@@ -79,7 +85,50 @@ def fetch(org: str, year: int, month: int) -> list[dict]:
     return json.loads(out).get("usageItems") or []
 
 
+def source(repo: str, run: dict) -> str:
+    """Which bucket a workflow run's minutes belong to."""
+    branch = str(run.get("head_branch") or "")
+    if (run.get("name") or "") == "DEPLOY":
+        return "deploy"
+    if repo.endswith("/fleet-kit") or branch.startswith("member/"):
+        return "fleet"
+    if branch.startswith("dependabot/"):
+        return "dependabot"
+    if branch == "main":
+        return "main-ops"
+    return "other-branches"
+
+
+def wall_minutes(run: dict) -> float:
+    def ts(v: object) -> float:
+        return float(calendar.timegm(time.strptime(str(v), "%Y-%m-%dT%H:%M:%SZ")))
+    try:
+        return max(0.0, (ts(run["updated_at"]) - ts(run["run_started_at"])) / 60)
+    except (KeyError, ValueError, TypeError):
+        return 0.0
+
+
+def by_source(runs: dict[str, list[dict]]) -> dict[str, int]:
+    out: dict[str, float] = {}
+    for repo, rs in runs.items():
+        for r in rs:
+            k = source(repo, r)
+            out[k] = out.get(k, 0.0) + wall_minutes(r)
+    return {k: round(v) for k, v in sorted(out.items(), key=lambda kv: -kv[1])}
+
+
+def fetch_runs(repo: str, day: str) -> list[dict]:
+    out = subprocess.run(
+        ["gh", "api", "--paginate", f"repos/{repo}/actions/runs?created={day}&per_page=100",
+         "-q", ".workflow_runs[]|{name,head_branch,run_started_at,updated_at}"],
+        capture_output=True, text=True, timeout=120, check=True,
+    ).stdout
+    return [json.loads(line) for line in out.splitlines() if line.strip()]
+
+
 def main(argv: list[str]) -> int:
+    by = "--by" in argv
+    argv = [a for a in argv if a != "--by"]
     org = argv[1] if len(argv) > 1 else os.environ.get("FLEET_GH_ORG", "PhilanthropyOrg")
     ts = time.time()
     now = time.gmtime(ts)
@@ -98,6 +147,14 @@ def main(argv: list[str]) -> int:
     save_cache(all_items, ts)
     day = time.strftime("%Y-%m-%d", now)
     print(f"today={int(minutes(items, day))} month={int(minutes(items))} day={day}")
+    if by:
+        repos = sorted({str(it.get("repositoryName") or "") for it in items
+                        if str(it.get("date") or "").startswith(day) and minutes([it]) > 0} - {""})
+        try:
+            split = by_source({f"{org}/{r}": fetch_runs(f"{org}/{r}", day) for r in repos})
+            print("by (wall min, approx): " + " ".join(f"{k}={v}" for k, v in split.items()))
+        except Exception as e:  # noqa: BLE001 -- the total above still stands
+            print(f"by: unavailable ({type(e).__name__})")
     return 0
 
 
