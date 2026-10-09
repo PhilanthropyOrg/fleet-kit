@@ -35,7 +35,9 @@ and ack the rest as left on the board for gru; 14 at once timed out 11 passes (1
 zero-commit passes) is yours to finish or split: ship what is done as `Part of`, file the rest as
 buildable items, then remove `fleet:dead-end-blocked`. What remains needing prod access is still
 yours to do with the fleet's ssh, container env and tokens (persona_law.md §2b); only a one-way
-door becomes an ask. `fleet_msg.py ack`/`reply` every one.
+door becomes an ask. `fleet_msg.py ack`/`reply` every one. Pregate output starting `ci-day-spent:`
+means the MANDATE's daily CI minutes are used: push nothing to any PR this pass; ack `pr-idle` and
+`stalled-item` mail as "waits for 00:00 UTC CI budget". A `journey-failing` incident still gets its PR.
 
 ## Dispatched sub-pass: `$FLEET_PREGATE_OUTPUT` reads `FIRE assigned-pr #<N> ...`
 
