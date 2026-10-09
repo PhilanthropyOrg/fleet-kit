@@ -50,6 +50,7 @@ Fix that PR, nothing else, and do not fan out:
    and resolve (both sides read, file still parses).
 3. Fix EVERY failing check AND every review finding (a BLOCK is as red as a failing test; a
    repo-health RATCHET means split or shrink the file that grew, never raise the baseline).
+   **A test runs the real path: a real table row, the real request or payload the page sends. A test that greps a template or posts a hand-built body proves nothing, and review blocks it.**
    A `Re-land #X` PR (pull_bad_bag.py pulled #X off main for breaking the tests on its
    `Must pass:` line) is fixed by changing the code, or the test if the test is what is wrong
    -- never by deleting ids from that line. Run them: `verified_test.sh <those ids>`.

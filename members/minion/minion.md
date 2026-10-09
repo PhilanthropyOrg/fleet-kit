@@ -124,7 +124,8 @@ said "created the 11 tasks but never updated them" again and again.
 
    Step 5 fetches again for conflicts; this step is about scope. Main moves between them.
 
-2. **Build each remaining item in your batch, in order.** Tests first when practical. Follow
+2. **Build each remaining item in your batch, in order.** Tests first when practical.
+   **A test runs the real path: a real table row, the real request or payload the page sends. A test that greps a template or posts a hand-built body proves nothing, and review blocks it.** Follow
    the codebase's existing style. Reuse before you build — check for an existing utility or
    pattern before writing a new one. One item's implementation touching a file another item in
    your batch also needs is fine and expected (that's part of why batching related items helps)
