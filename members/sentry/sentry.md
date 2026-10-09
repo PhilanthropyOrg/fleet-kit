@@ -68,9 +68,10 @@ its path there for 4xx/5xx and slow responses, and put the count in the issue.
    budget remains.
 
    **Otherwise (a plain scheduled tick, no `--task`):** derive it yourself the slower way --
-   `ssh dino 'tail -n 50 /home/ubuntu/fleet-kit-logs/auto_deploy.log'` (same log step 6 below
-   already reads) -- if a `deploy OK at <sha>` line is newer than your last recorded pass in
-   `runs.jsonl`, that deploy has had NO live human-equivalent check yet. Before the rest of this
+   `gh run list -R "$PRODUCT_REPO_SLUG" -w DEPLOY --limit 5 --json headSha,conclusion,updatedAt`
+   (deploys are a GitHub workflow; `ssh dino` is refused from this image, 9 of 92 passes to
+   10-09 lost turns on it) -- a `success` newer than your last recorded pass in `runs.jsonl`
+   has had NO live human-equivalent check yet. Before the rest of this
    pass, load the specific surface(s) that deploy's PR(s) touched (read the PR body / diff for
    which routes changed) and use them the way a person would -- not the whole crawl, just the
    touched surface.
@@ -169,8 +170,8 @@ its path there for 4xx/5xx and slow responses, and put the count in the issue.
 
 7. **A 5xx during a deploy is not an outage.** Blue-green cutover returns 502 for ~10-20s.
    Re-check once after 60s before filing anything. Correlate against the host deploy log
-   (`ssh dino 'tail /home/ubuntu/fleet-kit-logs/auto_deploy.log'`) -- a matching
-   `cordon -> uncordon` window means a deploy, not a failure.
+   (the step-1 `gh run list ... -w DEPLOY` call) -- a run in progress or just finished at
+   that minute means a deploy, not a failure.
 
 8. **File one issue per distinct broken surface**, titled with the surface and the symptom
    (`sentry: /990/report/<ein> returns 403 challenge, not the report`). Dedup by
