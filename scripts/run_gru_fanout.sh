@@ -36,6 +36,15 @@ if [ "$#" -eq 0 ]; then
     fi
   fi
   touch "$GRU_START_STAMP" 2>/dev/null || true
+  # dumbledore msg#1091: the check above lets go of gru.lock at once, and run_member.sh only
+  # takes it after the sweeps -- so 4 launches in 32s (2026-10-10 03:46Z) each ran the intake
+  # below at the same time, and each posted the same needs-spec comment on #11987 before any
+  # of the others' landed. Hold a sweeps lock until the exec; a launch that loses it exits.
+  exec 8>"$GRU_LOCK_DIR/gru-sweeps.lock"
+  if ! flock -n 8; then
+    echo "[run_gru_fanout] another gru launch is running the sweeps -- not starting another (msg#1091)"
+    exit 0
+  fi
 fi
 
 # Claims are leases (2026-09-26). Before gru's model starts, release every fleet:claimed item
@@ -61,4 +70,5 @@ timeout 60 python3 "$KIT_DIR/scripts/open_runs.py" close-lost \
   timeout 120 python3 "$KIT_DIR/scripts/minion_checkpoint.py" complete --notify ) \
   || echo "[run_gru_fanout] merge-ready scan failed (exit $?) -- continuing without it"
 
+exec 8>&-
 exec bash "$KIT_DIR/scripts/run_member.sh" gru "$@"
