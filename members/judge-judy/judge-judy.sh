@@ -17,7 +17,7 @@
 #     Budget is checked BEFORE each pick using the actual cost of the last call made this
 #     tick (first call in a tick always runs -- there's no prior cost to check against), so
 #     one hung/expensive review can't silently blow through many multiples of the cap.
-#   - Selection: open, non-draft PRs whose head has NO fleet-code-review status yet, skipping
+#   - Selection: open, non-draft PRs (or the explicit PR, draft or not) whose head has NO fleet-code-review status yet, skipping
 #     heads with a failing/absent required check-run (reviewing a dead head is pure spend).
 #     The product repo REQUIRES this status to merge (gh#9819, 2026-10-01), so every skip here
 #     is a PR that waits: a PR that changes no files gets a pass (pass_empty_pr), a draft or
@@ -205,7 +205,7 @@ pick_pr() {
   if [ "$pr_list_rc" -ne 0 ]; then
     return 2   # can't tell if the queue is empty -- the list call itself failed
   fi
-  for pr in $(printf '%s' "$pr_list_json" | jq -r 'sort_by(.createdAt) | .[] | select(.isDraft | not) | .number' 2>/dev/null); do
+  for pr in $(printf '%s' "$pr_list_json" | jq -r --arg x "$explicit" 'sort_by(.createdAt) | .[] | select((.isDraft | not) or ((.number | tostring) == $x)) | .number' 2>/dev/null); do
     [ -n "$explicit" ] && [ "$pr" != "$explicit" ] && continue
     case " $skip_list " in *" $pr "*) continue ;; esac
     head=$(gh pr view "$pr" --json headRefOid,commits -q '.headRefOid + " " + (.commits[-1] | if ((.messageHeadline // "") | startswith("Merge ")) then "" else .committedDate end)' 2>/dev/null)
@@ -837,7 +837,10 @@ $PR_VISION_LINK"
     # per head: a re-push that fails again COMMENTS on the open item (a re-review is a new
     # head, so the title's summary changes and exact-title dedupe never matched -- marie
     # found "three copies of one judge-judy finding" the same night).
-    if [[ "${HEAD_REF:-}" != member/* ]]; then
+    if [ -n "${JJ_DRAFT_REVIEW:-}" ]; then
+      # minion_checkpoint.py ready reviews a draft before CI: the pass in hand fixes it now.
+      log "PR #$PR: draft review before ready -- its minion fixes the finding, no fix item"
+    elif [[ "${HEAD_REF:-}" != member/* ]]; then
       log "PR #$PR: not a fleet branch (${HEAD_REF:-?}) -- the review comment is the hand-off, no fix item"
     else
       EXISTING_FIX=$(gh issue list --state open --label "${FLEET_LABEL_PREFIX:-fleet:}backlog" \

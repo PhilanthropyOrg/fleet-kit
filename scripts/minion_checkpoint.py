@@ -359,6 +359,37 @@ def ci_green(rollup: list[dict] | None) -> bool:
         for c in checks.values())
 
 
+REVIEW_CONTEXT = "fleet-code-review"
+
+
+def review_state(wt: str, head: str) -> str:
+    """The newest fleet-code-review status on `head` ("" when there is none or it can't be read)."""
+    rc, out = _gh(["api", f"repos/{{owner}}/{{repo}}/commits/{head}/statuses", "--jq",
+                   f'[.[] | select(.context=="{REVIEW_CONTEXT}")][0].state // ""'], cwd=wt)
+    return out.strip() if rc == 0 else ""
+
+
+def pre_ready_review(wt: str, pr: int, head: str) -> str | None:
+    """Review the draft's head BEFORE it leaves draft, so a review BLOCK is fixed while CI does
+    not run. 10-10: a block after ready cost a full CI run per round -- #11985 ran CI 4 times
+    (~45 min) and #11972 3 times (~60 min) on review fixes alone, on a day 99 minutes over the
+    MANDATE's 500. A head already reviewed is not reviewed again (judge-judy keys on head), and
+    a review that can't run (no account, timeout) fails open: CI runs as it did before."""
+    if not review_state(wt, head):
+        cmd = os.environ.get("FLEET_PRE_READY_REVIEW") or (
+            f"bash {Path(__file__).resolve().parent.parent}/members/judge-judy/judge-judy.sh")
+        try:
+            subprocess.run([*cmd.split(), str(pr)], cwd=wt, capture_output=True, timeout=900,
+                           env={**os.environ, "JJ_DRAFT_REVIEW": "1"})
+        except (subprocess.TimeoutExpired, OSError):
+            return None
+    if review_state(wt, head) == "failure":
+        return (f"fleet-code-review BLOCKED head {head[:12]} (findings in the PR comment): fix "
+                "every finding, verified_test.sh, push, run ready again -- still a draft, so "
+                "no CI minutes are spent")
+    return None
+
+
 def ready(wt: str, pr: int | None = None, ci: bool = False) -> dict:
     """Mark this pass's checkpoint PR ready, only if its done-criteria are met. With `ci`
     (HQ, no worktree on the branch): green CI on the PR's head stands in for the receipt."""
@@ -393,6 +424,10 @@ def ready(wt: str, pr: int | None = None, ci: bool = False) -> dict:
             gaps.append("local HEAD is not the PR's head: push first")
         elif not head_is_green(wt):
             gaps.append("HEAD has no passing verified_test.sh receipt: run it")
+        elif v.get("isDraft"):
+            gap = pre_ready_review(wt, v["number"], head)
+            if gap:
+                gaps.append(gap)
     if gaps:
         res["gaps"] = gaps
         return res
