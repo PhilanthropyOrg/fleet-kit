@@ -291,8 +291,12 @@ must not fall.
 
 **orgverify** — the ladder after the claim: approved, back in HQ, OrgVerify started, proved,
 badge (`cd /fleet-kit/scripts && python3 -c "import north; print(north.load_funnel()[0]['ladder'])"`).
-Walk the worst step live as the QA `owner` (§10e) and file what stops a real owner there,
-`Vision-link: okr.orgverify`.
+Walk ALL of it live as the QA `owner` (§10e), at 390px and 1280px, every pass (MANDATE's
+standing job): HQ -> Get verified -> every OrgVerify step, Back on each, up to the Stripe
+checkout page (never pay), then the badge, the statement and each email the walk sends. File
+every place a real owner would stall or be confused, `lane:orgverify`, `Vision-link:
+okr.orgverify`. The worst step already being filed is not a stop: 10 passes to 10-10 05:07Z
+quit after one click QUIET while Reif's own session filed 8 OrgVerify issues that day.
 
 **revenue** — the path from free product to paid. **A signup is not a payment.** The ordering
 inverts the obvious: audience capture (accounts, follows, emails) is the revenue PRECURSOR and

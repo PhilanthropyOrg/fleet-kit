@@ -390,6 +390,14 @@ case "${1:-cron-foreground}" in
       if cron_member_enabled sentry; then
         echo "17 0,3,6,9,12,15,18,21 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh sentry >> $LOG_DIR/sentry.log 2>&1"
       fi
+      # MANDATE (Reif, 2026-10-10): walk OrgVerify end to end every day. gru dispatches nerd's
+      # orgverify lane, but gru's pregate skips its whole pass once the CI day is spent (before
+      # 06Z most days), and a walk uses no CI: 0 orgverify walks 10-10 05:07Z..20:20Z. Daily at
+      # 13:53Z (08:53 CDT) without gru; :53 is unclaimed. Gated on gru: nerd has no cron of
+      # its own, it runs wherever gru dispatches it.
+      if cron_member_enabled gru; then
+        echo "53 13 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh nerd --task \"lane=orgverify — the daily end-to-end owner walk (MANDATE)\" >> $LOG_DIR/nerd.log 2>&1"
+      fi
       # fleet-kit#785: red, the adversary, every 6h (paced -- held when the hour has no headroom).
       if cron_member_enabled red; then
         echo "23 0,6,12,18 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh red >> $LOG_DIR/red.log 2>&1"
