@@ -103,6 +103,14 @@ class BySource(unittest.TestCase):
         self.assertEqual(got, {"deploy": 25, "fleet": 12, "other-branches": 7,
                                "dependabot": 3, "main-ops": 1})
 
+    def test_jobs_not_wall_time(self):
+        # A deploy that waits 45 min on the production timer bills only its job: 12 min, not 57.
+        run = {"run_started_at": "2026-10-09T01:00:00Z", "updated_at": "2026-10-09T01:57:00Z",
+               "jobs": [{"started_at": "2026-10-09T01:45:00Z", "completed_at": "2026-10-09T01:56:10Z"},
+                        {"started_at": "2026-10-09T01:56:20Z", "completed_at": "2026-10-09T01:56:20Z"},
+                        {"started_at": None, "completed_at": None}]}
+        self.assertEqual(ci_minutes.wall_minutes(run), 12.0)
+
     def test_bad_timestamps_count_zero(self):
         self.assertEqual(ci_minutes.wall_minutes({"run_started_at": None}), 0.0)
 
