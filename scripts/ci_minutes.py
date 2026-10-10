@@ -12,18 +12,21 @@ fleet_metrics.py can score a prediction on `ci_minutes_per_day` (the mandate's o
 
 `--by` adds one line naming who used today's minutes: deploys, the fleet's own branches
 (`member/`, and every fleet-kit run), dependabot, other main-branch jobs, and everyone else's
-branches. Billing has no per-run split, so this sums run wall time from the runs API (approx;
-a matrix job bills more than its wall time). dumbledore hand-built it 2 passes running.
+branches. Billing has no per-run split, so this sums each run's job times, every job rounded up
+to a whole minute as GitHub bills it. Not run wall time: a deploy waits ~45 min UNBILLED on the
+`production` timer, so wall time read deploy=632 on a 544-minute day (2026-10-10; jobs: 85).
 """
 
 from __future__ import annotations
 
 import calendar
 import json
+import math
 import os
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 KEEP_DAYS = 40
@@ -99,11 +102,24 @@ def source(repo: str, run: dict) -> str:
     return "other-branches"
 
 
+def _ts(v: object) -> float:
+    return float(calendar.timegm(time.strptime(str(v), "%Y-%m-%dT%H:%M:%SZ")))
+
+
 def wall_minutes(run: dict) -> float:
-    def ts(v: object) -> float:
-        return float(calendar.timegm(time.strptime(str(v), "%Y-%m-%dT%H:%M:%SZ")))
+    """Billed-like minutes: the run's jobs, each rounded up; run wall time only without jobs."""
+    if "jobs" in run:
+        total = 0
+        for j in run["jobs"] or []:
+            try:
+                secs = _ts(j["completed_at"]) - _ts(j["started_at"])
+            except (KeyError, ValueError, TypeError):
+                continue
+            if secs > 0:
+                total += math.ceil(secs / 60)
+        return float(total)
     try:
-        return max(0.0, (ts(run["updated_at"]) - ts(run["run_started_at"])) / 60)
+        return max(0.0, (_ts(run["updated_at"]) - _ts(run["run_started_at"])) / 60)
     except (KeyError, ValueError, TypeError):
         return 0.0
 
@@ -120,10 +136,25 @@ def by_source(runs: dict[str, list[dict]]) -> dict[str, int]:
 def fetch_runs(repo: str, day: str) -> list[dict]:
     out = subprocess.run(
         ["gh", "api", "--paginate", f"repos/{repo}/actions/runs?created={day}&per_page=100",
-         "-q", ".workflow_runs[]|{name,head_branch,run_started_at,updated_at}"],
+         "-q", ".workflow_runs[]|{id,name,head_branch,run_started_at,updated_at}"],
         capture_output=True, text=True, timeout=120, check=True,
     ).stdout
-    return [json.loads(line) for line in out.splitlines() if line.strip()]
+    runs = [json.loads(line) for line in out.splitlines() if line.strip()]
+
+    def jobs(run: dict) -> dict:
+        try:
+            j = subprocess.run(
+                ["gh", "api", "--paginate", f"repos/{repo}/actions/runs/{run['id']}/jobs?per_page=100",
+                 "-q", ".jobs[]|{started_at,completed_at}"],
+                capture_output=True, text=True, timeout=60, check=True,
+            ).stdout
+            run["jobs"] = [json.loads(line) for line in j.splitlines() if line.strip()]
+        except Exception:  # noqa: BLE001 -- this run falls back to wall time
+            pass
+        return run
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        return list(pool.map(jobs, runs))
 
 
 def main(argv: list[str]) -> int:
@@ -152,7 +183,7 @@ def main(argv: list[str]) -> int:
                         if str(it.get("date") or "").startswith(day) and minutes([it]) > 0} - {""})
         try:
             split = by_source({f"{org}/{r}": fetch_runs(f"{org}/{r}", day) for r in repos})
-            print("by (wall min, approx): " + " ".join(f"{k}={v}" for k, v in split.items()))
+            print("by (job min, as billed): " + " ".join(f"{k}={v}" for k, v in split.items()))
         except Exception as e:  # noqa: BLE001 -- the total above still stands
             print(f"by: unavailable ({type(e).__name__})")
     return 0
