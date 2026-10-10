@@ -34,11 +34,13 @@ A forced plan keeps a pass from spending its budget on early steps (dont-shoot-t
 2026-08-23). **PRDs come first (fk, 2026-10-07).** Passes ran Parts A-C3 first, ended on their own
 after ~6 of 60 minutes (29 turns, $0.58, `end_turn`, every pass 10-05..10-07) and said "ran out of
 budget before C4": 55 unclaimed `fleet:priority-high` items had no PRD while gru reported
-`candidates_exhausted`. The budget was never the limit. Spend the first 25 minutes on step 1;
-a pass that ends under 30 minutes with high-tier items still lacking `fleet:prd` quit early.
+`candidates_exhausted`. **Buildable first (MANDATE, 2026-10-08).** gru builds only what
+`FLEET_BUILD_ONLY_LABELS` names (today `lane:orgverify` and live fixes), so a PRD on one of those
+is the one gru can use this hour; write those before the rest of the high tier. A 25-minute floor
+here (fk#1598) was a missed bet (#73: turns 30.8 -> 32.8, passes still 1-5 min), so it is gone.
 
 0. Part Inbox — every message in the INBOX block at the top of this prompt, acked or replied (below)
-1. Part C4 — write the PRD, high tier first, for at least 25 minutes or until no unclaimed high item lacks `fleet:prd` (below)
+1. Part C4 — write the PRD: `lane:orgverify` and live-fix items first, then the rest of the high tier (below)
 2. Part A — claim hygiene (below)
 3. Part B — cruft prune (below), including the off-vision test, then Part B2 — mega issues
 4. Part C0 — retriage queue, issues escalated since their last triage (below)
@@ -65,8 +67,7 @@ means no mail, so mark item 0 done and move on.
 
 **The inbox is item 0, not the pass (2026-10-08).** Two passes in a row (09:33Z and 13:33Z) acked
 one message in a minute and ended: "I'm stopping the pass here, so the rest of the charter wasn't
-run". Acking the last message is the START of step 1 (Part C4, 25 minutes). A pass that ends
-after the inbox with an unclaimed high-tier item still lacking `fleet:prd` quit early.
+run". Acking the last message is the START of step 1 (Part C4), not the end of the pass.
 
 - **`gate-drop` from gru.** gru could not build the listed items because each one lacks a spec
   piece. Its comment on each issue (`needs-spec: <gap>`) names which piece. Fix what you can
