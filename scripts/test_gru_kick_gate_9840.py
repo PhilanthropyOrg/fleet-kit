@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """gh#9840: run_gru_fanout.sh exits before any sweep when gru is running or a deploy kick is
-under 45 min after the last start. Run: python3 scripts/test_gru_kick_gate_9840.py"""
+under 45 min after the last start, or another
+launch is still running the sweeps (msg#1091). Run: python3 scripts/test_gru_kick_gate_9840.py"""
 from __future__ import annotations
 
 import os
@@ -52,6 +53,12 @@ def main() -> int:
         (locks / "gru.last-start").touch()
         out = run(tmp)
         assert "SWEEP_RAN" in out, out
+        # 5. another launch is mid-sweep -> exits, no second intake (msg#1091)
+        holder = subprocess.Popen(["flock", str(locks / "gru-sweeps.lock"), "sleep", "3"])
+        time.sleep(0.5)
+        out = run(tmp)
+        holder.wait()
+        assert "running the sweeps" in out and "SWEEP_RAN" not in out, out
     print("ok")
     return 0
 
