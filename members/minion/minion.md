@@ -239,7 +239,7 @@ said "created the 11 tasks but never updated them" again and again.
    has no code for (see step 1's Closes/Fixes rule, applied per item). Never `Part of` an
    untouched item: a merged `Part of #N` sends VP to review it (#10066 did this to ten items). A batch PR that closes 2 of 3 items and states plainly what's left on the third is a
    normal, successful result — not a defect to hide.
-8. **Review your own diff** before pushing, if you have a review tool available.
+8. **`ready` reviews the draft first** (judge-judy, no CI on a draft): a BLOCK is a gap; fix it, push, `ready` again.
 9. **Arm auto-merge, always** — this fleet merges on green gates with no human in the loop:
    GitHub's auto-merge waits for every required check, then merges itself. You never merge
    directly and never wait for a human. Arming is NOT finishing the job; step 9b is.

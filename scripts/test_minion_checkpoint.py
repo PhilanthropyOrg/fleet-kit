@@ -205,6 +205,16 @@ elif a[:2] == ["pr", "edit"]:
 elif a[:2] == ["pr", "ready"]:
     pr["isDraft"] = False
     json.dump(pr, open(os.environ["FAKE_PR"], "w"))
+elif a[:1] == ["api"] and "/statuses" in a[1]:
+    print(pr.get("review", ""))
+"""
+# The pre-ready reviewer: writes its verdict ($FAKE_VERDICT, default approve) onto the PR.
+FAKE_REVIEW = r"""#!/usr/bin/env python3
+import json, os
+pr = json.load(open(os.environ["FAKE_PR"]))
+pr["review"] = os.environ.get("FAKE_VERDICT", "success")
+pr["reviewed"] = pr.get("reviewed", 0) + 1
+json.dump(pr, open(os.environ["FAKE_PR"], "w"))
 """
 
 
@@ -224,6 +234,11 @@ def _pr_sandbox(title: str, body: str, green: bool = True, branch: str | None = 
                                    "state": "OPEN", "headRefName": branch or br,
                                    "headRefOid": sh(wt, "git", "rev-parse", "HEAD")}))
     os.environ["FAKE_PR"] = str(pr_file)
+    review = sb.tmp / "review"
+    review.write_text(FAKE_REVIEW)
+    review.chmod(0o755)
+    os.environ["FLEET_PRE_READY_REVIEW"] = str(review)
+    os.environ.pop("FAKE_VERDICT", None)
     return sb, wt, pr_file
 
 
@@ -264,6 +279,23 @@ def test_ready_finishes_a_done_pr_and_drops_the_marker() -> None:
     assert pr["isDraft"] is False and mc.MARKER not in pr["body"] and "Closes #7942" in pr["body"]
     assert not mc.is_checkpoint_pr(pr["title"], pr["body"])  # now arms like any PR
     print("ok  ready: a done PR (Closes every item, green, pushed) is readied, marker dropped")
+
+
+def test_ready_reviews_the_draft_first_and_a_block_keeps_it_out_of_ci() -> None:
+    sb, wt, pr_file = _pr_sandbox(DONE_TITLE, DONE_BODY)
+    os.environ["FAKE_VERDICT"] = "failure"
+    r = mc.ready(wt)
+    assert not r["ready"] and "BLOCKED" in " ".join(r["gaps"]), r
+    assert not [c for c in sb.calls() if c[:2] == ["pr", "ready"]]
+    assert json.loads(pr_file.read_text())["isDraft"] is True  # still a draft: no CI run
+    # a head already reviewed is not reviewed again; an approved one is readied
+    pr = json.loads(pr_file.read_text())
+    pr["review"] = "success"
+    pr_file.write_text(json.dumps(pr))
+    r = mc.ready(wt)
+    pr = json.loads(pr_file.read_text())
+    assert r["ready"] and pr["isDraft"] is False and pr["reviewed"] == 1, (r, pr)
+    print("ok  ready: reviews the draft head first; a BLOCK keeps it a draft (no CI round)")
 
 
 def test_ready_refuses_untested_unpushed_or_someone_elses_pr() -> None:
