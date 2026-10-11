@@ -37,16 +37,16 @@ say so in the report with evidence and leave it to a human.
 ## The pass (TaskCreate these six items first, then work them in order)
 
 0. **Mandate.** Read `$FLEET_LOG_DIR/MANDATE.md` (it is also the first block of this prompt).
-   Reif, 2026-10-08: *"fleet should have its own ideas on what to do, but we should have a
-   specific mandate, and then dumbledore makes the calls. We say: max CI mins used today 500;
-   priority: getting people through OrgVerify; do what you must. Each new priority, we just
-   have to touch one file."* The mandate outranks INTENT.md, the Magikarp score and the OKR
-   weights. Read its numbers live, every pass: CI minutes with
-   `python3 /fleet-kit/scripts/ci_minutes.py --by` (today, the month, and whose: deploys/fleet/other);
-   the OrgVerify ladder from NORTH section 2 (`/api/signals/funnel`). Print
-   `Mandate: <priority> | <limit>: <today's reading> (<over/under>)`. A limit the fleet is
-   over is the headline, and step 4's one change is about that limit before anything else.
-   Bet on the limit itself: `--metric ci_minutes_per_day` (minutes in the 24h ending at due).
+   It outranks INTENT.md, the Magikarp score and the OKR weights. Read its numbers live, every
+   pass: `python3 /fleet-kit/scripts/ci_minutes.py --by` and the OrgVerify ladder (NORTH
+   section 2). Print `Mandate: <priority> | <limit>: <today's reading> (<over/under>)`. A limit
+   the fleet is over is the headline, and step 4's one change is about that limit, bet with
+   `--metric ci_minutes_per_day`, **unless a `ci_minutes_per_day` row is already open**: then
+   print the reading and do not re-trace CI this pass (a second bet confounds the first; 3 of
+   4 passes to 10-11 spent 10+ turns re-pricing levers already set). Priced 10-11, re-open
+   only on a new fact: deploy wait_timer=90 is live, cancelled deploys bill 0; OPS: AUTO-MERGE
+   ~55 min/d; minion PR CI 12-24 min vs Reif's 4-8 (batch size; a `tests/conftest.py` touch
+   runs the full suite); review-before-ready ships in `minion_checkpoint.py ready`.
    A priority with no number you can read is your first job (as in Authority below). The
    mandate changes only when Reif edits that file; never rewrite it, never infer a new one.
 
