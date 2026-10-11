@@ -17,8 +17,8 @@ THREE SAVES, all pushing the pass's own branch and opening (once) a DRAFT PR:
                     The push comes before the PR call, so even a save the grace window cuts off
                     leaves a branch the next pass resumes.
   * ended        -- same as timed-out, after the pass exited rc=0 with no Outcome: line
-                    (2026-09-27: 56 minions ended "waiting for the background run"). Skipped
-                    when the branch already has an open non-draft PR.
+                    (2026-09-27: 56 minions ended "waiting for the background run").
+Every save but green puts an open non-draft PR back in draft before pushing to it.
 The first two run while the model is still working, so they never touch the index; only the
 last one (the model is dead by then) commits.
 
@@ -279,13 +279,18 @@ def open_pr_is_ready(wt: str, branch: str) -> bool:
     return rc == 0 and out.strip() == "false"
 
 
+def remote_head(wt: str, branch: str) -> str:
+    rc, out = _git(wt, "ls-remote", "origin", f"refs/heads/{branch}", timeout=60)
+    return out.split()[0] if rc == 0 and out.strip() else ""
+
+
+def to_draft(wt: str, branch: str) -> bool:
+    rc, _ = _gh(["pr", "ready", branch, "--undo"], cwd=wt)
+    return rc == 0
+
+
 def save(wt: str, branch: str, items: list[int], reason: str) -> dict:
     res: dict = {"reason": reason, "branch": branch, "items": items, "saved": False}
-    # `ended`: the pass exited on its own with no report (run_member.sh, rc=0). A non-draft PR
-    # on the branch may have auto-merge armed -- untested WIP must never land on that.
-    if reason == "ended" and open_pr_is_ready(wt, branch):
-        res["why"] = "open non-draft PR on this branch -- not pushing untested WIP under auto-merge"
-        return res
     if reason in ("timed-out", "killed", "ended"):
         res["wip_commit"] = commit_wip(wt, items)
     res["commits"] = commits_ahead(wt)
@@ -295,6 +300,15 @@ def save(wt: str, branch: str, items: list[int], reason: str) -> dict:
     if reason == "green" and not head_is_green(wt):
         res["why"] = "HEAD has no passing test receipt yet"
         return res
+    # Untested work never lands on a ready PR: every push there runs full CI (#12098 at 04:57Z
+    # 2026-10-11, a killed pass's WIP: a ~20-minute red run) and auto-merge may be armed. Back
+    # to draft first (that also drops auto-merge); `ready` below is the way out again.
+    if reason != "green" and _git(wt, "rev-parse", "HEAD")[1].strip() != remote_head(wt, branch) \
+            and open_pr_is_ready(wt, branch):
+        if not to_draft(wt, branch):
+            res["why"] = "open non-draft PR would not go back to draft -- not pushing untested WIP"
+            return res
+        res["redrafted"] = True
     rc, out = _git(wt, "push", "--no-verify", "-u", "origin", f"HEAD:refs/heads/{branch}", timeout=180)
     if rc != 0:
         res["why"] = f"push failed: {out[-300:]}"
