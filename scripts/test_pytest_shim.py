@@ -1,6 +1,7 @@
 """scripts/bin/pytest runs the interpreter test_python.sh names, with the worktree's src first."""
 import os
 import subprocess
+import tempfile
 from pathlib import Path
 
 SHIM = Path(__file__).resolve().parent / "bin" / "pytest"
@@ -20,3 +21,10 @@ def test_shim_execs_test_python_with_worktree_src(tmp_path):
 def test_run_member_puts_shim_dir_first_on_path():
     text = (SHIM.parent.parent / "run_member.sh").read_text()
     assert 'export PATH="$KIT_DIR/scripts/bin:$PATH"' in text
+
+
+if __name__ == "__main__":
+    with tempfile.TemporaryDirectory() as d:
+        test_shim_execs_test_python_with_worktree_src(Path(d))
+    test_run_member_puts_shim_dir_first_on_path()
+    print("ok  pytest shim runs test_python.sh's interpreter with the worktree src first")
