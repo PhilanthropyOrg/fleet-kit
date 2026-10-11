@@ -473,9 +473,12 @@ def running_vp_items() -> set[int]:
 # recorded that look, so the next tick re-spawned vp on the same merge: #8889 got 11 vp passes
 # in 13h on one merge, each ending QUIET; 115 of 300 vp passes in the 7 days to 2026-09-30
 # posted no verdict ($25). Same shape as REDO_RETRY_AFTER_S on the builder side: a finished vp
-# pass that STARTED after the newest merge counts as a look, and re-arms after this long (a
-# deferral waiting on the 03:55 rebuild still gets its re-look the same day).
-VP_RELOOK_AFTER_S = int(os.environ.get("FLEET_VP_RELOOK_AFTER_S", 6 * 3600))
+# pass that STARTED after the newest merge counts as a look, and re-arms after this long.
+# 24h, not 6h (2026-10-11): the not-live-yet deploy check above now covers the rebuild wait, and
+# the deferrals left wait on things a day does not change (a weekly cron on 10-18, a Stripe page
+# no QA user can open): #12036/#11862/#12094/#12095 got 3 no-verdict looks each in one day.
+# A new merge still re-arms at once.
+VP_RELOOK_AFTER_S = int(os.environ.get("FLEET_VP_RELOOK_AFTER_S", 24 * 3600))
 
 
 def last_look_at(rows: list[dict], member: str = "vp") -> dict[int, float]:
