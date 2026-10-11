@@ -182,10 +182,12 @@ def test_ended_never_pushes_wip_onto_a_ready_pr() -> None:
     (wt / "a.py").write_text("x = 3\n")
     os.environ["FAKE_GH_ISDRAFT"] = "false"
     r = mc.save(str(wt), br, [8216], "ended")
-    assert not r["saved"] and "non-draft" in r["why"], r
-    assert not sh(repo, "git", "ls-remote", "--heads", "origin", br)
+    calls = json.load(open(os.environ["FAKE_GH_LOG"]))
+    # fleet-kit#1645: the PR goes back to draft (drops auto-merge) BEFORE the WIP is pushed.
+    assert r["saved"] and r.get("redrafted"), r
+    assert ["pr", "ready", br, "--undo"] in calls, calls
     os.environ["FAKE_GH_ISDRAFT"] = ""
-    print("ok  ended: an open non-draft PR (auto-merge may be armed) never gets untested WIP")
+    print("ok  ended: an open non-draft PR goes back to draft before untested WIP lands")
 
 
 def test_run_member_checkpoints_an_unreported_rc0_minion() -> None:
