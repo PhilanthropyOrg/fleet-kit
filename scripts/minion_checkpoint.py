@@ -424,10 +424,12 @@ def ready(wt: str, pr: int | None = None, ci: bool = False) -> dict:
             gaps.append("local HEAD is not the PR's head: push first")
         elif not head_is_green(wt):
             gaps.append("HEAD has no passing verified_test.sh receipt: run it")
-        elif v.get("isDraft"):
-            gap = pre_ready_review(wt, v["number"], head)
-            if gap:
-                gaps.append(gap)
+    # --ci too: a draft's CI is all SKIPPED, which ci_green reads as green. 10-11: hq readied
+    # #12113 on an unreviewed head that way, and two review blocks after ready cost 2 CI rounds.
+    if not gaps and v.get("isDraft"):
+        gap = pre_ready_review(wt, v["number"], v.get("headRefOid") or "")
+        if gap:
+            gaps.append(gap)
     if gaps:
         res["gaps"] = gaps
         return res
