@@ -29,7 +29,12 @@ calls = json.load(open(state)) if os.path.exists(state) else []
 calls.append(sys.argv[1:])
 json.dump(calls, open(state, "w"))
 a = sys.argv[1:]
-if a[:2] == ["pr", "list"]:
+if a[:2] == ["pr", "list"] and "isDraft" in a and os.environ.get("FAKE_GH_READY"):
+    print("true" if ["pr", "ready", a[a.index("--head") + 1], "--undo"] in calls else "false")
+elif a[:2] == ["pr", "ready"] and os.environ.get("FAKE_GH_UNDO_FAIL"):
+    json.dump(calls[:-1], open(state, "w"))  # refused: the PR stays ready
+    sys.exit(1)
+elif a[:2] == ["pr", "list"]:
     made = [c for c in calls if c[:2] == ["pr", "create"]]
     print("4242" if made else "")
 elif a[:2] == ["pr", "create"]:
@@ -140,6 +145,37 @@ def test_pre_timeout_save_never_commits_under_a_live_model() -> None:
     assert r["saved"] and "wip_commit" not in r, r
     assert sh(wt, "git", "status", "--porcelain") == "M a.py", "pre-timeout touched the index"
     print("ok  pre-timeout: pushes existing commits, leaves the live worktree untouched")
+
+
+def test_wip_never_lands_on_a_ready_pr_it_goes_back_to_draft_first() -> None:
+    sb = Sandbox()
+    br = "member/minion-item11634-1-2"
+    wt = sb.worktree(br)
+    (Path(wt) / "a.py").write_text("x = 9\n")
+    sh(wt, "git", "commit", "-qam", "built")
+    sh(wt, "git", "push", "-q", "origin", f"HEAD:refs/heads/{br}")
+    os.environ["FAKE_GH_READY"] = "1"
+    try:
+        # Nothing new to push: a finished ready PR is left alone, not redrafted.
+        r = mc.save(wt, br, [11634], "ended")
+        assert "redrafted" not in r and ["pr", "ready", br, "--undo"] not in sb.calls(), r
+        # #12098: a killed pass's WIP would start full CI on the ready PR. Draft first, then push.
+        (Path(wt) / "a.py").write_text("x = 10\n")
+        os.environ["FAKE_GH_UNDO_FAIL"] = "1"
+        r = mc.save(wt, br, [11634], "killed")
+        assert not r["saved"] and "draft" in r["why"], r
+        assert sh(wt, "git", "rev-parse", "HEAD") != sh(wt, "git", "ls-remote", "origin", br).split()[0]
+        del os.environ["FAKE_GH_UNDO_FAIL"]
+        (Path(wt) / "a.py").write_text("x = 11\n")
+        r = mc.save(wt, br, [11634], "timed-out")
+        assert r["saved"] and r["redrafted"], r
+        undo = sb.calls().index(["pr", "ready", br, "--undo"])
+        assert undo < len(sb.calls()) - 1, "redraft must come before the PR lookup after push"
+        assert sh(wt, "git", "rev-parse", "HEAD") == sh(wt, "git", "ls-remote", "origin", br).split()[0]
+    finally:
+        os.environ.pop("FAKE_GH_READY", None)
+        os.environ.pop("FAKE_GH_UNDO_FAIL", None)
+    print("ok  untested WIP never pushes onto a ready PR: back to draft first, or not at all")
 
 
 def test_find_reads_the_real_remote_and_run_member_resumes_it() -> None:
