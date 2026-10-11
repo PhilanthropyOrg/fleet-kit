@@ -92,6 +92,19 @@ class GateTests(unittest.TestCase):
         self.assertEqual(qg.count_gwt("## Acceptance\n- tbd\n"), 0)
         self.assertEqual(qg.count_gwt("## Acceptance\n\n## Evidence\n- a long bullet under the wrong heading here"), 0)
 
+    def test_done_when_line_is_a_criterion(self):
+        """jefe msg#1113 (philanthropy#12099): Reif's hand-filed `Done when:` line is a spec."""
+        body = ("The snapshot counts idle sessions as stalls.\n\n"
+                "Done when: only sessions truly waiting are saved, the log keeps a fixed size, "
+                "and a test fails without the fix.\nKPI: prod alert count.")
+        self.assertEqual(qg.count_gwt(body), 1)
+        out = qg.gate_candidates([item(31, ["quality:solid"], body=body)])
+        self.assertEqual(out["eligible"], [31])
+
+    def test_stub_or_mid_sentence_done_when_is_not(self):
+        self.assertEqual(qg.count_gwt("Done when: tbd\n"), 0)
+        self.assertEqual(qg.count_gwt("We are done when: someone looks at it and the page is fine."), 0)
+
     def test_bare_template_phrase_is_not_a_criterion(self):
         """fk#765: the literal 15-char phrase `Given/When/Then` -- no clause text between the
         keywords -- must not count as an acceptance criterion. This is the exact string that

@@ -77,6 +77,9 @@ _ACCEPTANCE_HEADING_RE = re.compile(
 _NEXT_HEADING_RE = re.compile(r"^#{1,6}[ \t]", re.MULTILINE)
 _BULLET_RE = re.compile(r"^[ \t]*(?:[-*+]|\d+[.)])[ \t]+(.+(?:\n(?![ \t]*(?:[-*+]|\d+[.)])[ \t])[ \t]+\S.*)*)",
                         re.MULTILINE)
+# jefe msg#1113 (philanthropy#12099): Reif's hand-filed issues end in one `Done when: ...` line
+# instead of Given/When/Then; it is his testable acceptance, so it counts as one criterion.
+_DONE_WHEN_RE = re.compile(r"^\W*done when\s*:[ \t]*(\S.*)$", re.IGNORECASE | re.MULTILINE)
 _REFERENCES_RE = re.compile(r"^\W*references?\s*:", re.IGNORECASE | re.MULTILINE)
 # "Design approved (VP review):" from members/vp/vp.md, or the older "Design approved:" form.
 _DESIGN_APPROVED_RE = re.compile(r"^\W*design approved(?:\s*\(vp review\))?\s*:", re.IGNORECASE | re.MULTILINE)
@@ -112,7 +115,8 @@ def count_acceptance_bullets(text: str | None) -> int:
 
 def count_gwt(text: str | None) -> int:
     gwt = sum(1 for span in _GWT_RE.findall(text or "") if len(span) >= _MIN_GWT_SPAN)
-    return gwt or count_acceptance_bullets(text)
+    done = sum(1 for d in _DONE_WHEN_RE.findall(text or "") if len(d.strip()) >= _MIN_GWT_SPAN)
+    return gwt or count_acceptance_bullets(text) or done
 
 
 def _criteria_text(body: str | None, comments: list[dict] | None) -> str | None:
@@ -139,7 +143,8 @@ def classify_candidate(labels, body: str | None, comments: list[dict] | None) ->
         return False, f"more than one quality label: {', '.join(quality)}"
     text = _criteria_text(body, comments)
     if text is None:
-        return False, "no Given/When/Then criterion or `## Acceptance` bullet in the PRD comment or body"
+        return False, ("no Given/When/Then criterion, `## Acceptance` bullet or `Done when:` line in the "
+                       "PRD comment or body")
     if quality[0] == WORLD_CLASS:
         all_text = "\n".join([body or ""] + [c.get("body") or "" for c in comments or []])
         if _DESIGN_APPROVED_RE.search(all_text):
