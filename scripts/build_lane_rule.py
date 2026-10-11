@@ -185,11 +185,16 @@ def cap_batches(result: dict, room: int | None, cap: int = 0, started: int = 0,
 
 
 def _labels_via_gh(numbers: list[int], repo: str) -> dict[int, list[str]]:
+    # run_member.sh passes $REPO, the product CHECKOUT (/repo), not an OWNER/NAME slug. gh -R
+    # rejects a path, the check failed closed, and every --item minion died "off lane" (1,103
+    # FATALs 10-07..10-11, OrgVerify redos included). A directory: run gh inside it instead.
+    where = {"cwd": repo} if os.path.isdir(repo) else {}
+    flag = [] if where else ["--repo", repo]
     out: dict[int, list[str]] = {}
     for n in numbers:
-        r = subprocess.run(["gh", "issue", "view", str(n), "--repo", repo, "--json", "labels",
+        r = subprocess.run(["gh", "issue", "view", str(n), *flag, "--json", "labels",
                             "--jq", "[.labels[].name]|join(\",\")"],
-                           capture_output=True, text=True, timeout=60)
+                           capture_output=True, text=True, timeout=60, **where)
         if r.returncode != 0:
             raise RuntimeError(f"gh issue view {n}: {r.stderr.strip()[:200]}")
         out[n] = [s for s in r.stdout.strip().split(",") if s]

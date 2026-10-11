@@ -119,6 +119,26 @@ class PackerHourCap(unittest.TestCase):
             self.assertEqual(r["hour_cap"]["started_last_hour"], 1)
 
 
+class LabelsFromACheckout(unittest.TestCase):
+    """10-07..10-11: run_member.sh passes $REPO, a checkout PATH (/repo). `gh -R /repo` errors,
+    the check failed closed, and 1,103 --item minions (OrgVerify redos too) died "off lane"."""
+
+    def test_a_checkout_dir_is_read_from_inside_it_not_passed_as_a_slug(self):
+        with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as repo:
+            Path(d, "gh").write_text(
+                "#!/usr/bin/env python3\nimport os, sys\n"
+                "if '--repo' in sys.argv: sys.exit('expected the OWNER/REPO format')\n"
+                "print('lane:orgverify' if os.getcwd() == os.path.realpath(os.environ['WANT_CWD']) else '')\n")
+            os.chmod(Path(d, "gh"), 0o755)
+            old = os.environ.copy()
+            os.environ.update(PATH=d + os.pathsep + old.get("PATH", ""), WANT_CWD=repo)
+            try:
+                self.assertEqual(rule._labels_via_gh([11634], repo), {11634: ["lane:orgverify"]})
+            finally:
+                os.environ.clear()
+                os.environ.update(old)
+
+
 class DispatchGuard(unittest.TestCase):
     """run_member.sh refuses in one second, before any lock, worktree or model. The fake `gh`
     answers the label lookup; nothing past the guard runs because the guard exits 2."""
