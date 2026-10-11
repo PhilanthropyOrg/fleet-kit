@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# pytest -- a bare `pytest` in any pass runs on the interpreter that can import the repo.
+#
+# The container's python3 has no pytest and no product dependencies, so `pytest` and
+# `python3 -m pytest` both fail. 7 days to 2026-10-11: 8 vp passes and 2 dumbledore passes wrote
+# "pytest isn't installed" in their self-critique and judged a PR from a read of the code
+# instead. scripts/test_python.sh already builds (once, cached) the venv that can run them; this
+# shim just points at it, the same way verified_test.sh does. run_member.sh puts this directory
+# first on PATH. A push still needs verified_test.sh's receipt; this only makes a check runnable.
+WT="${WT_PATH:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
+PY="$(bash "$(dirname "$(readlink -f "$0")")/../test_python.sh" "$WT")"
+[ -d "$WT/src" ] && export PYTHONPATH="$WT/src${PYTHONPATH:+:$PYTHONPATH}"
+exec "$PY" -m pytest "$@"

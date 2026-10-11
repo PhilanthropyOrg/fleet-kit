@@ -72,6 +72,8 @@ KIT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 # which is exactly the "authoritative env var name" that issue's own PRD flagged as UNKNOWN --
 # these are the real names, just never exported until now.
 export REPO="${FLEET_REPO:?set FLEET_REPO in fleet.env}"
+# A bare `pytest` runs on the cached test venv (scripts/bin/pytest), not "not installed".
+export PATH="$KIT_DIR/scripts/bin:$PATH"
 LOG_DIR="${FLEET_LOG_DIR:-$HOME/Library/Logs/fleet-kit}"
 mkdir -p "$LOG_DIR"
 
