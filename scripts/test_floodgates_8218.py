@@ -338,10 +338,13 @@ def test_complete_cli_and_ready_ci() -> None:
         if args[:2] == ["pr", "ready"]:
             state["pr"]["isDraft"] = False
             return 0, ""
+        if args[0] == "api" and "/statuses" in args[1]:
+            return 0, state.get("review", "")
         return 1, "unexpected"
 
     old = mc._gh
     mc._gh = fake
+    os.environ["FLEET_PRE_READY_REVIEW"] = "true"
     try:
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
@@ -350,12 +353,18 @@ def test_complete_cli_and_ready_ci() -> None:
         assert mc.ready(".", None, ci=True)["gaps"] == ["--ci needs --pr N"]
         r = mc.ready(".", 1, ci=True)
         assert r["ready"] and state["pr"]["isDraft"] is False and mc.MARKER not in state["pr"]["body"], r
+        # a draft whose skipped CI reads green is still reviewed first: a block keeps it a draft
+        state["pr"], state["review"] = _pr(3, body=DONE_BODY), "failure"
+        r = mc.ready(".", 3, ci=True)
+        assert not r["ready"] and "BLOCKED" in " ".join(r["gaps"]) and state["pr"]["isDraft"], r
+        state["review"] = ""
         state["pr"] = _pr(2, title="WIP (minion checkpoint): #7942", checks=[])
         r = mc.ready(".", 2, ci=True)
         assert not r["ready"] and any("CI" in g for g in r["gaps"]) and state["pr"]["isDraft"], r
     finally:
         mc._gh = old
-    print("ok  complete CLI prints JSON; ready --pr N --ci readies a done green draft, refuses a WIP one")
+        os.environ.pop("FLEET_PRE_READY_REVIEW", None)
+    print("ok  complete CLI prints JSON; ready --pr N --ci readies a done green draft, refuses a WIP one or a review BLOCK")
 
 
 if __name__ == "__main__":
