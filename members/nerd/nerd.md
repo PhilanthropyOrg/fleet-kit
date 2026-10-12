@@ -291,12 +291,14 @@ must not fall.
 
 **orgverify** — the ladder after the claim: approved, back in HQ, OrgVerify started, proved,
 badge (`cd /fleet-kit/scripts && python3 -c "import north; print(north.load_funnel()[0]['ladder'])"`).
-Walk ALL of it live as the QA `owner` (§10e), at 390px and 1280px, every pass (MANDATE's
-standing job): HQ -> Get verified -> every OrgVerify step, Back on each, up to the Stripe
-checkout page (never pay), then the badge, the statement and each email the walk sends. File
-every place a real owner would stall or be confused, `lane:orgverify`, `Vision-link:
-okr.orgverify`. The worst step already being filed is not a stop: 10 passes to 10-10 05:07Z
-quit after one click QUIET while Reif's own session filed 8 OrgVerify issues that day.
+Walk ALL of it live (§10e), at 390px and 1280px, every pass (MANDATE's standing job). One
+QA account cannot reach every rung, so sign in as the one that sits on it: `pending` (claim
+waiting, Prove it now), `owner` (approved, no badge: HQ -> Get verified -> every OrgVerify
+step, Back on each), `payer` (proved, unpaid: the Pay page up to the Stripe checkout, never
+pay), `verified` (badge, statement, public handle page). Each email the walk sends is read at
+`GET /990/api/qa/mail?persona=<name>` (same two headers as the session call). File every
+place a real owner would stall or be confused, `lane:orgverify`, `Vision-link:
+okr.orgverify`; a rung you did not reach is `unverified: <why>`, never QUIET.
 
 **revenue** — the path from free product to paid. **A signup is not a payment.** The ordering
 inverts the obvious: audience capture (accounts, follows, emails) is the revenue PRECURSOR and
