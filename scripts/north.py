@@ -443,6 +443,11 @@ def main(argv=None) -> int:
     else:
         reif, reif_err = reif_prs(slug, now)
         funnel, funnel_err = load_funnel()
+        try:  # Reif 2026-10-12: dumbledore bets on outcomes; fleet_metrics scores ladder_* from this
+            import fleet_metrics
+            fleet_metrics.record_ladder(ladder(funnel), now)
+        except Exception:  # noqa: BLE001 -- a snapshot never blocks NORTH.md
+            pass
         pr_kr = fleet_prs(slug, now)
     burn, total = burn_by_kr(load_runs(), pr_kr, now)
     text = render(reif, reif_err, load_okr(), funnel, funnel_err, burn, total, now)
