@@ -23,6 +23,10 @@ METRICS (name[:member]; every one is computed over a window of `hours` ending at
   runs_per_day[:<member>]         executed rows per day (any status that ran)
   ci_minutes_per_day              GitHub Actions minutes used in the window, per day (org-wide;
                                   read from ci_minutes.py's cache, the mandate's own number)
+  ladder_orgs:<stage>             orgs at that stage of the product's after-claim ladder (30-day
+                                  count, e.g. back_in_hq, verified_badge), from north.py's hourly
+                                  snapshot nearest `at` (within LADDER_TOL_H)
+  ladder_share:<stage>            those orgs / orgs at `approved`, same snapshot -- 0..1
 `<member>` may be `*` (or omitted where shown optional) for the whole fleet.
 
 None means "unavailable" (no rows in the window, or a zero denominator) -- never 0, so a
@@ -70,6 +74,11 @@ CATALOG = {
     # Reif 2026-10-08 mandate: "max CI mins used today 500". dumbledore could only bet on
     # turns and run counts, never on the limit it was told to hold. Cache: ci_minutes.py.
     "ci_minutes_per_day": "GitHub Actions minutes used in the window, per day (ci_minutes.py cache)",
+    # Reif 2026-10-12 mandate: "Dumbledore bets on outcomes (back in HQ, checklist done, paid
+    # verified ...), not turns/cost". Every metric above is the fleet's own internals, so no bet
+    # could name a user outcome. These read the product's ladder that north.py already fetches.
+    "ladder_orgs": "orgs at <stage> of the after-claim ladder, 30-day count (north.py hourly snapshot)",
+    "ladder_share": "orgs at <stage> / orgs at approved, same snapshot (0..1)",
 }
 
 # gh#789: direction only for metrics whose "better" is unambiguous from CATALOG's own
@@ -89,7 +98,47 @@ DIRECTION = {
     "rework_pct": "lower",
     "items_per_run": "higher",
     "ci_minutes_per_day": "lower",
+    "ladder_orgs": "higher",
+    "ladder_share": "higher",
 }
+
+LADDER_TOL_H = 2.0
+
+
+def ladder_path() -> Path:
+    return Path(os.environ.get("FLEET_LOG_DIR", "/var/log/fleet-kit")) / "ladder.jsonl"
+
+
+def record_ladder(lad: dict, now: float | None = None, path: Path | None = None) -> bool:
+    """Append one snapshot {ts, stages: {key: orgs}} of north.ladder(funnel). False when the
+    feed carried no ladder (nothing written: a missing read must stay missing, never 0)."""
+    stages = {s.get("key"): s.get("orgs") for s in (lad or {}).get("stages") or []
+              if isinstance(s, dict) and s.get("key") and isinstance(s.get("orgs"), (int, float))}
+    if not stages:
+        return False
+    p = path or ladder_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    with p.open("a") as f:
+        f.write(json.dumps({"ts": time.time() if now is None else float(now), "stages": stages}) + "\n")
+    return True
+
+
+def ladder_at(at: float, path: Path | None = None, tol_h: float = LADDER_TOL_H) -> dict | None:
+    """The snapshot nearest `at` within tol_h hours, or None. The ladder is a live 30-day count,
+    so a reading far from `at` says nothing about `at`."""
+    p = path or ladder_path()
+    if not p.exists():
+        return None
+    best, gap = None, tol_h * 3600
+    for line in p.read_text(errors="ignore").splitlines():
+        try:
+            r = json.loads(line)
+            d = abs(float(r["ts"]) - at)
+        except (ValueError, KeyError, TypeError):
+            continue
+        if d <= gap:
+            best, gap = r.get("stages"), d
+    return best if isinstance(best, dict) else None
 
 
 def direction(name: str) -> str | None:
@@ -298,6 +347,17 @@ def compute(name: str, rows: list[dict], at: float | None = None, hours: float =
         return float(v) if v is not None else None
     if base == "ci_minutes_per_day":
         return ci_minutes_in_window(_ci_cache(), at, hours)
+    if base in ("ladder_orgs", "ladder_share"):
+        if not args or not args[0]:
+            raise ValueError(f"{base} needs :<stage> (e.g. back_in_hq)")
+        snap = ladder_at(at)
+        v = (snap or {}).get(args[0])
+        if v is None:
+            return None
+        if base == "ladder_orgs":
+            return float(v)
+        base_n = (snap or {}).get("approved")
+        return (float(v) / base_n) if base_n else None
     raise ValueError(base)  # unreachable: parse() already rejected unknown names
 
 
