@@ -34,6 +34,14 @@ if [ -n "$due" ] && [ "$VP_ENABLED" != "True" ]; then
   log "vp enabled=false in spec -- not spawning for: $due"
   due=""
 fi
+# Under an hour cap the one minion slot is gru's to rank (MANDATE: "Build #12104, #12198, ...
+# in order"). This :00 tick spawned 7-10 redos an hour and one won the slot at :02, so all 22
+# gru passes on 2026-10-12 found it full and deferred the mandate items. A redo item is still
+# open and in gru's candidates; gru builds it when it ranks first. No cap set: spawn as before.
+if [ -n "$redo_lines" ] && [ "${FLEET_MINION_MAX_PER_HOUR:-0}" -gt 0 ] 2>/dev/null; then
+  log "hour cap FLEET_MINION_MAX_PER_HOUR=$FLEET_MINION_MAX_PER_HOUR -- leaving redo to gru: $(printf '%s\n' "$redo_lines" | cut -f1 | tr '\n' ' ')"
+  redo_lines=""
+fi
 if [ -z "$due" ] && [ -z "$redo_lines" ]; then
   log "nothing due"
   exit 0
