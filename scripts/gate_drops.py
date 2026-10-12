@@ -62,8 +62,16 @@ PREFIX = os.environ.get("FLEET_LABEL_PREFIX", "fleet:")
 NEEDS_SPEC = f"{PREFIX}needs-spec"
 DEFAULT_QUALITY = "quality:solid"
 MARKER = "needs-spec:"
-LOG_DIR = Path(os.environ.get("FLEET_LOG_DIR", Path.home() / "Library" / "Logs" / "fleet-kit")).expanduser()
-DROP_LOG = LOG_DIR / "gate_drops.jsonl"
+DROP_LOG: Path | None = None  # tests may pin a path; None reads $FLEET_LOG_DIR at write time
+
+
+def _drop_log() -> Path:
+    """Resolved per call, not at import: a test that imports this module before pointing
+    FLEET_LOG_DIR at a temp dir otherwise appends fixture drops (#8, #20) to the live log."""
+    if DROP_LOG is not None:
+        return DROP_LOG
+    base = os.environ.get("FLEET_LOG_DIR", Path.home() / "Library" / "Logs" / "fleet-kit")
+    return Path(base).expanduser() / "gate_drops.jsonl"
 # philanthropy#8215 amendment: more than this many needs-spec drops in one pass messages
 # marie (who fixes specs) and jefe (who watches why they keep arriving unspecced).
 MSG_THRESHOLD = int(os.environ.get("FLEET_GATE_DROP_MSG_THRESHOLD", "3"))
@@ -707,12 +715,13 @@ def apply(p: dict, repo: str | None, run_id: str, run=_gh, db_path: str | None =
                                                         {"error": (r.stderr or "")[:200]})))
     now = time.time()
     try:
-        LOG_DIR.mkdir(parents=True, exist_ok=True)
-        with DROP_LOG.open("a") as fh:
+        log = _drop_log()
+        log.parent.mkdir(parents=True, exist_ok=True)
+        with log.open("a") as fh:
             for rec in p["dropped"]:
                 fh.write(json.dumps(dict(rec, ts=now, run_id=run_id)) + "\n")
     except OSError as exc:
-        print(f"gate_drops: could not append {DROP_LOG}: {exc}", file=sys.stderr)
+        print(f"gate_drops: could not append {_drop_log()}: {exc}", file=sys.stderr)
     ask_id = None
     if p["ask"]:
         import ask as ask_mod
@@ -747,7 +756,7 @@ def count(hours: float = 6.0, now: float | None = None, path: Path | None = None
     now = now or time.time()
     by_action: dict[str, set] = {}
     try:
-        lines = (path or DROP_LOG).read_text().splitlines()
+        lines = (path or _drop_log()).read_text().splitlines()
     except OSError:
         lines = []
     for line in lines:
