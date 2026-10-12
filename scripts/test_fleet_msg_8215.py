@@ -278,5 +278,5 @@ class Wiring(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    os.environ.setdefault("FLEET_LOG_DIR", tempfile.mkdtemp())
+    os.environ["FLEET_LOG_DIR"] = tempfile.mkdtemp()  # never the live log dir: setdefault kept it in the container
     unittest.main(verbosity=2)

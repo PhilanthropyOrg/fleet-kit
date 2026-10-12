@@ -21,7 +21,7 @@ from types import SimpleNamespace
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-os.environ.setdefault("FLEET_LOG_DIR", tempfile.mkdtemp())
+os.environ["FLEET_LOG_DIR"] = tempfile.mkdtemp()  # never the live log dir: setdefault kept it in the container
 
 import denial_asks as da  # noqa: E402
 import gate_drops as gd  # noqa: E402
