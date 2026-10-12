@@ -1093,7 +1093,8 @@ def summarize(journeys_out: list[dict], blocked: list[dict]) -> dict:
 DEFAULT_STREAK_STATE_PATH = Path(
     os.environ.get(
         "FLEET_JOURNEY_STREAK_STATE",
-        str(Path.home() / ".cache" / "fleet-kit" / "journey_blocked_streak.json"),
+        str((Path(os.environ["FLEET_LOG_DIR"]) if os.environ.get("FLEET_LOG_DIR")
+             else Path.home() / ".cache" / "fleet-kit") / "journey_blocked_streak.json"),  # survives deploys
     )
 )
 

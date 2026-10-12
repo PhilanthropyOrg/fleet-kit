@@ -122,12 +122,12 @@ RED = Profile("red", f"{PREFIX}red-team", "b60205",
               "can be broken")
 PROFILES = {"sentry": SENTRY, "red": RED}
 
-DEFAULT_STATE_PATH = Path(
-    os.environ.get(
-        "FLEET_JOURNEY_STATE",
-        str(Path.home() / ".cache" / "fleet-kit" / "journey_last_pass.json"),
-    )
-)
+# dumbledore msg#1147: ~/.cache is the container's overlay, wiped on every deploy cutover, so
+# the once-a-day "Recurred again" throttle forgot itself and #8855/#9039 drew 2-17 a day on sha
+# `unknown`. $FLEET_LOG_DIR is the mounted volume that survives a redeploy.
+STATE_DIR = Path(os.environ["FLEET_LOG_DIR"]) if os.environ.get("FLEET_LOG_DIR") else (
+    Path.home() / ".cache" / "fleet-kit")
+DEFAULT_STATE_PATH = Path(os.environ.get("FLEET_JOURNEY_STATE", str(STATE_DIR / "journey_last_pass.json")))
 
 # gh#770: journeys.yaml's own URLs are all philanthropy.org, so an explicit target repo (not
 # whatever `gh` defaults to for the sandbox's ambient checkout, gh#151) is the correct default.
