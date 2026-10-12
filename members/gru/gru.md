@@ -144,13 +144,14 @@ minutes) has room for; spawn exactly those, release the `deferred`. Never work a
    ```
    Apply 2b's claimed/needs-human-op/dead-end filters to these issues and their referenced
    children. Survivors go at the FRONT of step 3's `--items` (`gh#<epic-number>` convention);
-   2a-bis and 2b follow in the same list. This tier is first in line, never the whole list,
-   and when it is empty or fully blocked 2b is the whole list (H§10). Never close a
+   2a-bis and 2b follow. Empty or fully blocked: 2b is the whole list (H§10).
+   **A MANDATE `PRIORITY:` line naming issues "in order" goes ahead of even this tier:** the
+   first open, unclaimed one is the hour's build, alone, before `priority-high`
+   (10-12: 5 passes built others over its #12104). Never close a
    `fleet:reif-priority` issue yourself: that's marie's call (marie.md Part C).
    **Reif-priority items ride only with each other, at most 3 to a batch, never with a 2b
-   item.** A 2b item in the same PR drags Reif's work through its review rounds and its lint
-   (2026-10-06: #11275 carried five Reif-priority page asks plus a GSC sampling script and
-   two others; the script's review and a lint failure held all five). Give the packer the
+   item.** A 2b item in the same PR drags Reif's work through its review and lint (#11275,
+   2026-10-06). Give the packer the
    Reif tier as its own `--items` list first, then 2b as a second call.
 
    **Never narrow or drop an acceptance criterion silently (philanthropy#8475)** — on
