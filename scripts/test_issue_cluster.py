@@ -248,3 +248,16 @@ def test_file_reads_an_at_path_body_instead_of_posting_the_path(monkeypatch, tmp
     posted = calls[-1][calls[-1].index("--body") + 1]
     assert rc == 0 and calls[-1][:3] == ["gh", "issue", "create"]
     assert posted.startswith("Evidence.") and "@" not in posted[:1]
+
+
+def test_mega_body_passes_both_intake_gates():
+    # jefe msg#1176: #12291 was born without a Vision-link and gru dropped it four passes running.
+    kids = [{"number": 1, "title": "a", "body": "x\n\nVision-link: okr.orgverify\n"},
+            {"number": 2, "title": "b", "body": "y\n\nVision-link: none (maintenance)\n"},
+            {"number": 3, "title": "c", "body": "no line"}]
+    body = ic.mega_body({"signature": "s", "lane": "lane:orgverify", "children": kids})
+    assert body.startswith("Vision-link: okr.orgverify")
+    assert ic.spec_gaps(body, ["fleet:mega"]) == []
+    bare = ic.mega_body({"signature": "s", "lane": "", "children": kids[2:]})
+    assert bare.startswith("Vision-link: none (maintenance)")
+    assert ic.spec_gaps(bare, ["fleet:mega"]) == []
