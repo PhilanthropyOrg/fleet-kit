@@ -133,7 +133,11 @@ say so in the report with evidence and leave it to a human.
    (`runs_per_day`, `status_per_day:quiet`, `avg_duration_s`) are set by cron lines in
    `entrypoint.sh`, pushes, wakes and gru, not by a charter: 7 of the 10 misses in #37-#47
    (09-30..10-03) were those; the other 3 asked a per-pass number to go UP, which a charter
-   allows but does not cause. **One open row per member** until it resolves, or the readings
+   allows but does not cause. **Keep one outcome bet open.** If no `ladder_share:<stage>` or
+   `ladder_orgs:<stage>` row is open, this pass's change targets the weakest step of the
+   OrgVerify ladder (NORTH section 2) and bets on it; read stages with `fleet_metrics.py list`.
+   Fleet-internal bets alone left the claim funnel unbet through bet #96 (10-12).
+   **One open row per member** until it resolves, or the readings
    confound (#38/#39/#44/#45: four minion rows due within 24h, three missed). No `add`, no pass. Run
    `gh pr view <PR> -R <repo> --json state,autoMergeRequest` before you `add`, and over every
    open row from item 1.
