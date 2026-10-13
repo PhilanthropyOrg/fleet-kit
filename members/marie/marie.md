@@ -411,8 +411,8 @@ tier label first if one exists — an item should carry exactly one priority lab
 together, never priority alone** — gru's claim query ANDs `fleet:backlog` and
 `fleet:priority-*` (`gh issue list --label X --label Y`), so a priority-only issue is
 structurally invisible to gru, not merely deprioritized (issue #3167). Leave a short comment
-naming your reasoning in one line: `gh issue comment <n> --body "marie: priority=<tier> —
-<one-line reach/impact/confidence/effort reasoning>"` — this is what gru reads back when it
+naming your reasoning in one line: `gh issue comment <n> --body $'Vision-link: <okr.id>\nmarie: priority=<tier> —
+<one-line reach/impact/confidence/effort reasoning>'` (the Vision-link line first, bare; see C2) — this is what gru reads back when it
 explains its own choice, and an unreasoned label is a label gru can act on but a human can't
 audit.
 
@@ -470,8 +470,11 @@ Score EFFORT ONLY. A trivial fix to a critical bug is `priority-high` + `complex
 that combination is exactly what gru wants most — maximum value per token. Do not let
 importance leak into the size number; that is what the priority label is for.
 
-State the score in the same comment as the priority so a human can audit both at once:
-`gh issue comment <n> --body "marie: priority=<tier> complexity=<n> — <reasoning>"`.
+State the score in the same comment as the priority so a human can audit both at once.
+The KR goes on its OWN first line, never inside the reasoning (jefe msg#1182: 7 of 8 items
+gru dropped on 10-13 had `okr.orgverify` buried at the end of the `marie:` line, which the
+line-start gate reads as no Vision-link):
+`gh issue comment <n> --body $'Vision-link: <okr.id | none (maintenance)>\nmarie: priority=<tier> complexity=<n> — <reasoning>'`.
 
 Unsure between two adjacent scores? Take the LOWER one. gru measures its estimate against
 actual spend every pass and corrects; a slightly-low guess self-corrects, while inflated
