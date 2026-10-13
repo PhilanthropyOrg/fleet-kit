@@ -33,6 +33,7 @@
   "llm": {
     "model": "opus",
     "prompt_file": "dumbledore.md",
+    "pregate": "members/dumbledore/pregate.sh",
     "tools": {
       "allow": [
         "Read",
