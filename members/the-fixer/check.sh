@@ -398,6 +398,17 @@ if [ "$PR_NUM" != "none" ] && [ -z "$FIRE_SHA" ]; then
   # rest. FIRE_SHA is what the state file stores, so it carries the batch key; the human-facing
   # log line below still prints the oldest sha's prefix for continuity.
   FIRE_SHA="batch:$STALE_KEY"; FIRE_WHAT="stale-prs($STALE_PRS)"
+  # A spent CI day (MANDATE 10-08, 500 min) refuses every `the-fixer --item` push in
+  # run_member.sh, so a stale-PR fire can only buy a model pass whose one dispatch is turned
+  # away: 4 such passes on 10-13 (#12270, 794..899/500), each ending in a FATAL. Same rule as
+  # gru's pregate. Red main/deploy and prod-down still fire; the PRs fire fresh after 00:00 UTC.
+  if [ "${FLEET_CI_MINUTES_DAILY_MAX:-0}" -gt 0 ] 2>/dev/null; then
+    CI_DAY=$(python3 "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/scripts/build_lane_rule.py" ci-budget 2>/dev/null)
+    if [ $? -eq 3 ]; then
+      log "stale-prs($STALE_PRS) held: CI day spent ($CI_DAY), --item pushes wait for 00:00 UTC"
+      FIRE_SHA=""; FIRE_WHAT=""; PROD_NOTE="${PROD_NOTE:-} (stale PRs held: CI day spent $CI_DAY)"
+    fi
+  fi
 fi
 if [ -n "$PROD_DOWN" ]; then
   # No single commit is necessarily guilty (an outage can be a resource threshold crossed, not
