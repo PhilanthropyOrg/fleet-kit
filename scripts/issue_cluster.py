@@ -221,14 +221,34 @@ def checklist_line(it: dict) -> str:
     return f"- [ ] #{it['number']} {(it.get('title') or '').strip()}"
 
 
+def mega_vision_link(children: list[dict]) -> str:
+    """The `Vision-link:` line a mega carries, copied from its children (jefe msg#1176: megas
+    were born with none, so gru's gate dropped #12291 four passes running). The KR most
+    children link wins, ties to the first child; no child with a real link -> maintenance."""
+    import collections
+    import vision_link_gate
+    links = collections.Counter()
+    for c in children:
+        status, raw = vision_link_gate.classify_candidate(c.get("body"), [])
+        if status == vision_link_gate.STATUS_LINKED and raw:
+            links[raw] += 1
+    return f"Vision-link: {links.most_common(1)[0][0] if links else 'none (maintenance)'}"
+
+
 def mega_body(plan: dict) -> str:
     lines = [
+        mega_vision_link(plan["children"]),
+        "",
         f"Mega issue: {len(plan['children'])} open issues share one root cause (same failure "
         "signature, same lane). Build it as ONE item: fix the shared cause once, then tick every "
         "box below with the evidence that covers it. `Closes` this mega only when every box is ticked.",
         "",
         f"{SIG_MARKER} {plan['signature']}",
         f"{LANE_MARKER} {plan['lane']}",
+        "",
+        "## Acceptance",
+        "- Given every child below, when the shared cause is fixed, then each box is ticked "
+        "with the evidence that covers it.",
         "",
         "## Children (closed as tracked here)",
         *[checklist_line(c) for c in plan["children"]],
