@@ -419,6 +419,11 @@ case "${1:-cron-foreground}" in
       # the grader ran for 12h on dino with the score pinned at 52-55 and nothing filed. :12 is
       # unclaimed on the minute map and five minutes after the grader's own slot.
       echo "12 * * * * root [ -f \"\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}\" ] && { set -a; . \"\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}\"; set +a; }; export GH_TOKEN=\$(cat $TOKEN_FILE) FLEET_LOG_DIR=$LOG_DIR; python3 /fleet-kit/scripts/rsi_stall_check.py >> $LOG_DIR/rsi_stall_check.log 2>&1"
+      # Jobs, daily (Reif 2026-10-14: self-improvement is daily). 7:25 AM Central, after the
+      # product's jobs_harvest_postings (10:40 UTC): read /api/signals/kpi `jobs`, comment the
+      # report on the Jobs epic, file a bug per rule that trips (scripts/jobs_daily.py). gh
+      # runs in the product checkout, so cd first.
+      echo "25 7 * * * root [ -f \"\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}\" ] && { set -a; . \"\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}\"; set +a; }; export GH_TOKEN=\$(cat $TOKEN_FILE) FLEET_LOG_DIR=$LOG_DIR; cd $FLEET_REPO && python3 /fleet-kit/scripts/jobs_daily.py >> $LOG_DIR/jobs_daily.log 2>&1"
       # charter_bloat_check.py (fk#753, fk#1122): the consolidation duty jefe held by prose and
       # dumbledore did by initiative -- both off since fk#1116. Weekly, Sunday 00:40 Central; prints
       # the reconstruction so the next librarian pass and any human can see which charters are
