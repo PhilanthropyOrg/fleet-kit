@@ -111,6 +111,14 @@ class BySource(unittest.TestCase):
                         {"started_at": None, "completed_at": None}]}
         self.assertEqual(ci_minutes.wall_minutes(run), 12.0)
 
+    def test_wait_without_steps_bills_nothing(self):
+        # Cancelled while waiting on the timer: 40 min "started", no step ran, nothing billed.
+        run = {"jobs": [{"started_at": "2026-10-14T09:41:01Z", "completed_at": "2026-10-14T10:20:33Z",
+                         "steps": 0},
+                        {"started_at": "2026-10-14T10:21:43Z", "completed_at": "2026-10-14T10:33:31Z",
+                         "steps": 9}]}
+        self.assertEqual(ci_minutes.wall_minutes(run), 12.0)
+
     def test_bad_timestamps_count_zero(self):
         self.assertEqual(ci_minutes.wall_minutes({"run_started_at": None}), 0.0)
 
