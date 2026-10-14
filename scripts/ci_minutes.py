@@ -115,7 +115,9 @@ def wall_minutes(run: dict) -> float:
                 secs = _ts(j["completed_at"]) - _ts(j["started_at"])
             except (KeyError, ValueError, TypeError):
                 continue
-            if secs > 0:
+            # A job cancelled while it waited on the production timer has a start time but ran
+            # no step, and bills nothing (10-14: 118 of DEPLOY's 193 min were such waits).
+            if secs > 0 and j.get("steps", 1):
                 total += math.ceil(secs / 60)
         return float(total)
     try:
@@ -145,7 +147,7 @@ def fetch_runs(repo: str, day: str) -> list[dict]:
         try:
             j = subprocess.run(
                 ["gh", "api", "--paginate", f"repos/{repo}/actions/runs/{run['id']}/jobs?per_page=100",
-                 "-q", ".jobs[]|{started_at,completed_at}"],
+                 "-q", ".jobs[]|{started_at,completed_at,steps:(.steps|length)}"],
                 capture_output=True, text=True, timeout=60, check=True,
             ).stdout
             run["jobs"] = [json.loads(line) for line in j.splitlines() if line.strip()]
