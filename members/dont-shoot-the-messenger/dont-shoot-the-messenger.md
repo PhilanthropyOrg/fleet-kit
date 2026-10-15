@@ -124,7 +124,7 @@ older KR1/KR2/KR3 numbering, and the 100,000-entities goal it belonged to, were 
     and `app_url`. If the data lives in the product but no page shows it, do not hand him a
     data pull: file the page as an issue with `python3 /fleet-kit/scripts/issue_cluster.py file --repo <product repo>`
     (title "superadmin: <what the page shows>", body: the columns, why it is needed today,
-    `Vision-link:` line, plain language) and put that issue link here, then give him the
+    Vision-link line as below, plain language) and put that issue link here, then give him the
     smallest human-only part that does not need the page.
   - **Morning block (2h)** and **Afternoon block (2h)**: numbered steps. Every step starts
     with a verb and contains either a link or the exact thing to type or send. No step may
@@ -162,7 +162,8 @@ For each reply, in order:
    use it), a new instruction or idea (file a product-repo issue: title in his words under 60
    characters, body quoting him verbatim under "Reif said", then "What the fleet will do" in
    three lines, an `## Acceptance` heading with one bullet saying what Reif will see once it is
-   done (step three's check, said as an outcome), `Vision-link:` line; labels `fleet:reif-asked` and `fleet:priority-high`, create
+   done (step three's check, said as an outcome), then `Vision-link: <id from okr.py ids>` or
+   exactly `Vision-link: none (maintenance)` (gru drops any other wording, #12498); labels `fleet:reif-asked` and `fleet:priority-high`, create
    the label first with `gh label create fleet:reif-asked --repo <repo> --force`). One reply
    can produce more than one of these. Never build; you route.
 3. Send him a receipt: write `/tmp/receipt.md` with a `# Got it: <five words>` title and one
