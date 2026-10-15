@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # node_gate.sh -- the ONLY thing the hub's key can run on a worker node (authorized_keys
 # `command=`, installed by node_up.sh). It accepts exactly `minion --items <n,..>` and runs that
-# batch inside the node's worker container.
+# batch inside the node's worker container, or `attach --items <n,..>` to follow one already running.
 #
 # WHY A WORKER NODE, NOT A SECOND FLEET (2026-09-29). dino ran at load 12-21 on 7 cores while
 # lucky sat idle. A second full instance would run a second gru against the same backlog, and a
@@ -14,6 +14,7 @@
 #   node-accepted host=<h>    the batch is running here; the hub must NOT run it too
 #   node-row <json>           a runs.jsonl row for this batch, relayed as it lands
 #   node-done rc=<n>          run_member.sh's exit code
+#   node-gone                 (attach only) no run of this batch is live and none recorded an end
 set -uo pipefail
 trap '' PIPE  # the hub hanging up must not kill a running minion
 [ -f "${FLEET_NODE_ENV:-$HOME/.config/fleet-kit/node.env}" ] && . "${FLEET_NODE_ENV:-$HOME/.config/fleet-kit/node.env}"
@@ -26,11 +27,42 @@ SLOT_DIR="${FLEET_NODE_SLOT_DIR:-$HOME/.cache/fleet-node-slots}"
 POLL_S="${FLEET_NODE_POLL_S:-5}"
 
 cmd="${SSH_ORIGINAL_COMMAND:-}"
-if ! [[ "$cmd" =~ ^minion\ --items\ ([0-9]{1,7}(,[0-9]{1,7}){0,9})$ ]]; then
-  echo "node-refused: only 'minion --items <n,..>' is allowed"
+if ! [[ "$cmd" =~ ^(minion|attach)\ --items\ ([0-9]{1,7}(,[0-9]{1,7}){0,9})$ ]]; then
+  echo "node-refused: only 'minion --items <n,..>' or 'attach --items <n,..>' is allowed"
   exit 2
 fi
-items="${BASH_REMATCH[1]}"
+verb="${BASH_REMATCH[1]}"
+items="${BASH_REMATCH[2]}"
+
+runs="$LOG_DIR/runs.jsonl"
+prefix="\"run_id\": \"minion-item${items//,/_}-"
+relay() {  # complete lines only: wc -l never counts a half-written last line
+  local total
+  total=$(wc -l < "$runs")
+  [ "$total" -lt "$seen" ] && seen=0
+  [ "$total" -gt "$seen" ] && sed -n "$((seen + 1)),${total}p" "$runs" | grep -F "$prefix" | sed 's/^/node-row /'
+  seen=$total
+}
+# One state file per batch: `start=<runs.jsonl line>` when it starts, `rc=<n>` when it ends. The
+# runner holds a lock on it for its whole life, so attach can tell "still running" from "gone".
+state="$SLOT_DIR/batch-${items//,/_}"
+
+if [ "$verb" = attach ]; then  # fk#1670: the hub's link dropped mid-run; replay and follow
+  start=$(sed -n 's/^start=//p' "$state" 2>/dev/null)
+  [ -n "$start" ] || { echo "node-gone"; exit 5; }
+  seen="$start"
+  while :; do
+    relay
+    end=$(sed -n 's/^rc=//p' "$state")
+    [ -n "$end" ] && { relay; echo "node-done rc=$end"; exit "$end"; }
+    if flock -n "$state" true; then  # nobody holds it: the runner is gone; re-read, it may just have ended
+      end=$(sed -n 's/^rc=//p' "$state")
+      [ -n "$end" ] && { relay; echo "node-done rc=$end"; exit "$end"; }
+      echo "node-gone"; exit 5
+    fi
+    sleep "$POLL_S"
+  done
+fi
 
 mkdir -p "$SLOT_DIR"
 got=""
@@ -46,17 +78,11 @@ if [ "$("$PODMAN" inspect -f '{{.State.Running}}' "$CONTAINER" 2>/dev/null)" != 
   exit 4
 fi
 
-runs="$LOG_DIR/runs.jsonl"
 mkdir -p "$LOG_DIR" && touch "$runs"
-prefix="\"run_id\": \"minion-item${items//,/_}-"
 seen=$(wc -l < "$runs")
-relay() {  # complete lines only: wc -l never counts a half-written last line
-  local total
-  total=$(wc -l < "$runs")
-  [ "$total" -lt "$seen" ] && seen=0
-  [ "$total" -gt "$seen" ] && sed -n "$((seen + 1)),${total}p" "$runs" | grep -F "$prefix" | sed 's/^/node-row /'
-  seen=$total
-}
+exec 9>>"$state"
+flock -n 9 || { echo "node-refused: batch $items is already running here"; exit 3; }
+: > "$state" && echo "start=$seen" >&9
 
 # The hub's accounts (node_minion.sh sends `acct <name> <token>` lines on stdin, never argv): each
 # goes in as FLEET_NODE_TOKEN_<ACCT> and FLEET_NODE_ACCOUNTS keeps the hub's order; podman gets
@@ -77,7 +103,7 @@ if [ -n "$accts" ]; then
 fi
 echo "node-accepted host=$(hostname) slot=$got/$SLOTS items=$items${accts:+ accounts=${accts// /,}}"
 "$PODMAN" exec -e FLEET_RUN_NOW=1 ${EXTRA[@]+"${EXTRA[@]}"} "$CONTAINER" \
-  bash /fleet-kit/scripts/run_member.sh minion --items "$items" >/dev/null 2>&1 </dev/null &
+  bash /fleet-kit/scripts/run_member.sh minion --items "$items" >/dev/null 2>&1 </dev/null 9>&- &
 pid=$!
 while kill -0 "$pid" 2>/dev/null; do
   relay
@@ -85,5 +111,6 @@ while kill -0 "$pid" 2>/dev/null; do
 done
 wait "$pid"; rc=$?
 relay
+echo "rc=$rc" >&9
 echo "node-done rc=$rc"
 exit "$rc"
