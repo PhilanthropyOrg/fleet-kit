@@ -74,7 +74,7 @@ class NodeMinion(unittest.TestCase):
         (self.d / "nodecfg" / "config").write_text("Host fleet-node\n")
         self.local = _sh(self.d / "run_member.sh", f'echo "local $@" >> {self.d}/ran\n')
         self.env = dict(os.environ, FLEET_RUN_MEMBER_LOCAL=str(self.local), FLEET_LOG_DIR=str(self.d),
-                        FLEET_NODE_DIR=str(self.d / "nodecfg"))
+                        FLEET_NODE_DIR=str(self.d / "nodecfg"), FLEET_NODE_ATTACH_WAIT_S="0")
 
     def _run(self, ssh_body: str, items="21,22"):
         ssh = _sh(self.d / "ssh", f'echo "$@" > {self.d}/ssh_args\n' + ssh_body)
@@ -104,6 +104,33 @@ class NodeMinion(unittest.TestCase):
         r = self._run("echo 'node-accepted host=lucky'\nexit 255\n")
         self.assertEqual(r.returncode, 255)
         self.assertEqual(self._local_ran(), "", "the node owns the batch once it accepted it")
+
+    def test_dropped_link_reattaches_and_relays_each_row_once(self):
+        """fk#1670: a tunnel drop after node-accepted left the hub row `started`; open_runs.py then
+        called it killed and gru sent the batch again, while the node had finished it."""
+        started = json.dumps({"run_id": "minion-item21_22-1-2", "status": "started"})
+        ok = json.dumps({"run_id": "minion-item21_22-1-2", "status": "ok"})
+        r = self._run(f"""case "$*" in
+  *attach*) echo "attach" >> {self.d}/attaches
+            [ "$(wc -l < {self.d}/attaches)" -lt 2 ] && exit 255
+            echo 'node-row {started}'; echo 'node-row {ok}'; echo 'node-done rc=0' ;;
+  *) echo 'node-accepted host=lucky'; echo 'node-row {started}'; exit 255 ;;
+esac
+""")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual((self.d / "ssh_args").read_text().split()[-3:], ["attach", "--items", "21,22"])
+        self.assertEqual((self.d / "runs.jsonl").read_text().splitlines(), [started, ok])
+        self.assertEqual(self._local_ran(), "")
+
+    def test_node_gone_stops_reattaching(self):
+        r = self._run(f"""case "$*" in
+  *attach*) echo x >> {self.d}/attaches; echo node-gone; exit 5 ;;
+  *) echo 'node-accepted host=lucky'; exit 255 ;;
+esac
+""")
+        self.assertEqual(r.returncode, 5)
+        self.assertEqual((self.d / "attaches").read_text(), "x\n")
+        self.assertEqual(self._local_ran(), "")
 
     def test_bad_args(self):
         r = self._run("exit 0\n", items="1;id")
@@ -163,7 +190,8 @@ esac
 
     def test_only_minion_batches(self):
         for cmd in ("", "gru", "bash", "minion --items", "minion --items 1;id", "minion --items 1 && id",
-                    "minion --items 1,2 --task x", "minion --items $(id)", "nerd --task lane=x"):
+                    "minion --items 1,2 --task x", "minion --items $(id)", "nerd --task lane=x",
+                    "attach --items 1;id", "attach 1", "attach --items 1 --task x"):
             r = self._gate(cmd)
             self.assertEqual(r.returncode, 2, cmd)
             self.assertTrue(r.stdout.startswith("node-refused"), cmd)
@@ -179,6 +207,30 @@ esac
         self.assertEqual(lines[-1], "node-done rc=0")
         self.assertIn("exec -e FLEET_RUN_NOW=1 worker bash /fleet-kit/scripts/run_member.sh minion --items 5,6",
                       self._podman_calls())
+
+    def test_attach_follows_a_running_batch_to_its_end(self):
+        (self.d / "podman").write_text((self.d / "podman").read_text().replace("sleep 0.5\n        echo '{\"run_id\": \"minion-item5_6-9-1\", \"status\": \"ok\"}'",
+                                                                                 "sleep 1.5\n        echo '{\"run_id\": \"minion-item5_6-9-1\", \"status\": \"ok\"}'"))
+        runner = subprocess.Popen(["bash", str(NODE_GATE)], env=dict(self.env, SSH_ORIGINAL_COMMAND="minion --items 5,6"),
+                                  stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+        try:
+            time.sleep(1.0)  # the hub's link is gone; the run goes on
+            r = self._gate("attach --items 5,6")
+        finally:
+            runner.wait(timeout=30)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        lines = r.stdout.splitlines()
+        rows = [json.loads(x[len("node-row "):]) for x in lines if x.startswith("node-row ")]
+        self.assertEqual([x["status"] for x in rows], ["started", "ok"])
+        self.assertEqual(lines[-1], "node-done rc=0")
+        again = self._gate("attach --items 5,6")  # after it ended: the recorded ending, not node-gone
+        self.assertEqual(again.stdout.splitlines()[-1], "node-done rc=0")
+        self.assertEqual(self._podman_calls().count("exec"), 1, "attach never starts a run")
+
+    def test_attach_to_an_unknown_batch_is_gone(self):
+        r = self._gate("attach --items 7")
+        self.assertEqual((r.returncode, r.stdout.strip()), (5, "node-gone"))
+        self.assertEqual(self._podman_calls(), "")
 
     def test_hub_accounts_reach_the_container_by_name_only(self):
         (self.d / "podman").write_text((self.d / "podman").read_text().replace(

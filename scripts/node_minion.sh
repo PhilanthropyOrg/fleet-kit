@@ -27,6 +27,7 @@ items="$3"
 
 run_here() {
   echo "[node_minion] $1 -- running items $items on this box"
+  rm -f "${seen_rows:-}"
   exec bash "$RUN_MEMBER" minion --items "$items"
 }
 [ -f "$NODE_DIR/config" ] || run_here "no worker node configured"
@@ -53,15 +54,36 @@ PY
   done
 }
 
-accepted=0
-node_tokens | "$SSH" -F "$NODE_DIR/config" -o BatchMode=yes -o ConnectTimeout=30 fleet-node \
-    "minion --items $items" 2>&1 | while IFS= read -r line; do
-  case "$line" in
-    node-accepted*) accepted=1; echo "[node_minion] $line" ;;
-    "node-row "*)   printf '%s\n' "${line#node-row }" >> "$LOG_DIR/runs.jsonl" ;;
-    *)              echo "[node_minion] $line" ;;
-  esac
-done
-rc=${PIPESTATUS[1]}
+# A post-accept ssh drop is the tunnel (cloudflared), not the run: node_gate.sh traps PIPE and the
+# batch keeps going. Ending here left the hub row `started` until open_runs.py called it killed,
+# and gru sent the item again (fk#1670: 4 of 8 minion batches on 10-14, #12104 sent 4 times).
+# So re-attach: the node replays the batch's rows and follows it to node-done. A row already
+# relayed is skipped, so runs.jsonl gets each one once.
+accepted=0 done=0 rc=0
+seen_rows=$(mktemp) && trap 'rm -f "$seen_rows"' EXIT
+talk() {  # talk <gate command> [stdin producer]
+  "${2:-true}" | "$SSH" -F "$NODE_DIR/config" -o BatchMode=yes -o ConnectTimeout=30 fleet-node \
+      "$1" 2>&1 | while IFS= read -r line; do
+    case "$line" in
+      node-accepted*) accepted=1; echo "[node_minion] $line" ;;
+      "node-row "*)   row="${line#node-row }"
+                      grep -Fxq -- "$row" "$seen_rows" && continue
+                      printf '%s\n' "$row" >> "$seen_rows"
+                      printf '%s\n' "$row" >> "$LOG_DIR/runs.jsonl" ;;
+      "node-done "*)  done=1; echo "[node_minion] $line" ;;
+      *)              echo "[node_minion] $line" ;;
+    esac
+  done
+  rc=${PIPESTATUS[1]}
+}
+talk "minion --items $items" node_tokens
 [ "$accepted" = 1 ] || run_here "node did not accept (ssh rc=$rc)"
+tries=0
+while [ "$done" = 0 ] && [ "$rc" != 0 ] && [ "$tries" -lt "${FLEET_NODE_ATTACH_TRIES:-5}" ]; do
+  tries=$((tries + 1))
+  echo "[node_minion] link dropped (ssh rc=$rc); re-attaching ($tries)"
+  sleep "${FLEET_NODE_ATTACH_WAIT_S:-30}"
+  talk "attach --items $items"
+  case "$rc" in 2|5) break ;; esac  # refused (a node without attach) or node-gone: nothing to follow
+done
 exit "$rc"
