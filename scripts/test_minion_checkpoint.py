@@ -334,6 +334,21 @@ def test_ready_reviews_the_draft_first_and_a_block_keeps_it_out_of_ci() -> None:
     print("ok  ready: reviews the draft head first; a BLOCK keeps it a draft (no CI round)")
 
 
+def test_ready_checks_the_body_with_the_repos_checker_while_still_a_draft() -> None:
+    sb, wt, pr_file = _pr_sandbox(DONE_TITLE, DONE_BODY)
+    checker = Path(wt) / "scripts" / "check_pr_body.py"
+    checker.parent.mkdir()
+    checker.write_text("import sys\nprint('check_pr_body \u2717 add `Phone screenshot (390px): x`')\n"
+                       "sys.exit(1)\n")
+    r = mc.ready(wt)
+    assert not r["ready"] and "Phone screenshot" in " ".join(r["gaps"]), r
+    pr = json.loads(pr_file.read_text())
+    assert pr["isDraft"] is True and not pr.get("reviewed"), pr  # no CI round, no review spent
+    checker.write_text("raise SystemExit('Traceback: gh down')\n")  # a crashing checker fails open
+    assert mc.ready(wt)["ready"]
+    print("ok  ready: the repo's check_pr_body.py gaps keep it a draft; a crash fails open")
+
+
 def test_ready_refuses_untested_unpushed_or_someone_elses_pr() -> None:
     _, wt, _ = _pr_sandbox(DONE_TITLE, DONE_BODY, green=False)
     assert "receipt" in " ".join(mc.ready(wt)["gaps"])
