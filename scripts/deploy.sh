@@ -381,10 +381,13 @@ retire_services_in() {
 # `timeout` wrapper and model CLI process whose PROMPT argv mentions run_member.sh --
 # measured live 2026-09-26 21:12 UTC, the reaper SIGTERMed three minions' own
 # model-CLI children (pass end rc=143) while sparing their bash wrappers.
-PASS_PATTERN='^(/usr)?(/bin/)?bash [^ ]*(run_member|worktree_builder|judge-judy)[.]sh'
+PASS_PATTERN='^(/usr)?(/bin/)?bash [^ ]*(run_member|node_minion|worktree_builder|judge-judy)[.]sh'
 # gh#8197: the minion passes among them (dispatch_member.sh / gru's `run_member.sh minion ...`).
 # While one is in flight the retired build stays up, so nothing in it is terminated early.
-MINION_PATTERN='^(/usr)?(/bin/)?bash [^ ]*run_member[.]sh minion( |$)'
+# node_minion.sh too: with a worker node it is the hub's only process for the batch, and
+# without it a deploy saw 0 in flight and stopped the build under it (exit 137, no end row,
+# gru re-sent the items: 6 batches lost 10-14..10-15, #12104 twice).
+MINION_PATTERN='^(/usr)?(/bin/)?bash [^ ]*(run_member|node_minion)[.]sh minion( |$)'
 inflight_in() {
     local n
     n="$(podman exec "$1" pgrep -c -f "${2:-$PASS_PATTERN}" 2>/dev/null 9>&- | head -1 | tr -cd '0-9' || true)"

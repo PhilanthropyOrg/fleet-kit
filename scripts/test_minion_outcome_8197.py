@@ -118,7 +118,8 @@ class DrainSparesMinions(unittest.TestCase):
     def test_minion_pattern_matches_minions_only(self):
         for args in ("bash /fleet-kit/scripts/run_member.sh minion --items 7939",
                      "/bin/bash /fleet-kit/scripts/run_member.sh minion --items 7941,7942",
-                     "bash /fleet-kit/scripts/run_member.sh minion"):
+                     "bash /fleet-kit/scripts/run_member.sh minion",
+                     "bash /fleet-kit/scripts/node_minion.sh minion --items 12525,12117"):
             self.assertRegex(args, self.MINION)
             self.assertRegex(args, self.PASS)
         for args in ("bash /fleet-kit/scripts/run_member.sh gru",
