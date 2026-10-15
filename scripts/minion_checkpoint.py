@@ -404,6 +404,23 @@ def pre_ready_review(wt: str, pr: int, head: str) -> str | None:
     return None
 
 
+def body_gaps(wt: str, pr: int) -> list[str]:
+    """The product repo's own PR-body rules (its scripts/check_pr_body.py, when it ships one),
+    checked while the PR is a draft. 10-08..10-15: six minion PRs (#11840 #12185 #12355 #12365
+    #12441 ...) went ready without the phone-screenshot line; each failed lint, cost a CI round
+    and a the-fixer pass to add one line. A checker that crashes or is absent fails open."""
+    script = Path(wt) / "scripts" / "check_pr_body.py"
+    if not script.is_file():
+        return []
+    try:
+        p = subprocess.run([sys.executable, str(script), "--pr", str(pr)], cwd=wt,
+                           capture_output=True, text=True, timeout=120)
+    except (subprocess.TimeoutExpired, OSError):
+        return []
+    return [f"PR body: {ln.split('✗', 1)[1].strip()} (gh pr edit --body, then ready again)"
+            for ln in p.stdout.splitlines() if ln.startswith("check_pr_body ✗")]
+
+
 def ready(wt: str, pr: int | None = None, ci: bool = False) -> dict:
     """Mark this pass's checkpoint PR ready, only if its done-criteria are met. With `ci`
     (HQ, no worktree on the branch): green CI on the PR's head stands in for the receipt."""
@@ -438,6 +455,8 @@ def ready(wt: str, pr: int | None = None, ci: bool = False) -> dict:
             gaps.append("local HEAD is not the PR's head: push first")
         elif not head_is_green(wt):
             gaps.append("HEAD has no passing verified_test.sh receipt: run it")
+    if not gaps:
+        gaps = body_gaps(wt, v["number"])
     # --ci too: a draft's CI is all SKIPPED, which ci_green reads as green. 10-11: hq readied
     # #12113 on an unreviewed head that way, and two review blocks after ready cost 2 CI rounds.
     if not gaps and v.get("isDraft"):
