@@ -124,6 +124,19 @@ def test_intake_plan_fixes_labels_specs_and_skips() -> None:
     print("ok  intake: quality:solid default, needs-spec for a real gap, epics/claimed/prod untouched")
 
 
+def test_prod_access_item_not_resent_within_7d() -> None:
+    prod = [_issue(14, [PA], title="read prod db"), _issue(16, [PA], title="nginx log")]
+    now = 1_800_000_000.0
+    m = gd.prod_access_message(prod, {14: now - 6 * 3600, 16: now - 8 * 86400}, now)
+    assert m["items"] == [16] and "#14" not in m["body"], m
+    assert gd.prod_access_message(prod[:1], {14: now - 86400}, now) is None
+    with tempfile.TemporaryDirectory() as d:
+        conn = fleet_db.connect(Path(d) / "f.db")
+        fleet_msg.send(conn, "gru", ["hq"], "prod-access", "prod-access:14", "b", [14])
+        assert gd.prod_access_message(prod[:1], gd.last_prod_access_by_item(conn)) is None
+    print("ok  prod-access: an item sent to hq in the last 7 days is not sent again")
+
+
 def test_intake_collapses_a_stamped_default_beside_a_scored_label() -> None:
     backlog = [_issue(20, ["fleet:backlog", "quality:solid", "quality:ship-it", gd.NEEDS_SPEC]),
                _issue(21, ["fleet:backlog", "quality:ship-it", "quality:world-class"])]

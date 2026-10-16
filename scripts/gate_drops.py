@@ -88,6 +88,10 @@ RESEND_S = float(os.environ.get("FLEET_GATE_DROP_RESEND_H", "72")) * 3600
 # (label, no more re-sends). 2026-09-30: 8 low items sent twice in 3 days, specced by nobody.
 LOW = f"{PREFIX}priority-low"
 PARKED = f"{PREFIX}parked"
+# A prod-access item already sent to hq is not sent again for this long. 2026-10-16: #11706 went
+# out every 6h for 8 days (msgs #1197-#1276) after hq replied it was blocked on a human; the
+# bus's 6h (to, kind, key) dedupe re-sent the same one-item list each time it expired.
+PROD_ACCESS_RESEND_S = float(os.environ.get("FLEET_PROD_ACCESS_RESEND_D", "7")) * 86400
 DEAD_END = f"{PREFIX}dead-end-blocked"
 MAX_SENDS_LOW = int(os.environ.get("FLEET_GATE_DROP_MAX_SENDS_LOW", "2"))
 
@@ -401,9 +405,27 @@ def sends_by_item(conn) -> dict[int, int]:
     return {n: len(v) for n, v in seen.items()}
 
 
-def prod_access_message(issues: list[dict]) -> dict | None:
-    """ONE message to hq listing open fleet:needs-prod-access items. Pure; None when none."""
-    nums = sorted(i["number"] for i in issues if LABEL_PROD_ACCESS in _names(i.get("labels")))
+def last_prod_access_by_item(conn) -> dict[int, float]:
+    """Newest prod-access message time per item number, from the fleet_msg bus."""
+    out: dict[int, float] = {}
+    for items, sent_at in conn.execute("SELECT items, sent_at FROM msgs WHERE kind = 'prod-access'"):
+        try:
+            nums = json.loads(items or "[]")
+        except ValueError:
+            continue
+        for n in nums if isinstance(nums, list) else []:
+            if isinstance(n, int) and sent_at > out.get(n, 0):
+                out[n] = sent_at
+    return out
+
+
+def prod_access_message(issues: list[dict], last_sent: dict[int, float] | None = None,
+                        now: float | None = None) -> dict | None:
+    """ONE message to hq listing open fleet:needs-prod-access items not sent in the last
+    PROD_ACCESS_RESEND_S. Pure; None when none."""
+    now = now or time.time()
+    nums = sorted(i["number"] for i in issues if LABEL_PROD_ACCESS in _names(i.get("labels"))
+                  and now - (last_sent or {}).get(i["number"], 0) >= PROD_ACCESS_RESEND_S)
     if not nums:
         return None
     titles = {i["number"]: i.get("title") or "" for i in issues}
@@ -417,7 +439,8 @@ def prod_access_message(issues: list[dict]) -> dict | None:
 def intake_plan(backlog: list[dict], prod_access: list[dict], run_id: str,
                 parents: dict | None = None, last_sent: dict[int, float] | None = None,
                 now: float | None = None, sends: dict[int, int] | None = None,
-                waits: dict[int, int] | None = None) -> dict:
+                waits: dict[int, int] | None = None,
+                prod_sent: dict[int, float] | None = None) -> dict:
     """Pure. plan() over every open backlog item except claimed / human-op / prod-access / epics;
     the Reif ask is replaced by one bus message (an hourly sweep of 400+ items would otherwise
     ask Reif every hour), plus hq's prod-access message."""
@@ -442,7 +465,7 @@ def intake_plan(backlog: list[dict], prod_access: list[dict], run_id: str,
     p["parked"] = park
     p["ask"] = None
     p["message"] = intake_message(p["dropped"], newly, run_id, stale)
-    p["messages"] = [m for m in (prod_access_message(prod_access),) if m]
+    p["messages"] = [m for m in (prod_access_message(prod_access, prod_sent, now),) if m]
     p["scanned"], p["skipped"] = len(backlog), len(backlog) - len(todo)
     return p
 
@@ -829,15 +852,16 @@ def main(argv=None) -> int:
         except (RuntimeError, ValueError, subprocess.TimeoutExpired) as exc:
             print(f"gate_drops intake: {exc}", file=sys.stderr)
             return 1
-        last_sent = sends = None
+        last_sent = sends = prod_sent = None
         try:
             import fleet_db
             conn = fleet_db.connect(Path(a.db_path) if a.db_path else None)
             last_sent, sends = last_sent_by_item(conn), sends_by_item(conn)
+            prod_sent = last_prod_access_by_item(conn)
         except Exception as exc:  # noqa: BLE001 -- no bus history: send only the new ones
             print(f"gate_drops intake: no message history, no re-sends: {exc}", file=sys.stderr)
         p = intake_plan(backlog, prod, a.run_id, fetch_parents(backlog, backlog, a.repo), last_sent,
-                        sends=sends, waits=founding_waits(backlog, a.repo))
+                        sends=sends, waits=founding_waits(backlog, a.repo), prod_sent=prod_sent)
         if not a.dry_run:
             p.update(apply(p, a.repo, a.run_id, db_path=a.db_path))
         summary = {k: p.get(k) for k in ("scanned", "skipped", "results", "sent", "parked")}
