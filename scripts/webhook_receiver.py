@@ -255,6 +255,7 @@ class Handler(BaseHTTPRequestHandler):
         """fk#669: Resend's email.received webhook -- Reif replied to a brief. Svix signature
         (a different scheme from GitHub's), sender allowlist, fetch the full message, store it,
         kick the messenger's inbox pass. Never 5xx on a bad message: Resend would retry forever."""
+        import g_mail
         import inbox as inbox_mod
         secret = env_value("FLEET_INBOX_WEBHOOK_SECRET")
         if not inbox_mod.verify_svix(body, dict(self.headers.items()), secret):
@@ -268,6 +269,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(204); self.end_headers(); return
         data = event.get("data") or {}
         sender = data.get("from") or ""
+        if g_mail.for_g(data):
+            self._g_mail(data); return
         # Support-inbox mail (in.philanthropy.org, prod's) is not for the fleet: drop it before
         # the trusted/budget decision and before anything is stored. Checked on the webhook data
         # first (no fetch needed), then again on the fetched message, whose received_for carries
@@ -285,6 +288,8 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as exc:  # noqa: BLE001
             log(f"inbox: fetch of {data.get('email_id')} failed: {exc} -- storing metadata only")
             email = None
+        if email is not None and g_mail.for_g(data, email):
+            self._g_mail(data, email); return
         if email is not None and inbox_mod.ignored_recipient(data, ignore, email):
             log(f"inbox IGNORED: addressed to {ignore}")
             self.send_response(200); self.end_headers(); self.wfile.write(b"ignored"); return
@@ -311,6 +316,20 @@ class Handler(BaseHTTPRequestHandler):
         if not applied.get("done") and not applied.get("deferred"):
             _launch_member("dont-shoot-the-messenger", ["--task", "inbox"])
         self.send_response(200); self.end_headers(); self.wfile.write(b"stored")
+
+    def _g_mail(self, data: dict, email: dict | None = None) -> None:
+        """Mail to G's own address: a file for G, never fleet steering (g_mail.py). A failed
+        fetch answers 503 so Resend retries and the retry gets the body."""
+        import g_mail
+        import inbox as inbox_mod
+        try:
+            email = email or inbox_mod.fetch_received(data.get("email_id") or "")
+        except Exception as exc:  # noqa: BLE001
+            log(f"g_mail: fetch of {data.get('email_id')} failed: {exc} -- Resend retries")
+            self.send_response(503); self.end_headers(); return
+        got = g_mail.take(email, env_value("G_MAIL_FROM") or None, env_value("G_MAIL_AUTHSERV_ID") or None)
+        log(f"g_mail: {data.get('email_id')} {got}")
+        self.send_response(200); self.end_headers(); self.wfile.write(got.encode())
 
     def _handle_pull_request(self, payload: dict) -> None:
         self.send_response(200)  # ack immediately, same reasoning as the workflow_run path
