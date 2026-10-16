@@ -94,6 +94,8 @@ jobs:
         run: python3 scripts/test_box_log.py
       - name: run test_webhook_inbox_ignore.py
         run: python3 scripts/test_webhook_inbox_ignore.py
+      - name: run test_g_mail.py
+        run: python3 scripts/test_g_mail.py
       - name: run test_fleet_view_operators.py
         run: python3 scripts/test_fleet_view_operators.py
       - name: run test_signin_email.py
