@@ -48,12 +48,12 @@ class WholeSuiteDetection(unittest.TestCase):
         for c in self.ALLOW:
             self.assertFalse(hook._is_whole_suite_pytest(c), c)
 
-    def test_decide_blocks_it_inside_a_worktree_and_names_the_wrapper(self):
+    def test_decide_blocks_it_inside_a_worktree_and_says_ci_runs_it(self):
         with tempfile.TemporaryDirectory() as wt:
             why = hook.decide({"tool_name": "Bash", "tool_input": {"command": "pytest tests/ -q"}},
                               {"WT_PATH": wt, "FLEET_KIT": "/fleet-kit"})
         self.assertIsNotNone(why)
-        self.assertIn("verified_test.sh", why)
+        self.assertIn("let CI run the suite", why)
 
     def test_outside_a_worktree_nothing_is_blocked(self):
         self.assertIsNone(hook.decide({"tool_name": "Bash", "tool_input": {"command": "pytest tests/"}}, {}))
