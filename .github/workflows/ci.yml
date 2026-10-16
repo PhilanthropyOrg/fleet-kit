@@ -200,6 +200,8 @@ jobs:
         run: python3 scripts/test_judge_judy_fold_deleted.py
       - name: run test_judge_judy_settle.py
         run: python3 scripts/test_judge_judy_settle.py
+      - name: run test_judge_judy_body_edit_rereview.py
+        run: python3 scripts/test_judge_judy_body_edit_rereview.py
       - name: run test_liveness_blocked_fleet.py
         run: python3 scripts/test_liveness_blocked_fleet.py
       - name: run test_messenger_brief.py
