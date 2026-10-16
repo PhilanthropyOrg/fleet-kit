@@ -244,6 +244,28 @@ class ReifMailPassesTheGateTests(unittest.TestCase):
         self.assertEqual(vision_link_gate.gate_candidates(
             [{"number": 9, "body": body, "comments": [], "labels": labels}])["eligible"], [9])
 
+    def test_reif_forward_is_born_with_an_acceptance_line(self):
+        import quality_gate
+        calls = []
+
+        def fake_run(cmd):
+            calls.append(cmd)
+            r = unittest.mock.Mock()
+            r.stderr, r.returncode = "", 0
+            r.stdout = "[]" if cmd[:3] == ["gh", "issue", "list"] else "https://github.com/x/y/issues/9\n"
+            return r
+
+        fwd = "Reif's note: Correcting the compensation number. That's it.\n\n## Forwarded message\n> hi"
+        with unittest.mock.patch.dict("os.environ", {"FLEET_REPO_URL": "https://github.com/x/y"}):
+            inbox.file_backlog("[Janet] Contact Us", fwd, "reif@x", run=fake_run)
+            inbox.file_backlog("prod alert [app_error]: boom", "boom", "box@x", run=fake_run)
+        bodies = [c[c.index("--body") + 1] for c in calls if c[:3] == ["gh", "issue", "create"]]
+        self.assertIn('(Reif: "Correcting the compensation number.', bodies[0])
+        ok, why = quality_gate.classify_candidate(["quality:solid"], bodies[0], [])
+        self.assertTrue(ok, why)
+        self.assertNotIn("draft from the ask", bodies[1], "alerts carry their own spec")
+        self.assertEqual(inbox.draft_acceptance("t", "Done when: the org page shows the corrected compensation number for every officer"), "")
+
 
 if __name__ == "__main__":
     unittest.main()

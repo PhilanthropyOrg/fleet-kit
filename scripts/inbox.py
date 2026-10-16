@@ -529,6 +529,20 @@ def open_issue_titled(slug: str, title: str, run, by_signature: bool = False) ->
     return None
 
 
+def draft_acceptance(title: str, text: str) -> str:
+    """jefe msg#1283 (philanthropy#12748/#12749): Reif's forwards carried the raw ask but no
+    acceptance line, so quality_gate held them at fleet:needs-spec with quality:solid already
+    set. A drafted `Done when:` from his note (else the title) makes them born buildable; the
+    PRD pass may sharpen it. Empty when the text already carries a criterion."""
+    import quality_gate
+    if quality_gate.count_gwt(text):
+        return ""
+    m = re.search(r"^Reif's note:\s*(.+)$", text, re.M)
+    ask = (m.group(1) if m else title).strip()[:200]
+    return (f"\n\n## Acceptance (draft from the ask)\nDone when: every change asked for above "
+            f"(Reif: \"{ask}\") is live on the site, or this issue says why one was not made.")
+
+
 def file_backlog(title: str, body: str, sender: str, run=None) -> str:
     """`gh issue create` in the product repo, label fleet:backlog. Returns the issue URL."""
     run = run or (lambda cmd: subprocess.run(cmd, capture_output=True, text=True, timeout=60))
@@ -543,7 +557,10 @@ def file_backlog(title: str, body: str, sender: str, run=None) -> str:
         run(["gh", "issue", "comment", "--repo", slug, str(it["number"]),
              "--body", f"Fired again by email from {sender}:\n\n{text[:1500]}"])
         return it["url"]
-    r = run(["gh", "issue", "create", "--repo", slug, "--label", backlog_labels(title),
+    labels = backlog_labels(title)
+    if "fleet:user-asked" in labels:
+        text += draft_acceptance(title, text)
+    r = run(["gh", "issue", "create", "--repo", slug, "--label", labels,
              "--title", title, "--body", f"{text}\n\nFiled by email from {sender} (fk#1056).\n\n"
                                          "Vision-link: none (maintenance) -- Reif's own ask; "
                                          "fleet:user-asked ranks it\n\nFiled-by: email"])
