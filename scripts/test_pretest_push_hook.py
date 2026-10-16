@@ -1,9 +1,7 @@
-"""Tests for pretest_push_hook.py -- the gate that moves testing off CI and onto the member.
+"""Tests for pretest_push_hook.py: blocks a whole-tree pytest, never a push (fk#1676).
 
-The property that MUST hold and is easy to silently break: a receipt keys on CONTENT, not on
-HEAD. A member runs the suite, then commits what it just tested; if the receipt died at the
-commit, the hook would block every honest push and members would learn to route around it.
-And the mirror of it: edit one line after the green run and the receipt must go stale.
+The receipt helpers stay keyed on CONTENT, not HEAD: verified_test.sh writes with them and
+minion_checkpoint.py reads with them.
 
 Run: python3 scripts/test_pretest_push_hook.py
 """
@@ -51,74 +49,67 @@ class Worktree:
         return hook.decide(payload, {"WT_PATH": self.dir})
 
 
-class PushGateTests(unittest.TestCase):
+class ReceiptTests(unittest.TestCase):
+    """verified_test.sh writes the receipt and minion_checkpoint.py reads it; the hook no
+    longer gates a push on it (fk#1676), but the content keying must still hold."""
+
     def setUp(self) -> None:
         self.wt = Worktree()
 
-    def test_a_push_with_no_receipt_is_blocked(self):
-        self.assertIn("No test receipt", self.wt.decide() or "")
-
-    def test_a_push_with_a_matching_green_receipt_is_allowed(self):
-        self.wt.receipt()
-        self.assertIsNone(self.wt.decide())
-
-    def test_the_receipt_survives_committing_the_very_content_it_certified(self):
-        # The whole design: run the suite, THEN commit what you tested. If this regressed to
-        # keying on HEAD, every honest push would be blocked and the gate would be routed
-        # around within a day.
+    def test_the_hash_survives_committing_the_very_content_it_certified(self):
         self.wt.write("app.py", "x = 2\n")
-        self.wt.receipt()
+        before = hook.content_hash(self.wt.dir)
         git(["add", "app.py"], self.wt.dir)
         git(["commit", "-qm", "the tested change"], self.wt.dir)
-        self.assertIsNone(self.wt.decide())
+        self.assertEqual(before, hook.content_hash(self.wt.dir))
 
-    def test_editing_after_the_green_run_goes_stale(self):
-        self.wt.receipt()
+    def test_editing_moves_the_hash(self):
+        before = hook.content_hash(self.wt.dir)
         self.wt.write("app.py", "x = 999\n")
-        self.assertIn("changed after the last green test run", self.wt.decide() or "")
-
-    def test_a_red_receipt_is_not_a_pass(self):
-        self.wt.receipt(status="fail")
-        self.assertIn("not a pass", self.wt.decide() or "")
+        self.assertNotEqual(before, hook.content_hash(self.wt.dir))
 
     def test_the_receipt_never_shows_up_as_an_untracked_file(self):
-        # postflight_dirty_check.sh (gh#78/#183) calls a pass dirty on any leftover file, and
-        # _only_docs reads `git status` too -- a receipt in the checkout would break both.
+        # postflight_dirty_check.sh (gh#78/#183) calls a pass dirty on any leftover file.
         self.wt.receipt()
         status = subprocess.run(["git", "status", "--porcelain=v1"], cwd=self.wt.dir,
                                 capture_output=True, text=True).stdout
         self.assertNotIn("receipt", status)
 
-    def test_a_docs_only_branch_needs_no_receipt(self):
-        self.wt.write("README.md", "words\n")
+
+class PushTests(unittest.TestCase):
+    """Reif 2026-10-15: no pre-push test runs; lint, push, CI tests (fk#1676)."""
+
+    def setUp(self) -> None:
+        self.wt = Worktree()
+
+    def test_a_push_with_no_receipt_is_allowed(self):
+        self.wt.write("app.py", "x = 3\n")
+        for cmd in ("git push -u origin HEAD", "git add -A && git push origin HEAD",
+                    "git checkout -b me/push-fix"):
+            self.assertIsNone(self.wt.decide(cmd), cmd)
+
+    def test_a_push_with_a_red_receipt_is_allowed(self):
+        self.wt.receipt(status="fail")
         self.assertIsNone(self.wt.decide())
 
-    def test_a_docs_only_branch_that_also_touches_code_still_needs_one(self):
-        self.wt.write("README.md", "words\n")
-        self.wt.write("app.py", "x = 3\n")
-        self.assertIn("No test receipt", self.wt.decide() or "")
 
-    def test_commands_that_are_not_a_push_are_left_alone(self):
-        for cmd in ("git status", "git commit -m x", "pytest -q tests/test_x.py",
-                    "echo git push"):
+class WholeSuitePytestTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.wt = Worktree()
+
+    def test_a_whole_tree_pytest_is_blocked(self):
+        for cmd in ("pytest", "python3 -m pytest -q -n auto tests", "cd x && pytest tests/ 2>&1"):
+            self.assertIn("BLOCKED", self.wt.decide(cmd) or "", cmd)
+
+    def test_a_targeted_pytest_is_allowed(self):
+        for cmd in ("pytest -q tests/test_x.py", "pytest -k claim tests"):
             self.assertIsNone(self.wt.decide(cmd), cmd)
 
-    def test_a_push_inside_a_chain_is_still_a_push(self):
-        self.assertIn("No test receipt", self.wt.decide("git add -A && git push origin HEAD") or "")
-
-    def test_a_push_only_quoted_in_an_argument_is_not_a_push(self):
-        # msg#56: gru's `ask.py answer --answer "..."` quoted a deny list containing
-        # `; git push --force` and was blocked for a receipt it never needed.
-        for cmd in ('python3 ask.py answer 53 --answer "deny: Bash(x); git push --force:*"',
-                    "gh issue comment 1 --body-file - <<'EOF'\nthen && git push\nEOF"):
-            self.assertIsNone(self.wt.decide(cmd), cmd)
-        self.assertIn("No test receipt",
-                      self.wt.decide('git commit -m "ship it" && git push origin HEAD') or "")
+    def test_pytest_only_quoted_in_an_argument_is_not_a_run(self):
+        self.assertIsNone(self.wt.decide('gh issue comment 1 --body "ran pytest tests/"'))
 
     def test_a_pass_that_is_not_worktree_isolated_is_exempt(self):
-        # run_member.sh leaves WT_PATH unset for `llm.worktree: false` passes -- the same
-        # signal worktree_guard_hook.py reuses rather than inventing a second flag.
-        payload = {"tool_name": "Bash", "tool_input": {"command": "git push"}}
+        payload = {"tool_name": "Bash", "tool_input": {"command": "pytest"}}
         self.assertIsNone(hook.decide(payload, {}))
 
 

@@ -1,10 +1,8 @@
 #!/usr/bin/env bash
-# verified_test.sh -- run the suite and leave a receipt the push hook can check.
+# verified_test.sh -- run the tests near a diff and leave a receipt of the run.
 #
-# The receipt is the whole point: pretest_push_hook.py refuses a `git push` out of a worktree
-# whose current content has no green run behind it. Writing the receipt by hand is not a
-# shortcut worth taking -- the hash comes from the hook's own --content-hash, so a
-# hand-written one is wrong the moment the tree moves.
+# Optional since Reif's 2026-10-15 law (lint, push, CI tests; fk#1676): no hook requires the
+# receipt before a push any more. The hash comes from pretest_push_hook.py --content-hash.
 #
 #   bash /fleet-kit/scripts/verified_test.sh                 # tests near the diff (tests_for_diff)
 #   bash /fleet-kit/scripts/verified_test.sh tests/test_x.py # narrower, recorded as such
