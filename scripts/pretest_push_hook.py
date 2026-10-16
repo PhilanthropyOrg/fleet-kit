@@ -1,35 +1,12 @@
 #!/usr/bin/env python3
-"""pretest_push_hook.py -- the tests run BEFORE the push, not after it in CI.
+"""pretest_push_hook.py -- blocks a whole-tree pytest from a member pass (fk#1166).
 
-MEASURED, 95 CI runs on philanthropy (2026-09-11): the `test` job produced 50 green, 22 RED
-and 23 CANCELLED. Nearly half of every run of the most expensive gate in the repo -- 1,202 of
-the suite's 2,152 minutes -- was thrown away, because a member pushes, lets CI discover the
-break, pushes a fix, and the new push cancels the run still grinding on the old one. The gate
-was doing discovery work the member could have done locally for free.
-
-Cutting gates does not touch that. `lighthouse-budget` burned 471 minutes and went red ZERO
-times in those 95 runs, which is a real cut and still smaller than the waste above.
-
-So this is the mechanical layer under the prose, the same shape as worktree_guard_hook.py: a
-PreToolUse hook that BLOCKS a `git push` out of a worktree whose current content has no
-passing test receipt. `scripts/verified_test.sh` writes that receipt; nothing else does.
-
-WHAT THE RECEIPT IS KEYED ON. Not HEAD -- a member typically runs the suite, then commits,
-and committing changes HEAD while changing nothing about what was tested. It is keyed on the
-CONTENT: `git stash create` builds a commit object from the current worktree without touching
-it, and its tree is the hash of exactly what is there now. Identical before and after a commit
-of the same content, different the moment a file changes. So "I tested this, then committed
-it" passes, and "I tested this, then edited one more line" does not.
-
-KNOWN GAP, deliberate: `git stash create` does not see UNTRACKED files. A brand-new file that
-was never `git add`ed is invisible to the hash, so a receipt taken before it existed still
-matches. The failure direction is the safe one once the member commits (HEAD's tree then
-includes the file, the hash moves, the receipt goes stale and this blocks) -- run the wrapper
-after staging, which is what members/*/*.md tells them to do.
-
-Exempt, in order: no $WT_PATH (this pass is not worktree-isolated -- the same signal
-worktree_guard_hook.py reuses rather than inventing a flag); the command is not a git push;
-the branch changes only documentation. Everything else needs a receipt.
+It used to also block every `git push` that had no green test receipt behind it. Reif
+reversed that on 2026-10-15 (9:25 AM Central, "make it law"): no pre-push test runs on lucky
+or the Mac; lint locally, push, CI runs the tests, red CI is fixed on the branch. The push
+gate made that law impossible to follow (fk#1676: two dumbledore fixes stranded unpushed on
+10-15/10-16), so a push is no longer judged here. `verified_test.sh` still writes a receipt
+when a member chooses to run it, and minion_checkpoint.py still reads one.
 
 Reads one PreToolUse hook payload (JSON) on stdin. Exit 0 = allow, exit 2 = block.
 Also usable as `pretest_push_hook.py --content-hash <dir>`, which is how verified_test.sh
@@ -48,9 +25,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from worktree_guard_hook import _strip_prose  # noqa: E402  gh#715's quote/heredoc stripper
 
 RECEIPT_NAME = "fleet-test-receipt.json"
-# A push that only moves prose does not need a 12-minute suite. Anything that can change
-# behaviour -- code, config, workflow, dependency manifest -- does.
-DOC_SUFFIXES = (".md", ".txt", ".rst")
 
 
 def _git(args: list[str], cwd: str) -> str:
@@ -62,10 +36,9 @@ def receipt_path(wt: str) -> Path:
     """Inside the git dir, never in the worktree itself.
 
     A receipt sitting at the top of the checkout is an untracked file: it shows up in
-    `git status`, which makes postflight_dirty_check.sh (gh#78/#183) call the pass dirty, and
-    it lands in `_only_docs`'s own path list. `--absolute-git-dir` resolves to
-    .git/worktrees/<name> for a linked worktree, so each one carries its own receipt and none
-    of them can ever be committed.
+    `git status`, which makes postflight_dirty_check.sh (gh#78/#183) call the pass dirty.
+    `--absolute-git-dir` resolves to .git/worktrees/<name> for a linked worktree, so each one
+    carries its own receipt and none of them can ever be committed.
     """
     return Path(_git(["rev-parse", "--absolute-git-dir"], wt) or Path(wt) / ".git") / RECEIPT_NAME
 
@@ -75,11 +48,6 @@ def content_hash(wt: str) -> str:
     stash = _git(["stash", "create"], wt)          # empty when the worktree is clean
     ref = f"{stash}^{{tree}}" if stash else "HEAD^{tree}"
     return _git(["rev-parse", ref], wt)
-
-
-def _is_git_push(command: str) -> bool:
-    # `git push`, `git -C <path> push`, `git --no-pager push`, and the same inside a chain.
-    return bool(re.search(r"(^|[;&|]\s*)git\b[^;&|]*\bpush\b", command))
 
 
 _VALUE_OPTS = {"-n", "-k", "-m", "-p", "-o", "-c", "-W", "-r", "--tb", "--timeout", "--maxfail",
@@ -129,18 +97,6 @@ def _is_whole_suite_pytest(command: str) -> bool:
     return False
 
 
-def _only_docs(wt: str) -> bool:
-    """True iff nothing this branch changes can alter behaviour."""
-    base = _git(["merge-base", "HEAD", "origin/main"], wt) or "origin/main"
-    committed = _git(["diff", "--name-only", f"{base}...HEAD"], wt)
-    working = _git(["status", "--porcelain=v1"], wt)
-    paths = [ln for ln in committed.splitlines() if ln]
-    paths += [ln[3:] for ln in working.splitlines() if ln[3:]]
-    if not paths:
-        return False  # nothing to judge -> do not hand out a free pass
-    return all(p.endswith(DOC_SUFFIXES) for p in paths)
-
-
 def decide(payload: dict, env: dict) -> str | None:
     """None = allow. A string = the reason to block, shown to the model."""
     wt = (env.get("WT_PATH") or "").strip()
@@ -148,40 +104,14 @@ def decide(payload: dict, env: dict) -> str | None:
         return None  # not worktree-isolated: run_member.sh's own signal, same as gh#592's hook
     if payload.get("tool_name") != "Bash":
         return None
-    # msg#56: a command that only QUOTES the push verb (an --answer/--body argument, a heredoc)
-    # is not a push; strip prose first, the same way worktree_guard_hook.py does (gh#715).
+    # msg#56: a command that only QUOTES pytest (an --answer/--body argument, a heredoc) is not
+    # a run; strip prose first, the same way worktree_guard_hook.py does (gh#715).
     command = _strip_prose((payload.get("tool_input") or {}).get("command") or "")
     if _is_whole_suite_pytest(command):
-        return (f"BLOCKED: a whole-tree pytest cannot produce the receipt the push needs and "
-                f"takes longer than this pass can wait (fk#1166). Run `bash "
-                f"{env.get('FLEET_KIT', '/fleet-kit')}/scripts/verified_test.sh` with no "
-                f"arguments in {wt} instead -- it runs the repo's diff-scoped tests and writes "
-                f"the receipt -- or name the specific test file(s) you touched.")
-    if not _is_git_push(command):
-        return None
-    if _only_docs(wt):
-        return None
-
-    want = content_hash(wt)
-    receipt = receipt_path(wt)
-    if not receipt.exists():
-        return (f"No test receipt. Run `bash {env.get('FLEET_KIT', '/fleet-kit')}/scripts/"
-                f"verified_test.sh` in {wt} and push once it is green.\n"
-                "CI is confirmation, not discovery: 45 of the last 95 `test` runs were red or "
-                "cancelled because pushes went out untested.")
-    try:
-        data = json.loads(receipt.read_text())
-    except (json.JSONDecodeError, OSError) as exc:
-        return f"Test receipt at {receipt} is unreadable ({exc}). Re-run verified_test.sh."
-
-    if data.get("status") != "pass":
-        return (f"The last test run recorded `{data.get('status')}`, not a pass. "
-                "Fix the failure and re-run verified_test.sh before pushing.")
-    if data.get("content") != want:
-        return ("The worktree changed after the last green test run "
-                f"(tested {str(data.get('content'))[:12]}, now {want[:12]}). "
-                "Re-run verified_test.sh so the push carries a receipt for what it pushes.")
-    return None
+        return ("BLOCKED: a whole-tree pytest takes longer than this pass can wait (fk#1166). "
+                "Lint, push, and let CI run the suite (Reif 10-15), or name the specific "
+                "test file(s) you touched.")
+    return None  # a push needs no receipt (Reif 10-15; fk#1676)
 
 
 def main() -> int:
