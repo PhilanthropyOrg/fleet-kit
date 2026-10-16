@@ -195,7 +195,7 @@ pass_empty_pr() { # <pr> <sha>
 #        per-PR scan -- the queue was NOT fully accounted for, so this must never be reported
 #        the same as case 1.
 pick_pr() {
-  local pr head pushed_at age statuses review_seen checks explicit="${1:-}" skip_list="${2:-}"
+  local pr head pushed_at age statuses review_seen block_at edited_at checks explicit="${1:-}" skip_list="${2:-}"
   local gh_failure=0 pr_list_json pr_list_rc view_rc api_rc
   # Oldest-created first: gh pr list's default (newest-first) order lets a steady stream of
   # new PRs starve a long-lived one indefinitely -- fleet-kit#181 measured PR#149 skipped 8
@@ -238,7 +238,19 @@ pick_pr() {
     fi
     [ -z "$statuses" ] && statuses="[]"
     review_seen=$(jq -r --arg c "$CONTEXT" '[.[] | select(.context==$c)] | length' <<<"$statuses" 2>/dev/null || echo 0)
-    [ "${review_seen:-0}" -gt 0 ] && continue   # this head already has a verdict (any state)
+    # This head already has a verdict: skip it, unless the verdict is a block and the body was
+    # edited after it. A block often asks for a body-only fix ("change Closes to Part of"), and
+    # that edit leaves the head as it was: philanthropy#12618 (OrgVerify step 3) sat 13h on a
+    # block its body had already answered, and the-fixer's 3 passes ran out.
+    if [ "${review_seen:-0}" -gt 0 ]; then
+      block_at=$(jq -r --arg c "$CONTEXT" '[.[] | select(.context==$c)][0] | select(.state=="failure") | .updated_at // empty' <<<"$statuses" 2>/dev/null)
+      edited_at=""
+      [ -n "$block_at" ] && edited_at=$(timeout 25s gh api graphql -F owner="${REPO_SLUG%%/*}" -F name="${REPO_SLUG#*/}" -F n="$pr" \
+        -f query='query($owner:String!,$name:String!,$n:Int!){repository(owner:$owner,name:$name){pullRequest(number:$n){lastEditedAt}}}' \
+        -q '.data.repository.pullRequest.lastEditedAt // empty' 2>/dev/null)
+      if [ -z "$edited_at" ] || [[ ! "$edited_at" > "$block_at" ]]; then continue; fi
+      log "PR #$pr head ${head:0:12}: body edited $edited_at, after the block at $block_at -- re-reviewing"
+    fi
     if [ -n "$REQUIRED_CHECKS" ]; then
       # Reviewing a dead head is pure spend: skip if any named required check is red at this head.
       checks=0
