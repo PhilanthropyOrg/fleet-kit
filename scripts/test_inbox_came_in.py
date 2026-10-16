@@ -264,7 +264,7 @@ class ReifMailPassesTheGateTests(unittest.TestCase):
         ok, why = quality_gate.classify_candidate(["quality:solid"], bodies[0], [])
         self.assertTrue(ok, why)
         self.assertNotIn("draft from the ask", bodies[1], "alerts carry their own spec")
-        self.assertEqual(inbox.draft_acceptance("t", "Done when: the page loads in under 2s"), "")
+        self.assertEqual(inbox.draft_acceptance("t", "Done when: the org page shows the corrected compensation number for every officer"), "")
 
 
 if __name__ == "__main__":
