@@ -9,7 +9,7 @@ one per kind of mistake, keyed by an `Audit-pattern: <key>` line. A pattern mean
 State: $FLEET_LOG_DIR/audit_forwarded.json, the pattern keys already sent. fleet_msg dedupes
 only 6h, so without this a pattern open for a week would be sent 28 times.
 
-Usage: audit_forward.py pending | send   [--repo OWNER/REPO]
+Usage: audit_forward.py pending | send   [--repo OWNER/REPO, default: gh repo view in /repo]
 """
 from __future__ import annotations
 
@@ -18,9 +18,12 @@ import json
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import audit_file as af  # noqa: E402
 
 
 def state_path() -> Path:
@@ -58,8 +61,9 @@ def open_audit_issues(repo: str) -> list[dict]:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("cmd", choices=["pending", "send"])
-    ap.add_argument("--repo", default=os.environ.get("PRODUCT_REPO_SLUG") or "PhilanthropyOrg/philanthropy")
+    ap.add_argument("--repo", default="", help="OWNER/REPO; default: gh repo view in /repo")
     a = ap.parse_args(argv)
+    a.repo = af.repo_slug(a.repo)
     sent = load_sent()
     new = new_patterns(open_audit_issues(a.repo), sent)
     if a.cmd == "pending":

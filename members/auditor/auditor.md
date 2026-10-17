@@ -46,6 +46,12 @@ Your lane arrives as `lane=<name>` in the operator instruction. Work only that l
 6. **Scoreboard:** `python3 /fleet-kit/scripts/audit_scoreboard.py`
    rewrites `/fleet-kit/shares/g/audit-scoreboard.md` (auditor vs Viken vs by-hand).
 7. **Report** the sample, every check's pass/fail count, what was filed, killed, re-seen.
+8. **Clean up, every lane, before the Report.** The moment you sign in as a QA persona, run
+   `python3 /fleet-kit/scripts/audit_cleanup.py persona <name>`; the moment you post a fixture
+   job, `audit_cleanup.py job <its public URL>`. Close each job in HQ, then run
+   `python3 /fleet-kit/scripts/audit_cleanup.py run`: it POSTs `/990/api/qa/reset` for every
+   persona recorded and checks every job answers 410. Any `LEFT` line (exit 1) goes in the
+   Report as not cleaned up; never end a pass signed in and dirty.
 
 ## Lane 990-truth (`auditor:990-truth`)
 
@@ -104,8 +110,8 @@ clean up after: close the job, nothing left in public lists). Sign in as the QA 
 or `member` (J2): `POST /990/api/qa/session` with `x-qa-token: $QA_SESSION_TOKEN` and
 `{"user":"owner"}`, then open the returned `url` (recipe: persona_law 10e). No
 `$QA_SESSION_TOKEN` in the env: say the walk could not run, never skip it silently. When done,
-close the job you posted (check it answers 410 and left /jobs/all) and `POST /990/api/qa/reset`
-`{"user":"<persona>"}` for each persona you used.
+close the job you posted in HQ (and check it left /jobs/all); step 8 resets the personas and
+checks the 410.
 - J1 job seeker: a Google-style landing on a job page, then search, a role page, the pay page
 - J2 Apply both ways: our form (the applicant and the org both get mail), and out to the org's
   site through the /go hop; each click leaves a record

@@ -113,8 +113,8 @@ class AuditForward(unittest.TestCase):
         calls = []
         with mock.patch.object(audit_forward, "open_audit_issues", return_value=ISSUES), \
                 mock.patch.object(subprocess, "run", side_effect=lambda a, **k: calls.append(a)):
-            audit_forward.main(["send"])
-            audit_forward.main(["send"])
+            audit_forward.main(["send", "--repo", "O/R"])
+            audit_forward.main(["send", "--repo", "O/R"])
         self.assertEqual(len(calls), 1)
         self.assertIn("audit:csv_link_is_pdf", calls[0])
         self.assertIn("dumbledore", calls[0])
@@ -123,9 +123,9 @@ class AuditForward(unittest.TestCase):
     def test_pending_fires_only_on_a_new_pattern(self):
         with mock.patch.object(audit_forward, "open_audit_issues", return_value=ISSUES), \
                 mock.patch("builtins.print") as out:
-            audit_forward.main(["pending"])
+            audit_forward.main(["pending", "--repo", "O/R"])
             Path(self.d, "audit_forwarded.json").write_text(json.dumps(["csv_link_is_pdf"]))
-            audit_forward.main(["pending"])
+            audit_forward.main(["pending", "--repo", "O/R"])
         self.assertTrue(out.call_args_list[0].args[0].startswith("FIRE 1"))
         self.assertTrue(out.call_args_list[1].args[0].startswith("green"))
 
