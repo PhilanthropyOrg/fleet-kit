@@ -92,3 +92,23 @@ class PushBudgetGate(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BudgetFromFleetEnv(unittest.TestCase):
+    def test_fleet_env_budget_is_read_when_process_env_lacks_it(self):
+        import os, tempfile
+        import push_budget_gate as g
+        with tempfile.NamedTemporaryFile("w", suffix=".env", delete=False) as f:
+            f.write("X=1\nFLEET_ACTIONS_BUDGET_USD=250\n")
+        old_env, old_file = os.environ.pop("FLEET_ACTIONS_BUDGET_USD", None), os.environ.get("FLEET_ENV_FILE")
+        os.environ["FLEET_ENV_FILE"] = f.name
+        try:
+            self.assertEqual(g._budget_usd(), 250.0)
+        finally:
+            if old_env is not None:
+                os.environ["FLEET_ACTIONS_BUDGET_USD"] = old_env
+            if old_file is None:
+                os.environ.pop("FLEET_ENV_FILE", None)
+            else:
+                os.environ["FLEET_ENV_FILE"] = old_file
+            os.unlink(f.name)
