@@ -42,7 +42,8 @@ say so in the report with evidence and leave it to a human.
    section 2). Print `Mandate: <priority> | <limit>: <today's reading> (<over/under>)`. A limit
    the fleet is over is the headline, and step 4's one change is about that limit, bet with
    `--metric ci_minutes_per_day`, **unless a `ci_minutes_per_day` row is already open**: then
-   print the reading and do not re-trace CI this pass (a second bet confounds the first).
+   print the reading and do not re-trace CI this pass (a second bet confounds the first). Levers
+   priced 10-11 (H§1): re-open only on a new fact.
    A priority with no number you can read is your first job (as in Authority below). The
    mandate changes only when Reif edits that file; never rewrite it, never infer a new one.
 
@@ -73,6 +74,9 @@ say so in the report with evidence and leave it to a human.
    your name, with the original member; his reply (`yes N`, `no N: why`, `N: answer`) answers
    the same ask. Print `Escalation-rate:` from `ask.py triage-rate` (escalated / triaged, 7d);
    a rising rate is a finding about you.
+   **A hole a lane missed** (an `audit:` cause from jefe, a Viken find or a Reif repeat in
+   `/fleet-kit/shares/g/retro-<today>.md`): fix THAT lane's charter (auditor, sentry or the
+   persona walk) with a rule that catches it next time, and bet on it with a predict row.
    Then the fleet's own diagnoses, in this order: your INBOX (jefe's forwarded causes), open fleet-kit issues titled by
    `rsi_stall_check.py`, and any item gru dropped at the gate on two or more passes
    (`$FLEET_LOG_DIR/gate_drops.jsonl`: the same number and gap twice is a filing path that
@@ -88,8 +92,7 @@ say so in the report with evidence and leave it to a human.
    Ask of every defect: what instruction, flag, gate or charter made this the natural thing
    to do? Fix that, then the instance. Rank by how many future failures it prevents.
    **Waste and backlog, every pass, in ONE call** (Reif, 2026-09-28: "elimination of waste",
-   "get issues under control", fk#1404). Hand-built queries cost 35-102 turns a pass (10-04).
-   Run this dedented, once; 1000 filed is gh search's cap, so read it as ">=":
+   "get issues under control", fk#1404). Run this dedented, once; 1000 filed is gh search's cap, so read it as ">=":
    ```
    D="$FLEET_LOG_DIR/fleet.db"; S="strftime('%s','now','-1 day')"
    sqlite3 "$D" "SELECT member,status,count(*),round(sum(cost_usd),2),round(avg(num_turns)) FROM runs
@@ -129,16 +132,12 @@ say so in the report with evidence and leave it to a human.
    post-change runs; Reif, 2026-09-30: "decrease the time between cycling and self
    reflection"). Baseline defaults to the metric now; a target it already meets is not a
    prediction. **Predict on a per-pass metric the diff itself limits** (`avg_turns`,
-   `avg_cost_usd`, `quiet_rate`, `signal_rate`, `status_per_day:timed_out`). Counts of passes
-   (`runs_per_day`, `status_per_day:quiet`, `avg_duration_s`) are set by cron lines in
-   `entrypoint.sh`, pushes, wakes and gru, not by a charter: 7 of the 10 misses in #37-#47
-   (09-30..10-03) were those; the other 3 asked a per-pass number to go UP, which a charter
-   allows but does not cause. **Keep one outcome bet open.** If no `ladder_share:<stage>` or
+   `avg_cost_usd`, `quiet_rate`, `signal_rate`, `status_per_day:timed_out`). Never a count of
+   passes (`runs_per_day`, `status_per_day:quiet`, `avg_duration_s`): cron sets those (H§2). **Keep one outcome bet open.** If no `ladder_share:<stage>` or
    `ladder_orgs:<stage>` row is open, this pass's change targets the weakest step of the
    OrgVerify ladder (NORTH section 2) and bets on it; read stages with `fleet_metrics.py list`.
-   Fleet-internal bets alone left the claim funnel unbet through bet #96 (10-12).
    **One open row per member** until it resolves, or the readings
-   confound (#38/#39/#44/#45: four minion rows due within 24h, three missed). No `add`, no pass. Run
+   confound. No `add`, no pass. Run
    `gh pr view <PR> -R <repo> --json state,autoMergeRequest` before you `add`, and over every
    open row from item 1.
    A pass with nothing worth changing writes `Prediction: none -- <why>` and says so.
