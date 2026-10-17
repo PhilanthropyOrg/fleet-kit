@@ -41,10 +41,8 @@ behind-pace week builds more. Spawn exactly those, release the `deferred`. Never
    ```
    python3 /fleet-kit/scripts/red_prs.py due
    ```
-   `due` is already ordered and capped: red or review-BLOCKed PRs of fleet:reif-priority
-   items at once, then green review-passed PRs that are only CONFLICTING (one merge of main
-   lands them), then any other fleet PR red with no real push for 60+ minutes. Dispatch a
-   fixer to EVERY entry in ONE call, which returns at once:
+   `due` is already ordered and capped (Reif-priority red/BLOCKed, then green-but-CONFLICTING,
+   then any fleet PR red 60+ min with no push). Dispatch a fixer to EVERY entry in ONE call:
    ```
    bash /fleet-kit/scripts/dispatch_fixer.sh <PR> <PR> ...
    ```
@@ -61,9 +59,7 @@ behind-pace week builds more. Spawn exactly those, release the `deferred`. Never
      content: name each in your report as needing a look, never re-send.
    - A `deferred the-fixer --item <N>` line (the cap, FLEET_FIXER_ITEM_MAX) means that PR has
      NO fixer this pass. Its `fix: PR #<N>` item is still yours in 2a-bis: dispatch it alone,
-     never release it as "has a fixer". (2026-10-05: #11126, #11141, #11202, #11207 sat
-     review-blocked 5-10 hours because every pass deferred their fixers and dropped the
-     fix items the same way.)
+     never release it as "has a fixer" (H§28).
    - An `error` from `red_prs.py` is a blind step, not an empty one: say so, go on to step 1.
 
    **`resume` lists a minion's red DRAFT PRs** (checkpoints, part-done work). Those get a
@@ -99,8 +95,7 @@ behind-pace week builds more. Spawn exactly those, release the `deferred`. Never
      prints `FLEET_SHARE_CEILING_PCT * FLEET_GRU_ALLOWANCE_FRACTION`: a multiply, never a
      `min()`, fed headroom, never consumption. After a dial change, check the printed number
      actually moved before trusting it (H§7).
-   - `headroom_fraction` is not your allowance. If it reads exactly `0.0`, check
-     `week_bank_pct` before believing the week is spent.
+   - `headroom_fraction` is not your allowance; at exactly `0.0`, check `week_bank_pct`.
    - On an uncalibrated meter (label `calibrating_unbilled`) the script prints a fixed
      even-pace allowance and says so on stderr: quote that line, pack against the number.
    - **An unspent hour is GONE — it does not roll over.** Underspending is as wrong as
@@ -149,13 +144,11 @@ behind-pace week builds more. Spawn exactly those, release the `deferred`. Never
    children. Survivors go at the FRONT of step 3's `--items` (`gh#<epic-number>` convention);
    2a-bis and 2b follow. Empty or fully blocked: 2b is the whole list (H§10).
    **A MANDATE `PRIORITY:` line naming issues "in order" goes ahead of even this tier:** the
-   first open, unclaimed one is the hour's build, alone, before `priority-high`
-   (10-12: 5 passes built others over its #12104). Never close a
+   first open, unclaimed one is the hour's build, alone, before `priority-high` (H§28). Never close a
    `fleet:reif-priority` issue yourself: that's marie's call (marie.md Part C).
    **Reif-priority items ride only with each other, at most 3 to a batch, never with a 2b
-   item.** A 2b item in the same PR drags Reif's work through its review and lint (#11275,
-   2026-10-06). Give the packer the
-   Reif tier as its own `--items` list first, then 2b as a second call.
+   item.** A 2b item in the same PR drags Reif's work through its review and lint (H§28).
+   Pack the Reif tier as its own `--items` list first, then 2b as a second call.
 
    **Never narrow or drop an acceptance criterion silently (philanthropy#8475)** — on
    `fleet:reif-priority` and `fleet:user-asked` items alike. Dispatch only against what
@@ -208,10 +201,10 @@ behind-pace week builds more. Spawn exactly those, release the `deferred`. Never
    It already drops `fleet:claimed`, `fleet:needs-human-op`, `fleet:needs-prod-access` and
    `fleet:parked`, and orders high -> medium -> low -> unranked, oldest first (H§14, H§15).
    Gate `numbers` in that order; the packer cuts it at step 3's `room_for_items`, so a lower
-   tier only gets the room a higher one left. Never stop after the high tier: 15 of 36 passes on 10-05 did, and left
-   36-87% of the hour unspent with 189 medium items waiting. Quote `by_tier` in the report.
+   tier only gets the room a higher one left. Never stop after the high tier (H§28). Quote
+   `by_tier` in the report.
    Filter out every `fix: PR #` / `CI RED: PR #` title too: 2a-bis already sent it alone or skipped
-   it, and one that reaches the packer gets the whole batch refused (2026-10-05: #11131).
+   it, and one that reaches the packer gets the whole batch refused.
 
    **Gates run on the survivors in this order: needs-human-op (above), dead-end, Vision-link,
    quality.** Never claim or spawn against a dropped candidate, and **never drop one
@@ -343,10 +336,9 @@ behind-pace week builds more. Spawn exactly those, release the `deferred`. Never
    `--min-items` set to `len(chosen)+1`. Never force more than one extra item per pass, and
    quote `forced_over_floor`/`over_allowance` when it fires (H§22).
 
-3b. **Last pass's estimates self-correct; you do not run a calibration step.** `cost_bridge.py`
-   (step 3) feeds real minion spend back in as `--observed` every pass. Do NOT adjust an
-   estimate by hand. If one complexity tier keeps costing ~3x its estimate, tell marie in a
-   comment.
+3b. **Estimates self-correct: `cost_bridge.py` feeds real minion spend back as `--observed`
+   every pass.** Never adjust one by hand; a complexity tier that keeps costing ~3x its
+   estimate gets a comment to marie.
 
 4. **Claim your chosen items yourself**, in ONE call, before spawning anything (Bash
    `timeout: 600000`; ~5s an item, so 20 items outrun the default 2 minutes):
@@ -468,13 +460,11 @@ behind-pace week builds more. Spawn exactly those, release the `deferred`. Never
    is a separate dispatch on top of the capped ranked selection, never truncated with it
    (gh#530). Name the lane(s) this override fired for in your report.
 
-   This override is the streak's only way back: if the probe's outcome does not start with
-   `STRUCTURAL-N/A`, the streak breaks and the lane scores normally from the pass after the
-   probe lands. It does not self-reverse with no dispatch in between (H§27).
+   This probe is the streak's only way back: an outcome not starting `STRUCTURAL-N/A` breaks
+   the streak, and the lane scores normally from the next pass (H§27).
 
-   **Separately, also check for reconfirmation-only staleness on a LIVE lane (gh#392).** Not
-   the gh#339 check; do not merge the two. It holds a lane whose open findings have not moved
-   since it was last examined. For each lane NOT already held flat by gh#339:
+   **Separately, reconfirmation-only staleness on a LIVE lane (gh#392)** holds a lane whose
+   open findings have not moved since its last look. For each lane NOT held flat by gh#339:
    1. Read the lane's last nerd run's cited issue numbers (`#\d+`/`gh#\d+`, excluding
       `PR#\d+`/`PR #\d+` and trailing `(#\d+)` parentheticals, which are PR numbers).
    2. No prior run, or zero issue numbers: skip this check for the lane this pass.
@@ -485,11 +475,9 @@ behind-pace week builds more. Spawn exactly those, release the `deferred`. Never
       rows is no evidence of movement (skip, as in 2). Compare the newest against the baseline
       at or before `recorded_at`: any nonzero change in `value` or `denominator` is material
       (do not invent a noise threshold).
-   5. Zero referenced issues moved, AND the KPI/guardrail change is not material, AND this
-      lane's own STALE and BREACHED signals from step 9b above are both false — hold this
-      lane's priority flat this pass.
-   6. The hold is self-reversing with no separate reset step: once any of those three
-      changes, the lane scores normally on the next pass.
+   5. No issue moved, no material KPI change, and the lane is neither STALE nor BREACHED:
+      hold its priority flat this pass. Once any of the three changes, it scores normally
+      next pass (no reset step).
    Name every lane held flat in your report, with the issue(s) you checked and found unchanged.
 
    9c. **Spawning fewer nerds than lanes is the normal case, not a failure.** A lane with a
