@@ -34,8 +34,10 @@ yields both nested percentages and leaves 1-F of the instance's slice for everyo
 which is what the dial always claimed to mean.
 
 FAILS OPEN, same law as maxx_reader.py: no ceiling exported (meter unreadable, or the
-operator never set FLEET_SHARE_FRACTION) means this prints nothing and
-gru falls back to its own documented conservative default. An absent reading must only ever
+operator never set FLEET_SHARE_FRACTION) falls back to the per-account rows in
+FLEET_METER_FILE (account_meter.py: one unreadable account never blocks a readable one).
+Only when no account reads or every account has walled does this print nothing and
+gru fall back to its own documented conservative default. An absent reading must only ever
 be usable to CONSERVE. A ceiling of exactly 0.0 is a real, honest answer and is printed as
 0.0000 -- distinct from "no reading".
 """
@@ -43,6 +45,8 @@ from __future__ import annotations
 
 import os
 import sys
+
+import account_meter
 
 DEFAULT_FRACTION = 0.70
 
@@ -99,12 +103,38 @@ def compute(ceiling_pct: str | None, fraction_raw: str | None, label: str | None
     return f"{ceiling * fraction:.4f}"
 
 
+def meter_allowance(rows: list[dict], share_raw: str | None, fraction_raw: str | None,
+                    override_raw: str | None = None) -> str:
+    """maxx gave nothing: use the accounts that read (account_meter.py, 2026-10-16).
+    The readable account furthest behind pace spends its week, less the reserve, over the
+    hours to its reset. No readable account with room but one that is unreadable and not
+    walled (tgp's setup token has no usage endpoint): the fixed even-pace allowance, as for an
+    uncalibrated meter. Every account walled, or no rows: "" (gru's own fallback)."""
+    row = account_meter.best(rows)
+    if row is not None:
+        hours_left = max(100.0 - float(row["elapsed"]), 1.0) * 168.0 / 100.0
+        room = float(row["week_left"]) - account_meter.RESERVE_PCT
+        pct = room / hours_left * _fraction(share_raw, 1.0) * _fraction(fraction_raw, DEFAULT_FRACTION)
+        return f"{pct:.4f}"
+    if any(account_meter.has_room(r) for r in rows):
+        return uncalibrated_allowance(share_raw, fraction_raw, override_raw)
+    return ""
+
+
 def main(argv: list[str]) -> int:
     ceiling = argv[1] if len(argv) > 1 else os.environ.get("FLEET_SHARE_CEILING_PCT")
     fraction = os.environ.get("FLEET_GRU_ALLOWANCE_FRACTION")
     label = os.environ.get("FLEET_MAXX_LABEL")
-    print(compute(ceiling, fraction, label, os.environ.get("FLEET_SHARE_FRACTION"),
-                  os.environ.get("FLEET_UNCALIBRATED_ALLOWANCE_PCT")))
+    share, override = os.environ.get("FLEET_SHARE_FRACTION"), os.environ.get("FLEET_UNCALIBRATED_ALLOWANCE_PCT")
+    out = compute(ceiling, fraction, label, share, override)
+    if not out:
+        rows = account_meter.load()
+        out = meter_allowance(rows, share, fraction, override)
+        if out:
+            name = (account_meter.best(rows) or {}).get("name", "unmetered, not walled")
+            print(f"gru_allowance: maxx gave no ceiling ({label or 'unset'}); priced from "
+                  f"FLEET_METER_FILE account rows, best: {name}", file=sys.stderr)
+    print(out)
     if (label or "").strip() in UNCALIBRATED_LABELS:
         print(f"gru_allowance: maxx meter uncalibrated ({label}); fixed even-pace allowance, "
               f"not the {ceiling} ceiling", file=sys.stderr)

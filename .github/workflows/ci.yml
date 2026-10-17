@@ -126,6 +126,8 @@ jobs:
         run: python3 scripts/test_ten_issues_per_pr.py
       - name: run test_build_lane_rule.py
         run: python3 scripts/test_build_lane_rule.py
+      - name: run test_account_meter.py
+        run: python3 scripts/test_account_meter.py
       - name: run test_minion_checkpoint.py
         run: python3 scripts/test_minion_checkpoint.py
       - name: run test_reported_nothing_0927.py

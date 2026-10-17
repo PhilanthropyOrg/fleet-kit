@@ -28,7 +28,8 @@ set, every item you claim -- 2a, 2a-bis, 2b, 8b alike -- must carry one of those
 `gate_drops.py candidates` already drops the rest (and, since 2026-10-08, every item an open PR or a PR merged in the last day already builds: `built_dropped` names each with its PR, and every item a minion already tried today and left with no commit and no PR: `tried_dropped` names each with the run time; do not re-read or re-dispatch either kind, marie slices them) and `run_member.sh` refuses any that slips
 through (FATAL, one second). When `FLEET_MINION_MAX_PER_HOUR` is set, `fanout.py batches`
 returns only the batches the hour (and, with `FLEET_CI_MINUTES_DAILY_MAX`, the day's CI
-minutes) has room for; spawn exactly those, release the `deferred`. Never work around a dial. Report one line:
+minutes) has room for; the cap rises with the week's pace gap (`account_meter.py`), so a
+behind-pace week builds more. Spawn exactly those, release the `deferred`. Never work around a dial. Report one line:
 `lane rule: <labels or none> · hour cap <started>/<cap>`.
 
 **Before anything else, call TaskCreate (load it first with ToolSearch `select:TaskCreate,TaskUpdate`) with exactly these 3 items covering steps 0-10, then work them in order:** `Steps 0-1: red PRs, allowance`, `Steps 2-7: gate, pack, claim, dispatch, read results`, `Steps 8-10: lanes, asks, report`. One TaskUpdate when a group closes, none per step: the plan gets a pass to its report (H§1); per-step tasks spent ~15 of ~34 tool calls (H§1b).
@@ -92,7 +93,7 @@ minutes) has room for; spawn exactly those, release the `deferred`. Never work a
    # {"headroom_fraction": .., "label": "ok", "week_bank_pct": .., ..}
    python3 /fleet-kit/scripts/gru_allowance.py
    # 0.0106      <- your allowance_pct, in percent-of-week units
-   # (empty)     <- no trustworthy reading: fall back to a small N and SAY you were blind
+   # (empty)     <- no account reads and none is unwalled: small N, SAY you were blind
    ```
    - **Do not compute your allowance yourself — run the script.** Same for N later (H§6). It
      prints `FLEET_SHARE_CEILING_PCT * FLEET_GRU_ALLOWANCE_FRACTION`: a multiply, never a
@@ -104,8 +105,10 @@ minutes) has room for; spawn exactly those, release the `deferred`. Never work a
      even-pace allowance and says so on stderr: quote that line, pack against the number.
    - **An unspent hour is GONE — it does not roll over.** Underspending is as wrong as
      overspending; a low-utilization pass says so plainly in its report.
-   - **If the meter is unreadable, fail open**: narrow ambition, never a hard stop. Use your
-     last known-good allowance or a small N, and SAY you were flying blind.
+   - **One unreadable meter is not a blind pass.** When maxx gives nothing, the script prices
+     the hour from the accounts in `FLEET_METER_FILE` that read, and an account that cannot be
+     read (tgp's setup token) counts as available until a real call walls (429/limit). Pack
+     against the number it prints and quote its stderr line; never end a pass on one meter.
    - **You own WHICH items get built, never how many**: `fanout.py` packs the hour.
 
    **Account readiness, separately from budget.** Before claiming, run
