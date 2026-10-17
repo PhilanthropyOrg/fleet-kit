@@ -21,6 +21,10 @@ import json
 import re
 import subprocess
 import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import issue_cluster as ic  # noqa: E402
 
 REQUIRED = ("pattern", "lane", "title", "count", "sample_urls", "evidence", "fix",
             "guard_test", "given", "when", "then")
@@ -104,6 +108,10 @@ def plan(findings: list[dict], open_issues: list[dict], verdicts: dict) -> list[
         if miss:
             out.append(("drop", f, f"missing {miss}"))
             continue
+        gaps = ic.spec_gaps(issue_body(f), LABELS.split(","))
+        if gaps:  # the issue_create_hook / gru intake check: a gapped issue is never built
+            out.append(("drop", f, f"spec gaps {gaps}"))
+            continue
         key = pattern_key(f)
         if key in have:
             out.append(("comment", f, have[key]))
@@ -117,6 +125,21 @@ def _gh(args: list[str]) -> str:
     return subprocess.run(["gh", *args], capture_output=True, text=True, check=True).stdout
 
 
+def ensure_labels(repo: str, gh=None) -> None:
+    """Create any of LABELS the repo lacks; exit with a plain message if that fails."""
+    gh = gh or _gh
+    have = set(json.loads(gh(["label", "list", "--repo", repo, "--limit", "500", "--json", "name",
+                              "--jq", "[.[].name]"]) or "[]"))
+    for name in LABELS.split(","):
+        if name in have:
+            continue
+        try:
+            gh(["label", "create", name, "--repo", repo])
+        except subprocess.CalledProcessError as e:
+            raise SystemExit(f"audit_file: label {name!r} is missing on {repo} and could not be "
+                             f"created ({(e.stderr or '').strip()[:200]}). Create it, then re-run.")
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--findings", required=True)
@@ -124,6 +147,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args(argv)
     findings = [json.loads(line) for line in open(a.findings) if line.strip()]
+    if not a.dry_run:
+        ensure_labels(a.repo)
     open_issues = json.loads(_gh(["issue", "list", "--repo", a.repo, "--label", "lane:audit",
                                   "--state", "open", "--limit", "300",
                                   "--json", "number,body"]))
