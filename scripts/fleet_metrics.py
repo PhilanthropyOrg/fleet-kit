@@ -30,6 +30,8 @@ METRICS (name[:member]; every one is computed over a window of `hours` ending at
   product:<name>                  a company's user-facing number (po.paid_verified_orgs,
                                   po.job_applies_7d, dyw.applicants_per_day, gym.members, ...)
                                   from product_metrics.py's hourly snapshot nearest `at`
+  merged_prs_per_day[:<priority>] product-repo PRs merged in 24h, all or one MANDATE priority
+                                  (jobs, orgverify, hq, audit), from tank.py's hourly snapshot
   reif_repeats_per_day            desk inbox items that say again what INTENT.md's Keys hold
                                   (intent_repeats.py), per day; target 0
   audit_lead                      holes the auditor found minus holes Viken found this week, from
@@ -89,6 +91,8 @@ CATALOG = {
     # Desk 2026-10-17: 3 of 25 bets since 10-09 touched the product. These are what each company
     # is for (philanthropy.org, DYW, GymFleet); product_metrics.py writes the snapshot.
     "product": "a company's user-facing number <name> (product_metrics.py hourly snapshot)",
+    # Reif 2026-10-17 "use the whole tank": while budget runs ahead of the week, bet on shipping.
+    "merged_prs_per_day": "product-repo PRs merged in 24h [:jobs|orgverify|hq|audit] (tank.py hourly snapshot)",
     # Reif 2026-10-17: "I don't want to keep having to explain this daily." A repeat is a miss.
     "reif_repeats_per_day": "desk inbox items repeating an INTENT.md key, per day (intent_repeats.py)",
     # Reif 2026-10-17: holes surface themselves; by 10-24 the auditor finds more than Viken.
@@ -116,6 +120,7 @@ DIRECTION = {
     "ladder_share": "higher",
     "reif_repeats_per_day": "lower",
     "audit_lead": "higher",
+    "merged_prs_per_day": "higher",
 }
 
 LADDER_TOL_H = 2.0
@@ -382,6 +387,11 @@ def compute(name: str, rows: list[dict], at: float | None = None, hours: float =
             raise ValueError("product needs :<name> (e.g. po.paid_verified_orgs)")
         import product_metrics
         v = (ladder_at(at, product_metrics.snapshot_path()) or {}).get(args[0])
+        return float(v) if isinstance(v, (int, float)) else None
+    if base == "merged_prs_per_day":
+        import tank
+        key = f"merged_prs_24h:{args[0]}" if args and args[0] else "merged_prs_24h"
+        v = (ladder_at(at, tank.snapshot_path()) or {}).get(key)
         return float(v) if isinstance(v, (int, float)) else None
     if base == "reif_repeats_per_day":
         import intent_repeats

@@ -26,13 +26,15 @@ import time
 from pathlib import Path
 
 RESERVE_PCT = 10.0           # never plan to spend the last 10% of any account's week
+GAP_PTS = 10.0               # budget left this far over week left: the builder cap steps up (tank.py)
+DEFAULT_FILE = "/fleet-kit/shares/g/meter.json"  # G's host cron copies ~/G/meter.json here every 15 min
 MAX_PACED_PER_HOUR = 6       # gru's concurrency ceiling is 7; leave one slot for the rest
 STALE_S = 3 * 3600           # an older file is no reading at all
 
 
 def load(path: str | None = None, now: float | None = None) -> list[dict]:
     """Rows from FLEET_METER_FILE, or [] when unset, missing, malformed or stale."""
-    path = path if path is not None else os.environ.get("FLEET_METER_FILE", "")
+    path = path if path is not None else (os.environ.get("FLEET_METER_FILE") or DEFAULT_FILE)
     now = time.time() if now is None else now
     try:
         data = json.loads(Path(path).read_text()) if path else {}
@@ -62,6 +64,13 @@ def pace_multiplier(row: dict) -> float:
     return max(float(row["week_left"]) - RESERVE_PCT, 0.0) / time_left
 
 
+def pace_gap(row: dict) -> float | None:
+    """Points by which budget left beats week left (phil 10-16: 87 - 16 = +71); None if unread."""
+    if not reads(row):
+        return None
+    return float(row["week_left"]) - (100.0 - float(row["elapsed"]))
+
+
 def best(rows: list[dict]) -> dict | None:
     """The readable account furthest behind pace, or None when no readable account has room."""
     readable = [r for r in rows if reads(r) and has_room(r)]
@@ -74,4 +83,5 @@ def paced_hour_cap(base: int, rows: list[dict]) -> int:
     row = best(rows)
     if not base or row is None:
         return base
-    return max(base, min(round(base * pace_multiplier(row)), MAX_PACED_PER_HOUR))
+    step = 1 if (pace_gap(row) or 0) >= GAP_PTS else 0  # Reif 10-17: a 10-point gap is one more start
+    return max(base + step, min(round(base * pace_multiplier(row)), MAX_PACED_PER_HOUR))
