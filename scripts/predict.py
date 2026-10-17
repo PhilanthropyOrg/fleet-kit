@@ -95,6 +95,13 @@ def make(rows: list[dict], *, member: str, change: str, metric: str, target: flo
     fleet_metrics.parse(metric)  # raises on an unknown metric
     if baseline is None:
         baseline = fleet_metrics.compute(metric, runs or [], now, RESOLVE_WINDOW_H)
+    # fleet-kit#1662: a target on the bad side of the start bets that things get worse, and
+    # #95 (CI minutes 781.7 -> 850, actual 1133) scored a hit for it. Bet on improvement only.
+    d = fleet_metrics.direction(metric)
+    if d is not None and baseline is not None and (
+            float(target) < baseline if d == "higher" else float(target) > baseline):
+        raise ValueError(f"{metric}: {d} is better, so the target must not be on the bad side "
+                         f"of the start ({baseline} -> {target}); bet on improvement")
     return {
         "id": new_id(rows), "ts": now, "member": member, "run_id": run_id,
         "change": change, "metric": metric,
@@ -115,6 +122,12 @@ def judge(baseline: float | None, target: float, actual: float | None,
         if d is None:
             return "unavailable", None
         return ("hit" if (actual >= target if d == "higher" else actual <= target) else "miss"), None
+    d = fleet_metrics.direction(metric) if metric else None
+    if d is not None:
+        # fleet-kit#1662: with a known direction, a hit means the number ended on the good
+        # side of the target, so a bet aimed the wrong way can't be scored a hit for getting worse.
+        better = actual >= target if d == "higher" else actual <= target
+        return ("hit" if better else "miss"), (actual > baseline if d == "higher" else actual < baseline)
     if target > baseline:
         return ("hit" if actual >= target else "miss"), actual > baseline
     if target < baseline:
