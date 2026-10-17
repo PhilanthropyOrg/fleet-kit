@@ -6,8 +6,9 @@ here reads only what the lane can reach:
   d2 completeness: the newest IRS index rows (filing_index) with no row in filings. The index
      has tax_period (YYYYMM), not tax_year: the tax year is the year the period began, so
      202312 -> 2023 and 202306 -> 2022 (the IRS rule; prod's filings rows agree).
-  d4 privacy: each sampled org's public JSON (/990/api/org/<ein>/facts) and report page, through
-     audit_990_truth.leaks_in (one text node or JSON value at a time, fk7).
+  d4 privacy: each sampled org's public JSON (/990/api/org/<ein>/facts) address fields and its
+     report page's address lines, through audit_990_truth.leaks_in (one text node or JSON value
+     at a time, fk7). The org's name is never read as a street (fk11: "1638-1640 Topping Ave").
   d5 crawler inflation: dash_events is not on the query allowlist, so this reads the flag the
      superadmin Jobs card shows: jobs.real[].crawler_hit in /990/api/signals/kpi (X-PM-Token).
   d6 sources: the newest Search Console point (hub.*gsc* in dash_metric_points) is over 2 days
@@ -23,12 +24,14 @@ import argparse
 import datetime as dt
 import json
 import os
+import re
 import sys
 import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from audit_990_truth import _get, leaks_in, privacy_leaks  # noqa: E402
+from audit_cleanup import state_path  # noqa: E402
 from audit_sample import SITE, query  # noqa: E402
 
 D2_WINDOW = 2000
@@ -49,26 +52,54 @@ def d2(q=query) -> list[str]:
     return [f"{n} of the newest {D2_WINDOW} IRS index rows have no filings row (e.g. {eg})"]
 
 
-def _strings(doc) -> list[str]:
+_ADDRESS_KEY = re.compile(r"addr|street|location|contact|mail|phone", re.I)
+
+
+def _address_strings(doc, inside: bool = False) -> list[str]:
+    """String values under an address-bearing key (identity.address, officers[].address, a
+    contact block), never the name: a legal name can read like a street (EIN 133847940)."""
     if isinstance(doc, str):
-        return [doc]
-    vals = doc.values() if isinstance(doc, dict) else doc if isinstance(doc, list) else []
-    return [s for v in vals for s in _strings(v)]
+        return [doc] if inside else []
+    if isinstance(doc, dict):
+        return [s for k, v in doc.items()
+                for s in _address_strings(v, inside or bool(_ADDRESS_KEY.search(str(k))))]
+    return [s for v in doc for s in _address_strings(v, inside)] if isinstance(doc, list) else []
 
 
-def d4(eins: list[str], get=_get) -> list[dict]:
+def _facts_leaks(body: bytes) -> list[str]:
+    doc = json.loads(body)
+    return leaks_in(_address_strings(doc), str(doc.get("name") or ""))
+
+
+def d4(eins: list[str], get=_get, seen_path: Path | None = None) -> list[dict]:
+    """One finding per leaking org, naming every leak once. seen_path keeps how many passes each
+    EIN has leaked, so a repeat reads "seen N passes" instead of looking new."""
     if not eins:
         raise RuntimeError("no sampled orgs: pass --sample with audit_sample.py output")
+    seen_path = seen_path or state_path().with_name("datain-d4-seen.json")
+    try:
+        seen = json.loads(seen_path.read_text())
+    except (OSError, ValueError):
+        seen = {}
     out = []
     for ein in eins:
-        for url, read in ((f"{SITE}/990/api/org/{ein}/facts", lambda b: leaks_in(
-                _strings(json.loads(b)))), (f"{SITE}/990/report/{ein}", lambda b: privacy_leaks(
-                b.decode("utf-8", "replace")))):
+        leaks = []
+        for url, read in ((f"{SITE}/990/api/org/{ein}/facts", _facts_leaks),
+                          (f"{SITE}/990/report/{ein}", lambda b: privacy_leaks(
+                              b.decode("utf-8", "replace"), address_only=True))):
             status, _, body = get(url)
             if status != 200:
                 out.append({"check": "d4", "error": f"{url} answered HTTP {status}"})
                 continue
-            out += [{"check": "d4", "finding": f"{url}: {leak}"} for leak in read(body)]
+            leaks += read(body)
+        if leaks:
+            seen[ein] = seen.get(ein, 0) + 1
+            out.append({"check": "d4", "finding": f"{SITE}/990/report/{ein}: "
+                        + "; ".join(dict.fromkeys(leaks)) + f" (seen {seen[ein]} passes)"})
+    try:
+        seen_path.write_text(json.dumps(seen))
+    except OSError as e:
+        print(f"audit_datain: d4 seen-set not saved ({e})", file=sys.stderr)
     return out
 
 

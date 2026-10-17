@@ -65,7 +65,12 @@ def test_d2_reads_tax_period_and_derives_the_tax_year():
     assert ad.d2(_d2_db([(1, "111111111", "202312")], [("111111111", 2023)])) == []
 
 
-def test_d4_scans_public_json_values_one_at_a_time_and_the_report_page():
+def _seen():
+    import tempfile
+    return Path(tempfile.mkdtemp()) / "seen.json"
+
+
+def test_d4_scans_public_json_address_values_and_the_report_address_line():
     facts = {"city": "TAMPA", "officers": [{"name": "Ann Lee", "address": "12 Maple Street"}],
              "a": "Suite 174", "b": "Occupancy Ln 16", "mail": "ann.lee@gmail.com"}
     table = b"<td>174</td><td>Occupancy</td><td>Ln 16</td>"
@@ -73,12 +78,47 @@ def test_d4_scans_public_json_values_one_at_a_time_and_the_report_page():
              f"{ad.SITE}/990/report/1": (200, "text/html", table),
              f"{ad.SITE}/990/api/org/2/facts": (404, "", b""),
              f"{ad.SITE}/990/report/2": (200, "text/html", b"<p>Tampa, FL</p>")}
-    rows = ad.d4(["1", "2"], get=pages.__getitem__)
-    found = " ".join(r["finding"] for r in rows if "finding" in r)
-    assert "12 Maple Street" in found and "ann.lee@gmail.com" in found, rows
-    assert "Occupancy" not in found and "/990/report/1" not in found, rows
+    rows = ad.d4(["1", "2"], get=pages.__getitem__, seen_path=_seen())
+    found = [r["finding"] for r in rows if "finding" in r]
+    assert len(found) == 1 and "12 Maple Street" in found[0], rows
+    assert "ann.lee@gmail.com" in found[0] and "Occupancy" not in found[0], rows
     assert [r["error"] for r in rows if "error" in r] == [
         f"{ad.SITE}/990/api/org/2/facts answered HTTP 404"], rows
+
+
+_TOPPING = "1638-1640 Topping Ave Residence"
+
+
+def _org(ein, irs_line, name=_TOPPING):
+    page = (f'<title>{name} | 990</title><script type="application/ld+json">{{"name": "{name}"}}'
+            f'</script><h1 class="title">{name}</h1><p class="rp-irs"><span class="rp-irs-k">'
+            f'On file with the IRS</span><span>{irs_line}</span></p>').encode()
+    facts = {"ein": ein, "name": name.upper(), "identity": {"address": irs_line}}
+    return {f"{ad.SITE}/990/api/org/{ein}/facts": (200, "json", json.dumps(facts).encode()),
+            f"{ad.SITE}/990/report/{ein}": (200, "text/html", page)}
+
+
+def test_d4_a_street_in_the_legal_name_is_clean():
+    pages = _org("133847940", "New York, NY")
+    assert ad.d4(["133847940"], get=pages.__getitem__, seen_path=_seen()) == []
+    page = pages[f"{ad.SITE}/990/report/133847940"][2].decode()
+    assert ad.privacy_leaks(page) == []  # the whole-page check (audit_990_truth) agrees
+
+
+def test_d4_a_street_in_the_irs_line_is_flagged():
+    rows = ad.d4(["133847940"], get=_org("133847940", "77 Grand Concourse Ave, Bronx, NY")
+                 .__getitem__, seen_path=_seen())
+    assert len(rows) == 1 and "'77 Grand Concourse Ave'" in rows[0]["finding"], rows
+    assert rows[0]["finding"].count("Grand Concourse") == 1, rows  # JSON and page: said once
+
+
+def test_d4_a_repeat_ein_is_counted_once_per_pass():
+    path, pages = _seen(), _org("1", "19 Oak Street, Troy, NY")
+    first = ad.d4(["1"], get=pages.__getitem__, seen_path=path)
+    again = ad.d4(["1"], get=pages.__getitem__, seen_path=path)
+    assert len(first) == len(again) == 1, (first, again)
+    assert first[0]["finding"].endswith("(seen 1 passes)"), first
+    assert again[0]["finding"].endswith("(seen 2 passes)"), again
 
 
 def _day(d, hit, uncounted=0):
