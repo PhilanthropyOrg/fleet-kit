@@ -72,7 +72,7 @@ For each sampled org, fetch the report page and the IRS XML on file, then:
 - D4 privacy: street addresses or personal emails in any public table or JSON
 - D5 crawler inflation: funnel and click counts that include non-browser user agents or one
   IP at machine speed
-- D6 a source the fleet reads (GSC, PostHog, IRS index) returned nothing today
+- D6 a source the fleet reads (GSC, IRS index) returned nothing today; PostHog is shut down (Reif, 10-07), so its silence and its alerts are not findings
 
 ## Lane scout-report (`auditor:scout-report`)
 

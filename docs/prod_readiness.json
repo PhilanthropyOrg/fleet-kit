@@ -39,14 +39,14 @@
   {"id": "email.auth", "area": "email", "needs": "email", "item": "SPF / DKIM / DMARC valid", "owner": "red", "check": "dig TXT for SPF, _dmarc and the resend DKIM selector: missing or p=none is a finding", "cadence_h": 24},
   {"id": "email.bounces", "area": "email", "needs": "email", "item": "bounce and complaint rate", "owner": "nerd", "check": "read the email-bounces inflow (dash_events mailer bounced/complained): hard-bounce share of sends over 2% is a finding", "cadence_h": 72},
 
-  {"id": "analytics.flowing", "area": "analytics & SEO", "needs": "analytics", "item": "analytics events (GA4/PostHog) still flowing", "owner": "nerd", "check": "read the ga4/posthog/clarity inflows in the daily inflows table; a non-OK one is a finding", "cadence_h": 72},
+  {"id": "analytics.flowing", "area": "analytics & SEO", "needs": "analytics", "item": "analytics events (GA4 and our own dash_events) still flowing", "owner": "nerd", "check": "read the ga4/clarity inflows in the daily inflows table; a non-OK one is a finding", "cadence_h": 72},
   {"id": "seo.indexation", "area": "analytics & SEO", "needs": "web", "item": "Search Console indexation / coverage", "owner": "nerd", "check": "read the gsc inflow (/990/api/signals/gsc coverage + gsc_performance cron): indexed pages falling week over week is a finding", "cadence_h": 72},
 
   {"id": "pay.webhooks", "area": "payments", "needs": "payments", "item": "payment webhooks delivered and processed", "owner": "nerd", "check": "read the stripe-webhooks inflow (stripe_webhook_events newest row) against Stripe's own event list", "cadence_h": 72},
   {"id": "pay.failed_charges", "area": "payments", "needs": "payments", "item": "failed charges / disputes", "owner": "nerd", "check": "Stripe API charges?status=failed and disputes over the last 7 days; any unexplained one is a finding", "cadence_h": 72},
 
   {"id": "cost.spend", "area": "costs & quotas", "needs": "host", "item": "infra + third-party spend vs budget", "owner": "nerd", "check": "the box spend_limits_check log + DO invoice preview vs budget", "cadence_h": 72},
-  {"id": "cost.quotas", "area": "costs & quotas", "needs": "host", "item": "API quotas (GSC, PostHog, LLM accounts) vs limits", "owner": "nerd", "check": "GSC/PostHog/LLM account quota reads (posthog billing, maxx budget) vs limits", "cadence_h": 72},
+  {"id": "cost.quotas", "area": "costs & quotas", "needs": "host", "item": "API quotas (GSC, LLM accounts) vs limits", "owner": "nerd", "check": "GSC/LLM account quota reads (maxx budget) vs limits", "cadence_h": 72},
 
   {"id": "data.inflows", "area": "data inflows", "needs": "web", "item": "every data source in docs/data_inflows.json delivered within its freshness window, credential present", "owner": "librarian", "check": "coverage_map.py inflows table (first section of the daily HQ line); any non-OK inflow fails the audit", "cadence_h": 36}
  ]
