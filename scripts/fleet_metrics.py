@@ -27,6 +27,9 @@ METRICS (name[:member]; every one is computed over a window of `hours` ending at
                                   count, e.g. back_in_hq, verified_badge), from north.py's hourly
                                   snapshot nearest `at` (within LADDER_TOL_H)
   ladder_share:<stage>            those orgs / orgs at `approved`, same snapshot -- 0..1
+  product:<name>                  a company's user-facing number (po.paid_verified_orgs,
+                                  po.job_applies_7d, dyw.applicants_per_day, gym.members, ...)
+                                  from product_metrics.py's hourly snapshot nearest `at`
   reif_repeats_per_day            desk inbox items that say again what INTENT.md's Keys hold
                                   (intent_repeats.py), per day; target 0
 `<member>` may be `*` (or omitted where shown optional) for the whole fleet.
@@ -81,6 +84,9 @@ CATALOG = {
     # could name a user outcome. These read the product's ladder that north.py already fetches.
     "ladder_orgs": "orgs at <stage> of the after-claim ladder, 30-day count (north.py hourly snapshot)",
     "ladder_share": "orgs at <stage> / orgs at approved, same snapshot (0..1)",
+    # Desk 2026-10-17: 3 of 25 bets since 10-09 touched the product. These are what each company
+    # is for (philanthropy.org, DYW, GymFleet); product_metrics.py writes the snapshot.
+    "product": "a company's user-facing number <name> (product_metrics.py hourly snapshot)",
     # Reif 2026-10-17: "I don't want to keep having to explain this daily." A repeat is a miss.
     "reif_repeats_per_day": "desk inbox items repeating an INTENT.md key, per day (intent_repeats.py)",
 }
@@ -149,7 +155,10 @@ def ladder_at(at: float, path: Path | None = None, tol_h: float = LADDER_TOL_H) 
 def direction(name: str) -> str | None:
     """'higher' or 'lower' for a metric whose direction is unambiguous; None when this
     file doesn't record a judgment about it (see DIRECTION above)."""
-    base, _ = parse(name)
+    base, args = parse(name)
+    if base == "product":
+        import product_metrics
+        return "lower" if args and args[0] in product_metrics.LOWER else "higher"
     return DIRECTION.get(base)
 
 
@@ -363,6 +372,12 @@ def compute(name: str, rows: list[dict], at: float | None = None, hours: float =
             return float(v)
         base_n = (snap or {}).get("approved")
         return (float(v) / base_n) if base_n else None
+    if base == "product":
+        if not args or not args[0]:
+            raise ValueError("product needs :<name> (e.g. po.paid_verified_orgs)")
+        import product_metrics
+        v = (ladder_at(at, product_metrics.snapshot_path()) or {}).get(args[0])
+        return float(v) if isinstance(v, (int, float)) else None
     if base == "reif_repeats_per_day":
         import intent_repeats
         n = intent_repeats.count_repeats(at, hours)

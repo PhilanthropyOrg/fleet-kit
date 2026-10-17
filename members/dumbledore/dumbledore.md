@@ -41,7 +41,7 @@ say so in the report with evidence and leave it to a human.
    pass: `python3 /fleet-kit/scripts/ci_minutes.py --by` and the OrgVerify ladder (NORTH
    section 2). Print `Mandate: <priority> | <limit>: <today's reading> (<over/under>)`. A limit
    the fleet is over is the headline, and step 4's one change is about that limit, bet with
-   `--metric ci_minutes_per_day`, **unless a `ci_minutes_per_day` row is already open**: then
+   `--metric ci_minutes_per_day --over-limit "<limit>: <reading>"`, **unless a `ci_minutes_per_day` row is already open**: then
    print the reading and do not re-trace CI this pass (a second bet confounds the first).
    A priority with no number you can read is your first job (as in Authority below). The
    mandate changes only when Reif edits that file; never rewrite it, never infer a new one.
@@ -128,15 +128,15 @@ say so in the report with evidence and leave it to a human.
    Always `--by-hours 24` (predict.py scores the 24h ending at due, so the window holds only
    post-change runs; Reif, 2026-09-30: "decrease the time between cycling and self
    reflection"). Baseline defaults to the metric now; a target it already meets is not a
-   prediction. **Predict on a per-pass metric the diff itself limits** (`avg_turns`,
-   `avg_cost_usd`, `quiet_rate`, `signal_rate`, `status_per_day:timed_out`). Counts of passes
-   (`runs_per_day`, `status_per_day:quiet`, `avg_duration_s`) are set by cron lines in
-   `entrypoint.sh`, pushes, wakes and gru, not by a charter: 7 of the 10 misses in #37-#47
-   (09-30..10-03) were those; the other 3 asked a per-pass number to go UP, which a charter
-   allows but does not cause. **Keep one outcome bet open.** If no `ladder_share:<stage>` or
-   `ladder_orgs:<stage>` row is open, this pass's change targets the weakest step of the
-   OrgVerify ladder (NORTH section 2) and bets on it; read stages with `fleet_metrics.py list`.
-   Fleet-internal bets alone left the claim funnel unbet through bet #96 (10-12).
+   prediction. **Bet on the vision** (G for Reif, 10-17: 3 of 25 bets since 10-09 touched the
+   product). At least 2 of every 3 bets name a product metric: `product:<name>`
+   (`product_metrics.py show`: po.paid_verified_orgs, po.claims_finished_24h,
+   po.scout_plus_sales_7d, po.job_applies_7d, po.jobs_second_page_pct, dyw.*, gym.*) or
+   `ladder_*`; pick the one the MANDATE's top priority moves. A plumbing metric (`avg_turns`,
+   `quiet_rate`, `ci_minutes`) only while the fleet is over a MANDATE limit, with
+   `--over-limit "<limit>: <reading>"`; predict.py refuses a third plumbing bet in a row
+   without it. Never bet on a count of passes (`runs_per_day`, `avg_duration_s`): cron lines
+   set those, not a charter.
    **One open row per member** until it resolves, or the readings
    confound (#38/#39/#44/#45: four minion rows due within 24h, three missed). No `add`, no pass. Run
    `gh pr view <PR> -R <repo> --json state,autoMergeRequest` before you `add`, and over every
