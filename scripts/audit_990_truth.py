@@ -41,6 +41,10 @@ _STREET = re.compile(
     r"(?:St|Street|Ave|Avenue|Blvd|Boulevard|Rd|Road|Dr|Drive|Ln(?!\s*\d)|Lane|Way|Pkwy|Hwy)\b\.?")
 _IRS_WORDS = {"Occupancy"}  # IRS expense line names that read like a street name
 _PERSONAL_MAIL = re.compile(r"[\w.+-]+@(?:gmail|yahoo|hotmail|aol|outlook|icloud)\.com", re.I)
+_H1 = re.compile(r"<h1\b[^>]*>(.*?)</h1>", re.S)
+# Where a report page prints an address: the "On file with the IRS" line, the contact block.
+_ADDRESS_REGION = re.compile(r'<p class="rp-irs">.*?</p>|<ul class="about-org-contact">.*?</ul>'
+                             r"|<address\b.*?</address>", re.S)
 _PERSON = re.compile(r'<a\b[^>]*href="/990/person/[^"]*"[^>]*>(.*?)</a>', re.S)
 _SCH_ON = re.compile(r'class="sch on"[^>]*>\s*([A-Z]{1,3})\s')
 
@@ -145,17 +149,23 @@ def garbage_names(page: str) -> list[str]:
     return bad
 
 
-def privacy_leaks(page: str) -> list[str]:
-    """Street addresses and personal mail on a public page (city and state only)."""
-    return leaks_in(htmllib.unescape(n) for n in _TAGS.split(page))  # one text node at a time
+def privacy_leaks(page: str, address_only: bool = False) -> list[str]:
+    """Street addresses and personal mail on a public page (city and state only). The org's
+    name (the h1) is never a leak, even when it reads like a street (EIN 133847940, "1638-1640
+    Topping Ave"); address_only reads just the regions that print an address."""
+    m = _H1.search(page)
+    part = "".join(_ADDRESS_REGION.findall(page)) if address_only else page
+    return leaks_in((htmllib.unescape(n) for n in _TAGS.split(part)),  # one text node at a time
+                    _text(m.group(1)) if m else "")
 
 
-def leaks_in(texts) -> list[str]:
+def leaks_in(texts, name: str = "") -> list[str]:
     """The privacy check on separate texts (page text nodes, JSON string values), one at a
-    time, so a street never spans two fields."""
+    time, so a street never spans two fields. A street inside the org's legal name is skipped."""
     nodes = list(texts)
     streets = [m.group(0) for n in nodes for m in _STREET.finditer(n)]
-    return ([f"street address: {st!r}" for st in streets if not _IRS_WORDS & set(st.split())]
+    return ([f"street address: {st!r}" for st in streets if not _IRS_WORDS & set(st.split())
+             and st.lower() not in name.lower()]
             + [f"personal email: {m.group(0)!r}" for n in nodes
                for m in _PERSONAL_MAIL.finditer(n)])
 
