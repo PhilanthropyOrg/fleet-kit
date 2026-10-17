@@ -27,6 +27,8 @@ METRICS (name[:member]; every one is computed over a window of `hours` ending at
                                   count, e.g. back_in_hq, verified_badge), from north.py's hourly
                                   snapshot nearest `at` (within LADDER_TOL_H)
   ladder_share:<stage>            those orgs / orgs at `approved`, same snapshot -- 0..1
+  reif_repeats_per_day            desk inbox items that say again what INTENT.md's Keys hold
+                                  (intent_repeats.py), per day; target 0
 `<member>` may be `*` (or omitted where shown optional) for the whole fleet.
 
 None means "unavailable" (no rows in the window, or a zero denominator) -- never 0, so a
@@ -79,6 +81,8 @@ CATALOG = {
     # could name a user outcome. These read the product's ladder that north.py already fetches.
     "ladder_orgs": "orgs at <stage> of the after-claim ladder, 30-day count (north.py hourly snapshot)",
     "ladder_share": "orgs at <stage> / orgs at approved, same snapshot (0..1)",
+    # Reif 2026-10-17: "I don't want to keep having to explain this daily." A repeat is a miss.
+    "reif_repeats_per_day": "desk inbox items repeating an INTENT.md key, per day (intent_repeats.py)",
 }
 
 # gh#789: direction only for metrics whose "better" is unambiguous from CATALOG's own
@@ -100,6 +104,7 @@ DIRECTION = {
     "ci_minutes_per_day": "lower",
     "ladder_orgs": "higher",
     "ladder_share": "higher",
+    "reif_repeats_per_day": "lower",
 }
 
 LADDER_TOL_H = 2.0
@@ -358,6 +363,10 @@ def compute(name: str, rows: list[dict], at: float | None = None, hours: float =
             return float(v)
         base_n = (snap or {}).get("approved")
         return (float(v) / base_n) if base_n else None
+    if base == "reif_repeats_per_day":
+        import intent_repeats
+        n = intent_repeats.count_repeats(at, hours)
+        return None if n is None else n / days
     raise ValueError(base)  # unreachable: parse() already rejected unknown names
 
 

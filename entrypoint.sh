@@ -354,11 +354,13 @@ case "${1:-cron-foreground}" in
       # INTENT.md) at 00:15 Central, before the morning brief. Kept as its own dispatch target
       # (fk#1195): a `kind: shell` zero-token hourly pass and a real daily model pass cannot
       # share one member's schedule/tool grant under today's dispatch mechanism.
+      # 2026-10-17: hourly at :15 behind a pregate (members/librarian/pregate.sh): a new desk
+      # inbox item reaches INTENT.md the same hour; 00:15 stays the full daily read.
       if cron_member_enabled librarian-scrub; then
         echo "6 * * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh librarian-scrub >> $LOG_DIR/librarian-scrub.log 2>&1"
       fi
       if cron_member_enabled librarian; then
-        echo "15 0 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh librarian >> $LOG_DIR/librarian.log 2>&1"
+        echo "15 * * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh librarian >> $LOG_DIR/librarian.log 2>&1"
       fi
       if cron_member_enabled marie; then
         echo "33 ${FLEET_MARIE_CADENCE:-*} * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh marie >> $LOG_DIR/marie.log 2>&1"
