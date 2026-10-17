@@ -137,16 +137,16 @@ your environment by name (from `fleet.env`). Read the NAME; **never echo a secre
 
 | lane | needs | variable(s) |
 |---|---|---|
-| growth, datadog, claim | Search Console, GA4, PostHog | none of your own: the prod app holds them (below) |
+| growth, datadog, claim | Search Console, GA4 | none of your own: the prod app holds them (below) |
 | datadog, ui | Microsoft Clarity | `CLARITY_API_TOKEN` |
 | devops, lens | the app's own metrics store and logs | on-box, no login |
 | prod-runtime | the prod box + its DB, read-only | `FLEET_PROD_PROBE_KEY` (path), `FLEET_PROD_PROBE_HOST` |
 | every lane | the repo and GitHub | `GH_TOKEN`, already present |
 | every lane | the live site's whole nginx access log | `$FLEET_LOG_DIR/site_access/access-YYYY-MM-DD.log.gz` (UTC days, 14 kept; `zcat`/`zgrep`; today's file is still growing) |
 
-- **GSC/GA4/PostHog: `GSC_SA_KEY` is unset for good; that is not a finding.** Read
+- **GSC/GA4: `GSC_SA_KEY` is unset for good; that is not a finding.** Read
   `curl -s -H "X-PM-Token: $FLEET_NUMBER_TOKEN" -H "x-atlas-test: $ATLAS_TEST_BYPASS"
-  https://philanthropy.org/990/api/signals/gsc?days=28` (or `/ga4`, `/posthog`); both headers
+  https://philanthropy.org/990/api/signals/gsc?days=28` (or `/ga4`); both headers
   needed. GSC returns 100 top queries, pages and query-pages (2026-10-03).
 - **A missing credential is a FINDING, not an excuse to file nothing.** File it once, naming
   the exact variable and the exact question it blocked, then do the parts you can.
