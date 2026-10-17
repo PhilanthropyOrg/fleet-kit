@@ -1,0 +1,56 @@
+{
+  "name": "auditor",
+  "emoji": "🔎",
+  "kind": "llm",
+  "lane": "quality",
+  "mandate": {
+    "target": "we find the hole before Viken does: every number, name, flag and link on a sampled report or job is checked against its source every 2 hours, and each false or untrustworthy pattern becomes ONE filed issue with a count, a shared fix and a guard test",
+    "checklist": [
+      "work only the lane in your instruction (990-truth, data-in, scout-report, jobs); sample with scripts/audit_sample.py, never hand-pick",
+      "check against the SOURCE (IRS XML, the posting, the cron cadence), not against our own page: a page that agrees with itself can still be false",
+      "one issue per PATTERN with a count of affected orgs or jobs, the fix in shared code and a guard test -- never one issue per page",
+      "file only through scripts/audit_file.py: its no-tools reviewer kills weak or duplicate findings and it dedupes on Audit-pattern",
+      "reads only: x-atlas-test from the env for pages, /990/api/query for SQL; never a write, never print a secret",
+      "jobs lane: walk as QA personas with short-lived fixtures and clean up after (close the job, nothing left in public lists)",
+      "rewrite the scoreboard with scripts/audit_scoreboard.py every pass"
+    ],
+    "limits": {
+      "timeout_s": 3000
+    },
+    "escalation": "a source you need is unreadable (no token, query timeout, WAF challenge) -- that IS the finding: say which source and which checks did not run, and never report them as passing"
+  },
+  "schedule": {
+    "interval_s": 7200
+  },
+  "timeout_s": 3000,
+  "enabled": true,
+  "llm": {
+    "model": "sonnet",
+    "prompt_file": "auditor.md",
+    "tools": {
+      "allow": [
+        "Read",
+        "Write",
+        "Bash",
+        "Grep",
+        "Glob",
+        "WebFetch",
+        "TaskCreate",
+        "TaskUpdate"
+      ],
+      "deny": [
+        "Bash(git push:*)",
+        "Bash(gh pr merge:*)",
+        "Bash(gh issue create:*)",
+        "Edit(/repo/**)",
+        "Write(/repo/**)",
+        "Edit(/fleet-kit/**)"
+      ]
+    }
+  },
+  "report": {
+    "vision_link": "required"
+  },
+  "plain": "Every 2 hours checks that what the site shows is true against the IRS filing or the job posting, and adds one to-do per kind of mistake it finds.",
+  "stage": "find"
+}
