@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Git-level push budget gate (fleet-kit, 2026-10-17). Installed container-wide by entrypoint.sh through
+# `git config --global core.hooksPath`, so EVERY `git push` to the philanthropy repo is judged, however it
+# is invoked: a Claude Bash call, a kit script, a heredoc, `git -C`, a minion's own helper. The Claude
+# PreToolUse hook only sees a literal `git push` inside a tool command; PR philanthropy#13024 was pushed at
+# 141% of the day's share through a scripted push the PreToolUse hook never saw.
+# Bypass: only push_budget_gate.py --why "deploy-gate revert ..." (it logs the bypass and sets the env below).
+remote_url="$2"
+case "$remote_url" in
+  *PhilanthropyOrg/philanthropy|*PhilanthropyOrg/philanthropy.git|*PhilanthropyOrg/philanthropy/|*PhilanthropyOrg/philanthropy.git/) ;;
+  *) exit 0 ;;
+esac
+[ "${PUSH_BUDGET_GATE_BYPASS:-}" = "1" ] && exit 0
+gate="${FLEET_KIT_DIR:-/fleet-kit}/scripts/push_budget_gate.py"
+[ -f "$gate" ] || gate="$(cd "$(dirname "$0")/.." && pwd)/push_budget_gate.py"
+[ -f "$gate" ] || exit 0
+top="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+if ! python3 "$gate" --check --wt "$top"; then
+  echo "pre-push: refused by push_budget_gate (today's Actions money is spent). Nothing pushed." >&2
+  exit 1
+fi
