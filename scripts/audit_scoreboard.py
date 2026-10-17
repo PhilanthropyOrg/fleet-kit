@@ -6,7 +6,7 @@ that are still a hole (status not LIVE and not context only). The auditor's coun
 labelled lane:audit opened in the last 7 days. Hand-found Jobs holes = issues opened in the
 last 7 days whose title starts "Jobs" and that do NOT carry lane:audit.
 
-Usage: audit_scoreboard.py --repo OWNER/REPO [--viken PATH] [--out PATH]
+Usage: audit_scoreboard.py [--repo OWNER/REPO, default: gh repo view in /repo] [--viken PATH] [--out PATH]
 """
 from __future__ import annotations
 
@@ -15,7 +15,11 @@ import datetime as dt
 import json
 import re
 import subprocess
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from audit_file import repo_slug  # noqa: E402
 
 SHARES = Path("/fleet-kit/shares/g")
 _ROW = re.compile(r"^\|\s*(V\d+[a-z]?)\s*\|\s*([^|]*)\|\s*([^|]*)\|", re.M)
@@ -62,10 +66,11 @@ def render(viken: list, audit: list, hand: list, now: dt.datetime) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--repo", required=True)
+    ap.add_argument("--repo", default="")
     ap.add_argument("--viken", default=str(SHARES / "viken-status.md"))
     ap.add_argument("--out", default=str(SHARES / "audit-scoreboard.md"))
     a = ap.parse_args(argv)
+    a.repo = repo_slug(a.repo)
     now = dt.datetime.now(dt.timezone.utc)
     since = now - dt.timedelta(days=7)
     viken = viken_holes(Path(a.viken).read_text()) if Path(a.viken).exists() else []

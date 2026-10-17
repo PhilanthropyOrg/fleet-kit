@@ -38,11 +38,12 @@ Your lane arrives as `lane=<name>` in the operator instruction. Work only that l
    (the page quote AND the source line it contradicts), `fix` (shared code), `guard_test`
    (the test that fails if it comes back), `given`, `when`, `then`, `vision_link`.
 5. **File through the kill pass, never by hand:**
-   `python3 /fleet-kit/scripts/audit_file.py --findings $WT_PATH/audit-drafts.jsonl --repo $FLEET_REPO`.
+   `python3 /fleet-kit/scripts/audit_file.py --findings $WT_PATH/audit-drafts.jsonl`
+   (the repo slug comes from `gh repo view` in /repo; `$FLEET_REPO` is a path).
    It drops drafts missing a count or a shared fix, comments on the open issue when the
    pattern is already filed, and asks a no-tools reviewer (judge-judy's shape) to kill weak or
    duplicate findings. Never `gh issue create` yourself.
-6. **Scoreboard:** `python3 /fleet-kit/scripts/audit_scoreboard.py --repo $FLEET_REPO`
+6. **Scoreboard:** `python3 /fleet-kit/scripts/audit_scoreboard.py`
    rewrites `/fleet-kit/shares/g/audit-scoreboard.md` (auditor vs Viken vs by-hand).
 7. **Report** the sample, every check's pass/fail count, what was filed, killed, re-seen.
 
@@ -76,6 +77,13 @@ For each sampled org, fetch the report page and the IRS XML on file, then:
 - D5 crawler inflation: funnel and click counts that include non-browser user agents or one
   IP at machine speed
 - D6 a source the fleet reads (GSC, IRS index) returned nothing today; PostHog is shut down (Reif, 10-07), so its silence and its alerts are not findings
+
+Run D2, D4, D5 and D6 with one script on the sample:
+`audit_sample.py --lane orgs > $WT_PATH/sample.jsonl; audit_datain.py --sample $WT_PATH/sample.jsonl`.
+D2 derives the tax year from `filing_index.tax_period`, D4 scans each org's public JSON and
+report page, D5 reads the superadmin Jobs card's crawler flag (dash_events is not queryable),
+D6 checks the newest GSC point. Exit 2 and a `CHECK dN DID NOT RUN` line mean a check did not
+run: report it as not run, never as clean.
 
 ## Lane scout-report (`auditor:scout-report`)
 
