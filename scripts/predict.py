@@ -15,8 +15,10 @@ resolve (small file, tens of rows). Fields:
 
 COMMANDS
   add     --member M --change "fleet-kit#NNN" --metric signal_rate:gru --target 0.6
-          [--baseline 0.48] [--by-hours 72] [--note "..."]
+          [--baseline 0.48] [--by-hours 72] [--note "..."] [--over-limit "<limit: reading>"]
           baseline defaults to the metric's value now (24h window). Prints the row.
+          dumbledore: at least 2 of every 3 bets name a product metric (PRODUCT); a plumbing
+          bet after two in a row needs --over-limit naming the MANDATE limit it is over.
   resolve [--now EPOCH]   every open row past due: actual = metric over the 24h ending at
           due_ts; hit when actual reached the target in the baseline->target direction,
           miss otherwise, unavailable when the metric has no data. Prints what changed.
@@ -40,7 +42,22 @@ sys.path.insert(0, str(HERE))
 import fleet_metrics  # noqa: E402
 
 RESOLVE_WINDOW_H = 24.0
-DEFAULT_BY_HOURS = 24.0  # = RESOLVE_WINDOW_H: the shortest horizon whose score is all post-change
+DEFAULT_BY_HOURS = 24.0
+# Desk 2026-10-17: 3 of dumbledore's 25 bets since 10-09 touched the product. Set by G, a
+# human: dumbledore may not edit this file.
+PRODUCT = {"product", "ladder_orgs", "ladder_share"}
+
+
+def plumbing_streak_error(rows: list[dict], member: str, metric: str, over_limit: str) -> str | None:
+    """Why this bet is refused, or None. Only dumbledore is held to the 2-of-3 rule."""
+    if member != "dumbledore" or metric.split(":")[0] in PRODUCT or over_limit.strip():
+        return None
+    last2 = [r for r in rows if r.get("member") == member][-2:]
+    if len(last2) == 2 and not any(str(r.get("metric")).split(":")[0] in PRODUCT for r in last2):
+        return (f"refused: {metric} would be a 3rd plumbing bet in a row; bet on a product "
+                f"metric (fleet_metrics.py list: product:*, ladder_*) or pass --over-limit "
+                f"naming the MANDATE limit the fleet is over")
+    return None  # = RESOLVE_WINDOW_H: the shortest horizon whose score is all post-change
 
 
 def ledger_path() -> Path:
@@ -184,6 +201,7 @@ def main(argv: list[str]) -> int:
     a.add_argument("--baseline", type=float, default=None)
     a.add_argument("--by-hours", type=float, default=DEFAULT_BY_HOURS)
     a.add_argument("--note", default="")
+    a.add_argument("--over-limit", default="", help="the MANDATE limit a plumbing bet answers")
     a.add_argument("--now", type=float, default=None)
     r = sub.add_parser("resolve")
     r.add_argument("--now", type=float, default=None)
@@ -202,12 +220,17 @@ def main(argv: list[str]) -> int:
 
     if args.cmd == "add":
         try:
+            why = plumbing_streak_error(rows, args.member, args.metric, args.over_limit)
+            if why:
+                raise ValueError(why)
             row = make(rows, member=args.member, change=args.change, metric=args.metric,
                        target=args.target, baseline=args.baseline, by_hours=args.by_hours,
                        note=args.note, now=now, runs=runs, run_id=os.environ.get("FLEET_RUN_ID"))
         except ValueError as e:
             print(str(e), file=sys.stderr)
             return 2
+        if args.over_limit:
+            row["over_limit"] = args.over_limit
         rows.append(row)
         save(path, rows)
         print(json.dumps(row, sort_keys=True))
