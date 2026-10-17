@@ -106,7 +106,13 @@ def garbage_names(page: str) -> list[str]:
 
 def privacy_leaks(page: str) -> list[str]:
     """Street addresses and personal mail on a public page (city and state only)."""
-    nodes = [htmllib.unescape(n) for n in _TAGS.split(page)]  # one rendered text node at a time
+    return leaks_in(htmllib.unescape(n) for n in _TAGS.split(page))  # one text node at a time
+
+
+def leaks_in(texts) -> list[str]:
+    """The privacy check on separate texts (page text nodes, JSON string values), one at a
+    time, so a street never spans two fields."""
+    nodes = list(texts)
     streets = [m.group(0) for n in nodes for m in _STREET.finditer(n)]
     return ([f"street address: {st!r}" for st in streets if not _IRS_WORDS & set(st.split())]
             + [f"personal email: {m.group(0)!r}" for n in nodes

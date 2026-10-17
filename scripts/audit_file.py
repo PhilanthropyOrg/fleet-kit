@@ -12,7 +12,7 @@ The auditor drafts findings as JSON lines. Nothing reaches the board until it su
      shape as judge-judy (`claude -p --tools "" --json-schema`), and kills anything weak,
      unproven, a duplicate of another finding in the batch, or a page bug dressed as a pattern.
 
-Usage: audit_file.py --findings drafts.jsonl --repo OWNER/REPO [--dry-run]
+Usage: audit_file.py --findings drafts.jsonl [--repo OWNER/REPO] [--dry-run]
 """
 from __future__ import annotations
 
@@ -125,6 +125,17 @@ def _gh(args: list[str]) -> str:
     return subprocess.run(["gh", *args], capture_output=True, text=True, check=True).stdout
 
 
+def repo_slug(repo: str = "", gh=None) -> str:
+    """OWNER/REPO for gh. FLEET_REPO is the checkout path (/repo), not a slug (fk5, fk8), so
+    anything that is not OWNER/REPO is resolved by `gh repo view` inside that checkout."""
+    if re.fullmatch(r"[\w.-]+/[\w.-]+", repo or ""):
+        return repo
+    where = repo if repo and Path(repo).is_dir() else "/repo"
+    gh = gh or (lambda args: subprocess.run(["gh", *args], capture_output=True, text=True,
+                                            check=True, cwd=where).stdout)
+    return gh(["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"]).strip()
+
+
 def ensure_labels(repo: str, gh=None) -> None:
     """Create any of LABELS the repo lacks; exit with a plain message if that fails."""
     gh = gh or _gh
@@ -143,9 +154,10 @@ def ensure_labels(repo: str, gh=None) -> None:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--findings", required=True)
-    ap.add_argument("--repo", required=True)
+    ap.add_argument("--repo", default="", help="OWNER/REPO; default: gh repo view in /repo")
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args(argv)
+    a.repo = repo_slug(a.repo)
     findings = [json.loads(line) for line in open(a.findings) if line.strip()]
     if not a.dry_run:
         ensure_labels(a.repo)

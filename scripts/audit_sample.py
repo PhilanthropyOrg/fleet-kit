@@ -32,29 +32,36 @@ API = os.environ.get("AUDIT_QUERY_URL", "https://philanthropy.org/990/api/query"
 # Viken's set is fixed every run: the holes he reported must stay closed.
 VIKEN = ["362193608", "363258696"]  # Shriners, YMCA of the USA; Salvation Army rotates below
 
+# fk8: 106 fixture orgs (EIN 0000000xx, e.g. 000000024 "National Disco Ball Foundation") live in
+# organizations; every stratum leaves them out, so a sample is always a real org.
+_REAL = "{a}is_fixture IS NOT TRUE AND {a}ein NOT LIKE '0000000%'"
+_O = _REAL.format(a="o.")
 _REV = ("SELECT o.ein, o.name FROM organizations o JOIN filings f ON f.ein = o.ein "
-        "WHERE {where} GROUP BY o.ein, o.name ORDER BY {order} LIMIT {limit} OFFSET {off}")
+        "WHERE " + _O + " AND {where} GROUP BY o.ein, o.name ORDER BY {order} "
+        "LIMIT {limit} OFFSET {off}")
 # fk5: ORDER BY MAX(f.total_revenue) over the filings join hit the 3s cap every run; the
 # organizations.revenue_amt column answers "biggest first" in 0.3s.
-_BIG = ("SELECT ein, name FROM organizations WHERE {where} AND revenue_amt IS NOT NULL "
-        "ORDER BY revenue_amt DESC LIMIT {limit} OFFSET {off}")
+_BIG = ("SELECT ein, name FROM organizations WHERE " + _REAL.format(a="") + " AND {where} "
+        "AND revenue_amt IS NOT NULL ORDER BY revenue_amt DESC LIMIT {limit} OFFSET {off}")
 ORG_STRATA = {
     "largest": (_BIG, "TRUE", "", 10, 1),
     "hospital": (_BIG, "ntee_code IN ('E20','E21','E22','E24')", "", 1, 50),
-    "church_no_990": ("SELECT o.ein, o.name FROM organizations o WHERE o.ntee_code LIKE 'X2%' "
+    "church_no_990": ("SELECT o.ein, o.name FROM organizations o WHERE " + _O + " AND "
+                      "o.ntee_code LIKE 'X2%' "
                       "AND NOT EXISTS (SELECT 1 FROM filings f WHERE f.ein = o.ein) "
                       "ORDER BY o.ein LIMIT {limit} OFFSET {off}", "", "", 1, 5000),
     "foundation_daf": ("SELECT i.ein, o.name FROM filing_index i JOIN organizations o "
-                       "ON o.ein = i.ein WHERE i.return_type = '990PF' ORDER BY i.object_id "
-                       "DESC LIMIT {limit} OFFSET {off}", "", "", 1, 500),
+                       "ON o.ein = i.ein WHERE " + _O + " AND i.return_type = '990PF' "
+                       "ORDER BY i.object_id DESC LIMIT {limit} OFFSET {off}", "", "", 1, 500),
     "small_under_200k": (_REV, "f.total_revenue BETWEEN 1 AND 199999", "o.ein", 1, 5000),
     "filed_this_week": ("SELECT i.ein, o.name FROM filing_index i JOIN organizations o "
-                        "ON o.ein = i.ein ORDER BY i.object_id DESC LIMIT {limit} OFFSET {off}",
-                        "", "", 2, 50),
-    "salvation_army": ("SELECT ein, name FROM organizations WHERE name LIKE 'SALVATION ARMY%' "
-                       "ORDER BY ein LIMIT {limit} OFFSET {off}", "", "", 1, 40),
-    "viken": ("SELECT ein, name FROM organizations WHERE ein IN ('" + "','".join(VIKEN) + "') "
-              "ORDER BY ein LIMIT {limit} OFFSET {off}", "", "", 2, 1),
+                        "ON o.ein = i.ein WHERE " + _O + " ORDER BY i.object_id DESC "
+                        "LIMIT {limit} OFFSET {off}", "", "", 2, 50),
+    "salvation_army": ("SELECT o.ein, o.name FROM organizations o WHERE " + _O + " AND "
+                       "o.name LIKE 'SALVATION ARMY%' ORDER BY o.ein LIMIT {limit} OFFSET {off}",
+                       "", "", 1, 40),
+    "viken": ("SELECT o.ein, o.name FROM organizations o WHERE " + _O + " AND o.ein IN ('"
+              + "','".join(VIKEN) + "') ORDER BY o.ein LIMIT {limit} OFFSET {off}", "", "", 2, 1),
 }
 # fk6: job_postings is not exposed by /990/api/query (all 6 strata answered 400), so the jobs
 # lane reads the PUBLIC pages a job seeker sees, with the same x-atlas-test header.
