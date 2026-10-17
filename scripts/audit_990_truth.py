@@ -11,7 +11,8 @@ the IRS XML when given), so a test can pin it and a 10-14 render can prove it.
 Usage:
   audit_990_truth.py --html page.html [--xml return.xml] [--url URL]
   audit_990_truth.py --url https://philanthropy.org/990/report/<ein>/<slug> [--xml return.xml]
-    (live: sends x-atlas-test from $ATLAS_TEST_BYPASS, and HEADs every download link)
+    (live: sends x-atlas-test from $ATLAS_TEST_BYPASS, and opens every download link; with
+    --html, --url is the base the CSV link is opened against)
 Prints one JSON finding per line: {"check", "url", "evidence"}. Exit 0 always; a finding is
 data for audit_file.py, not a crash.
 """
@@ -34,7 +35,8 @@ _GRADES = re.compile(r">\s*(Looks good|Worth a look|Concern|Fine|Strong|Weak)\s*
 _MORE = re.compile(r"\+\s?(\d+)\s+more\b")
 _STREET = re.compile(
     r"\b\d{2,6}\s+(?:[NSEW]\.?\s+)?[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)?\s+"
-    r"(?:St|Street|Ave|Avenue|Blvd|Boulevard|Rd|Road|Dr|Drive|Ln|Lane|Way|Pkwy|Hwy)\b\.?")
+    r"(?:St|Street|Ave|Avenue|Blvd|Boulevard|Rd|Road|Dr|Drive|Ln(?!\s*\d)|Lane|Way|Pkwy|Hwy)\b\.?")
+_IRS_WORDS = {"Occupancy"}  # IRS expense line names that read like a street name
 _PERSONAL_MAIL = re.compile(r"[\w.+-]+@(?:gmail|yahoo|hotmail|aol|outlook|icloud)\.com", re.I)
 _PERSON = re.compile(r'<a\b[^>]*href="/990/person/[^"]*"[^>]*>(.*?)</a>', re.S)
 _SCH_ON = re.compile(r'class="sch on"[^>]*>\s*([A-Z]{1,3})\s')
@@ -54,15 +56,22 @@ def links(page: str) -> list[tuple[str, str]]:
     return out
 
 
-def csv_link_is_pdf(page: str) -> list[str]:
-    """V1b: a link labelled CSV that goes where a PDF link goes, or nowhere CSV-shaped."""
-    ls = links(page)
-    pdf = {h for h, t in ls if "PDF" in t}
+def csv_link_is_pdf(page: str, fetch=None) -> list[str]:
+    """V1b: a link labelled CSV must open a CSV. Judged by what the link serves after every
+    redirect (Content-Type and first bytes), never by its href: /get?fy=..&fmt=csv is fine.
+    fetch(href) -> (status, content type, first bytes); without one there is nothing to judge."""
+    if fetch is None:
+        return []
     bad = []
-    for h, t in ls:
-        if "CSV" in t and (h in pdf or ("csv" not in h.lower() and "format=" not in h)):
-            bad.append(f'"{t}" -> {h}' + (" (same href as the PDF link)" if h in pdf else ""))
-    return sorted(set(bad))
+    for h, t in sorted(set(links(page))):
+        if "CSV" not in t:
+            continue
+        status, ctype, head = fetch(h)
+        if head.startswith(b"%PDF") or "pdf" in ctype.lower():
+            bad.append(f'"{t}" -> {h} serves a PDF')
+        elif status != 200 or "csv" not in ctype.lower():
+            bad.append(f'"{t}" -> {h} serves {status} {ctype or "no type"}, not a CSV')
+    return bad
 
 
 def disclaimer_vs_grades(page: str) -> list[str]:
@@ -97,9 +106,11 @@ def garbage_names(page: str) -> list[str]:
 
 def privacy_leaks(page: str) -> list[str]:
     """Street addresses and personal mail on a public page (city and state only)."""
-    body = _text(page)
-    return ([f"street address: {m.group(0)!r}" for m in _STREET.finditer(body)]
-            + [f"personal email: {m.group(0)!r}" for m in _PERSONAL_MAIL.finditer(body)])
+    nodes = [htmllib.unescape(n) for n in _TAGS.split(page)]  # one rendered text node at a time
+    streets = [m.group(0) for n in nodes for m in _STREET.finditer(n)]
+    return ([f"street address: {st!r}" for st in streets if not _IRS_WORDS & set(st.split())]
+            + [f"personal email: {m.group(0)!r}" for n in nodes
+               for m in _PERSONAL_MAIL.finditer(n)])
 
 
 def xml_schedules(xml_text: str) -> set[str]:
@@ -126,7 +137,6 @@ def schedules_vs_xml(page: str, xml_text: str) -> list[str]:
 
 
 CHECKS = {
-    "csv_link_is_pdf": csv_link_is_pdf,
     "disclaimer_vs_grades": disclaimer_vs_grades,
     "hidden_rows": hidden_rows,
     "garbage_names": garbage_names,
@@ -134,37 +144,46 @@ CHECKS = {
 }
 
 
-def audit(page: str, url: str = "", xml_text: str | None = None) -> list[dict]:
+def audit(page: str, url: str = "", xml_text: str | None = None, fetch=None) -> list[dict]:
     found = [{"check": name, "url": url, "evidence": ev}
              for name, fn in CHECKS.items() for ev in fn(page)]
+    found += [{"check": "csv_link_is_pdf", "url": url, "evidence": ev}
+              for ev in csv_link_is_pdf(page, fetch)]
     if xml_text:
         found += [{"check": "schedules_vs_xml", "url": url, "evidence": ev}
                   for ev in schedules_vs_xml(page, xml_text)]
     return found
 
 
-def _get(url: str, method: str = "GET") -> tuple[int, str, str]:
+def _get(url: str, n: int | None = None) -> tuple[int, str, bytes]:
+    """GET url, following redirects; (final status, Content-Type, body or its first n bytes)."""
     headers = {"User-Agent": "Mozilla/5.0 (fleet auditor)"}
     if os.environ.get("ATLAS_TEST_BYPASS"):
         headers["x-atlas-test"] = os.environ["ATLAS_TEST_BYPASS"]
-    req = urllib.request.Request(url, headers=headers, method=method)
+    req = urllib.request.Request(url, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=25) as r:
-            body = r.read().decode("utf-8", "replace") if method == "GET" else ""
-            return r.status, r.headers.get("Content-Type", ""), body
+            return r.status, r.headers.get("Content-Type", ""), r.read(n)
     except urllib.error.HTTPError as e:
-        return e.code, e.headers.get("Content-Type", ""), ""
+        return e.code, e.headers.get("Content-Type", ""), b""
+
+
+def fetcher(url: str):
+    """fetch(href) for csv_link_is_pdf: opens a site-relative href against url's origin."""
+    base = re.match(r"https?://[^/]+", url).group(0)
+    return lambda href: _get(href if href.startswith("http") else base + href, 512)
 
 
 def live_links(page: str, url: str) -> list[dict]:
-    """Every download link answers 200 with the type its label promises."""
-    base = re.match(r"https?://[^/]+", url).group(0)
+    """Every PDF and XML link answers 200 with the type its label promises (CSV:
+    csv_link_is_pdf)."""
+    fetch = fetcher(url)
     out = []
     for href, text in sorted(set(links(page))):
-        if not re.search(r"\b(CSV|PDF|XML)\b", text) or not href.startswith("/"):
+        if not re.search(r"\b(PDF|XML)\b", text) or not href.startswith("/"):
             continue
-        status, ctype, _ = _get(base + href, "HEAD")
-        want = re.search(r"\b(CSV|PDF|XML)\b", text).group(1).lower()
+        status, ctype, _ = fetch(href)
+        want = re.search(r"\b(PDF|XML)\b", text).group(1).lower()
         if status != 200 or want not in ctype.lower():
             out.append({"check": "download_link_type", "url": url,
                         "evidence": f'"{text}" -> {href}: {status} {ctype or "no type"}'})
@@ -178,15 +197,17 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--url", default="")
     a = ap.parse_args(argv)
     xml_text = open(a.xml).read() if a.xml else None
+    fetch = fetcher(a.url) if a.url else None
     if a.html:
         page = open(a.html).read()
-        found = audit(page, a.url, xml_text)
+        found = audit(page, a.url, xml_text, fetch)
     else:
-        status, _, page = _get(a.url)
+        status, _, body = _get(a.url)
         if status != 200:
             print(json.dumps({"check": "page_status", "url": a.url, "evidence": str(status)}))
             return 0
-        found = audit(page, a.url, xml_text) + live_links(page, a.url)
+        page = body.decode("utf-8", "replace")
+        found = audit(page, a.url, xml_text, fetch) + live_links(page, a.url)
     for f in found:
         print(json.dumps(f))
     print(f"audit_990_truth: {len(found)} finding(s) on {a.url or a.html}", file=sys.stderr)

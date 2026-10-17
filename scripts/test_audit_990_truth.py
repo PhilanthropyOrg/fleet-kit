@@ -3,12 +3,16 @@
 
 Fixtures are cut from the real 2026-10-14 Shriners render (commit 79dc379f4): the CSV link and
 the PDF link share `/get?fy=2024`, and the footer says "does not rate, score, or rank" next to
-graded cards. RED without the fix: scripts/audit_990_truth.py does not exist (ImportError).
-Plain-python test, no pytest -- matches ci.yml.
+graded cards. On 10-14 that link served the PDF bytes (_SERVED). The CSV check is judged by
+what a link serves after redirects (fk7), so the 10-17 pass's /get?fy=..&fmt=csv -> text/csv is
+clean, and the street check reads one text node at a time ("174" + "Occupancy" + "Ln 16" are
+three cells of an expense table, not an address). Plain-python test, no pytest -- matches ci.yml.
 """
 from __future__ import annotations
 
 import sys
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -23,12 +27,50 @@ GRADES = '<span class="g">Looks good</span><span class="g">Concern</span>'
 NO_RATE = "<p>philanthropy.org does not rate, score, or rank organizations.</p>"
 XML = ('<Return xmlns="http://www.irs.gov/efile"><ReturnData><IRS990/><IRS990ScheduleA/>'
        "<IRS990ScheduleJ/><IRS990ScheduleO/></ReturnData></Return>")
+_SERVED = {"/990/report/362193608/get?fy=2024": (200, "application/pdf", b"%PDF-1.7"),
+           "/990/report/362193608/data.csv?fy=2024": (200, "text/csv", b"ein,fy\n")}
 
 
 def test_csv_link_that_serves_the_pdf_is_flagged():
-    found = at.csv_link_is_pdf(PDF + CSV_BAD)
-    assert found and "same href as the PDF link" in found[0], found
-    assert at.csv_link_is_pdf(PDF + CSV_OK) == []
+    found = at.csv_link_is_pdf(PDF + CSV_BAD, _SERVED.get)
+    assert found and "serves a PDF" in found[0], found
+    assert at.csv_link_is_pdf(PDF + CSV_OK, _SERVED.get) == []
+
+
+class _Site(BaseHTTPRequestHandler):
+    """/get?..&fmt=csv 302s to a CSV; /get?fy=2024 302s to PDF bytes sent as octet-stream."""
+    ROUTES = {"/r/get?fy=2024&fmt=csv": (302, "/r/export.csv"),
+              "/r/export.csv": (200, "text/csv", b"ein,fy,total\n362193608,2024,1\n"),
+              "/r/get?fy=2024": (302, "/r/990.pdf"),
+              "/r/990.pdf": (200, "application/octet-stream", b"%PDF-1.7 ...")}
+
+    def do_GET(self):
+        r = self.ROUTES[self.path]
+        self.send_response(r[0])
+        if r[0] == 302:
+            self.send_header("Location", r[1])
+            self.end_headers()
+            return
+        self.send_header("Content-Type", r[1])
+        self.end_headers()
+        self.wfile.write(r[2])
+
+    def log_message(self, *a):
+        pass
+
+
+def test_csv_check_follows_redirects_and_reads_the_bytes():
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), _Site)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        fetch = at.fetcher(f"http://127.0.0.1:{srv.server_port}/r")
+        pdf = '<a href="/r/get?fy=2024">990 PDF</a>'
+        ok = '<a href="/r/get?fy=2024&amp;fmt=csv"><span>CSV</span> 990 data</a>'
+        assert at.csv_link_is_pdf(pdf + ok, fetch) == []
+        bad = at.csv_link_is_pdf(pdf + '<a href="/r/get?fy=2024">CSV 990 data</a>', fetch)
+        assert bad == ['"CSV 990 data" -> /r/get?fy=2024 serves a PDF'], bad
+    finally:
+        srv.shutdown()
 
 
 def test_disclaimer_that_contradicts_grades_is_flagged():
@@ -49,6 +91,14 @@ def test_names_rows_and_privacy():
     assert at.privacy_leaks("<p>Tampa, FL</p>") == []
 
 
+def test_expense_table_cells_are_not_a_street_address():
+    row = ('<tr><td>$174</td><th><span class="bn-l">Occupancy</span>'
+           '<span class="bn-ln">Ln 16</span></th></tr>')
+    assert at.privacy_leaks(row) == [], at.privacy_leaks(row)
+    assert at.privacy_leaks("<p>174 Occupancy Ln 16</p>") == []
+    assert at.privacy_leaks("<p>174 Maple Ln, Tampa FL</p>") == ["street address: '174 Maple Ln'"]
+
+
 def test_schedules_shown_must_match_the_xml():
     page = ('<span class="sch on">A · Public support</span>'
             '<span class="sch on">O · Explanations</span><span class="sch off">J · Pay</span>')
@@ -58,7 +108,8 @@ def test_schedules_shown_must_match_the_xml():
 
 
 def test_the_10_14_shriners_shape_trips_both_v1b_and_v1d():
-    checks = {f["check"] for f in at.audit(PDF + CSV_BAD + NO_RATE + GRADES, "u")}
+    page = PDF + CSV_BAD + NO_RATE + GRADES
+    checks = {f["check"] for f in at.audit(page, "u", None, _SERVED.get)}
     assert {"csv_link_is_pdf", "disclaimer_vs_grades"} <= checks, checks
 
 
