@@ -19,8 +19,9 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import member_spec  # noqa: E402
 
 # member -> most bytes its charter file may hold. Set a little above the size it was slimmed
-# to on 2026-10-01 (gru 34.0 KB, nerd 20.6 KB), so a small real rule still fits.
-BUDGET_BYTES = {"gru": 36_000, "nerd": 22_000}
+# to on 2026-10-01 (gru 34.0 KB, nerd 20.6 KB), so a small real rule still fits. dumbledore and
+# jefe (2026-10-17, fk3) are pinned at their size before the retro loop's rules: slim, never raise.
+BUDGET_BYTES = {"gru": 36_000, "nerd": 22_000, "dumbledore": 14_725, "jefe": 3_650}
 
 
 def over_budget(root: Path = ROOT, budgets: dict = BUDGET_BYTES) -> list[str]:
