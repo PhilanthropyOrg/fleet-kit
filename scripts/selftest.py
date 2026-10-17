@@ -4105,7 +4105,7 @@ _ENTRYPOINT_SCHEDULED_SCRIPTS = (
     ("git_pull_guard.sh", "bash /fleet-kit/scripts/git_pull_guard.sh", "gh#68"),
     ("vp_due.sh", "bash /fleet-kit/scripts/vp_due.sh", "vp loop, 2026-09-08"),
     ("librarian-scrub (hourly shell scrub)", "run_member.sh librarian-scrub >>", "fleet-kit#784"),
-    ("librarian (daily reader, 00:15 Central)", "15 0 * * * root export GH_TOKEN=\\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh librarian >>", "fleet-kit#784"),
+    ("librarian (hourly intent pass at :15, full read at 00:15 Central)", "15 * * * * root export GH_TOKEN=\\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh librarian >>", "fleet-kit#784"),
     ("pacing_hold_check.py", "python3 /fleet-kit/scripts/pacing_hold_check.py", "gh#812"),
     ("rsi_stall_check.py", "python3 /fleet-kit/scripts/rsi_stall_check.py", "fk#1122"),
     ("charter_bloat_check.py (weekly)", "python3 /fleet-kit/scripts/charter_bloat_check.py", "fk#1122"),
@@ -8858,7 +8858,7 @@ def _hourly_at_minute_matches_entrypoint_cron_line():
             continue
         expected = int(sched["hourly_at_minute"])
         script = f"run_{name}_fanout.sh" if f"run_{name}_fanout.sh" in entry else f"run_member.sh {name}"
-        m = re.search(rf'echo "(\S+)[^\n"]*{re.escape(script)}', entry)
+        m = re.search(rf'echo "(\S+)[^\n"]*{re.escape(script)}(?![\w-])', entry)  # not librarian-scrub
         if not m:
             continue  # existence is _every_scheduled_member_is_actually_on_cron's job, not ours
         actual = m.group(1)
@@ -13313,7 +13313,10 @@ def _librarian_scrub_is_shell_hourly_and_librarian_runs_daily_gh784():
     assert scrub.get("kind") == "shell" and scrub["llm"]["runner"] == "members/librarian-scrub/librarian-scrub.sh", scrub
     assert os.access(ROOT / scrub["llm"]["runner"], os.X_OK)
     assert scrub["schedule"] == {"hourly_at_minute": 6}, scrub["schedule"]
-    assert lib["schedule"].get("daily_at") == "00:15" and lib["llm"]["model"] == "sonnet", lib["schedule"]
+    # Reif 2026-10-17 ("I don't want to keep having to explain this daily"): hourly, but a
+    # pregate keeps every hour without a new desk item at $0; the full read stays at 00:15.
+    assert lib["schedule"].get("hourly_at_minute") == 15 and lib["llm"]["model"] == "sonnet", lib["schedule"]
+    assert lib["llm"]["pregate"] == "members/librarian/pregate.sh", lib["llm"]
     deny = set(lib["llm"]["tools"]["deny"])
     assert {"Edit(/repo/**)", "Write(/repo/**)", "Edit(/fleet-kit/**)", "Write(/fleet-kit/**)"} <= deny, deny
     entry = (ROOT / "entrypoint.sh").read_text()
