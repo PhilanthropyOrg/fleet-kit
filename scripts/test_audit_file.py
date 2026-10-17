@@ -6,12 +6,18 @@ Plain-python test, no pytest -- matches ci.yml.
 from __future__ import annotations
 
 import datetime as dt
+import json
+import shlex
+import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import audit_file as af  # noqa: E402
+import audit_sample as asm  # noqa: E402
+import issue_create_hook as hook  # noqa: E402
+import quality_gate  # noqa: E402
 import audit_scoreboard as sb  # noqa: E402
 
 GOOD = {"pattern": "csv_link_is_pdf", "lane": "990-truth",
@@ -64,6 +70,59 @@ def test_scoreboard_counts_open_viken_rows_and_auditor_issues():
     assert [i["number"] for i in audit] == [1] and [i["number"] for i in hand] == [2]
     md = sb.render(sb.viken_holes(text), audit, hand, now)
     assert "| Auditor (lane:audit) | 1 |" in md and "| Viken (open rows in viken-status.md) | 2 |" in md
+
+
+def test_a_filed_finding_passes_the_issue_create_hook_and_gru_intake():
+    # fk5: the first real finding (990-PF source line) was approved, then never reached the board.
+    cmd = shlex.join(["gh", "issue", "create", "--repo", "PhilanthropyOrg/philanthropy",
+                      "--title", GOOD["title"], "--label", af.LABELS, "--body", af.issue_body(GOOD)])
+    assert hook.decide(cmd, list_open=lambda repo: []) is None
+    eligible, why = quality_gate.classify_candidate(af.LABELS.split(","), af.issue_body(GOOD), [])
+    assert eligible, why
+
+
+def test_a_finding_the_intake_gate_would_drop_is_not_filed():
+    bad = {**GOOD, "vision_link": "Targets KR2"}
+    [(action, _, detail)] = af.plan([bad], [], {af.pattern_key(bad): (True, "real")})
+    assert action == "drop" and "vision-link" in detail, detail
+
+
+def test_missing_labels_are_created_once_and_a_failed_create_says_so():
+    calls = []
+
+    def gh(args):
+        calls.append(args[:3])
+        if args[:2] == ["label", "create"] and args[2] == "quality:solid":
+            raise subprocess.CalledProcessError(1, "gh", stderr="HTTP 403")
+        return '["bug", "fleet:backlog"]' if args[:2] == ["label", "list"] else ""
+
+    try:
+        af.ensure_labels("o/r", gh=gh)
+        raise AssertionError("a label that cannot be created must stop the run")
+    except SystemExit as e:
+        assert "quality:solid" in str(e) and "HTTP 403" in str(e)
+    assert ["label", "create", "lane:audit"] in calls
+    assert ["label", "create", "bug"] not in calls
+
+
+def test_a_stratum_that_times_out_prints_an_error_row():
+    import contextlib
+    import io
+
+    real, asm.query = asm.query, lambda sql: (_ for _ in ()).throw(RuntimeError("canceling statement due to "
+                                                               "statement timeout"))
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        asm.main(["--lane", "orgs", "--slot", "0"])
+    asm.query = real
+    rows = [json.loads(line) for line in out.getvalue().splitlines()]
+    assert {r["stratum"] for r in rows if "timeout" in r.get("error", "")} == set(asm.ORG_STRATA)
+    assert "largest" in err.getvalue()
+
+
+def test_largest_reads_the_revenue_column_not_the_filings_join():
+    sql = asm.sql_for(asm.ORG_STRATA, 0)["largest"]
+    assert "ORDER BY revenue_amt DESC" in sql and "JOIN" not in sql, sql
 
 
 if __name__ == "__main__":

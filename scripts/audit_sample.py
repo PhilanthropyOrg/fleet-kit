@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 import time
 import urllib.request
 
@@ -26,9 +27,13 @@ VIKEN = ["362193608", "363258696"]  # Shriners, YMCA of the USA; Salvation Army 
 
 _REV = ("SELECT o.ein, o.name FROM organizations o JOIN filings f ON f.ein = o.ein "
         "WHERE {where} GROUP BY o.ein, o.name ORDER BY {order} LIMIT {limit} OFFSET {off}")
+# fk5: ORDER BY MAX(f.total_revenue) over the filings join hit the 3s cap every run; the
+# organizations.revenue_amt column answers "biggest first" in 0.3s.
+_BIG = ("SELECT ein, name FROM organizations WHERE {where} AND revenue_amt IS NOT NULL "
+        "ORDER BY revenue_amt DESC LIMIT {limit} OFFSET {off}")
 ORG_STRATA = {
-    "largest": (_REV, "f.tax_year >= 2022", "MAX(f.total_revenue) DESC", 10, 1),
-    "hospital": (_REV, "o.ntee_code IN ('E20','E21','E22','E24')", "MAX(f.total_revenue) DESC", 1, 50),
+    "largest": (_BIG, "TRUE", "", 10, 1),
+    "hospital": (_BIG, "ntee_code IN ('E20','E21','E22','E24')", "", 1, 50),
     "church_no_990": ("SELECT o.ein, o.name FROM organizations o WHERE o.ntee_code LIKE 'X2%' "
                       "AND NOT EXISTS (SELECT 1 FROM filings f WHERE f.ein = o.ein) "
                       "ORDER BY o.ein LIMIT {limit} OFFSET {off}", "", "", 1, 5000),
@@ -73,6 +78,8 @@ def query(sql: str) -> list[dict]:
                  "x-atlas-test": os.environ.get("ATLAS_TEST_BYPASS", "")})
     with urllib.request.urlopen(req, timeout=25) as r:
         data = json.load(r)
+    if isinstance(data, dict) and data.get("error"):  # a timeout is a 200 with {"error"}
+        raise RuntimeError(data["error"])
     return data.get("rows", data if isinstance(data, list) else [])
 
 
@@ -87,10 +94,14 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps({"stratum": stratum, "sql": sql}))
             continue
         try:
-            for row in query(sql):
+            rows = query(sql)
+            for row in rows:
                 print(json.dumps({"stratum": stratum, **row}))
+            if not rows:
+                print(json.dumps({"stratum": stratum, "error": "no rows"}))
         except Exception as e:  # noqa: BLE001 -- an unreadable stratum is reported, not hidden
             print(json.dumps({"stratum": stratum, "error": f"{type(e).__name__}: {e}"[:200]}))
+            print(f"audit_sample: stratum {stratum} unreadable: {e}"[:300], file=sys.stderr)
     return 0
 
 
