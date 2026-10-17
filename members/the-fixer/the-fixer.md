@@ -168,6 +168,9 @@ runner writes the QUIET record itself, $0). The line shapes it emits and what ea
     (never mechanically keep-both in a way that leaves the file syntactically broken -- same
     rule as gru's minions, persona_law.md's worktree-conflict guidance), re-run the test suite
     before pushing -- main moved under this PR, its last green run is stale.
+  **A flaky test is never pushed to green (Reif 10-17: CI is money).** Re-run the failed job
+  ONCE (`gh run rerun <run-id> --failed`); red again = file it per persona_law.md §7 and stop.
+  No empty or retry commit, ever; push_budget_gate.py refuses pushes past today's share.
   **Shared rule for wedged-check / green-but-parked's re-arm failure / check-never-ran: retry
   or re-arm ONCE, then persona_law.md §7 -- file once, stop retrying, never merge around it.**
   - `wedged-check` -- no code is broken; a check has been queued/in-progress past the staleness

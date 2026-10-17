@@ -42,12 +42,13 @@ def _hook_commands() -> list[str]:
     checkpoint PR leaves draft only through `minion_checkpoint.py ready`). So does
     issue_create_hook.py (philanthropy#8215: raw `gh issue create` is deduped here, not denied).
     So does pass_clock_hook.py (2026-10-04: a minion in its last 12 minutes reports instead of
-    starting one more wait).
+    starting one more wait). So does push_budget_gate.py (Reif 10-17: no push once today's
+    Actions money is spent).
     """
     scripts = Path(__file__).resolve().parent
     return [f"python3 {scripts / name}" for name in
             ("worktree_guard_hook.py", "pretest_push_hook.py", "checkpoint_pr_hook.py",
-             "issue_create_hook.py", "pass_clock_hook.py",
+             "issue_create_hook.py", "pass_clock_hook.py", "push_budget_gate.py",
              f"worktree_guard_hook.py {READ_GUARD_ARG}")]
 
 

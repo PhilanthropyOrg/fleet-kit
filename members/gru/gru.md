@@ -350,7 +350,7 @@ behind-pace week builds more. Spawn exactly those, release the `deferred`. Never
    un-claim or defer news as a new `gh issue comment`: per-item results go in your report (H§24).
 
 5. **Batch `chosen` into minion PASSES sized by real turn cost, not a fixed item count, and
-   spawn ONE minion per batch, not one per item** (every PR is a full CI run). Batch size is
+   spawn ONE minion per batch, not one per item** (every PR is a CI run; one PR per area). Batch size is
    an OUTPUT of the packer:
    ```
    BATCH_OBSERVED=$(python3 /fleet-kit/scripts/cost_bridge.py --batch-turns \

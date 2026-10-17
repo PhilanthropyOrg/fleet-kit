@@ -93,4 +93,6 @@ def section(slug: str, now: float, run) -> list[str]:
         started = build_lane_rule.started_in_window(runs.read_text(errors="ignore").splitlines(), now=now)
     except OSError:
         started = 0
-    return lines(account_meter.load(now=now), started, build_lane_rule.hour_cap(), merged)
+    import push_budget_gate
+    return lines(account_meter.load(now=now), started, build_lane_rule.hour_cap(), merged) + [
+        f"- {push_budget_gate.summary(now)}"]

@@ -284,7 +284,9 @@ if [ -n "${ONTO_PR:-}" ]; then
   # fk#1202: the rebase linearizes any merge-from-main commits the PR branch already carried, so
   # a plain push can never fast-forward and the built commits were dropped with the worktree.
   # --force-with-lease rewrites only if nobody else pushed since our fetch.
-  PUSH_ERR=$(cd "$WT_PATH" && git push --force-with-lease origin "HEAD:$WT_BRANCH" 2>&1 1>>"$LOG"); PUSH_RC=$?
+  # Reif 10-17: no push to philanthropy once today's Actions money is spent (push_budget_gate.py).
+  PUSH_ERR=$(python3 "$KIT_DIR/scripts/push_budget_gate.py" --check --wt "$WT_PATH" 2>&1) && \
+    PUSH_ERR=$(cd "$WT_PATH" && git push --force-with-lease origin "HEAD:$WT_BRANCH" 2>&1 1>>"$LOG"); PUSH_RC=$?
   if [ "$PUSH_RC" -eq 0 ]; then
     PR_NUM="$ONTO_PR"
     log "item #$ITEM_ID: folded onto PR #$ONTO_PR ($WT_BRANCH), pushed"

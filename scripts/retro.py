@@ -114,6 +114,14 @@ def budget(meter: dict | None) -> str:
     return "; ".join(out) or "no reading"
 
 
+def push_gate_line(day: dt.date) -> str:
+    """Yesterday's push gate verdicts; a push past the Actions cap is a fleet bug (Reif 10-17)."""
+    import push_budget_gate
+    n = push_budget_gate.today_counts(dt.datetime(day.year, day.month, day.day, 12).timestamp())
+    line = f"push gate {n.get('allow', 0)} pushed, {n.get('refuse', 0)} refused"
+    return line + (f", FLEET BUG {n['past_cap']} past the cap" if n.get("past_cap") else "")
+
+
 def audit_counts(text: str) -> dict[str, int]:
     """{'Auditor': n, 'Viken': n, 'By hand': n} from the scoreboard table; {} when absent."""
     n = {k: int(v) for k, v in re.findall(r"^\| (Auditor|Viken|By hand)[^|]*\| (\d+) \|", text, re.M)}
@@ -188,7 +196,8 @@ def main(argv: list[str] | None = None) -> int:
         directions(day, read_text(log_dir() / "INTENT.md"), SHARES / "inbox-copy"),
         charter_change(_rows(log_dir() / "predictions.jsonl"), day),
         scoreboard(_kpi(), day, before),
-        budget(_read_json(SHARES / "meter.json") or _read_json(SHARES / "meter-snapshot.json")),
+        budget(_read_json(SHARES / "meter.json") or _read_json(SHARES / "meter-snapshot.json"))
+        + "; " + push_gate_line(dt.date.fromisoformat(day)),
         audit(read_text(SCOREBOARD)),
     )
     out = a.out / f"retro-{dt.date.fromisoformat(day) + dt.timedelta(days=1)}.md"

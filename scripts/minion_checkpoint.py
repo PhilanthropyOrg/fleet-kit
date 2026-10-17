@@ -309,6 +309,11 @@ def save(wt: str, branch: str, items: list[int], reason: str) -> dict:
             res["why"] = "open non-draft PR would not go back to draft -- not pushing untested WIP"
             return res
         res["redrafted"] = True
+    import push_budget_gate  # Reif 10-17: no push once today's Actions money is spent
+    ok, why = push_budget_gate.check(wt)
+    if not ok:
+        res["why"] = f"push_budget_gate: {why}"
+        return res
     rc, out = _git(wt, "push", "--no-verify", "-u", "origin", f"HEAD:refs/heads/{branch}", timeout=180)
     if rc != 0:
         res["why"] = f"push failed: {out[-300:]}"
