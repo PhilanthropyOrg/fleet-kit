@@ -15953,6 +15953,9 @@ def _roster_is_ten_members_after_fk1195_fold():
         # fk#1495: the owner asked for a go-to-market member. Ships enabled:false with no cron
         # line (asserted below), so the scheduled roster is unchanged until he turns it on.
         "growth",
+        # a1 (Reif, 2026-10-16): "we just need fleet auditors" -- sentry checks a page loads,
+        # auditor checks it is TRUE against the filing. Four lanes on cron every 2h.
+        "auditor",
     }
     assert set(member_dirs) == expected, \
         f"roster drifted from fk#1195's fold: have {sorted(member_dirs)}, want {sorted(expected)}"

@@ -72,7 +72,11 @@ never create new ones. Folded duties live in the charters that took them (marie'
 nerd's datadog lane, gru's own step 9). vp and librarian-scrub stay separate dispatch targets
 despite the letter of that budget — both hit a real tool-grant/cadence conflict with the member
 they'd otherwise fold into (see judge-judy.md and librarian.md); that is a stated deviation,
-not an oversight.
+not an oversight. auditor is a third, by Reif's ask (a1, 2026-10-16): sentry checks that a page
+loads, auditor checks that it is true against the IRS filing or the job posting. Its four lanes
+(990-truth, data-in, scout-report, jobs) each run every 2h on cron (:09/:39), and its only way
+to file is `scripts/audit_file.py` (dedupe + a no-tools kill pass). Item-to-check map:
+members/auditor/auditor.md.
 
 Not every start is a cron slot: gru spawns minion, and nerd with `lane=<name>`; the-fixer also
 wakes on a red-CI webhook; vp only works when `vp_due.sh` finds `quality:*` labels; jefe's

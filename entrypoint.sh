@@ -177,7 +177,7 @@ case "${1:-cron-foreground}" in
     # `FLEET_CRON_MEMBERS=judge-judy`) to schedule only those. dont-shoot-the-messenger is
     # excluded from ALL_CRON_MEMBERS because its own cron line is already commented out
     # (archived 2026-09-04, see below) -- re-enabling it is a separate step from this mechanism.
-    ALL_CRON_MEMBERS=(the-fixer judge-judy gru marie sentry librarian librarian-scrub red dont-shoot-the-messenger jefe dumbledore)
+    ALL_CRON_MEMBERS=(the-fixer judge-judy gru marie sentry librarian librarian-scrub red dont-shoot-the-messenger jefe dumbledore auditor)
     if [ -n "${FLEET_CRON_MEMBERS:-}" ]; then
       IFS=', ' read -ra RESOLVED_CRON_MEMBERS <<< "$FLEET_CRON_MEMBERS"
       for m in "${RESOLVED_CRON_MEMBERS[@]}"; do
@@ -403,6 +403,14 @@ case "${1:-cron-foreground}" in
       # its own, it runs wherever gru dispatches it.
       if cron_member_enabled gru; then
         echo "53 13 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh nerd --task \"lane=orgverify — the daily end-to-end owner walk (MANDATE)\" >> $LOG_DIR/nerd.log 2>&1"
+      fi
+      # a1 (Reif, 2026-10-16): auditor, "is it TRUE", four lanes each every 2h, staggered so
+      # one lane runs per hour slot. :09 and :39 are unclaimed.
+      if cron_member_enabled auditor; then
+        echo "9 0,2,4,6,8,10,12,14,16,18,20,22 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh auditor --task \"lane=990-truth\" >> $LOG_DIR/auditor.log 2>&1"
+        echo "39 0,2,4,6,8,10,12,14,16,18,20,22 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh auditor --task \"lane=data-in\" >> $LOG_DIR/auditor.log 2>&1"
+        echo "9 1,3,5,7,9,11,13,15,17,19,21,23 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh auditor --task \"lane=scout-report\" >> $LOG_DIR/auditor.log 2>&1"
+        echo "39 1,3,5,7,9,11,13,15,17,19,21,23 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh auditor --task \"lane=jobs\" >> $LOG_DIR/auditor.log 2>&1"
       fi
       # fleet-kit#785: red, the adversary, every 6h (paced -- held when the hour has no headroom).
       if cron_member_enabled red; then
