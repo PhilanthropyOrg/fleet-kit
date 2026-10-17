@@ -27,6 +27,8 @@ METRICS (name[:member]; every one is computed over a window of `hours` ending at
                                   count, e.g. back_in_hq, verified_badge), from north.py's hourly
                                   snapshot nearest `at` (within LADDER_TOL_H)
   ladder_share:<stage>            those orgs / orgs at `approved`, same snapshot -- 0..1
+  merged_prs_per_day[:<priority>] product-repo PRs merged in 24h, all or one MANDATE priority
+                                  (jobs, orgverify, hq, audit), from tank.py's hourly snapshot
   reif_repeats_per_day            desk inbox items that say again what INTENT.md's Keys hold
                                   (intent_repeats.py), per day; target 0
 `<member>` may be `*` (or omitted where shown optional) for the whole fleet.
@@ -82,6 +84,8 @@ CATALOG = {
     "ladder_orgs": "orgs at <stage> of the after-claim ladder, 30-day count (north.py hourly snapshot)",
     "ladder_share": "orgs at <stage> / orgs at approved, same snapshot (0..1)",
     # Reif 2026-10-17: "I don't want to keep having to explain this daily." A repeat is a miss.
+    # Reif 2026-10-17 "use the whole tank": while budget runs ahead of the week, bet on shipping.
+    "merged_prs_per_day": "product-repo PRs merged in 24h [:jobs|orgverify|hq|audit] (tank.py hourly snapshot)",
     "reif_repeats_per_day": "desk inbox items repeating an INTENT.md key, per day (intent_repeats.py)",
 }
 
@@ -105,6 +109,7 @@ DIRECTION = {
     "ladder_orgs": "higher",
     "ladder_share": "higher",
     "reif_repeats_per_day": "lower",
+    "merged_prs_per_day": "higher",
 }
 
 LADDER_TOL_H = 2.0
@@ -363,6 +368,11 @@ def compute(name: str, rows: list[dict], at: float | None = None, hours: float =
             return float(v)
         base_n = (snap or {}).get("approved")
         return (float(v) / base_n) if base_n else None
+    if base == "merged_prs_per_day":
+        import tank
+        key = f"merged_prs_24h:{args[0]}" if args and args[0] else "merged_prs_24h"
+        v = (ladder_at(at, tank.snapshot_path()) or {}).get(key)
+        return float(v) if isinstance(v, (int, float)) else None
     if base == "reif_repeats_per_day":
         import intent_repeats
         n = intent_repeats.count_repeats(at, hours)
