@@ -376,6 +376,10 @@ case "${1:-cron-foreground}" in
       if cron_member_enabled dumbledore; then
         echo "13 */3 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh dumbledore >> $LOG_DIR/dumbledore.log 2>&1"
       fi
+      # retro.py (Reif, 2026-10-17): G's daily retro at 7:00 Central, written to
+      # /fleet-kit/shares/g/retro-<date>.md. TZ=America/Chicago above makes this 7:00 across DST.
+      # Sources fleet.env for FLEET_NUMBER_URL/TOKEN (the /990/api/signals/kpi read).
+      echo "0 7 * * * root export FLEET_LOG_DIR=$LOG_DIR && [ -f \"\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}\" ] && { set -a; . \"\${FLEET_ENV_FILE:-/fleet-kit/fleet.env}\"; set +a; }; python3 /fleet-kit/scripts/retro.py >> $LOG_DIR/retro.log 2>&1"
       # the-fixer -> the owning member when a fleet PR sits idle > 4h (philanthropy#8215). Its
       # own shell line at the-fixer's minute, not inside check.sh: a 30-50s gh list must never
       # delay an incident pregate.

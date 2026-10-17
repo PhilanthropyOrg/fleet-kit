@@ -27,6 +27,8 @@ METRICS (name[:member]; every one is computed over a window of `hours` ending at
                                   count, e.g. back_in_hq, verified_badge), from north.py's hourly
                                   snapshot nearest `at` (within LADDER_TOL_H)
   ladder_share:<stage>            those orgs / orgs at `approved`, same snapshot -- 0..1
+  audit_lead                      holes the auditor found minus holes Viken found this week, from
+                                  /fleet-kit/shares/g/audit-scoreboard.md as it reads now
 `<member>` may be `*` (or omitted where shown optional) for the whole fleet.
 
 None means "unavailable" (no rows in the window, or a zero denominator) -- never 0, so a
@@ -79,6 +81,8 @@ CATALOG = {
     # could name a user outcome. These read the product's ladder that north.py already fetches.
     "ladder_orgs": "orgs at <stage> of the after-claim ladder, 30-day count (north.py hourly snapshot)",
     "ladder_share": "orgs at <stage> / orgs at approved, same snapshot (0..1)",
+    # Reif 2026-10-17: holes surface themselves; by 10-24 the auditor finds more than Viken.
+    "audit_lead": "auditor finds minus Viken finds this week (audit-scoreboard.md, read now)",
 }
 
 # gh#789: direction only for metrics whose "better" is unambiguous from CATALOG's own
@@ -100,6 +104,7 @@ DIRECTION = {
     "ci_minutes_per_day": "lower",
     "ladder_orgs": "higher",
     "ladder_share": "higher",
+    "audit_lead": "higher",
 }
 
 LADDER_TOL_H = 2.0
@@ -358,6 +363,10 @@ def compute(name: str, rows: list[dict], at: float | None = None, hours: float =
             return float(v)
         base_n = (snap or {}).get("approved")
         return (float(v) / base_n) if base_n else None
+    if base == "audit_lead":
+        import retro
+        n = retro.audit_counts(retro.read_text(retro.SCOREBOARD))
+        return float(n["Auditor"] - n["Viken"]) if n else None
     raise ValueError(base)  # unreachable: parse() already rejected unknown names
 
 
