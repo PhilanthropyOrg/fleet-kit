@@ -64,10 +64,33 @@ def _actions_usd(path: str) -> float | None:
         return None
 
 
+def _budget_from_fleet_env() -> str:
+    """FLEET_ACTIONS_BUDGET_USD read straight from fleet.env when the process env lacks it.
+
+    2026-10-17: the hook runs inside `claude -p`; a launch that did not source fleet.env (G's
+    podman exec, an ad-hoc --summary) saw no budget, fell back to the org's $150, computed a
+    $6.26 share and WROTE THAT INTO THE SHARED 10-MINUTE CACHE, so every member read 276%
+    and nothing pushed. The file is the source of truth; read it before guessing."""
+    for cand in (os.environ.get("FLEET_ENV_FILE", ""), "/fleet-kit/fleet.env", "fleet.env"):
+        if not cand:
+            continue
+        try:
+            for line in open(cand, encoding="utf-8"):
+                line = line.strip()
+                if line.startswith("FLEET_ACTIONS_BUDGET_USD="):
+                    return line.split("=", 1)[1].strip().strip('"').strip("'")
+        except OSError:
+            continue
+    return ""
+
+
 def _budget_usd() -> float | None:
-    env = os.environ.get("FLEET_ACTIONS_BUDGET_USD", "").strip()
+    env = os.environ.get("FLEET_ACTIONS_BUDGET_USD", "").strip() or _budget_from_fleet_env()
     if env:
-        return float(env)
+        try:
+            return float(env)
+        except ValueError:
+            pass
     out = _run(["gh", "api", f"orgs/{ORG}/settings/billing/budgets", "--jq",
                 '[.budgets[] | select(.budget_product_sku=="actions") | .budget_amount][0]'])
     try:
