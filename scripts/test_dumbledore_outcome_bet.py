@@ -1,8 +1,10 @@
-"""Dumbledore's charter must send it to a claim-ladder bet when none is open.
+"""Dumbledore's charter must send most bets to a product number.
 
 #1655 gave predict.py the ladder_share / ladder_orgs metrics, but the charter kept saying
 "predict on a per-pass metric", so the next pass (#96, 10-12) bet on minion items_per_run
-again. This test fails if the charter stops naming the ladder metrics in its bet step.
+again. 2026-10-17 (desk): 3 of 25 bets since 10-09 still touched the product, so the rule is now
+2 of every 3 bets on `product:*` or `ladder_*` (predict.py enforces it). This test fails if
+the charter stops saying so in its bet step.
 """
 import re
 import unittest
@@ -18,12 +20,13 @@ def bet_step(text: str) -> str:
 
 
 class OutcomeBet(unittest.TestCase):
-    def test_bet_step_requires_an_open_ladder_bet(self):
+    def test_bet_step_puts_two_of_three_bets_on_the_product(self):
         step = bet_step(CHARTER.read_text())
         self.assertTrue(step, "step 4 of dumbledore.md not found")
-        self.assertIn("ladder_share:<stage>", step)
-        self.assertIn("ladder_orgs:<stage>", step)
-        self.assertIn("weakest step", step)
+        self.assertIn("2 of every 3 bets name a product metric", step)
+        self.assertIn("`product:<name>`", step)
+        self.assertIn("`ladder_*`", step)
+        self.assertIn("--over-limit", step)
 
 
 if __name__ == "__main__":

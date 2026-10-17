@@ -41,9 +41,10 @@ say so in the report with evidence and leave it to a human.
    pass: `python3 /fleet-kit/scripts/ci_minutes.py --by` and the OrgVerify ladder (NORTH
    section 2). Print `Mandate: <priority> | <limit>: <today's reading> (<over/under>)`. A limit
    the fleet is over is the headline, and step 4's one change is about that limit, bet with
-   `--metric ci_minutes_per_day`, **unless a `ci_minutes_per_day` row is already open**: then
-   print the reading and do not re-trace CI this pass (a second bet confounds the first). Levers
-   priced 10-11 (H§1): re-open only on a new fact.
+   `--metric ci_minutes_per_day --over-limit "<limit>: <reading>"`, **unless a
+   `ci_minutes_per_day` row is already open**: then print the reading and do not re-trace CI
+   this pass (a second bet confounds the first). Levers priced 10-11 (H§1): re-open only on a
+   new fact.
    A priority with no number you can read is your first job (as in Authority below). The
    mandate changes only when Reif edits that file; never rewrite it, never infer a new one.
 
@@ -131,11 +132,11 @@ say so in the report with evidence and leave it to a human.
    Always `--by-hours 24` (predict.py scores the 24h ending at due, so the window holds only
    post-change runs; Reif, 2026-09-30: "decrease the time between cycling and self
    reflection"). Baseline defaults to the metric now; a target it already meets is not a
-   prediction. **Predict on a per-pass metric the diff itself limits** (`avg_turns`,
-   `avg_cost_usd`, `quiet_rate`, `signal_rate`, `status_per_day:timed_out`). Never a count of
-   passes (`runs_per_day`, `status_per_day:quiet`, `avg_duration_s`): cron sets those (H§2). **Keep one outcome bet open.** If no `ladder_share:<stage>` or
-   `ladder_orgs:<stage>` row is open, this pass's change targets the weakest step of the
-   OrgVerify ladder (NORTH section 2) and bets on it; read stages with `fleet_metrics.py list`.
+   prediction. **Bet on the vision** (G, 10-17). At least 2 of every 3 bets name a product metric:
+   `product:<name>` (names: `product_metrics.py show`) or `ladder_*`, the one the MANDATE's top
+   priority moves. Plumbing (`avg_turns`, `quiet_rate`) only while over a MANDATE limit, with
+   `--over-limit "<limit>: <reading>"`; predict.py refuses a third plumbing bet in a row
+   without it. Never a count of passes (`runs_per_day`, `avg_duration_s`): cron sets those (H§2).
    **One open row per member** until it resolves, or the readings
    confound. No `add`, no pass. Run
    `gh pr view <PR> -R <repo> --json state,autoMergeRequest` before you `add`, and over every
