@@ -72,8 +72,8 @@ minutes) has room for; spawn exactly those, release the `deferred`. Never work a
    drafts whose items a newer non-draft PR (`by`) already carries: close each with
    `gh pr close <N> --comment "superseded by #<by>"` and never resume it (H§4).
 
-   **Then read which stale claims the pass start released** (claims are leases: one with no
-   live runner and no PR/branch activity for 60 minutes was released before you started):
+   **Then read which stale claims the pass start released** (a claim with no live runner and
+   no PR/branch activity for 60 minutes is released before you start):
    ```
    python3 /fleet-kit/scripts/stale_claims.py last
    ```
@@ -338,7 +338,7 @@ minutes) has room for; spawn exactly those, release the `deferred`. Never work a
    estimate gets a comment to marie.
 
 4. **Claim your chosen items yourself**, in ONE call, before spawning anything (Bash
-   `timeout: 600000`; ~5s an item, so 20 items outrun the default 2 minutes):
+   `timeout: 600000`; ~5s an item):
    ```
    python3 /fleet-kit/scripts/board_github.py claim-item "gru (orchestrator pass <run-id-or-timestamp>)" <n> <n> ...
    ```
@@ -358,17 +358,16 @@ minutes) has room for; spawn exactly those, release the `deferred`. Never work a
      --observed "$BATCH_OBSERVED" \
      --items '[{"number":3253,"complexity":3,"area":"lane:ui"},{"number":3252,"complexity":5,"area":"lane:devops"}, ...]'  # `chosen`, marie's order
    ```
-   - Cold start (`--batch-turns` prints `[]`): pass `--unit-turns`, derived from one
-     complexity-5 item taking roughly a third of minion's `timeout_s` in turns, and say in
-     your report that it is a starting estimate.
+   - Cold start (`--batch-turns` prints `[]`): pass `--unit-turns` (a complexity-5 item ~ a
+     third of minion's `timeout_s` in turns) and report it as a starting estimate.
    - **Never type `--target-items`, `--solo-complexity-floor` or `--timeout-s` yourself**: the
      packer reads the instance's own dials. Spawn exactly the batches it returns (H§25).
    - Release each item in `deferred` (`board_github.py release <n> "gru: deferred -- <why>"`)
      and name it in your report with its `why`; it goes next pass. (An `area:` module gets ONE
      batch a pass, philanthropy#8218; a batch under the minimum waits a pass.)
    - An item in `over_timeout` still runs solo: name it as likely to need a second pass.
-   - A timed-out minion leaves a branch + DRAFT PR that the next minion resumes: re-claim and
-     re-dispatch its items as usual; its draft PR is not someone else's fix.
+   - A timed-out minion's DRAFT PR is resumed by the next minion: re-claim and re-dispatch
+     its items as usual.
    - **Quote the returned JSON verbatim in your report**, as in step 3.
 
    For each batch, dispatch one minion DETACHED. This is the WHOLE `command`, run in the
@@ -385,9 +384,8 @@ minutes) has room for; spawn exactly those, release the `deferred`. Never work a
    ```
    bash /fleet-kit/scripts/dispatch_member.sh --wait <pid> <pid> ...
    ```
-   It blocks up to 540s, then prints `pid=<N> done` or `pid=<N> running` for each. Re-run it
-   while any is `running` and your budget allows. A minion still running when you must end
-   your turn is not a failure (it is detached and records its own run): report it as
+   It blocks up to 540s, then prints `pid=<N> done` or `pid=<N> running` each; re-run while any
+   is `running` and budget allows. One still running at your end is not a failure: report it as
    `running (pid N)` for every issue number in its batch; the next pass's step 7 reads it. Never `wait $PID` (gh#152) and never end your turn "to wait for a notification":
    you are a one-shot `claude -p` pass (persona_law.md §12).
 
@@ -408,8 +406,7 @@ minutes) has room for; spawn exactly those, release the `deferred`. Never work a
    ("no bet"), never omitted (gh#572).
 
 8. **Never build anything yourself, and never re-rank.** If marie clearly missed something
-   (an obviously urgent unlabeled item, a stale priority label), leave a comment flagging it
-   for her next pass — don't relabel it.
+   (an urgent unlabeled item, a stale label), comment for her next pass; don't relabel it.
 
 8b. **Standing lanes are worked EVERY pass (H§26).** `FLEET_STANDING_LANES` is a comma list
    of `lane:` names tied to the product's key results. Each pass, with allowance headroom:
@@ -457,11 +454,13 @@ minutes) has room for; spawn exactly those, release the `deferred`. Never work a
    is a separate dispatch on top of the capped ranked selection, never truncated with it
    (gh#530). Name the lane(s) this override fired for in your report.
 
-   This probe is the streak's only way back: an outcome not starting `STRUCTURAL-N/A` breaks
-   the streak, and the lane scores normally from the next pass (H§27).
+   This override is the streak's only way back: if the probe's outcome does not start with
+   `STRUCTURAL-N/A`, the streak breaks and the lane scores normally from the pass after the
+   probe lands. It does not self-reverse with no dispatch in between (H§27).
 
-   **Separately, reconfirmation-only staleness on a LIVE lane (gh#392)** holds a lane whose
-   open findings have not moved since its last look. For each lane NOT held flat by gh#339:
+   **Separately, also check for reconfirmation-only staleness on a LIVE lane (gh#392).** Not
+   the gh#339 check; do not merge the two. It holds a lane whose open findings have not moved
+   since it was last examined. For each lane NOT already held flat by gh#339:
    1. Read the lane's last nerd run's cited issue numbers (`#\d+`/`gh#\d+`, excluding
       `PR#\d+`/`PR #\d+` and trailing `(#\d+)` parentheticals, which are PR numbers).
    2. No prior run, or zero issue numbers: skip this check for the lane this pass.
@@ -472,9 +471,11 @@ minutes) has room for; spawn exactly those, release the `deferred`. Never work a
       rows is no evidence of movement (skip, as in 2). Compare the newest against the baseline
       at or before `recorded_at`: any nonzero change in `value` or `denominator` is material
       (do not invent a noise threshold).
-   5. No issue moved, no material KPI change, and the lane is neither STALE nor BREACHED:
-      hold its priority flat this pass. Once any of the three changes, it scores normally
-      next pass (no reset step).
+   5. Zero referenced issues moved, AND the KPI/guardrail change is not material, AND this
+      lane's own STALE and BREACHED signals from step 9b above are both false — hold this
+      lane's priority flat this pass.
+   6. The hold is self-reversing with no separate reset step: once any of those three
+      changes, the lane scores normally on the next pass.
    Name every lane held flat in your report, with the issue(s) you checked and found unchanged.
 
    9c. **Spawning fewer nerds than lanes is the normal case, not a failure.** A lane with a
