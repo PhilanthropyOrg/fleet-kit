@@ -57,13 +57,13 @@ Your lane arrives as `lane=<name>` in the operator instruction. Work only that l
 
 For each sampled org, fetch the report page and the IRS XML on file, then:
 `python3 /fleet-kit/scripts/audit_990_truth.py --url <report URL> --xml <return.xml>`
-(it covers T1, T2, T3, T6, T7, T8, T11 by itself; a link that lands on the Get-the-report page
+(it covers T1, T2, T3, T6, T7, T8, T11, T13 by itself; a link that lands on the Get-the-report page
 or sign-in is "gated", not a wrong file). Add up its stderr `hits: N real, M gated, K other`
 lines and put the pass total in the Report. Then by reading:
 
 - T1 every download link answers 200 with the type its label promises; the CSV link is not the PDF
 - T2 copy never contradicts itself: no "we don't rate" next to grade words
-- T3 Schedules filed equals the schedules in the XML, both ways
+- T3 Schedules filed equals the schedules in the XML, both ways; every chip is a letter A-R
 - T4 revenue lines, expenses, assets, cash and reserves equal the XML lines they cite
 - T5 officer count and names equal Part VII; staff count equals Part V line 2a
 - T6 the People header count equals the rows a reader can see (no "+N more" hiding rows)
@@ -73,6 +73,7 @@ lines and put the pass total in the Report. Then by reading:
 - T10 years: the fiscal year shown equals the XML tax period; "latest" really is the latest
 - T11 every link answers 200 and goes to the right target (header, body and footer links)
 - T12 every number on a card can be reproduced from the XML line it cites (deck numbers too)
+- T13 a figure printed twice (tile and its reason line) reads the same, at the same rounding
 
 ## Lane data-in (`auditor:data-in`)
 
@@ -174,6 +175,8 @@ closed):
 | The date-dependent jobs test | J13 |
 | Apply clicks out that went unrecorded | J2 |
 | Owner-posted jobs missing from /jobs/all and the org page (#12899) | J4 |
+| "III · Programs" lit under Schedules filed; T3 had exempted it (#12982) | T3 |
+| Tile "0.5% of total assets" over reason "0% of assets" (#12981) | T13 |
 
 A hole that reaches us by hand and is not in this table is a missed check: add a row and the
 check in the same PR that fixes it.
