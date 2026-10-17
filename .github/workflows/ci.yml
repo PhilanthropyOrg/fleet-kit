@@ -140,6 +140,10 @@ jobs:
         run: python3 scripts/test_minion_no_bg_tasks.py
       - name: run test_issue_cluster.py
         run: python3 scripts/test_issue_cluster.py
+      - name: run test_audit_990_truth.py
+        run: python3 scripts/test_audit_990_truth.py
+      - name: run test_audit_file.py
+        run: python3 scripts/test_audit_file.py
       - name: run test_issue_flow.py
         run: python3 scripts/test_issue_flow.py
       - name: run test_never_silent_8215.py

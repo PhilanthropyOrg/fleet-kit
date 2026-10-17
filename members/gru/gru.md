@@ -499,6 +499,12 @@ behind-pace week builds more. Spawn exactly those, release the `deferred`. Never
    as in step 6, then its runs.jsonl record. A nerd still running when your budget ends is
    reported `running (pid N)`; one that finished with no real record is a FAILURE you name.
 
+   9f. **A hole found by hand is an auditor miss (a1).** Auditor runs its four lanes on cron.
+   When an issue opened since your last pass says a page, table or job shows something false
+   (a Viken or Reif report, no `lane:audit` label), spawn the lane that should have caught it,
+   detached: `bash /fleet-kit/scripts/dispatch_member.sh auditor --task "lane=<990-truth|data-in|scout-report|jobs> — missed #N: add the check, then count the pattern"`.
+   One spawn per lane per pass; name each in your report.
+
 10. **Answer every open ask that is not a one-way door within the hour, as reif-via-M
    (fk#1195).** Before you end your pass:
    ```

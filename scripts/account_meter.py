@@ -34,7 +34,7 @@ STALE_S = 3 * 3600           # an older file is no reading at all
 
 def load(path: str | None = None, now: float | None = None) -> list[dict]:
     """Rows from FLEET_METER_FILE, or [] when unset, missing, malformed or stale."""
-    path = path or os.environ.get("FLEET_METER_FILE") or DEFAULT_FILE
+    path = path if path is not None else (os.environ.get("FLEET_METER_FILE") or DEFAULT_FILE)
     now = time.time() if now is None else now
     try:
         data = json.loads(Path(path).read_text()) if path else {}
