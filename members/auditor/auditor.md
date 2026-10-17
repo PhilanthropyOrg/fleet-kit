@@ -57,7 +57,9 @@ Your lane arrives as `lane=<name>` in the operator instruction. Work only that l
 
 For each sampled org, fetch the report page and the IRS XML on file, then:
 `python3 /fleet-kit/scripts/audit_990_truth.py --url <report URL> --xml <return.xml>`
-(it covers T1, T2, T3, T6, T7, T8, T11 by itself). Then by reading:
+(it covers T1, T2, T3, T6, T7, T8, T11 by itself; a link that lands on the Get-the-report page
+or sign-in is "gated", not a wrong file). Add up its stderr `hits: N real, M gated, K other`
+lines and put the pass total in the Report. Then by reading:
 
 - T1 every download link answers 200 with the type its label promises; the CSV link is not the PDF
 - T2 copy never contradicts itself: no "we don't rate" next to grade words

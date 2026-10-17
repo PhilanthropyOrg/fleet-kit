@@ -27,14 +27,42 @@ GRADES = '<span class="g">Looks good</span><span class="g">Concern</span>'
 NO_RATE = "<p>philanthropy.org does not rate, score, or rank organizations.</p>"
 XML = ('<Return xmlns="http://www.irs.gov/efile"><ReturnData><IRS990/><IRS990ScheduleA/>'
        "<IRS990ScheduleJ/><IRS990ScheduleO/></ReturnData></Return>")
-_SERVED = {"/990/report/362193608/get?fy=2024": (200, "application/pdf", b"%PDF-1.7"),
-           "/990/report/362193608/data.csv?fy=2024": (200, "text/csv", b"ein,fy\n")}
+_SERVED = {"/990/report/362193608/get?fy=2024": (200, "application/pdf", b"%PDF-1.7", "/x.pdf"),
+           "/990/report/362193608/data.csv?fy=2024": (200, "text/csv", b"ein,fy\n", "/x.csv")}
+_GET_PAGE = (200, "text/html; charset=utf-8", b"<!doctype html>",
+             "https://h/990/report/1/get?fy=2024")
+
+
+def _evidence(page, fetch, signed_in=None):
+    found, gated = at.download_hits(page, "u", fetch, signed_in)
+    return [f["evidence"] for f in found], gated
 
 
 def test_csv_link_that_serves_the_pdf_is_flagged():
-    found = at.csv_link_is_pdf(PDF + CSV_BAD, _SERVED.get)
-    assert found and "serves a PDF" in found[0], found
-    assert at.csv_link_is_pdf(PDF + CSV_OK, _SERVED.get) == []
+    found, _ = _evidence(PDF + CSV_BAD, _SERVED.get)
+    assert found == ['"CSV 990 data" -> /990/report/362193608/get?fy=2024 serves a PDF'], found
+    assert _evidence(PDF + CSV_OK, _SERVED.get) == ([], 0)
+
+
+def test_a_link_that_lands_on_the_get_page_or_sign_in_is_gated_not_a_wrong_file():
+    """fk10: ~210 of ~260 hits a pass were links landing on /get or /990/login."""
+    get = '<a href="/990/report/1/get">Get the full report (PDF)</a>'
+    assert _evidence(get, lambda h: _GET_PAGE) == ([], 1)
+    login = (200, "text/html", b"<html>", "https://h/990/login?next=/x")
+    assert _evidence('<a href="/x">Get the PDF</a>', lambda h: login) == ([], 1)
+    # a label that promised the file itself: one pattern per page, with the count
+    page = CSV_OK.replace("data.csv?fy=2024", "get") + CSV_BAD
+    found, gated = _evidence(page, lambda h: _GET_PAGE)
+    assert gated == 2 and len(found) == 1, found
+    assert found[0].startswith("CSV/PDF links land on a gate: 2 (see #12783)"), found
+
+
+def test_signed_in_follows_the_gate_once_and_judges_the_final_bytes():
+    pdf_bytes = (200, "application/octet-stream", b"%PDF-1.7", "https://h/990/x.pdf")
+    csv_bytes = (200, "text/csv", b"ein,fy\n", "https://h/990/x.csv")
+    assert _evidence(CSV_BAD, lambda h: _GET_PAGE, lambda h: pdf_bytes)[0] == [
+        '"CSV 990 data" -> /990/report/362193608/get?fy=2024 serves a PDF']
+    assert _evidence(CSV_BAD, lambda h: _GET_PAGE, lambda h: csv_bytes) == ([], 0)
 
 
 class _Site(BaseHTTPRequestHandler):
@@ -66,8 +94,8 @@ def test_csv_check_follows_redirects_and_reads_the_bytes():
         fetch = at.fetcher(f"http://127.0.0.1:{srv.server_port}/r")
         pdf = '<a href="/r/get?fy=2024">990 PDF</a>'
         ok = '<a href="/r/get?fy=2024&amp;fmt=csv"><span>CSV</span> 990 data</a>'
-        assert at.csv_link_is_pdf(pdf + ok, fetch) == []
-        bad = at.csv_link_is_pdf(pdf + '<a href="/r/get?fy=2024">CSV 990 data</a>', fetch)
+        assert _evidence(pdf + ok, fetch) == ([], 0)
+        bad, _ = _evidence(pdf + '<a href="/r/get?fy=2024">CSV 990 data</a>', fetch)
         assert bad == ['"CSV 990 data" -> /r/get?fy=2024 serves a PDF'], bad
     finally:
         srv.shutdown()
@@ -109,7 +137,8 @@ def test_schedules_shown_must_match_the_xml():
 
 def test_the_10_14_shriners_shape_trips_both_v1b_and_v1d():
     page = PDF + CSV_BAD + NO_RATE + GRADES
-    checks = {f["check"] for f in at.audit(page, "u", None, _SERVED.get)}
+    found = at.audit(page, "u") + at.download_hits(page, "u", _SERVED.get)[0]
+    checks = {f["check"] for f in found}
     assert {"csv_link_is_pdf", "disclaimer_vs_grades"} <= checks, checks
 
 
