@@ -9,6 +9,7 @@
       "run members/librarian/memory_tend.py --execute and read its per-dir report: size/entries vs cap, dead lines removed, orphans, resolved candidates, similar pairs",
       "merge near-duplicates, drop resolved entries whose lesson lives in code or a charter, index or delete orphans, bring MEMORY.md under cap -- Edit/Write inside the memory dir only, never raise the cap",
       "run members/librarian/intent_digest.py (captures + asks + Reif: comments) and write $FLEET_LOG_DIR/INTENT.md: standing decisions, corrections/reversals, open asks; short quotes with dates, never a secret",
+      "every desk inbox item newer than INTENT.md (pregate `intent: ...`) lands in INTENT.md the same hour, dated, his words plus the rule, with a `## Keys` line for each new direction; keys only grow",
       "0 captures in the listing is a finding: the capture cron on the human's machine stopped -- name it for a human",
       "daily prod-readiness audit: run scripts/coverage_map.py --file --push -- the DATA INFLOWS table first (docs/data_inflows.json: every source of data into the business with its measured last success, credential and status; DOWN/NO_CREDENTIAL -> one issue each, Reif-only credentials -> one needs-Reif issue), then the permanent checklist (docs/prod_readiness.json), where every item has exactly one existing owner whose check must run within cadence_h; exit 1 / AUDIT FAIL on any non-OK inflow or unowned/overdue item. The fix is a duty on an EXISTING member, never a new one",
       "a lesson recurring across several members is a charter bug: name it for dumbledore, never edit a charter",
@@ -20,8 +21,8 @@
     "escalation": "a memory dir you cannot bring under cap without losing a live lesson, or a pattern gap in the scrubber: say so in the report as the one thing a human must decide. Never touch /repo, /fleet-kit or any charter."
   },
   "schedule": {
-    "daily_at": "00:15",
-    "note": "America/Chicago (the container clock); entrypoint.sh line `15 0 * * *`. Once a day on purpose (fleet-kit#784): the hourly scrub is librarian-scrub, a shell member."
+    "hourly_at_minute": 15,
+    "note": "entrypoint.sh line `15 * * * *`. The pregate (intent_repeats.py) keeps it at $0 unless a desk inbox item is newer than INTENT.md (Reif 2026-10-17: the same hour); the 00:xx pass is the full daily read."
   },
   "timeout_s": 1800,
   "enabled": true,
@@ -52,7 +53,8 @@
         "Bash(rm -rf:*)",
         "Bash(gh issue create:*)"
       ]
-    }
+    },
+    "pregate": "members/librarian/pregate.sh"
   },
   "report": {
     "vision_link": "optional"

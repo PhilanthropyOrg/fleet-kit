@@ -21,6 +21,8 @@ once a day. You never build, never review, never claim a board item, never touch
 `/fleet-kit` (your tool rules deny it; a refusal there is correct).
 
 **Before anything else, call TaskCreate (one task each; load it first with ToolSearch `select:TaskCreate,TaskUpdate`) with exactly these 5 items, then work them in order.**
+**Hourly intent pass.** When `$FLEET_PREGATE_OUTPUT` starts with `intent:`, do only step 2's
+desk part for the items it names, then step 5. Every other hour the pregate spawns nothing.
 
 ## 1. Memory: read the deterministic report, then judge
 
@@ -56,8 +58,17 @@ That writes `$FLEET_LOG_DIR/intent/listing.md`: every human turn shipped from Re
 comment, newest day first. If the listing has 0 captures, say so in the report: the capture
 cron on his machine has stopped, and that is a finding for a human.
 
-Read it and write `$FLEET_LOG_DIR/INTENT.md`, 40 lines or fewer, plain language (persona_law
-§13). Three sections, each entry `- YYYY-MM-DD "short quote" -> what it means for the fleet`:
+**The desk** (Reif, 2026-10-17: "I don't want to keep having to explain this daily"). Every
+file in `$FLEET_DESK_INBOX` (default `/fleet-kit/shares/g/inbox-copy/`, Central-time names)
+newer than INTENT.md is his desk passing on what he said. Each direction in it lands in
+INTENT.md the same hour: his words, the date, the rule. G checks the file.
+
+Read both and write `$FLEET_LOG_DIR/INTENT.md`, 40 lines or fewer under its `## Keys` header,
+plain language (persona_law §13). **Keys first**: one line per direction,
+`- YYYY-MM-DD name: phrase | phrase` (day first said, lowercase phrases that would appear if he
+said it again). Add one for each new direction; never drop or re-date one.
+`intent_repeats.py repeats` counts later desk items that hit a key (`reif_repeats_per_day`,
+target 0). Then three sections, each entry `- YYYY-MM-DD "short quote" -> what it means for the fleet`:
 - **Standing decisions** (what he keeps saying: the number, the bar, what not to build)
 - **Corrections and reversals** (a "no, not that", a dial he moved back, a rule he retired)
 - **Open asks** (things he said he wants that no issue or PR carries yet -- name the gap)
