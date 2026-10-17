@@ -135,6 +135,34 @@ def test_schedules_shown_must_match_the_xml():
     assert at.schedules_vs_xml(page_ok, XML) == []
 
 
+def test_a_form_part_lit_under_schedules_filed_is_flagged():
+    """#12982: "III · Programs" sat lit beside R and I on every full 990; T3 had exempted it."""
+    page = '<span class="sch on">III · Programs</span><span class="sch on">I · Grants</span>'
+    assert at.schedule_letters(page) == ["not an IRS schedule, shown as filed: 'III'"]
+    assert at.schedule_letters(page.split("</span>", 1)[1]) == []
+
+
+def _tile(name, big, unit, why):
+    return (f'<div class="byg-tile byg-good" data-tile="{name}" data-tone="good" title="x">'
+            f'<div class="byg-q">Q</div><div class="byg-big num">{big}</div>'
+            f'<div class="byg-unit num">{unit}</div><div class="byg-why">{why}</div>'
+            '<div class="byg-cite num">Pt X</div></div>')
+
+
+def test_a_tile_and_its_reason_line_print_the_same_figure():
+    """#12981, the 10-17 Fidelity render: 0.5% over 0%, 4 mo over 3.5 months."""
+    page = (_tile("debt", "$407.6M", "0.5% of total assets",
+                  "Looks good: liabilities are 0% of assets; 50% or less.")
+            + _tile("reserves", "4 mo", "of spending, in cash",
+                    "Looks good: 3.5 months of spending in cash; 3 or more."))
+    assert [e.split(":")[0] for e in at.tile_vs_reason(page)] == ["tile debt", "tile reserves"]
+    ok = (_tile("debt", "$407.6M", "0.5% of total assets",
+                "Looks good: liabilities are 0.5% of assets; 50% or less.")
+          + _tile("programs", "100%", "of spending",
+                  "Looks good: 100% went to programs; 75% or more."))
+    assert at.tile_vs_reason(ok) == []
+
+
 def test_the_10_14_shriners_shape_trips_both_v1b_and_v1d():
     page = PDF + CSV_BAD + NO_RATE + GRADES
     found = at.audit(page, "u") + at.download_hits(page, "u", _SERVED.get)[0]

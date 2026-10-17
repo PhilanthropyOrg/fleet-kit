@@ -47,6 +47,13 @@ _ADDRESS_REGION = re.compile(r'<p class="rp-irs">.*?</p>|<ul class="about-org-co
                              r"|<address\b.*?</address>", re.S)
 _PERSON = re.compile(r'<a\b[^>]*href="/990/person/[^"]*"[^>]*>(.*?)</a>', re.S)
 _SCH_ON = re.compile(r'class="sch on"[^>]*>\s*([A-Z]{1,3})\s')
+_SCHEDULES = set("ABCDEFGHIJKLMNOPQR")  # the IRS 990 schedules; "III" is a form Part
+_TILE = re.compile(r'<div class="byg-tile[^"]*" data-tile="([^"]+)".*?>(.*?)<div class="byg-cite',
+                   re.S)
+_BIG = re.compile(r'<div class="byg-(?:big|unit)[^"]*">(.*?)</div>', re.S)
+_WHY = re.compile(r'<div class="byg-why">(.*?)</div>', re.S)
+_PCT = re.compile(r"(\d+(?:\.\d+)?)\s?%")
+_MONTHS = re.compile(r"(\d+(?:\.\d+)?)\s?(?:mo|months?)\b")
 
 
 def _text(fragment: str) -> str:
@@ -188,8 +195,38 @@ def schedules_vs_xml(page: str, xml_text: str) -> list[str]:
     out = []
     if filed - shown:
         out.append(f"filed in the XML, not shown as filed: {sorted(filed - shown)}")
-    if shown - filed - {"III"}:
-        out.append(f"shown as filed, not in the XML: {sorted(shown - filed - {'III'})}")
+    if (shown & _SCHEDULES) - filed:
+        out.append(f"shown as filed, not in the XML: {sorted((shown & _SCHEDULES) - filed)}")
+    return out
+
+
+def schedule_letters(page: str) -> list[str]:
+    """#12982: every chip under Schedules filed is a real IRS schedule letter (A-R). "III" is
+    Part III of the main form, on every full 990; T3 once exempted it, so it shipped lit."""
+    return [f"not an IRS schedule, shown as filed: {c!r}"
+            for c in sorted(set(_SCH_ON.findall(page)) - _SCHEDULES)]
+
+
+def _figures(text: str) -> tuple[list[float], list[float]]:
+    pct = [float(v) for v in _PCT.findall(text)]
+    return pct, [float(v) for v in _MONTHS.findall(text)]
+
+
+def tile_vs_reason(page: str) -> list[str]:
+    """#12981: a tile and its reason line print the same figure ("0.5% of total assets" above
+    "liabilities are 0% of assets"; "4 mo" above "3.5 months"). Only the reason's own clause
+    is read: the threshold after ';' ("50% or less") is a rule, not this org's figure."""
+    out = []
+    for name, body in _TILE.findall(page):
+        big = _text(" ".join(_BIG.findall(body)))
+        why = _WHY.search(body)
+        if not why:
+            continue
+        reason = _text(why.group(1)).split(";")[0]
+        for kind, shown, said in zip(("%", "months"), _figures(big), _figures(reason)):
+            if shown and said and shown[0] != said[0]:
+                out.append(f"tile {name}: shows {shown[0]:g} {kind}, reason says "
+                           f"{reason.strip()!r}")
     return out
 
 
@@ -198,6 +235,8 @@ CHECKS = {
     "hidden_rows": hidden_rows,
     "garbage_names": garbage_names,
     "privacy_leaks": privacy_leaks,
+    "schedule_letters": schedule_letters,
+    "tile_vs_reason": tile_vs_reason,
 }
 
 
