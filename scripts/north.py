@@ -448,9 +448,20 @@ def main(argv=None) -> int:
             fleet_metrics.record_ladder(ladder(funnel), now)
         except Exception:  # noqa: BLE001 -- a snapshot never blocks NORTH.md
             pass
+        try:  # desk 2026-10-17: dumbledore bets on what each company is for (product_metrics.py)
+            import product_metrics
+            product_metrics.record(load_funnel(url=product_metrics.kpi_url() or None)[0], now)
+        except Exception:  # noqa: BLE001
+            pass
         pr_kr = fleet_prs(slug, now)
     burn, total = burn_by_kr(load_runs(), pr_kr, now)
     text = render(reif, reif_err, load_okr(), funnel, funnel_err, burn, total, now)
+    if not a.no_gh:  # Reif 10-17: use the whole tank; every pass reads this section
+        try:
+            import tank
+            text += "\n".join(tank.section(slug, now, _run)) + "\n"
+        except Exception as e:  # noqa: BLE001 -- never blocks NORTH.md, but never silent either
+            text += f"\n## The tank\nUNREADABLE METER: tank.py failed: {type(e).__name__}\n"
     try:  # prepended to every pass's prompt: no credential (a PR title, an OKR note) may reach it
         import redact_secrets
         text = redact_secrets.safe_text(text)

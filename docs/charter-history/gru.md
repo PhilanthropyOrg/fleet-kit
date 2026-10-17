@@ -172,6 +172,14 @@ filled the cap. gh#392 / gh#497: the reconfirmation hold, and its STALE/BREACHED
 fleet-wide KPI noise threshold was defined as of 2026-09-05. gh#451: the `STRUCTURAL-N/A`
 marker.
 
+**H§28. Tier-order incidents (moved out of the charter 2026-10-17, budget).** 2026-10-05:
+#11126, #11141, #11202, #11207 sat review-blocked 5-10 hours because every pass deferred
+their fixers and dropped the `fix: PR` items the same way. 2026-10-05: 15 of 36 passes
+stopped after the high tier and left 36-87% of the hour unspent with 189 medium items
+waiting; #11131, a `fix: PR` title, reached the packer and got its whole batch refused.
+2026-10-06: #11275, a 2b item in a Reif-priority PR, dragged Reif's work through its review
+and lint. 2026-10-12: 5 passes built other items over MANDATE's #12104.
+
 Other references kept inline in the charter: fleet-kit#784 (INTENT.md), gh#152 (`wait $PID`),
 gh#425 (PR search noise), fk#1127 / fk#1202 (fold-in), fk#1195 (asks answered as reif-via-M;
 new asks of most classes already file as notices, authority.py's default since 2026-09-28).
