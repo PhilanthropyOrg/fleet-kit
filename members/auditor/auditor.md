@@ -22,7 +22,10 @@ Your lane arrives as `lane=<name>` in the operator instruction. Work only that l
    the 10 largest, a hospital, a church with no 990, a foundation/DAF sponsor, one under
    $200k, two filed this week, Salvation Army, plus Viken's fixed set (Shriners 36-2193608,
    YMCA 36-3258696). The offset moves every 2h window, so the sample rotates by itself. A
-   stratum that prints `error` is your first finding.
+   stratum that prints `error` is your first finding. `--lane jobs` reads public pages, not
+   SQL (`job_postings` is not in `/990/api/query`): newest, highest-paid, leadership, one per
+   ATS (workday, greenhouse, lever, adp, from the `/go` hop's host) and closed (a pid from an
+   earlier pass that now answers 410). Each row has pid, title, ein, apply_host and `jsonld`.
 2. **Run the lane's checklist below** on every sampled org or job. Reads only: pages with the
    `x-atlas-test` header from `$ATLAS_TEST_BYPASS`, SQL through `/990/api/query` with
    `X-PM-Token: $FLEET_NUMBER_TOKEN` (one SELECT, 3s cap). Never a write, never a DDL, never
@@ -89,7 +92,12 @@ cite the page URL and the source line each finding contradicts or lacks:
 ## Lane jobs (`auditor:jobs`)
 
 **Run the process as people** (QA personas from `routes_qa_session`, short-lived fixtures,
-clean up after: close the job, nothing left in public lists):
+clean up after: close the job, nothing left in public lists). Sign in as the QA `owner` (J4)
+or `member` (J2): `POST /990/api/qa/session` with `x-qa-token: $QA_SESSION_TOKEN` and
+`{"user":"owner"}`, then open the returned `url` (recipe: persona_law 10e). No
+`$QA_SESSION_TOKEN` in the env: say the walk could not run, never skip it silently. When done,
+close the job you posted (check it answers 410 and left /jobs/all) and `POST /990/api/qa/reset`
+`{"user":"<persona>"}` for each persona you used.
 - J1 job seeker: a Google-style landing on a job page, then search, a role page, the pay page
 - J2 Apply both ways: our form (the applicant and the org both get mail), and out to the org's
   site through the /go hop; each click leaves a record

@@ -125,6 +125,75 @@ def test_largest_reads_the_revenue_column_not_the_filings_join():
     assert "ORDER BY revenue_amt DESC" in sql and "JOIN" not in sql, sql
 
 
+
+def _job_page(pid, ein="530196605", ld=True):
+    js = f'<script type="application/ld+json">{{"title": "Job {pid}"}}</script>' if ld else ""
+    return f'{js}<h1>Job {pid}</h1><a class="btn ghost" href="/jobs/at/{ein}/x">All jobs</a>'
+
+
+def _fake_site(gone=(), broken=()):
+    """A fake fetcher for the jobs sampler: every list page links 12-hex pids, every /go hop
+    answers 302 to one ATS by pid, prior pids in `gone` answer 410, paths in `broken` 400."""
+    hosts = {"a": "x.wd1.myworkdayjobs.com", "b": "boards.greenhouse.io", "c": "jobs.lever.co",
+             "d": "workforcenow.adp.com"}
+    lists = {"/jobs/all": "a00000000001 b00000000002", "/jobs/leadership-openings": "c00000000003",
+             "/jobs/pay/ceo": "d00000000004 a00000000005"}
+
+    def fetch(path, follow=True):
+        if path in broken:
+            return 400, "", ""
+        if path == "/jobs":
+            return 200, "", ('<x id="pay"><a href="/jobs/pay/clerk">x</a> $40,000 '
+                             '<a href="/jobs/pay/ceo">x</a> $250,000')
+        if path in lists:
+            return 200, "", " ".join(f'href="/jobs/j/{p}/s"' for p in lists[path].split())
+        pid = path.split("/")[3]
+        if path.endswith("/go"):
+            return 302, f"https://{hosts[pid[0]]}/job/1", ""
+        return (410, "", "") if pid in gone else (200, "", _job_page(pid))
+    return fetch
+
+
+def _jobs_rows(fetch, state):
+    real = asm.fetch
+    asm.fetch, asm.JOBS_STATE = fetch, str(state)
+    try:
+        return asm.jobs_sample(0)
+    finally:
+        asm.fetch = real
+
+
+def test_every_jobs_stratum_yields_rows_from_public_pages():
+    import tempfile
+    state = Path(tempfile.mkdtemp()) / "pids.json"
+    state.write_text(json.dumps(["e00000000009"]))
+    rows = _jobs_rows(_fake_site(gone={"e00000000009"}), state)
+    got = {r["stratum"] for r in rows if "pid" in r}
+    want = {"newest", "highest_paid", "leadership", "workday", "greenhouse", "lever", "adp",
+            "closed"}
+    assert got == want, rows
+    lead = next(r for r in rows if r["stratum"] == "leadership")
+    assert (lead["ein"], lead["title"], lead["apply_host"]) == (
+        "530196605", "Job c00000000003", "jobs.lever.co"), lead
+    assert next(r for r in rows if r["stratum"] == "highest_paid")["pid"] == "d00000000004"
+    assert next(r for r in rows if r["stratum"] == "closed")["status"] == 410
+    assert "a00000000001" in json.loads(state.read_text())  # next pass can find it closed
+
+
+def test_a_400_or_timeout_on_a_jobs_page_is_an_error_row_never_silence():
+    import tempfile
+    state = Path(tempfile.mkdtemp()) / "pids.json"
+    rows = _jobs_rows(_fake_site(broken={"/jobs/leadership-openings"}), state)
+    assert any(r["stratum"] == "leadership" and "HTTP 400" in r["error"] for r in rows), rows
+
+    def timeout(path, follow=True):
+        raise TimeoutError("timed out")
+    rows = _jobs_rows(timeout, state)
+    errs = {r["stratum"] for r in rows if "error" in r}
+    assert errs >= {"newest", "highest_paid", "leadership", "workday", "closed"}, rows
+    assert not [r for r in rows if "pid" in r], rows
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):
