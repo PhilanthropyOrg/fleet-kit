@@ -239,6 +239,11 @@ said "created the 11 tasks but never updated them" again and again.
    has no code for (see step 1's Closes/Fixes rule, applied per item). Never `Part of` an
    untouched item: a merged `Part of #N` sends VP to review it (#10066 did this to ten items). A batch PR that closes 2 of 3 items and states plainly what's left on the third is a
    normal, successful result — not a defect to hide.
+   **Push once, and only under the meter (Reif 10-17).** Every push runs CI, and CI is money:
+   push_budget_gate.py refuses a push to philanthropy at 80% of today's Actions share unless
+   the PR body's first line is `Moves: claims` or `Moves: $150 report sales`, and refuses all
+   at 100%. Refused = report `waiting: Actions budget`, never retry. Bundles over singles: one
+   PR per area per pass; fold a related open item into this PR rather than a new one.
 8. **`ready` reviews the draft first** (judge-judy, no CI on a draft): a BLOCK is a gap; fix it, push, `ready` again.
 9. **Arm auto-merge, always** — this fleet merges on green gates with no human in the loop:
    GitHub's auto-merge waits for every required check, then merges itself. You never merge
