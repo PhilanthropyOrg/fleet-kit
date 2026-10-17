@@ -55,12 +55,11 @@ Fix that PR, nothing else, and do not fan out:
    **A test runs the real path: a real table row, the real request or payload the page sends. A test that greps a template or posts a hand-built body proves nothing, and review blocks it.**
    A `Re-land #X` PR (pull_bad_bag.py pulled #X off main for breaking the tests on its
    `Must pass:` line) is fixed by changing the code, or the test if the test is what is wrong
-   -- never by deleting ids from that line. Run them: `verified_test.sh <those ids>`.
-4. `bash /fleet-kit/scripts/verified_test.sh` (lint autofix + repo gates + diff tests; the push
-   hook needs its receipt), stage explicit paths, commit, `git push origin HEAD:<headRefName>`.
-   Never build your own venv: the test interpreter is `bash /fleet-kit/scripts/test_python.sh`
-   (cached per dependency set; verified_test.sh already uses it). It prints `PASS CLOCK` when
-   the pass is too short to run the tests: step 6, now.
+   -- never by deleting ids from that line; CI runs them on your push.
+4. Lint, never test locally (Reif's 10-15 law; fk#1676 dropped the receipt):
+   `python3 /fleet-kit/scripts/preflight_gate.py` (ruff fix+check, repo gates; seconds). Stage
+   explicit paths, commit, `git push origin HEAD:<headRefName>`; CI on the PR is the test run.
+   Two 10-16 passes ran verified_test.sh anyway, one for 25 min before it was killed.
 5. `python3 /fleet-kit/scripts/pr_ci_wait.py <N>` in the foreground until GREEN (exit 3: call
    again; exit 1: back to 3), or until it prints `PASS CLOCK` (then step 6, now). Arm
    auto-merge if it is not (`source /fleet-kit/scripts/merge_arm.sh; arm_pr_auto_merge <N>`).
