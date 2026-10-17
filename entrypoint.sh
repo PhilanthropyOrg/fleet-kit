@@ -67,6 +67,11 @@ guard_targets=("/root/.claude")
 for acct in ${FLEET_ACCOUNTS:-primary}; do
   guard_targets+=("/root/.claude-$acct")
 done
+# Git-level push budget gate (2026-10-17): every `git push` in this container runs scripts/git-hooks/pre-push,
+# whatever invoked it. The PreToolUse hook above only sees a literal `git push` in a Claude tool command.
+if [ -x /fleet-kit/scripts/git-hooks/pre-push ]; then
+  git config --global core.hooksPath /fleet-kit/scripts/git-hooks || echo "[entrypoint] WARNING: could not set core.hooksPath -- git-level push gate not installed"
+fi
 if ! python3 /fleet-kit/scripts/worktree_guard_hook_install.py "${guard_targets[@]}"; then
   echo "[entrypoint] WARNING: worktree_guard_hook_install.py failed -- gh#592's mechanical worktree guard is NOT registered this boot"
 fi

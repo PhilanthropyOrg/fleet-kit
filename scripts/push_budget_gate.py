@@ -176,6 +176,8 @@ def check(wt: str, why: str = "", now: float | None = None, meter: dict | None =
     """Gate one push from worktree `wt`. Logs the verdict; returns (allowed, reason)."""
     now = time.time() if now is None else now
     if not targets_philanthropy(wt):
+        record({"ts": now, "day": time.strftime("%Y-%m-%d", time.gmtime(now)), "member": os.environ.get(
+            "FLEET_MEMBER", ""), "wt": wt, "verdict": "skip", "why": "not the philanthropy repo"})
         return True, "not the philanthropy repo"
     meter = meter if meter is not None else read_meter(now)
     moves = moves_line(wt) if moves is None else moves
@@ -262,7 +264,8 @@ def main(argv: list[str]) -> int:
         if not ok:
             print(f"push_budget_gate: {reason}", file=sys.stderr)
             return 3
-        return subprocess.run(argv[argv.index("--") + 1:]).returncode
+        env = {**os.environ, "PUSH_BUDGET_GATE_BYPASS": "1"}  # the git-level pre-push hook honours the logged bypass
+        return subprocess.run(argv[argv.index("--") + 1:], env=env).returncode
     try:
         payload = json.load(sys.stdin)
     except (json.JSONDecodeError, ValueError):
