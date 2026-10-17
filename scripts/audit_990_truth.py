@@ -11,9 +11,12 @@ the IRS XML when given), so a test can pin it and a 10-14 render can prove it.
 Usage:
   audit_990_truth.py --html page.html [--xml return.xml] [--url URL]
   audit_990_truth.py --url https://philanthropy.org/990/report/<ein>/<slug> [--xml return.xml]
-    (live: sends x-atlas-test from $ATLAS_TEST_BYPASS, and opens every download link; with
-    --html, --url is the base the CSV link is opened against)
-Prints one JSON finding per line: {"check", "url", "evidence"}. Exit 0 always; a finding is
+    (live: sends x-atlas-test from $ATLAS_TEST_BYPASS, and opens every CSV/PDF/XML link; with
+    --html, --url is the base links are opened against. A link that lands on the Get-the-report
+    page or sign-in is "gated", not a wrong file; with $QA_SESSION_TOKEN it is opened once more
+    as the QA operator.)
+Prints one JSON finding per line: {"check", "url", "evidence"}, then on stderr
+"hits: N real, M gated, K other" (add these up for the pass). Exit 0 always; a finding is
 data for audit_file.py, not a crash.
 """
 from __future__ import annotations
@@ -56,22 +59,60 @@ def links(page: str) -> list[tuple[str, str]]:
     return out
 
 
-def csv_link_is_pdf(page: str, fetch=None) -> list[str]:
-    """V1b: a link labelled CSV must open a CSV. Judged by what the link serves after every
-    redirect (Content-Type and first bytes), never by its href: /get?fy=..&fmt=csv is fine.
-    fetch(href) -> (status, content type, first bytes); without one there is nothing to judge."""
-    if fetch is None:
-        return []
-    bad = []
-    for h, t in sorted(set(links(page))):
-        if "CSV" not in t:
+_GATE = re.compile(r"/990/report/\d+/get/?(?:\?|$)|/(?:990/)?(?:login|sign-?in)\b", re.I)
+_NOT_A_FILE = re.compile(r"\b(get|buy|order|unlock|sign in|log in)\b", re.I)  # labels of a gate
+
+
+def served(ctype: str, head: bytes) -> str:
+    """The file type a response really is, from its Content-Type and first bytes."""
+    ctype = ctype.lower()
+    if head.startswith(b"%PDF") or "pdf" in ctype:
+        return "pdf"
+    return next((k for k in ("csv", "xml") if k in ctype and "html" not in ctype), "")
+
+
+def judge(text: str, href: str, want: str, fetch, signed_in=None) -> tuple[str, str]:
+    """('clean'|'real'|'gated', evidence) for a link labelled `want` (csv, pdf or xml), by what
+    it serves after every redirect, never by its href. A final page that is the Get-the-report
+    page or a sign-in page is a gate, not a wrong file; with signed_in (the QA operator) the
+    gate is followed once and the final response judged instead.
+    fetch(href) -> (status, content type, first bytes, final URL)."""
+    status, ctype, head, final = fetch(href)
+    kind = served(ctype, head)
+    if not kind and _GATE.search(final) and signed_in:
+        status, ctype, head, final = signed_in(href)
+        kind = served(ctype, head)
+    if status == 200 and kind == want:
+        return "clean", ""
+    if not kind and _GATE.search(final):
+        return "gated", f'"{text}" -> {href} lands on {re.sub(r"^https?://[^/]+", "", final)}'
+    if kind == "pdf" and want == "csv":
+        return "real", f'"{text}" -> {href} serves a PDF'
+    return "real", f'"{text}" -> {href} serves {status} {ctype or "no type"}, not a {want.upper()}'
+
+
+def download_hits(page: str, url: str, fetch, signed_in=None) -> tuple[list[dict], int]:
+    """(findings, gated links) for every site link labelled CSV, PDF or XML (V1b: the CSV link
+    must not open the PDF). A gated link is no finding unless its label promised a file; those
+    are one finding per page."""
+    real, gated, promised = [], 0, []
+    for href, text in sorted(set(links(page))):
+        m = re.search(r"\b(CSV|PDF|XML)\b", text)
+        if not m or not href.startswith("/"):
             continue
-        status, ctype, head = fetch(h)
-        if head.startswith(b"%PDF") or "pdf" in ctype.lower():
-            bad.append(f'"{t}" -> {h} serves a PDF')
-        elif status != 200 or "csv" not in ctype.lower():
-            bad.append(f'"{t}" -> {h} serves {status} {ctype or "no type"}, not a CSV')
-    return bad
+        verdict, ev = judge(text, href, m.group(1).lower(), fetch, signed_in)
+        if verdict == "real":
+            check = "csv_link_is_pdf" if m.group(1) == "CSV" else "download_link_type"
+            real.append({"check": check, "url": url, "evidence": ev})
+        elif verdict == "gated":
+            gated += 1
+            if not _NOT_A_FILE.search(text):
+                promised.append(ev)
+    if promised:  # the CSV half is philanthropy#12783: dedupe there, never file it twice
+        real.append({"check": "download_lands_on_gate", "url": url, "evidence":
+                     f"CSV/PDF links land on a gate: {len(promised)} (see #12783): "
+                     + "; ".join(promised)})
+    return real, gated
 
 
 def disclaimer_vs_grades(page: str) -> list[str]:
@@ -150,50 +191,64 @@ CHECKS = {
 }
 
 
-def audit(page: str, url: str = "", xml_text: str | None = None, fetch=None) -> list[dict]:
+def audit(page: str, url: str = "", xml_text: str | None = None) -> list[dict]:
     found = [{"check": name, "url": url, "evidence": ev}
              for name, fn in CHECKS.items() for ev in fn(page)]
-    found += [{"check": "csv_link_is_pdf", "url": url, "evidence": ev}
-              for ev in csv_link_is_pdf(page, fetch)]
     if xml_text:
         found += [{"check": "schedules_vs_xml", "url": url, "evidence": ev}
                   for ev in schedules_vs_xml(page, xml_text)]
     return found
 
 
-def _get(url: str, n: int | None = None) -> tuple[int, str, bytes]:
-    """GET url, following redirects; (final status, Content-Type, body or its first n bytes)."""
-    headers = {"User-Agent": "Mozilla/5.0 (fleet auditor)"}
+def _headers() -> dict:
+    h = {"User-Agent": "Mozilla/5.0 (fleet auditor)"}
     if os.environ.get("ATLAS_TEST_BYPASS"):
-        headers["x-atlas-test"] = os.environ["ATLAS_TEST_BYPASS"]
-    req = urllib.request.Request(url, headers=headers)
+        h["x-atlas-test"] = os.environ["ATLAS_TEST_BYPASS"]
+    return h
+
+
+def _open(url: str, n: int | None = None, opener=None) -> tuple[int, str, bytes, str]:
+    """GET url, following redirects; (final status, Content-Type, body or its first n bytes,
+    final URL)."""
     try:
-        with urllib.request.urlopen(req, timeout=25) as r:
-            return r.status, r.headers.get("Content-Type", ""), r.read(n)
+        with (opener or urllib.request.build_opener()).open(
+                urllib.request.Request(url, headers=_headers()), timeout=25) as r:
+            return r.status, r.headers.get("Content-Type", ""), r.read(n), r.geturl()
     except urllib.error.HTTPError as e:
-        return e.code, e.headers.get("Content-Type", ""), b""
+        return e.code, e.headers.get("Content-Type", ""), b"", e.geturl()
 
 
-def fetcher(url: str):
-    """fetch(href) for csv_link_is_pdf: opens a site-relative href against url's origin."""
+def _get(url: str, n: int | None = None) -> tuple[int, str, bytes]:
+    return _open(url, n)[:3]
+
+
+def fetcher(url: str, opener=None):
+    """fetch(href) for judge: opens a site-relative href against url's origin."""
     base = re.match(r"https?://[^/]+", url).group(0)
-    return lambda href: _get(href if href.startswith("http") else base + href, 512)
+    return lambda href: _open(href if href.startswith("http") else base + href, 512, opener)
 
 
-def live_links(page: str, url: str) -> list[dict]:
-    """Every PDF and XML link answers 200 with the type its label promises (CSV:
-    csv_link_is_pdf)."""
-    fetch = fetcher(url)
-    out = []
-    for href, text in sorted(set(links(page))):
-        if not re.search(r"\b(PDF|XML)\b", text) or not href.startswith("/"):
-            continue
-        status, ctype, _ = fetch(href)
-        want = re.search(r"\b(PDF|XML)\b", text).group(1).lower()
-        if status != 200 or want not in ctype.lower():
-            out.append({"check": "download_link_type", "url": url,
-                        "evidence": f'"{text}" -> {href}: {status} {ctype or "no type"}'})
-    return out
+def signed_in_fetcher(url: str):
+    """fetch as the QA operator (persona_law 10e), or None without $QA_SESSION_TOKEN or when
+    the sign-in fails. Records the persona so audit_cleanup.py run resets it."""
+    token = os.environ.get("QA_SESSION_TOKEN")
+    if not token:
+        return None
+    base = re.match(r"https?://[^/]+", url).group(0)
+    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor())
+    req = urllib.request.Request(
+        base + "/990/api/qa/session", data=json.dumps({"user": "operator"}).encode(),
+        headers={**_headers(), "x-qa-token": token, "Content-Type": "application/json"})
+    try:
+        with opener.open(req, timeout=25) as r:
+            link = json.load(r)["url"]
+        opener.open(urllib.request.Request(link, headers=_headers()), timeout=25).close()
+    except Exception as e:  # noqa: BLE001 -- signed out is still a pass, just say so
+        print(f"audit_990_truth: QA operator sign-in failed ({type(e).__name__})", file=sys.stderr)
+        return None
+    import audit_cleanup
+    audit_cleanup.record(audit_cleanup.state_path(), "personas", "operator")
+    return fetcher(url, opener)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -203,20 +258,21 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--url", default="")
     a = ap.parse_args(argv)
     xml_text = open(a.xml).read() if a.xml else None
-    fetch = fetcher(a.url) if a.url else None
     if a.html:
         page = open(a.html).read()
-        found = audit(page, a.url, xml_text, fetch)
     else:
-        status, _, body = _get(a.url)
+        status, _, page = _get(a.url)
         if status != 200:
             print(json.dumps({"check": "page_status", "url": a.url, "evidence": str(status)}))
             return 0
-        page = body.decode("utf-8", "replace")
-        found = audit(page, a.url, xml_text, fetch) + live_links(page, a.url)
-    for f in found:
+        page = page.decode("utf-8", "replace")
+    found = audit(page, a.url, xml_text)
+    downloads, gated = (download_hits(page, a.url, fetcher(a.url), signed_in_fetcher(a.url))
+                        if a.url else ([], 0))
+    for f in found + downloads:
         print(json.dumps(f))
-    print(f"audit_990_truth: {len(found)} finding(s) on {a.url or a.html}", file=sys.stderr)
+    print(f"audit_990_truth: {a.url or a.html} hits: {len(downloads)} real, {gated} gated, "
+          f"{len(found)} other", file=sys.stderr)
     return 0
 
 
