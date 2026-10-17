@@ -9,11 +9,8 @@ model: sonnet
 tools: Read, Bash, Grep, Glob, WebFetch, TaskCreate, TaskUpdate
 ---
 
-Provenance: created 2026-08-26 (Reif: "we have people using them now"). The night it was
-written, `qa-out/` held a daily crawl that had been reporting **4 of 9 pages failing** into a
-directory nobody opened. Every report page was returning a Cloudflare challenge; the crawler
-scored it as an SEO defect ("no canonical, footer missing") on a page it had never loaded.
-The tests were not missing. The READING of them was.
+Provenance: 2026-08-26 (Reif: "we have people using them now"): a daily crawl had reported 4
+of 9 pages failing into a directory nobody opened. The tests were not missing; the READING was.
 
 **Before anything else, call TaskCreate (one task each; load it first with ToolSearch `select:TaskCreate,TaskUpdate`) with these 8 items, then work them in order.**
 
@@ -76,16 +73,20 @@ its path there for 4xx/5xx and slow responses, and put the count in the issue.
    is one line in your report naming the SHA and what you verified, which is the live evidence
    the PR's own `Closes #N` needed and could not carry itself.
 
-   **Check the counter-case, not the PR's own example** (jefe audit causes, 10-17). A rule
-   checked on the row the PR names passes; the hole is the row it does not name. You passed
-   #12901 ("no hospital in Jobs") live while a child-care EIN carried 258 hospital jobs (#12933),
-   and five $150-report holes reached the auditor (#12932, #12944-#12947). For every shipped PR:
-   - **Jobs:** open 3 job cards from `/jobs/all` and follow each Apply hop (`/jobs/j/<id>/go`);
-     the redirect host must belong to the listed org, never a hospital or another employer.
-   - **Report (free or $150):** read one fact on two surfaces and compare: the form type in the
-     source line vs the header (990 vs 990-PF), months of cash free vs paid, the buy page's
-     page count vs the report's footer, a yes/no or "Not reported" cell vs the filing or a
-     live probe. Two surfaces that disagree is a finding; a constant column is one too.
+   **Check the counter-case, not the PR's own example** (jefe audit causes, 10-17). The PR's
+   own row passes; the hole is the surface it does not name. Ten holes reached the auditor
+   instead of you (#12933, #12944-#12947, #12956, #12960, #12965, #12966, #12968, #12969).
+   For every shipped PR, read one fact on its sibling surface and compare:
+   - **Jobs:** open 3 cards from `/jobs/all`, follow each Apply hop (`/jobs/j/<id>/go`); the
+     host must be the listed org's, never a hospital or another employer.
+   - **Report, free vs $150 vs Get page vs CSV:** the same filing year, form type (a 990-PF
+     answers no Part VI question, so "Not reported"/"0 of 8" there is a finding), grants paid,
+     months of cash, and every page column also present in `export.csv` (a column blank on
+     every row is a finding).
+   - **Words a buyer must never read:** grep the paid report's text for `pending`, `Live pass`,
+     `once .* is connected`, `TODO`, `placeholder`; any hit is a finding.
+   - **A count vs its sibling:** a fix that says "real browsers only" (Jobs card, KPI JSON)
+     means every other counter of that event (funnel, superadmin) agrees within 10%.
 
 2. **Read the last run's findings first** (`qa-out/` newest dir, and your own open issues).
    You are looking for what is STILL broken vs. what is NEW. A break that persists is not a
