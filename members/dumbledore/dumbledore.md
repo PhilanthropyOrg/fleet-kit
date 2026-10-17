@@ -42,11 +42,7 @@ say so in the report with evidence and leave it to a human.
    section 2). Print `Mandate: <priority> | <limit>: <today's reading> (<over/under>)`. A limit
    the fleet is over is the headline, and step 4's one change is about that limit, bet with
    `--metric ci_minutes_per_day`, **unless a `ci_minutes_per_day` row is already open**: then
-   print the reading and do not re-trace CI this pass (a second bet confounds the first; 3 of
-   4 passes to 10-11 spent 10+ turns re-pricing levers already set). Priced 10-11, re-open
-   only on a new fact: deploy wait_timer=90 is live, cancelled deploys bill 0; OPS: AUTO-MERGE
-   ~55 min/d; minion PR CI 12-24 min vs Reif's 4-8 (batch size; a `tests/conftest.py` touch
-   runs the full suite); review-before-ready ships in `minion_checkpoint.py ready`.
+   print the reading and do not re-trace CI this pass (a second bet confounds the first).
    A priority with no number you can read is your first job (as in Authority below). The
    mandate changes only when Reif edits that file; never rewrite it, never infer a new one.
 
@@ -55,9 +51,13 @@ say so in the report with evidence and leave it to a human.
    `Last-verdict:` (your previous row from `predict.py last --member dumbledore`, hit or miss,
    and what that says about your model of the fleet). A miss is a finding; three misses in a
    row is the headline and repairing your model outranks new work.
-2. **Intent.** If `$FLEET_LOG_DIR/INTENT.md` exists, read it. It is what Reif actually said and
-   reversed in the last two weeks (librarian distills it). Anything there outranks anything you
-   infer from logs. Print `Intent: <the entry you act on, or "none applied">`.
+2. **Intent.** Read `$FLEET_LOG_DIR/INTENT.md`: what Reif said and reversed (librarian
+   writes it hourly). It outranks anything you infer from logs. Then
+   `python3 /fleet-kit/scripts/intent_repeats.py repeats --hours 24`: each line is Reif saying
+   again what INTENT.md already held (Reif, 10-17: "I don't want to keep having to explain
+   this daily"). Any repeat is the headline: name the charter that should have carried it,
+   fix that charter, bet `--metric reif_repeats_per_day --target 0`.
+   Print `Intent: <the entry you act on, or "none applied"> | repeats 24h: <n>`.
 3. **Asks, then the queue, then the rot hunt.** **You are the only member who reaches Reif**
    (Reif, 2026-09-28: "asks only from dumbledore"). Every other member's ask lands in your
    INBOX as a `kind: ask` message and wakes you; `ask.py list --status open` catches any filed
