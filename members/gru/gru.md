@@ -28,7 +28,8 @@ set, every item you claim -- 2a, 2a-bis, 2b, 8b alike -- must carry one of those
 `gate_drops.py candidates` already drops the rest (and, since 2026-10-08, every item an open PR or a PR merged in the last day already builds: `built_dropped` names each with its PR, and every item a minion already tried today and left with no commit and no PR: `tried_dropped` names each with the run time; do not re-read or re-dispatch either kind, marie slices them) and `run_member.sh` refuses any that slips
 through (FATAL, one second). When `FLEET_MINION_MAX_PER_HOUR` is set, `fanout.py batches`
 returns only the batches the hour (and, with `FLEET_CI_MINUTES_DAILY_MAX`, the day's CI
-minutes) has room for; spawn exactly those, release the `deferred`. Never work around a dial. Report one line:
+minutes) has room for; the cap rises with the week's pace gap (`account_meter.py`), so a
+behind-pace week builds more. Spawn exactly those, release the `deferred`. Never work around a dial. Report one line:
 `lane rule: <labels or none> · hour cap <started>/<cap>`.
 
 **Before anything else, call TaskCreate (load it first with ToolSearch `select:TaskCreate,TaskUpdate`) with exactly these 3 items covering steps 0-10, then work them in order:** `Steps 0-1: red PRs, allowance`, `Steps 2-7: gate, pack, claim, dispatch, read results`, `Steps 8-10: lanes, asks, report`. One TaskUpdate when a group closes, none per step: the plan gets a pass to its report (H§1); per-step tasks spent ~15 of ~34 tool calls (H§1b).
@@ -40,10 +41,8 @@ minutes) has room for; spawn exactly those, release the `deferred`. Never work a
    ```
    python3 /fleet-kit/scripts/red_prs.py due
    ```
-   `due` is already ordered and capped: red or review-BLOCKed PRs of fleet:reif-priority
-   items at once, then green review-passed PRs that are only CONFLICTING (one merge of main
-   lands them), then any other fleet PR red with no real push for 60+ minutes. Dispatch a
-   fixer to EVERY entry in ONE call, which returns at once:
+   `due` is already ordered and capped (Reif-priority red/BLOCKed, then green-but-CONFLICTING,
+   then any fleet PR red 60+ min with no push). Dispatch a fixer to EVERY entry in ONE call:
    ```
    bash /fleet-kit/scripts/dispatch_fixer.sh <PR> <PR> ...
    ```
@@ -60,9 +59,7 @@ minutes) has room for; spawn exactly those, release the `deferred`. Never work a
      content: name each in your report as needing a look, never re-send.
    - A `deferred the-fixer --item <N>` line (the cap, FLEET_FIXER_ITEM_MAX) means that PR has
      NO fixer this pass. Its `fix: PR #<N>` item is still yours in 2a-bis: dispatch it alone,
-     never release it as "has a fixer". (2026-10-05: #11126, #11141, #11202, #11207 sat
-     review-blocked 5-10 hours because every pass deferred their fixers and dropped the
-     fix items the same way.)
+     never release it as "has a fixer" (H§28).
    - An `error` from `red_prs.py` is a blind step, not an empty one: say so, go on to step 1.
 
    **`resume` lists a minion's red DRAFT PRs** (checkpoints, part-done work). Those get a
@@ -76,8 +73,8 @@ minutes) has room for; spawn exactly those, release the `deferred`. Never work a
    drafts whose items a newer non-draft PR (`by`) already carries: close each with
    `gh pr close <N> --comment "superseded by #<by>"` and never resume it (H§4).
 
-   **Then read which stale claims the pass start released** (claims are leases: one with no
-   live runner and no PR/branch activity for 60 minutes was released before you started):
+   **Then read which stale claims the pass start released** (a claim with no live runner and
+   no PR/branch activity for 60 minutes is released before you start):
    ```
    python3 /fleet-kit/scripts/stale_claims.py last
    ```
@@ -92,20 +89,21 @@ minutes) has room for; spawn exactly those, release the `deferred`. Never work a
    # {"headroom_fraction": .., "label": "ok", "week_bank_pct": .., ..}
    python3 /fleet-kit/scripts/gru_allowance.py
    # 0.0106      <- your allowance_pct, in percent-of-week units
-   # (empty)     <- no trustworthy reading: fall back to a small N and SAY you were blind
+   # (empty)     <- no account reads and none is unwalled: small N, SAY you were blind
    ```
    - **Do not compute your allowance yourself — run the script.** Same for N later (H§6). It
      prints `FLEET_SHARE_CEILING_PCT * FLEET_GRU_ALLOWANCE_FRACTION`: a multiply, never a
      `min()`, fed headroom, never consumption. After a dial change, check the printed number
      actually moved before trusting it (H§7).
-   - `headroom_fraction` is not your allowance. If it reads exactly `0.0`, check
-     `week_bank_pct` before believing the week is spent.
+   - `headroom_fraction` is not your allowance; at exactly `0.0`, check `week_bank_pct`.
    - On an uncalibrated meter (label `calibrating_unbilled`) the script prints a fixed
      even-pace allowance and says so on stderr: quote that line, pack against the number.
    - **An unspent hour is GONE — it does not roll over.** Underspending is as wrong as
      overspending; a low-utilization pass says so plainly in its report.
-   - **If the meter is unreadable, fail open**: narrow ambition, never a hard stop. Use your
-     last known-good allowance or a small N, and SAY you were flying blind.
+   - **One unreadable meter is not a blind pass.** When maxx gives nothing, the script prices
+     the hour from the accounts in `FLEET_METER_FILE` that read, and an account that cannot be
+     read (tgp's setup token) counts as available until a real call walls (429/limit). Pack
+     against the number it prints and quote its stderr line; never end a pass on one meter.
    - **You own WHICH items get built, never how many**: `fanout.py` packs the hour.
 
    **Account readiness, separately from budget.** Before claiming, run
@@ -146,13 +144,11 @@ minutes) has room for; spawn exactly those, release the `deferred`. Never work a
    children. Survivors go at the FRONT of step 3's `--items` (`gh#<epic-number>` convention);
    2a-bis and 2b follow. Empty or fully blocked: 2b is the whole list (H§10).
    **A MANDATE `PRIORITY:` line naming issues "in order" goes ahead of even this tier:** the
-   first open, unclaimed one is the hour's build, alone, before `priority-high`
-   (10-12: 5 passes built others over its #12104). Never close a
+   first open, unclaimed one is the hour's build, alone, before `priority-high` (H§28). Never close a
    `fleet:reif-priority` issue yourself: that's marie's call (marie.md Part C).
    **Reif-priority items ride only with each other, at most 3 to a batch, never with a 2b
-   item.** A 2b item in the same PR drags Reif's work through its review and lint (#11275,
-   2026-10-06). Give the packer the
-   Reif tier as its own `--items` list first, then 2b as a second call.
+   item.** A 2b item in the same PR drags Reif's work through its review and lint (H§28).
+   Pack the Reif tier as its own `--items` list first, then 2b as a second call.
 
    **Never narrow or drop an acceptance criterion silently (philanthropy#8475)** — on
    `fleet:reif-priority` and `fleet:user-asked` items alike. Dispatch only against what
@@ -205,10 +201,10 @@ minutes) has room for; spawn exactly those, release the `deferred`. Never work a
    It already drops `fleet:claimed`, `fleet:needs-human-op`, `fleet:needs-prod-access` and
    `fleet:parked`, and orders high -> medium -> low -> unranked, oldest first (H§14, H§15).
    Gate `numbers` in that order; the packer cuts it at step 3's `room_for_items`, so a lower
-   tier only gets the room a higher one left. Never stop after the high tier: 15 of 36 passes on 10-05 did, and left
-   36-87% of the hour unspent with 189 medium items waiting. Quote `by_tier` in the report.
+   tier only gets the room a higher one left. Never stop after the high tier (H§28). Quote
+   `by_tier` in the report.
    Filter out every `fix: PR #` / `CI RED: PR #` title too: 2a-bis already sent it alone or skipped
-   it, and one that reaches the packer gets the whole batch refused (2026-10-05: #11131).
+   it, and one that reaches the packer gets the whole batch refused.
 
    **Gates run on the survivors in this order: needs-human-op (above), dead-end, Vision-link,
    quality.** Never claim or spawn against a dropped candidate, and **never drop one
@@ -340,13 +336,12 @@ minutes) has room for; spawn exactly those, release the `deferred`. Never work a
    `--min-items` set to `len(chosen)+1`. Never force more than one extra item per pass, and
    quote `forced_over_floor`/`over_allowance` when it fires (H§22).
 
-3b. **Last pass's estimates self-correct; you do not run a calibration step.** `cost_bridge.py`
-   (step 3) feeds real minion spend back in as `--observed` every pass. Do NOT adjust an
-   estimate by hand. If one complexity tier keeps costing ~3x its estimate, tell marie in a
-   comment.
+3b. **Estimates self-correct: `cost_bridge.py` feeds real minion spend back as `--observed`
+   every pass.** Never adjust one by hand; a complexity tier that keeps costing ~3x its
+   estimate gets a comment to marie.
 
 4. **Claim your chosen items yourself**, in ONE call, before spawning anything (Bash
-   `timeout: 600000`; ~5s an item, so 20 items outrun the default 2 minutes):
+   `timeout: 600000`; ~5s an item):
    ```
    python3 /fleet-kit/scripts/board_github.py claim-item "gru (orchestrator pass <run-id-or-timestamp>)" <n> <n> ...
    ```
@@ -366,17 +361,16 @@ minutes) has room for; spawn exactly those, release the `deferred`. Never work a
      --observed "$BATCH_OBSERVED" \
      --items '[{"number":3253,"complexity":3,"area":"lane:ui"},{"number":3252,"complexity":5,"area":"lane:devops"}, ...]'  # `chosen`, marie's order
    ```
-   - Cold start (`--batch-turns` prints `[]`): pass `--unit-turns`, derived from one
-     complexity-5 item taking roughly a third of minion's `timeout_s` in turns, and say in
-     your report that it is a starting estimate.
+   - Cold start (`--batch-turns` prints `[]`): pass `--unit-turns` (a complexity-5 item ~ a
+     third of minion's `timeout_s` in turns) and report it as a starting estimate.
    - **Never type `--target-items`, `--solo-complexity-floor` or `--timeout-s` yourself**: the
      packer reads the instance's own dials. Spawn exactly the batches it returns (H§25).
    - Release each item in `deferred` (`board_github.py release <n> "gru: deferred -- <why>"`)
      and name it in your report with its `why`; it goes next pass. (An `area:` module gets ONE
      batch a pass, philanthropy#8218; a batch under the minimum waits a pass.)
    - An item in `over_timeout` still runs solo: name it as likely to need a second pass.
-   - A timed-out minion leaves a branch + DRAFT PR that the next minion resumes: re-claim and
-     re-dispatch its items as usual; its draft PR is not someone else's fix.
+   - A timed-out minion's DRAFT PR is resumed by the next minion: re-claim and re-dispatch
+     its items as usual.
    - **Quote the returned JSON verbatim in your report**, as in step 3.
 
    For each batch, dispatch one minion DETACHED. This is the WHOLE `command`, run in the
@@ -393,9 +387,8 @@ minutes) has room for; spawn exactly those, release the `deferred`. Never work a
    ```
    bash /fleet-kit/scripts/dispatch_member.sh --wait <pid> <pid> ...
    ```
-   It blocks up to 540s, then prints `pid=<N> done` or `pid=<N> running` for each. Re-run it
-   while any is `running` and your budget allows. A minion still running when you must end
-   your turn is not a failure (it is detached and records its own run): report it as
+   It blocks up to 540s, then prints `pid=<N> done` or `pid=<N> running` each; re-run while any
+   is `running` and budget allows. One still running at your end is not a failure: report it as
    `running (pid N)` for every issue number in its batch; the next pass's step 7 reads it. Never `wait $PID` (gh#152) and never end your turn "to wait for a notification":
    you are a one-shot `claude -p` pass (persona_law.md §12).
 
@@ -416,8 +409,7 @@ minutes) has room for; spawn exactly those, release the `deferred`. Never work a
    ("no bet"), never omitted (gh#572).
 
 8. **Never build anything yourself, and never re-rank.** If marie clearly missed something
-   (an obviously urgent unlabeled item, a stale priority label), leave a comment flagging it
-   for her next pass — don't relabel it.
+   (an urgent unlabeled item, a stale label), comment for her next pass; don't relabel it.
 
 8b. **Standing lanes are worked EVERY pass (H§26).** `FLEET_STANDING_LANES` is a comma list
    of `lane:` names tied to the product's key results. Each pass, with allowance headroom:

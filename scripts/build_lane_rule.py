@@ -25,7 +25,7 @@ Three places enforce them, so a prompt cannot build around the rule:
 Run: python3 scripts/build_lane_rule.py check --items 1,2 --repo owner/repo
      python3 scripts/build_lane_rule.py hour-count --runs /var/log/fleet-kit/runs.jsonl
      python3 scripts/build_lane_rule.py reserve --runs /var/log/fleet-kit/runs.jsonl \
-         --ledger /var/log/fleet-kit/minion_hour_starts.log --cap 1   # exit 3 = hour full
+         --ledger /var/log/fleet-kit/minion_hour_starts.log   # exit 3 = hour full
      python3 scripts/build_lane_rule.py ci-budget                        # exit 3 = day spent
 """
 from __future__ import annotations
@@ -39,6 +39,8 @@ import sys
 import time
 from pathlib import Path
 from typing import Iterable, Mapping
+
+import account_meter
 
 
 def allowed_labels(env: Mapping[str, str] | None = None) -> list[str]:
@@ -55,13 +57,17 @@ def off_lane(item_labels: Mapping[int, Iterable[str]], allowed: Iterable[str]) -
     return [n for n, labels in item_labels.items() if not want & set(labels)]
 
 
-def hour_cap(env: Mapping[str, str] | None = None) -> int:
-    """FLEET_MINION_MAX_PER_HOUR as an int; 0 when unset, blank or not a number (= no cap)."""
-    raw = (env if env is not None else os.environ).get("FLEET_MINION_MAX_PER_HOUR", "")
+def hour_cap(env: Mapping[str, str] | None = None, rows: list[dict] | None = None) -> int:
+    """FLEET_MINION_MAX_PER_HOUR as an int, scaled by the week's pace gap; 0 when unset, blank
+    or not a number (= no cap). 2026-10-16: a fixed 1/hour left phil's week 87% unspent at 84%
+    elapsed; account_meter.paced_hour_cap() raises it while an account is behind pace."""
+    env = env if env is not None else os.environ
     try:
-        return max(0, int(raw))
+        base = max(0, int(env.get("FLEET_MINION_MAX_PER_HOUR", "")))
     except (TypeError, ValueError):
         return 0
+    rows = rows if rows is not None else account_meter.load(env.get("FLEET_METER_FILE", ""))
+    return account_meter.paced_hour_cap(base, rows)
 
 
 # The cap's window is 50 minutes, not 60. gru's pass runs at :03 every hour and its minion
@@ -214,7 +220,7 @@ def main(argv: list[str] | None = None) -> int:
     r = sub.add_parser("reserve", help="take one hour slot atomically; exit 3 and print the count when full")
     r.add_argument("--runs", required=True)
     r.add_argument("--ledger", required=True)
-    r.add_argument("--cap", type=int, required=True)
+    r.add_argument("--cap", type=int, help="default: hour_cap(), the dial scaled by the week's pace")
     r.add_argument("--member", default="minion")
     r.add_argument("--window-s", type=float, default=WINDOW_S)
     sub.add_parser("ci-budget", help="print today's Actions minutes/cap; exit 3 when the day is spent")
@@ -240,7 +246,8 @@ def main(argv: list[str] | None = None) -> int:
         print(started_in_window(lines, member=a.member, window_s=a.window_s))
         return 0
     if a.cmd == "reserve":
-        taken, count = reserve(Path(a.runs), Path(a.ledger), a.cap, a.member, a.window_s)
+        cap = a.cap if a.cap is not None else hour_cap()
+        taken, count = reserve(Path(a.runs), Path(a.ledger), cap, a.member, a.window_s)
         print(count)
         return 0 if taken else 3
     if a.cmd == "ci-budget":
