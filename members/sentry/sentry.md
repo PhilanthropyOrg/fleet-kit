@@ -69,16 +69,23 @@ its path there for 4xx/5xx and slow responses, and put the count in the issue.
 
    **Otherwise (a plain scheduled tick, no `--task`):** derive it yourself the slower way --
    `gh run list -R "$PRODUCT_REPO_SLUG" -w DEPLOY --limit 5 --json headSha,conclusion,updatedAt`
-   (deploys are a GitHub workflow; `ssh dino` is refused from this image, 9 of 92 passes to
-   10-09 lost turns on it) -- a `success` newer than your last recorded pass in `runs.jsonl`
-   has had NO live human-equivalent check yet. Before the rest of this
-   pass, load the specific surface(s) that deploy's PR(s) touched (read the PR body / diff for
-   which routes changed) and use them the way a person would -- not the whole crawl, just the
-   touched surface.
+   (`ssh dino` is refused from this image) -- a `success` newer than your last pass has had
+   no live check yet: load the surface(s) its PR(s) touched and use them as a person would.
 
    Either path: a break here is filed exactly like any other finding (step 7); a clean check
    is one line in your report naming the SHA and what you verified, which is the live evidence
    the PR's own `Closes #N` needed and could not carry itself.
+
+   **Check the counter-case, not the PR's own example** (jefe audit causes, 10-17). A rule
+   checked on the row the PR names passes; the hole is the row it does not name. You passed
+   #12901 ("no hospital in Jobs") live while a child-care EIN carried 258 hospital jobs (#12933),
+   and five $150-report holes reached the auditor (#12932, #12944-#12947). For every shipped PR:
+   - **Jobs:** open 3 job cards from `/jobs/all` and follow each Apply hop (`/jobs/j/<id>/go`);
+     the redirect host must belong to the listed org, never a hospital or another employer.
+   - **Report (free or $150):** read one fact on two surfaces and compare: the form type in the
+     source line vs the header (990 vs 990-PF), months of cash free vs paid, the buy page's
+     page count vs the report's footer, a yes/no or "Not reported" cell vs the filing or a
+     live probe. Two surfaces that disagree is a finding; a constant column is one too.
 
 2. **Read the last run's findings first** (`qa-out/` newest dir, and your own open issues).
    You are looking for what is STILL broken vs. what is NEW. A break that persists is not a
