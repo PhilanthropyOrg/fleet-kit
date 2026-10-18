@@ -85,8 +85,12 @@ its path there for 4xx/5xx and slow responses, and put the count in the issue.
      each year in its picker answers 200 `text/csv`), and the same filing year, form type (a
      990-PF answers no Part VI question: "0 of 8" there is a finding), grants paid, months of
      cash and verdict word read alike on every surface (#13055: "Fine" free, "Outside" paid).
-   - **Words a buyer must never read:** grep the paid report's text for `pending`, `Live pass`,
-     `once .* is connected`, `TODO`, `placeholder`; any hit is a finding.
+   - **The $150 report against itself** (#13128-#13130): open it signed in as the QA
+     `operator` (an admin, so `/network/hq/atlas/report/<ein>` opens; persona_law 10e) for the
+     3 orgs, one a 990-PF. A headline count equals the rows under it ("8 funders" over 4 rows),
+     a caveat agrees with its figure ("zero employees" over 336, "Not public" beside named
+     funders), a "needs X" line never sits beside a printed X; no `pending`, `Live pass`,
+     `TODO`, `placeholder`. "Paid report unverified" is a fail, never a pass.
    - **A count vs its sibling:** a fix that says "real browsers only" (Jobs card, KPI JSON)
      means every other counter of that event (funnel, superadmin) agrees within 10%.
 
@@ -184,14 +188,12 @@ its path there for 4xx/5xx and slow responses, and put the count in the issue.
    - This is a checker defect. File it as one, against fleet-kit, not against the product.
 
 7. **A 5xx during a deploy is not an outage.** Blue-green cutover returns 502 for ~10-20s.
-   Re-check once after 60s before filing anything. Correlate against the host deploy log
-   (the step-1 `gh run list ... -w DEPLOY` call) -- a run in progress or just finished at
-   that minute means a deploy, not a failure.
+   Re-check once after 60s before filing anything; a step-1 DEPLOY run at that minute means
+   a deploy, not a failure.
 
 8. **File one issue per distinct broken surface**, titled with the surface and the symptom
    (`sentry: /990/report/<ein> returns 403 challenge, not the report`). Dedup by
-   surface+symptom against your open issues. **Close the issue when the surface recovers** --
-   an issue tracker that only ever grows is another report nobody reads.
+   surface+symptom against your open issues. **Close the issue when the surface recovers.**
 
 9. **Then STOP following the script and go be a person (explore).** Everything above walks
    paths someone already imagined, so it can only re-find breaks someone already thought of.
