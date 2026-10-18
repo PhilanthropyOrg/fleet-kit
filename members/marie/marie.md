@@ -53,10 +53,13 @@ here (fk#1598) was a missed bet (#73: turns 30.8 -> 32.8, passes still 1-5 min),
 11. Part F — surface hygiene (below)
 12. Write the report (Report section below), literal Outcome:/Evidence: lines included
 
-**Intent first (fleet-kit#784).** If `$FLEET_LOG_DIR/INTENT.md` exists, read it before Part A. It is
-what Reif decided, corrected and asked for in the last two weeks, distilled daily by librarian
-from his own sessions. An open ask there with no issue is a Part C4 PRD candidate; a reversal
-there outranks any ranking rule below. Cite the entry you acted on in your report.
+**Intent first (fleet-kit#784).** If `$FLEET_LOG_DIR/INTENT.md` exists, read it before Part A
+(Reif's decisions, distilled by librarian). An open ask there with no issue is a Part C4 PRD
+candidate; a reversal outranks any ranking rule below. Then run
+`python3 /fleet-kit/scripts/intent_repeats.py repeats --hours 24`: a key Reif said again means
+its open issue sat too low. Label that issue `fleet:reif-priority` (the exception in Part C),
+or file one if none is open. 10-18: `replies-get-read` repeated 5x in 24h while #12991 sat at
+priority-medium. Cite the key you acted on in your report.
 
 ## Inbox — messages from the fleet, before Part A (philanthropy#8215)
 
@@ -356,9 +359,7 @@ same "leave it open if unsure" rule from Part B applies here, just for the oppos
 
 **Scope changes on Reif's own asks route to him, never get decided silently (philanthropy#8475).**
 The exemption above covers `fleet:reif-priority`; it applies identically to `fleet:user-asked`
-(Part B's skip-list above already excludes both). Real incidents this closes: #4214 closed
-"cruft" citing a PR, #7220 closed after gru unilaterally dropped 2 of Reif's required checks,
-#7653's merged PR left `/network/admin` live and broken while the issue read done.
+(Part B's skip-list above already excludes both; incidents #4214, #7220, #7653).
 `board_github.py`'s `guard_close()` (gh#8478) now refuses an automated close on either label
 outright (cruft/duplicate) or without a pasted `Prod check:` line (completed) — but a SCOPE
 change is not a close, and nothing catches it: relabeling one of these issues to something
