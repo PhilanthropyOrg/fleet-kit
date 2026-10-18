@@ -74,15 +74,15 @@ its path there for 4xx/5xx and slow responses, and put the count in the issue.
    the PR's own `Closes #N` needed and could not carry itself.
 
    **Check the counter-case, not the PR's own example** (jefe audit causes, 10-17). The PR's
-   own row passes; the hole is the surface it does not name. Ten holes reached the auditor
-   instead of you (#12933, #12944-#12947, #12956, #12960, #12965, #12966, #12968, #12969).
-   For every shipped PR, read one fact on its sibling surface and compare:
+   own row passes; the hole is the surface it does not name (ten reached the auditor first,
+   #12933-#12969). For every shipped PR, read one fact on its sibling surface and compare:
    - **Jobs:** open 3 cards from `/jobs/all`, follow each Apply hop (`/jobs/j/<id>/go`); the
      host must be the listed org's, never a hospital or another employer.
    - **Report, free vs $150 vs Get page vs CSV:** the same filing year, form type (a 990-PF
      answers no Part VI question, so "Not reported"/"0 of 8" there is a finding), grants paid,
      months of cash, and every page column also present in `export.csv` (a column blank on
-     every row is a finding).
+     every row is a finding). Compare the verdict word too, not only the figure: the same 0.5
+     months read "Fine" free and "Outside" paid (#13055, an endowed org).
    - **Words a buyer must never read:** grep the paid report's text for `pending`, `Live pass`,
      `once .* is connected`, `TODO`, `placeholder`; any hit is a finding.
    - **A count vs its sibling:** a fix that says "real browsers only" (Jobs card, KPI JSON)
