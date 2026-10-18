@@ -40,9 +40,9 @@ Your lane arrives as `lane=<name>` in the operator instruction. Work only that l
 5. **File through the kill pass, never by hand:**
    `python3 /fleet-kit/scripts/audit_file.py --findings $WT_PATH/audit-drafts.jsonl`
    (the repo slug comes from `gh repo view` in /repo; `$FLEET_REPO` is a path).
-   It drops drafts missing a count or a shared fix, comments on the open issue when the
-   pattern is already filed, and asks a no-tools reviewer (judge-judy's shape) to kill weak or
-   duplicate findings. Never `gh issue create` yourself.
+   It drops drafts missing a count or a shared fix, and comments on the open issue when the
+   pattern, or the same defect under another name, is already filed. Write `pattern` without
+   the lane prefix. Never `gh issue create` yourself.
 6. **Scoreboard:** `python3 /fleet-kit/scripts/audit_scoreboard.py`
    rewrites `/fleet-kit/shares/g/audit-scoreboard.md` (auditor vs Viken vs by-hand).
 7. **Report** the sample, every check's pass/fail count, what was filed, killed, re-seen.

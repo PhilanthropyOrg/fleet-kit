@@ -47,6 +47,26 @@ def test_only_findings_the_kill_pass_keeps_are_filed():
     assert af.plan([GOOD], [], {})[0][0] == "drop"  # no verdict = not filed (fail closed)
 
 
+def test_a_doubled_lane_prefix_is_the_same_pattern():
+    # 10-17: drafts with pattern "scout-report:x" filed as "scout-report:scout-report:x".
+    doubled = {**GOOD, "pattern": "990-truth:csv_link_is_pdf"}
+    assert af.pattern_key(doubled) == af.pattern_key(GOOD) == "990-truth:csv_link_is_pdf"
+    old = {"number": 902, "body": "Audit-pattern: 990-truth:990-truth:csv_link_is_pdf\n"}
+    assert af.plan([GOOD], [old], {})[0][:3:2] == ("comment", 902)
+
+
+def test_same_defect_under_a_new_key_comments_on_the_open_issue():
+    # #12944, #13012, #13029: one months-of-cash bug, three keys, three issues (10-17).
+    renamed = {**GOOD, "pattern": "csv_href_points_at_pdf"}
+    open_issue = {"number": 903, "title": "Report CSV link opens the PDF", "body": "x"}
+    key = af.pattern_key(renamed)
+    assert af.plan([renamed], [open_issue], {key: (False, "same as #903", 903)})[0][:3:2] == (
+        "comment", 903)
+    # a duplicate_of that is not an open issue is a plain kill, never a comment elsewhere
+    assert af.plan([renamed], [open_issue], {key: (False, "dup", 77)})[0][0] == "drop"
+    assert "#903 Report CSV link opens the PDF" in af.kill_prompt([renamed], [open_issue])
+
+
 def test_issue_body_carries_count_gwt_vision_link_and_pattern_key():
     body = af.issue_body(GOOD)
     for want in ("1840 affected", "## Fix in shared code", "## Guard test", "- Given a report",
