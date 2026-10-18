@@ -163,6 +163,16 @@ def test_a_tile_and_its_reason_line_print_the_same_figure():
     assert at.tile_vs_reason(ok) == []
 
 
+def test_the_programs_tile_and_the_fact_box_print_the_same_share():
+    """#13131, Memphis Goodwill live 10-18: tile 99%, fact box 100 cents of each $1."""
+    fact = ('<div class="rp-fact"><svg></svg><span><b class="num">{}\u00a2</b> of each '
+            '<b class="num">$1</b> spent went to programs.</span></div>')
+    tile = _tile("programs", "99%", "of spending", "Looks good: 99% went to programs.")
+    assert [e.split(":")[0] for e in at.tile_vs_fact(tile + fact.format(100))] == [
+        "tile programs"]
+    assert at.tile_vs_fact(tile + fact.format(99)) == []
+
+
 def test_the_10_14_shriners_shape_trips_both_v1b_and_v1d():
     page = PDF + CSV_BAD + NO_RATE + GRADES
     found = at.audit(page, "u") + at.download_hits(page, "u", _SERVED.get)[0]

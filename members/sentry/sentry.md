@@ -87,7 +87,8 @@ its path there for 4xx/5xx and slow responses, and put the count in the issue.
      cash and verdict word read alike on every surface (#13055: "Fine" free, "Outside" paid).
    - **The $150 report against itself** (#13128-#13130): open it signed in as the QA
      `operator` (an admin, so `/network/hq/atlas/report/<ein>` opens; persona_law 10e) for the
-     3 orgs, one a 990-PF. A headline count equals the rows under it ("8 funders" over 4 rows),
+     3 orgs, one a 990-PF. A headline count equals the rows under it ("8 funders" over 4 rows,
+     "0 of 1 data checks passed" over none: #13133),
      a caveat agrees with its figure ("zero employees" over 336, "Not public" beside named
      funders), a "needs X" line never sits beside a printed X; no `pending`, `Live pass`,
      `TODO`, `placeholder`. "Paid report unverified" is a fail, never a pass.

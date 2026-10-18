@@ -54,6 +54,8 @@ _BIG = re.compile(r'<div class="byg-(?:big|unit)[^"]*">(.*?)</div>', re.S)
 _WHY = re.compile(r'<div class="byg-why">(.*?)</div>', re.S)
 _PCT = re.compile(r"(\d+(?:\.\d+)?)\s?%")
 _MONTHS = re.compile(r"(\d+(?:\.\d+)?)\s?(?:mo|months?)\b")
+_FACT = re.compile(r'<div class="rp-fact">(.*?)</div>', re.S)
+_CENTS = re.compile(r"(\d+)\s*¢\s+of each\s+\$1\s+spent went to programs")
 
 
 def _text(fragment: str) -> str:
@@ -230,6 +232,19 @@ def tile_vs_reason(page: str) -> list[str]:
     return out
 
 
+def tile_vs_fact(page: str) -> list[str]:
+    """#13131: the programs tile and the fact box print one share ("99% of spending" beside
+    "100¢ of each $1 spent went to programs"); two roundings of one figure is a T13 hole."""
+    tiles = dict(_TILE.findall(page))
+    shown = _figures(_text(" ".join(_BIG.findall(tiles.get("programs", "")))))[0]
+    out = []
+    for fact in _FACT.findall(page):
+        said = _CENTS.search(_text(fact))
+        if shown and said and float(said.group(1)) != shown[0]:
+            out.append(f"tile programs: shows {shown[0]:g}%, fact box says {said.group(0)!r}")
+    return out
+
+
 CHECKS = {
     "disclaimer_vs_grades": disclaimer_vs_grades,
     "hidden_rows": hidden_rows,
@@ -237,6 +252,7 @@ CHECKS = {
     "privacy_leaks": privacy_leaks,
     "schedule_letters": schedule_letters,
     "tile_vs_reason": tile_vs_reason,
+    "tile_vs_fact": tile_vs_fact,
 }
 
 
