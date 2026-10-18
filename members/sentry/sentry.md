@@ -109,7 +109,12 @@ its path there for 4xx/5xx and slow responses, and put the count in the issue.
    does not mean a human got what they came for. For each surface, the assertion is:
    - **search** (`/990/?q=hospital`) -- result rows present, count > 0, org names non-empty
    - **filter** (`/990/?ntee=E&state=CA`) -- rows present AND actually filtered
-   - **report** (`/990/report/<ein>`) -- org name, a revenue/expense figure, a filing year
+   - **report** (`/990/report/<ein>`) -- org name, a revenue/expense figure, a filing year,
+     AND the page tells the truth about itself: run `python3 /fleet-kit/scripts/audit_990_truth.py
+     --url <report URL>` on 3 crawled reports. "We don't rate" over grade cards (#13031), an
+     "(XML)" link serving the Sources page (#13032) and a 0.5% tile over a "0%" reason (#13033)
+     sat live on every report while sentry saw 200s. A hit goes to
+     `audit_file.py --findings` (it dedupes against open `lane:audit` issues), never `gh issue create`.
    - **superadmin** (`superadmin.philanthropy.org`) -- signed in as the operator persona, the
      Overview renders STYLED with both halves on screen (journey `superadmin-overview-renders`).
      The sign-in form rendering is not enough: on 2026-09-28 it rendered fine while the
