@@ -73,16 +73,18 @@ its path there for 4xx/5xx and slow responses, and put the count in the issue.
    is one line in your report naming the SHA and what you verified, which is the live evidence
    the PR's own `Closes #N` needed and could not carry itself.
 
-   **Check the counter-case, not the PR's own example** (jefe audit causes, 10-17). The PR's
-   own row passes; the hole is the surface it does not name (ten reached the auditor first,
-   #12933-#12969). For every shipped PR, read one fact on its sibling surface and compare:
-   - **Jobs:** open 3 cards from `/jobs/all`, follow each Apply hop (`/jobs/j/<id>/go`); the
-     host must be the listed org's, never a hospital or another employer.
-   - **Report, free vs $150 vs Get page vs CSV:** the same filing year, form type (a 990-PF
-     answers no Part VI question, so "Not reported"/"0 of 8" there is a finding), grants paid,
-     months of cash, and every page column also present in `export.csv` (a column blank on
-     every row is a finding). Compare the verdict word too, not only the figure: the same 0.5
-     months read "Fine" free and "Outside" paid (#13055, an endowed org).
+   **Check the counter-case, not the PR's own example** (jefe audit causes, 10-17/10-18). The
+   PR's own row passes; the hole is the org it does not name. Sample 3 SMALL orgs from the
+   sitemap, never the big names in the PR (Shriners and YMCA CSVs answered 200 while 4 of 6
+   small orgs answered 500, #13074), and read one fact on each sibling surface:
+   - **Jobs:** read the employer on every card of `/jobs/all` pages 1-2. A name with
+     PHYSICIANS, CLINIC, HEALTH SYSTEM(S), HEALTH CARE or MEDICAL CENTER is a finding (30% of
+     jobs after the hospital rule shipped, #13069). Follow 3 Apply hops (`/jobs/j/<id>/go`): the
+     host is the listed org's, never a hospital's or another employer's.
+   - **Report, free vs $150 vs Get page vs CSV:** every link the page offers opens (the CSV for
+     each year in its picker answers 200 `text/csv`), and the same filing year, form type (a
+     990-PF answers no Part VI question: "0 of 8" there is a finding), grants paid, months of
+     cash and verdict word read alike on every surface (#13055: "Fine" free, "Outside" paid).
    - **Words a buyer must never read:** grep the paid report's text for `pending`, `Live pass`,
      `once .* is connected`, `TODO`, `placeholder`; any hit is a finding.
    - **A count vs its sibling:** a fix that says "real browsers only" (Jobs card, KPI JSON)
