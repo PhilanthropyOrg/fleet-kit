@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import push_budget_gate as gate  # noqa: E402
 
 NOW = 1792252800.0  # 2026-10-17 16:00Z: 14 days after today in October
-NONE, CLAIMS, SALES = "Moves: none", "Moves: claims", "Moves: $150 report sales"
+NONE, CLAIMS, SALES, JOBS = "Moves: none", "Moves: claims", "Moves: $150 report sales", "Moves: jobs"
 
 
 def meter(pct):
@@ -52,10 +52,11 @@ class PushBudgetGate(unittest.TestCase):
         self.assertIn("Moves: claims", why)
         self.assertTrue(gate.check(str(self.wt), now=NOW, meter=meter(81), moves=CLAIMS)[0])
         self.assertTrue(gate.check(str(self.wt), now=NOW, meter=meter(81), moves=SALES)[0])
-        self.assertEqual([r["verdict"] for r in self.rows()], ["refuse", "allow", "allow"])
+        self.assertTrue(gate.check(str(self.wt), now=NOW, meter=meter(81), moves=JOBS)[0])
+        self.assertEqual([r["verdict"] for r in self.rows()], ["refuse", "allow", "allow", "allow"])
 
     def test_100_percent_refuses_everything(self):
-        for moves in (NONE, CLAIMS, SALES):
+        for moves in (NONE, CLAIMS, SALES, JOBS):
             ok, why = gate.check(str(self.wt), now=NOW, meter=meter(100), moves=moves)
             self.assertFalse(ok)
             self.assertIn("next UTC day", why)

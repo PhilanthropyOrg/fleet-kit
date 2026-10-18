@@ -9,8 +9,9 @@ EVERY push to the philanthropy repo:
   spent     = today's actions netAmount from the org billing API    (10-minute cache file)
 
   under 80% of the share  -> any PR pushes
-  80% to 100%             -> only a PR whose body's first line is `Moves: claims` or
-                             `Moves: $150 report sales` (no PR yet: the head commit's body)
+  80% to 100%             -> only a PR whose body's first line is `Moves: claims`,
+                             `Moves: $150 report sales` or `Moves: jobs` (Jobs is priority 1,
+                             INTENT 10-18 jobs-pushes-skip-gate; no PR yet: the head commit's body)
   100% and over           -> nothing pushes until the next UTC day
 
 The only bypass is a deploy-gate revert: `push_budget_gate.py --why "deploy-gate revert ..."
@@ -40,7 +41,7 @@ ORG = "PhilanthropyOrg"
 REPO_RX = re.compile(r"PhilanthropyOrg/philanthropy(\.git)?/?$")
 CACHE_S = 600
 SOFT_PCT, HARD_PCT = 80.0, 100.0
-MONEY_LINES = ("Moves: claims", "Moves: $150 report sales")
+MONEY_LINES = ("Moves: claims", "Moves: $150 report sales", "Moves: jobs")
 
 
 def log_dir() -> Path:
@@ -146,7 +147,7 @@ def verdict(pct: float, moves: str, why: str = "") -> tuple[bool, str]:
                        "nothing pushes to philanthropy until the next UTC day")
     if pct >= SOFT_PCT and not moves.strip().startswith(MONEY_LINES):
         return False, (f"{pct:.0f}% of today's Actions share is spent: only a PR whose body starts "
-                       "`Moves: claims` or `Moves: $150 report sales` may push")
+                       "`Moves: claims`, `Moves: $150 report sales` or `Moves: jobs` may push")
     return True, "ok"
 
 
