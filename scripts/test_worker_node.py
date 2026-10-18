@@ -147,12 +147,14 @@ esac
                 {"claudeAiOauth": {"accessToken": tok, "refreshToken": "sk-ant-ort01-SECRET",
                                    "expiresAt": int((now + left_min * 60) * 1000)}}))
         self.env.update(HOME=str(home), FLEET_ACCOUNTS="gmail tgp philanthropy bad/name",
-                        CLAUDE_CODE_OAUTH_TOKEN_TGP="sk-ant-oat01-long")
+                        CLAUDE_CODE_OAUTH_TOKEN_TGP="sk-ant-oat01-long", FLEET_ACTIONS_BUDGET_USD="250")
         r = self._run(f"cat > {self.d}/stdin\necho 'node-accepted host=lucky'\necho 'node-done rc=0'\n")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertEqual((self.d / "stdin").read_text(),
-                         "acct gmail sk-ant-oat01-gm\nacct tgp sk-ant-oat01-long\n",
-                         "philanthropy's token expires in 30 min: not sent; refresh tokens never")
+                         "acct gmail sk-ant-oat01-gm\nacct tgp sk-ant-oat01-long\n"
+                         "env FLEET_ACTIONS_BUDGET_USD 250\n",
+                         "philanthropy's token expires in 30 min: not sent; refresh tokens never; "
+                         "the hub's Actions budget rides along (10-18: the node's stale copy refused every push)")
         self.assertNotIn("sk-ant", (self.d / "ssh_args").read_text())
 
 
@@ -249,6 +251,18 @@ esac
             "FLEET_NODE_TOKEN_CLAUDE_REIF=sk-ant-oat01-cr",
             "FLEET_NODE_TOKEN_GMAIL=sk-ant-oat01-gm",
         ])
+
+    def test_hub_actions_budget_reaches_the_container_and_nothing_else_does(self):
+        """10-18: lucky's fleet.env predated FLEET_ACTIONS_BUDGET_USD, so its push gate read 193%
+        while the hub read 78%. The hub's number rides in; any other name or a non-number does not."""
+        (self.d / "podman").write_text((self.d / "podman").read_text().replace(
+            "exec) sleep 0.5", f'exec) env | grep -E "^(FLEET_ACTIONS_BUDGET_USD|PATH_X)=" | sort > {self.d}/exec_env\n        sleep 0.5'))
+        r = self._gate("minion --items 5,6",
+                       "env PATH_X /evil\nenv FLEET_ACTIONS_BUDGET_USD 250;id\n"
+                       "env FLEET_ACTIONS_BUDGET_USD 250\n")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("exec -e FLEET_RUN_NOW=1 -e FLEET_ACTIONS_BUDGET_USD worker bash", self._podman_calls())
+        self.assertEqual((self.d / "exec_env").read_text().splitlines(), ["FLEET_ACTIONS_BUDGET_USD=250"])
 
     def test_run_member_prefers_the_hubs_accounts(self):
         d = Path(tempfile.mkdtemp())

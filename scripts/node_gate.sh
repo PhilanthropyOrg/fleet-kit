@@ -90,7 +90,12 @@ flock -n 9 || { echo "node-refused: batch $items is already running here"; exit 
 # the node's own fleet.env accounts. An old hub sends nothing: the node's own accounts, as before.
 EXTRA=()
 accts=""
+# The hub also sends `env FLEET_ACTIONS_BUDGET_USD <number>` (node_minion.sh): only that name,
+# only a number, so the push gate here reads the hub's budget, not a stale copy's.
 while IFS=' ' read -r -t "${FLEET_NODE_STDIN_WAIT_S:-10}" kw name tok; do
+  if [ "$kw" = "env" ] && [ "$name" = "FLEET_ACTIONS_BUDGET_USD" ] && [[ "$tok" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+    export "$name=$tok"; EXTRA+=(-e "$name"); continue
+  fi
   [ "$kw" = "acct" ] && [[ "$name" =~ ^[a-z0-9-]{1,40}$ ]] && [[ "$tok" =~ ^sk-ant-[A-Za-z0-9_-]+$ ]] || continue
   var="FLEET_NODE_TOKEN_$(echo "$name" | tr '[:lower:]-' '[:upper:]_')"
   export "$var=$tok"
