@@ -73,7 +73,8 @@ lines and put the pass total in the Report. Then by reading:
 - T10 years: the fiscal year shown equals the XML tax period; "latest" really is the latest
 - T11 every link answers 200 and goes to the right target (header, body and footer links)
 - T12 every number on a card can be reproduced from the XML line it cites (deck numbers too)
-- T13 a figure printed twice (tile and its reason line) reads the same, at the same rounding
+- T13 a figure printed twice (tile, its reason line, the fact box, a headline) reads the same at
+  one rounding; nothing under 100% prints 100 (or 100¢)
 
 ## Lane data-in (`auditor:data-in`)
 
@@ -105,6 +106,7 @@ cite the page URL and the source line each finding contradicts or lacks:
 - S3 a journalist: would every claim survive a fact check against the filing? Any label that
   grades while the copy says we don't, any figure we cannot reproduce?
 - S4 the paid report adds what the free one lacks, and says nothing the free one contradicts
+- S5 an "N of M passed" counts only checks that ran: a placeholder row is not a failed check
 
 ## Lane jobs (`auditor:jobs`)
 
@@ -181,6 +183,8 @@ closed):
 | Owner-posted jobs missing from /jobs/all and the org page (#12899) | J4 |
 | "III · Programs" lit under Schedules filed; T3 had exempted it (#12982) | T3 |
 | Tile "0.5% of total assets" over reason "0% of assets" (#12981) | T13 |
+| Tile "99%" beside fact box "100¢ of each $1" (#13131) | T13 |
+| Paid headline "0 of 1 data checks passed" when none ran (#13133) | S5 |
 
 A hole that reaches us by hand and is not in this table is a missed check: add a row and the
 check in the same PR that fixes it.
