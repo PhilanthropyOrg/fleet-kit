@@ -77,9 +77,9 @@ its path there for 4xx/5xx and slow responses, and put the count in the issue.
    PR's own row passes; the hole is the org it does not name. Sample 3 SMALL orgs from the
    sitemap, never the big names in the PR (Shriners and YMCA CSVs answered 200 while 4 of 6
    small orgs answered 500, #13074), and read one fact on each sibling surface:
-   - **Jobs:** read the employer on every card of `/jobs/all` pages 1-2. A name with
-     PHYSICIANS, CLINIC, HEALTH SYSTEM(S), HEALTH CARE or MEDICAL CENTER is a finding (30% of
-     jobs after the hospital rule shipped, #13069). Follow 3 Apply hops (`/jobs/j/<id>/go`): the
+   - **Jobs:** read the employer on every card of `/jobs/all` pages 1-2 and on 3 `/jobs/at`
+     URLs from `/jobs/sitemap-jobs-wave-1.xml` (#13103). A name with PHYSICIANS, CLINIC,
+     HEALTH SYSTEM(S), HEALTH CARE or MEDICAL CENTER is a finding (#13069). Follow 3 Apply hops (`/jobs/j/<id>/go`): the
      host is the listed org's, never a hospital's or another employer's.
    - **Report, free vs $150 vs Get page vs CSV:** every link the page offers opens (the CSV for
      each year in its picker answers 200 `text/csv`), and the same filing year, form type (a
