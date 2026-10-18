@@ -76,7 +76,17 @@ talk() {  # talk <gate command> [stdin producer]
   done
   rc=${PIPESTATUS[1]}
 }
-talk "minion --items $items" node_tokens
+# The hub's Actions budget goes too (`env <NAME> <number>`): the node's fleet.env is a copy from
+# node_up.sh day, and without FLEET_ACTIONS_BUDGET_USD its push gate fell back to the org's
+# smaller budget and refused every minion push at 157-193% while the hub read 78% (10-18).
+node_stdin() {
+  local b="${FLEET_ACTIONS_BUDGET_USD:-}"
+  [ -n "$b" ] || b=$(sed -n 's/^FLEET_ACTIONS_BUDGET_USD=//p' "${FLEET_ENV_FILE:-/fleet-kit/fleet.env}" 2>/dev/null | tail -1)
+  node_tokens
+  [[ "$b" =~ ^[0-9]+(\.[0-9]+)?$ ]] && printf 'env FLEET_ACTIONS_BUDGET_USD %s\n' "$b"
+  return 0
+}
+talk "minion --items $items" node_stdin
 [ "$accepted" = 1 ] || run_here "node did not accept (ssh rc=$rc)"
 tries=0
 while [ "$done" = 0 ] && [ "$rc" != 0 ] && [ "$tries" -lt "${FLEET_NODE_ATTACH_TRIES:-5}" ]; do
