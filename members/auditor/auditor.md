@@ -132,7 +132,10 @@ closed):
 **Funnel and Google:**
 - J9 the funnel counts only real browsers
 - J10 jobs metrics are fresh under the 3-day rule; the hub Google metric is not stale
-- J11 the sitemap count equals open jobs, and closed jobs have left the sitemap
+- J11 what Google is told matches what Jobs shows: sitemap-jobs-open counts the open jobs,
+  closed ones have left it; 3 URLs from EACH `/jobs/sitemap*.xml` file (the `/jobs/at` wave
+  files too) pass J5 and J6; every sampled open job, newest first, reads `index` with JobPosting
+  JSON-LD (#13103 hospital org pages in wave-1, #13126 newest Workday jobs noindex)
 - J12 a sample of open jobs is indexed: GSC URL inspection when the key exists, else a
   `site:` query, and say which one you used
 - J13 a test that depends on today's date is a finding (it passes today, fails next week)
@@ -167,7 +170,8 @@ closed):
 | Deck numbers we could not reproduce | T12, S3 |
 | "k h" and ALL-CAPS names | T7, D3 |
 | Street addresses on report pages and public JSON | T8, D4 |
-| Hospitals in Jobs | J6 |
+| Hospitals in Jobs, and in the jobs sitemap (#13103) | J6, J11 |
+| Newest jobs noindex with no JobPosting (#13126) | J11 |
 | Hub GSC metric stale since 10-13 | D1, J10 |
 | A crawler inflating the Apply funnel | D5, J9 |
 | Wrong employers (2,602) | J5, D3 |
