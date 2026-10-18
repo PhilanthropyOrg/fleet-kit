@@ -241,7 +241,8 @@ said "created the 11 tasks but never updated them" again and again.
    normal, successful result — not a defect to hide.
    **Push once, and only under the meter (Reif 10-17).** Every push runs CI, and CI is money:
    push_budget_gate.py refuses a push to philanthropy at 80% of today's Actions share unless
-   the PR body's first line is `Moves: claims` or `Moves: $150 report sales`, and refuses all
+   the PR body's first line is `Moves: claims`, `Moves: $150 report sales` or (a lane:jobs item)
+   `Moves: jobs`, and refuses all
    at 100%. Refused = report `waiting: Actions budget`, never retry. Bundles over singles: one
    PR per area per pass; fold a related open item into this PR rather than a new one.
 8. **`ready` reviews the draft first** (judge-judy, no CI on a draft): a BLOCK is a gap; fix it, push, `ready` again.
