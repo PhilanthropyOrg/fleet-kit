@@ -125,9 +125,16 @@ def test_gh_denial_becomes_one_ask_per_verb() -> None:
         {"tool_name": "Bash", "tool_use_id": "a", "tool_input": {"command": "gh issue create --title x"}},
         {"tool_name": "Bash", "tool_use_id": "b", "tool_input": {"command": "cd /repo && gh issue create -t y"}},
         {"tool_name": "Bash", "tool_use_id": "c", "tool_input": {"command": "git push --force"}},
-        {"tool_name": "Bash", "tool_use_id": "d", "tool_input": {"command": "gh pr merge 1"}}]}
+        {"tool_name": "Bash", "tool_use_id": "d", "tool_input": {"command": "gh pr merge 1"}},
+        {"tool_name": "Bash", "tool_use_id": "e", "tool_input": {"command":
+            'python3 fleet_msg.py ack --id 1386 --note "Keep. vp denies gh issue create, \\"ok\\""'}},
+        {"tool_name": "Bash", "tool_use_id": "f", "tool_input": {"command":
+            "python3 fleet_msg.py ack --id 1388 --note 'jefe denies gh pr merge only'"}},
+        {"tool_name": "Bash", "tool_use_id": "g", "tool_input": {"command":
+            'cd /x && gh pr edit 5 --body "not gh pr merge"'}}]}
     dn = da.gh_denials(result, skip_ids={"d"})
-    assert [d["verb"] for d in dn] == ["gh issue create", "gh issue create"], dn
+    assert [d["verb"] for d in dn] == ["gh issue create", "gh issue create", "gh pr edit"], dn
+    dn = dn[:2]
     p = da.plan_ask("sentry", "run9", dn, [])
     assert p and p["why"].startswith("permission denied: gh issue create"), p
     assert da.plan_ask("sentry", "run10", dn, [{"member": "sentry", "why": p["why"]}]) is None

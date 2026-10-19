@@ -30,6 +30,9 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 GH_VERB = re.compile(r"(?:^|[\s;&|(])gh\s+([a-z-]+)(?:\s+([a-z-]+))?")
+# A gh verb inside a quoted argument is text, not a call: jefe's ack note quoting the denied
+# verb ("Keep the deny ...") was itself refused and filed as asks #156/#157, a loop.
+QUOTED = re.compile(r"""'[^']*'|"(?:[^"\\]|\\.)*\"""", re.S)
 LOG_DIR = Path(os.environ.get("FLEET_LOG_DIR", Path.home() / "Library" / "Logs" / "fleet-kit")).expanduser()
 TAG = "permission denied:"
 ANSWERED_WINDOW_S = 14 * 86400
@@ -42,7 +45,7 @@ def gh_denials(result: dict, skip_ids: set[str] | None = None) -> list[dict]:
         if d.get("tool_name") != "Bash" or d.get("tool_use_id") in (skip_ids or set()):
             continue
         cmd = (d.get("tool_input") or {}).get("command") or ""
-        m = GH_VERB.search(cmd)
+        m = GH_VERB.search(QUOTED.sub("''", cmd))
         if not m:
             continue
         verb = " ".join(x for x in ("gh", m.group(1), m.group(2)) if x)
