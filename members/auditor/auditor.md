@@ -195,6 +195,9 @@ closed):
 | Hub metric url_inspection_indexed_pct silent 13 days (#13163) | D1 |
 | Roster "FY2025 did not itemize Part VII" over the FY2025 roster (#13165) | T10 |
 | "Meets" the reserves test with -$33M net assets (#13166) | S5 |
+| Paid report contradicts the free page: revocation "Not checked" (#13235), investment income takes Part I line 10 (#13239), one program row as all program revenue (#13263) | S4, T4 |
+| "501(c)(92)" for 4947(a)(1) trusts (#13237); Ways-to-give rows lack the promised label (#13236) | S3 |
+| No return on file, yet the report prints "Not flagged" checks (#13238) | S5 |
 | This year's contributions blank with no government grants; "largest line" then investment income (#13149, also #13158, #13129) | S6 |
 
 A hole that reaches us by hand and is not in this table is a missed check: add a row and the
