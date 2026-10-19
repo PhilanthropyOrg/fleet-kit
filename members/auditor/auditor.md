@@ -23,7 +23,7 @@ Your lane arrives as `lane=<name>` in the operator instruction. Work only that l
    $200k, two filed this week, Salvation Army, plus Viken's fixed set (Shriners 36-2193608,
    YMCA 36-3258696). A stratum that prints `error` is your first finding. `--lane jobs`
    reads public pages, not SQL (`job_postings` is not in `/990/api/query`): newest, highest-paid, leadership, one per
-   ATS (workday, greenhouse, lever, adp, from the `/go` hop's host) and closed (a pid from an
+   ATS (workday, icims, greenhouse, lever, adp, from the `/go` hop's host) and closed (a pid from an
    earlier pass that now answers 410). Each row has pid, title, ein, apply_host and `jsonld`.
 2. **Run the lane's checklist below** on every sampled org or job. Reads only: pages with the
    `x-atlas-test` header from `$ATLAS_TEST_BYPASS`, SQL through `/990/api/query` with
@@ -72,7 +72,7 @@ lines and put the pass total in the Report. Then by reading:
 - T7 names read like names (no ALL CAPS, no initials-only like "k h")
 - T8 no street address or personal email on a public page (city and state only)
 - T9 related orgs (Schedule R) are listed once each, linked when we have the EIN
-- T10 years: the fiscal year shown equals the XML tax period; "latest" really is the latest
+- T10 years: every year shown or named in a label equals the XML tax period; "latest" is latest
 - T11 every link answers 200 and goes to the right target (header, body and footer links)
 - T12 every number on a card can be reproduced from the XML line it cites (deck numbers too)
 - T13 a figure printed twice (tile, its reason line, the fact box, a headline) reads the same at
@@ -80,8 +80,8 @@ lines and put the pass total in the Report. Then by reading:
 
 ## Lane data-in (`auditor:data-in`)
 
-- D1 freshness: every table and every `dash_metric_points` key is newer than its cadence in
-  /repo/docs/ops/crons.md (a hub metric last written 10-13 on a daily cadence is a finding)
+- D1 freshness: ONE query, newest point per `dash_metric_points` key (`GROUP BY` key), every key
+  checked against its cadence in /repo/docs/ops/crons.md, never a spot-check (#13163 sat 13 days)
 - D2 completeness: filings in the IRS index (`filing_index`) with no row in `filings`
 - D3 garbage rates: ALL-CAPS or initials-only person names, missing city, duplicate orgs or
   people, an employer name that does not match the EIN's org, one exact value on a big share
@@ -107,7 +107,8 @@ cite the page URL and the source line each finding contradicts or lacks:
 - S2 a major donor: can they tell where the money goes, with no number they cannot check?
 - S3 a journalist: does every claim, label and figure survive a fact check against the filing?
 - S4 the paid report adds what the free one lacks, and says nothing the free one contradicts
-- S5 an "N of M passed" counts only checks that ran: a placeholder row is not a failed check
+- S5 an "N of M passed" counts only checks that ran: a placeholder row is not a failed check;
+  a "Meets" whose input is negative, zero or missing is a finding (#13166, -$33M net assets)
 - S6 blank sweep: list EVERY blank cell, "n/a", "not on the return", "needs" or "appears
   later" on the paid report, and check each against the XML. A missing element that means $0
   (no `GovernmentGrantsAmt`) is $0, not unknown; a this-year cell blank beside a filled last
@@ -131,7 +132,8 @@ checks the 410.
 
 **Data truth** on 20 sampled jobs (`audit_sample.py --lane jobs`: newest, leadership, each ATS,
 closed):
-- J5 the employer is the right EIN and a 501(c)(3)
+- J5 the employer is the right EIN and a 501(c)(3), per ATS board: the tenant in the apply URL
+  (`wcpss.icims`, `lsu.wd1`) names the org; a small org holding 100+ jobs is a finding (#13155)
 - J6 no hospitals: Schedule H filed, foundation code 12, or NTEE E20-E24 is excluded
 - J7 the job is still open at the source; pay, location, title and apply URL match the posting
   (the place is the job's own, from its text or apply URL slug, never the org's HQ city)
@@ -159,12 +161,7 @@ closed):
 | V1e "Claim to fix it" promises a change we cannot make; no display-error path (Viken) | S3 |
 | V1f Related orgs listed twice (Viken) | T9 |
 | V1g 20+ directors with no names (Viken) | T5 |
-| V1h Two salary pages (Viken) | T11 |
-| V1i Give goes to the homepage; Support has no link (Viken) | T11, S2 |
-| V1j Header links to the right targets (Viken) | T11 |
-| V1k ~20 body links into WP resources (Viken) | T11 |
-| V1l Nav "990 Resource" and Hospitals targets (Viken) | T11 |
-| V1m Footer to match WP; copyright year (Viken) | T11, T10 |
+| V1h-V1m Two salary pages; Give/Support, header, body, nav and footer links; copyright year (Viken) | T11, S2, T10 |
 | V2 No endowment / investment-fee ratio (Viken) | S1 |
 | V3 GIVING Magazine covers by persona (Viken) | S2 |
 | V4 No clear home-page link to 990 Scout (Viken) | T11 |
@@ -193,6 +190,11 @@ closed):
 | Paid headline "0 of 1 data checks passed" when none ran (#13133) | S5 |
 | "Public support share 1%" on 36% of filers, a stored 1.0 (#13141) | step 3 spike, D3 |
 | Workday jobs read "Where: Savannah, GA", the org's HQ (#13144) | step 3 spike, J7 |
+| One ATS board filed under a small wrong org (#13155) | J5 |
+| Closed jobs left in the open-jobs sitemap, 7 of 49 answer 410 (#13161) | J11 |
+| Hub metric url_inspection_indexed_pct silent 13 days (#13163) | D1 |
+| Roster "FY2025 did not itemize Part VII" over the FY2025 roster (#13165) | T10 |
+| "Meets" the reserves test with -$33M net assets (#13166) | S5 |
 | This year's contributions blank with no government grants; "largest line" then investment income (#13149, also #13158, #13129) | S6 |
 
 A hole that reaches us by hand and is not in this table is a missed check: add a row and the
