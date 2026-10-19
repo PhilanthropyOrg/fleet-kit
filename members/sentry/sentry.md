@@ -72,16 +72,17 @@ its path there for 4xx/5xx and slow responses, and put the count in the issue.
 
    **Check the counter-case, not the PR's own example** (jefe audit causes, 10-17/10-18). The
    PR's own row passes; the hole is the org it does not name. Sample 3 SMALL orgs from the
-   sitemap, never the big names in the PR (Shriners and YMCA CSVs answered 200 while 4 of 6
-   small orgs answered 500, #13074), and read one fact on each sibling surface:
+   sitemap, never the PR's big names (#13074), and read one fact on each sibling surface:
    - **Jobs:** read the employer on every card of `/jobs/all` pages 1-2 and on 3 `/jobs/at`
      URLs from `/jobs/sitemap-jobs-wave-1.xml` (#13103). A name with PHYSICIANS, CLINIC,
      HEALTH SYSTEM(S), HEALTH CARE or MEDICAL CENTER is a finding (#13069). Follow 3 Apply hops (`/jobs/j/<id>/go`): the
      host is the listed org's, never a hospital's or another employer's.
-   - **Report, free vs $150 vs Get page vs CSV:** every link the page offers opens (the CSV for
-     each year in its picker answers 200 `text/csv`), and the same filing year, form type (a
-     990-PF answers no Part VI question: "0 of 8" there is a finding), grants paid, months of
-     cash and verdict word read alike on every surface (#13055: "Fine" free, "Outside" paid).
+   - **Report, free vs $150 vs Get page vs CSV:** every link opens (each year's CSV answers 200
+     `text/csv`), and EVERY fact printed on two surfaces reads alike, not a fixed list: list
+     them side by side (verdict word #13055, revocation status #13235, investment income line 3
+     #13239, program revenue as the sum of all its rows #13263). A code shows as a real IRS
+     status (no "501(c)(92)": #13237); a promised label is on every row (#13236); an org with no
+     return gets no check rows (#13238); a 990-PF answers no Part VI question.
    - **The $150 report against itself** (#13128-#13130): open it signed in as the QA
      `operator` (`/network/hq/atlas/report/<ein>`; persona_law 10e) for the 3 orgs, one a
      990-PF. Reconcile, do not just read: a headline count equals its rows (#13133); a figure
@@ -102,11 +103,8 @@ its path there for 4xx/5xx and slow responses, and put the count in the issue.
    ```
    cd /repo && python3.11 scripts/qa_crawl.py --base https://philanthropy.org --out qa-out
    ```
-   `python3.11`, never `/repo/.venv` (a dangling link to an uv Python this image lacks: rc=127,
-   104 times in sentry.log 09-25..10-07) nor bare `python3` (3.10, no `datetime.UTC`).
-   It already samples real EINs from the sitemap, shoots desktop+mobile, and runs a
-   corpus-wide data-integrity audit. Your job is to make its output land somewhere a human
-   sees, and to check what it does not cover.
+   `python3.11`, never `/repo/.venv` (dangling: rc=127) nor bare `python3` (3.10). It samples
+   real EINs, shoots desktop+mobile and audits data; land its output where a human sees it.
 
    If `git -C /repo remote -v` names fleet-kit, not philanthropy (gh#151), there is no crawler to
    run: say so in one line, do not re-derive it or substitute a curl spot-check, and go on.
