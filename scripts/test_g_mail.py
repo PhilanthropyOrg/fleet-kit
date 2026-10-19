@@ -99,6 +99,28 @@ class GMailTests(unittest.TestCase):
         self.assertTrue(g_mail.verified(mail(sender="viken@x.org", auth="amazonses.com; dkim=pass header.d=x.org"),
                                         allow="viken@x.org"))
 
+    def test_real_provider_stamps_verify(self):
+        """2026-10-19: every mail Reif sent was held. Outlook mail arrives with two stamps in a
+        JSON list; SES puts the domain a few ';' after 'spf=pass'; Google signs thegoodproject.net
+        with its default gappssmtp key and that domain has no SPF/DKIM of its own."""
+        outlook = ('["amazonses.com; spf=pass (spfCheck: domain of philanthropy.org designates 52.101.52.105 '
+                   'as permitted sender) client-ip=52.101.52.105; envelope-from=reif@philanthropy.org; '
+                   'helo=BL2PR02CU003.outbound.protection.outlook.com; dkim=pass header.i=@plannedgiv.onmicrosoft.com; '
+                   'dmarc=pass header.from=philanthropy.org;","mx.microsoft.com 1; spf=pass smtp.mailfrom=x"]')
+        self.assertTrue(g_mail.verified(mail(auth=outlook)))
+        google = ("amazonses.com; spf=none (spfCheck: 209.85.219.50 is neither permitted nor denied by domain of "
+                  "thegoodproject.net) client-ip=209.85.219.50; envelope-from=reif@thegoodproject.net; "
+                  "helo=mail-qv1-f50.google.com; dkim=pass header.i=@thegoodproject-net.20251104.gappssmtp.com; "
+                  "dmarc=none header.from=thegoodproject.net;")
+        self.assertTrue(g_mail.verified(mail(sender="Reif Tauati <reif@thegoodproject.net>", auth=google)))
+        # another tenant's default key, or a pass stamped by someone other than the provider, still fails
+        other = google.replace("thegoodproject-net.20251104", "evil-org.20250101")
+        self.assertFalse(g_mail.verified(mail(sender="reif@thegoodproject.net", auth=other)))
+        self.assertFalse(g_mail.verified(mail(auth='["evil.org; dmarc=pass header.from=philanthropy.org"]')))
+        self.assertFalse(g_mail.verified(mail(auth="amazonses.com; spf=fail envelope-from=reif@philanthropy.org; "
+                                                   "dmarc=fail header.from=philanthropy.org")))
+        self.assertTrue(g_mail.verified(mail(auth="amazonses.com; dmarc=pass header.from=philanthropy.org")))
+
     def test_duplicate_message_id_is_one_file_one_reply(self):
         self.assertEqual(self.post(), b"filed")
         self.assertEqual(self.post(), b"duplicate")
