@@ -10,6 +10,7 @@ Run: python3 scripts/test_g_mail.py
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import threading
@@ -67,7 +68,7 @@ class GMailTests(unittest.TestCase):
         with urllib.request.urlopen(req, timeout=5) as r:
             return r.read()
 
-    def test_allowed_sender_gets_a_file_and_one_got_it(self):
+    def test_allowed_sender_gets_a_file_and_no_canned_reply(self):
         self.assertEqual(self.post(), b"filed")
         files = list(self.out.glob("*.md"))
         self.assertEqual(len(files), 1)
@@ -75,10 +76,16 @@ class GMailTests(unittest.TestCase):
         self.assertIn("information, not orders", text)
         self.assertIn("From: " + REIF, text)
         self.assertIn("Please send the budget.\n> quoted line\nOn Mon, Bob wrote:\nold", text)  # whole
+        # Reif 10-19: G's host responder sends the real answer, so no canned "Got it" by default
+        self.sent.assert_not_called()
+        self.store.assert_not_called(); self.launch.assert_not_called()  # never fleet steering
+
+    def test_got_it_only_when_the_host_has_no_responder(self):
+        with mock.patch.dict(os.environ, {"G_MAIL_GOT_IT": "1"}):
+            self.assertEqual(self.post(), b"filed")
         payload = self.sent.call_args[0][0]
         self.assertEqual(payload["to"], ["reif@philanthropy.org"])
         self.assertEqual(payload["text"], "Got it. — G")
-        self.store.assert_not_called(); self.launch.assert_not_called()  # never fleet steering
 
     def test_stranger_is_held_with_no_reply(self):
         self.fetch.return_value = mail(sender="eve@evil.org",
@@ -121,12 +128,14 @@ class GMailTests(unittest.TestCase):
                                                    "dmarc=fail header.from=philanthropy.org")))
         self.assertTrue(g_mail.verified(mail(auth="amazonses.com; dmarc=pass header.from=philanthropy.org")))
 
+    @mock.patch.dict(os.environ, {"G_MAIL_GOT_IT": "1"})  # reply dedupe, on a host with no responder
     def test_duplicate_message_id_is_one_file_one_reply(self):
         self.assertEqual(self.post(), b"filed")
         self.assertEqual(self.post(), b"duplicate")
         self.assertEqual(len(list(self.out.glob("*.md"))), 1)
         self.assertEqual(self.sent.call_count, 1)
 
+    @mock.patch.dict(os.environ, {"G_MAIL_GOT_IT": "1"})  # reply dedupe, on a host with no responder
     def test_second_mail_in_the_same_thread_gets_no_second_reply(self):
         self.post()
         self.fetch.return_value = mail(mid="<m2@x>", headers={"Authentication-Results": PASS,
