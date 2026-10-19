@@ -487,6 +487,16 @@ while :; do
   BODY_RULES="The PR body must read in plain language (freshman 101): a smart person outside software can tell what the change lets a person do. If the first two paragraphs do not, set your verdict to block and add a finding saying so.
 
 If the diff touches a template, a static file, or a route (anything a person can see), the PR body must carry a line 'See it: <URL or path>' naming the live page where the change is visible, or 'See it: (internal)' when there is no such page. Missing: set your verdict to block and add a finding saying so."
+  # Reif 2026-10-19 ("its for every bloody page type", philanthropy#13212): every PR that changes
+  # what a person sees carries a design walk -- the author opened the page as the person it is for
+  # at 1440 and 390 and wrote down what reads wrong. A screenshot proves it rendered; the walk
+  # says whether a person can read it. PRs opened before the rule (1 PM Central) are exempt.
+  PR_CREATED=$(timeout 25s gh pr view "$PR" --json createdAt -q .createdAt 2>/dev/null || true)
+  if [ -z "$PR_CREATED" ] || [[ "$PR_CREATED" > "2026-10-19T18:00:00Z" ]]; then
+    BODY_RULES="$BODY_RULES
+
+If the diff touches a template (any .html or .jinja file, including mail templates), a .css file, or a route that renders a page, the PR body must carry a design walk: a line starting 'Design walk:' that names who the page is for (the persona), two screenshots of the changed page as that person (one at 1440 wide, one at 390 wide; paths or links), and a short list of what still reads wrong against the page's job (truncated labels, uneven rows, abbreviations, nothing ranked, text a person cannot read), or the words 'reads clean'. For a mail template the screenshots are of the rendered mail, not the template source. Missing walk: set your verdict to block and add a finding saying so. A walk whose own list names something a person cannot read or use (a label cut off, a page that scrolls sideways at 390, a key number missing) also blocks."
+  fi
   if gh pr view "$PR" --json author,files -q 'select(.author.login == "app/dependabot" or .author.login == "dependabot[bot]" or .author.login == "dependabot") | [.files[].path | select(test("(^|/)(pyproject\\.toml|uv\\.lock|requirements[^/]*\\.txt|package(-lock)?\\.json|yarn\\.lock|pnpm-lock\\.yaml)$|^\\.github/workflows/") | not)] | length == 0' 2>/dev/null | grep -qx true; then
     BODY_RULES="This PR is an automated dependency-version bump: its body is the upstream release notes, so do not block on plain language or a 'See it:' line. Block only if the new version would break this repo's code."
     log "PR #$PR: dependabot version-pin-only diff -- plain-language/See-it rules waived"
