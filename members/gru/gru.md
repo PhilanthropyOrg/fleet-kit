@@ -136,10 +136,14 @@ behind-pace week builds more. Spawn exactly those, release the `deferred`. Never
 
    2a. **First, check for an open Reif-priority epic — it outranks marie's ranking entirely**
    (never step 0: fixing a red Reif-priority PR outranks building a new one).
-   `fleet:reif-priority` is Reif naming a goal directly; its items go first, no RICE contest:
+   `fleet:reif-priority` is Reif naming a goal directly; its items go first, no RICE contest.
+   Read it in MANDATE `PRIORITY` order, Jobs first (the first call), then the rest:
    ```
+   gh issue list --state open --label fleet:reif-priority --search "jobs in:title" --json number,title,body --limit 20
    gh issue list --state open --label fleet:reif-priority --json number,title,body --limit 20
    ```
+   A bare `--limit 20` is the 20 NEWEST of ~230, so the auditor's latest finds (MANDATE
+   priority 4) took 10 of 10 slots on 10-19 while open Jobs items sat (#12897, #13056, #13059).
    Apply 2b's claimed/needs-human-op/dead-end filters to these issues and their referenced
    children. Survivors go at the FRONT of step 3's `--items` (`gh#<epic-number>` convention);
    2a-bis and 2b follow. Empty or fully blocked: 2b is the whole list (H§10).
