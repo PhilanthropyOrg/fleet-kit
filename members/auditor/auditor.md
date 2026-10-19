@@ -21,9 +21,8 @@ Your lane arrives as `lane=<name>` in the operator instruction. Work only that l
 1. **Sample.** `python3 /fleet-kit/scripts/audit_sample.py --lane orgs` (or `--lane jobs`):
    the 10 largest, a hospital, a church with no 990, a foundation/DAF sponsor, one under
    $200k, two filed this week, Salvation Army, plus Viken's fixed set (Shriners 36-2193608,
-   YMCA 36-3258696). The offset moves every 2h window, so the sample rotates by itself. A
-   stratum that prints `error` is your first finding. `--lane jobs` reads public pages, not
-   SQL (`job_postings` is not in `/990/api/query`): newest, highest-paid, leadership, one per
+   YMCA 36-3258696). A stratum that prints `error` is your first finding. `--lane jobs`
+   reads public pages, not SQL (`job_postings` is not in `/990/api/query`): newest, highest-paid, leadership, one per
    ATS (workday, greenhouse, lever, adp, from the `/go` hop's host) and closed (a pid from an
    earlier pass that now answers 410). Each row has pid, title, ein, apply_host and `jsonld`.
 2. **Run the lane's checklist below** on every sampled org or job. Reads only: pages with the
@@ -33,6 +32,10 @@ Your lane arrives as `lane=<name>` in the operator instruction. Work only that l
 3. **Count the pattern.** One bad page is a clue. Before drafting, measure how many orgs or
    jobs share it (a SQL count, or the same check over the whole sample) and name the shared
    code that produces it (template, helper, query, job) by `file:line` in /repo.
+   **Spike test, every figure and place you check:** how many rows hold that exact value? One
+   value on a big share of rows is a unit or fallback bug printed as a fact: `1.0` on 49,570
+   filings read as "1%" (#13141); a job's place equal to its employer's HQ while its apply URL
+   names another city (#13144).
 4. **Draft** one JSON line per pattern to `$WT_PATH/audit-drafts.jsonl` with: `pattern`,
    `lane`, `title` (plain words, what a person sees), `count`, `sample_urls`, `evidence`
    (the page quote AND the source line it contradicts), `fix` (shared code), `guard_test`
@@ -45,8 +48,7 @@ Your lane arrives as `lane=<name>` in the operator instruction. Work only that l
    the lane prefix. Never `gh issue create` yourself.
 6. **Scoreboard:** `python3 /fleet-kit/scripts/audit_scoreboard.py`
    rewrites `/fleet-kit/shares/g/audit-scoreboard.md` (auditor vs Viken vs by-hand).
-7. **Report** the sample, every check's pass/fail count, what was filed, killed, re-seen.
-8. **Clean up, every lane, before the Report.** The moment you sign in as a QA persona, run
+7. **Clean up, every lane, before the Report.** The moment you sign in as a QA persona, run
    `python3 /fleet-kit/scripts/audit_cleanup.py persona <name>`; the moment you post a fixture
    job, `audit_cleanup.py job <its public URL>`. Close each job in HQ, then run
    `python3 /fleet-kit/scripts/audit_cleanup.py run`: it POSTs `/990/api/qa/reset` for every
@@ -82,7 +84,8 @@ lines and put the pass total in the Report. Then by reading:
   /repo/docs/ops/crons.md (a hub metric last written 10-13 on a daily cadence is a finding)
 - D2 completeness: filings in the IRS index (`filing_index`) with no row in `filings`
 - D3 garbage rates: ALL-CAPS or initials-only person names, missing city, duplicate orgs or
-  people, an employer name that does not match the EIN's org
+  people, an employer name that does not match the EIN's org, one exact value on a big share
+  of a numeric column (`GROUP BY` it, top 2: the spike test of step 3)
 - D4 privacy: street addresses or personal emails in any public table or JSON
 - D5 crawler inflation: funnel and click counts that include non-browser user agents or one
   IP at machine speed
@@ -115,7 +118,7 @@ clean up after: close the job, nothing left in public lists). Sign in as the QA 
 or `member` (J2): `POST /990/api/qa/session` with `x-qa-token: $QA_SESSION_TOKEN` and
 `{"user":"owner"}`, then open the returned `url` (recipe: persona_law 10e). No
 `$QA_SESSION_TOKEN` in the env: say the walk could not run, never skip it silently. When done,
-close the job you posted in HQ (and check it left /jobs/all); step 8 resets the personas and
+close the job you posted in HQ (and check it left /jobs/all); step 7 resets the personas and
 checks the 410.
 - J1 job seeker: a Google-style landing on a job page, then search, a role page, the pay page
 - J2 Apply both ways: our form (the applicant and the org both get mail), and out to the org's
@@ -129,6 +132,7 @@ closed):
 - J5 the employer is the right EIN and a 501(c)(3)
 - J6 no hospitals: Schedule H filed, foundation code 12, or NTEE E20-E24 is excluded
 - J7 the job is still open at the source; pay, location, title and apply URL match the posting
+  (the place is the job's own, from its text or apply URL slug, never the org's HQ city)
 - J8 no duplicate postings (same EIN, title and location)
 
 **Funnel and Google:**
@@ -185,6 +189,8 @@ closed):
 | Tile "0.5% of total assets" over reason "0% of assets" (#12981) | T13 |
 | Tile "99%" beside fact box "100¢ of each $1" (#13131) | T13 |
 | Paid headline "0 of 1 data checks passed" when none ran (#13133) | S5 |
+| "Public support share 1%" on 36% of filers, a stored 1.0 (#13141) | step 3 spike, D3 |
+| Workday jobs read "Where: Savannah, GA", the org's HQ (#13144) | step 3 spike, J7 |
 
 A hole that reaches us by hand and is not in this table is a missed check: add a row and the
 check in the same PR that fixes it.
