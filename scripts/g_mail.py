@@ -206,7 +206,10 @@ def take(email: dict, allow: str | None = None, authserv: str | None = None,
     _note("seen", key)
     inbox.log(f"g_mail: {'filed' if ok else 'held'} {path.name} from {email.get('from')!r}")
     thread = _thread(email)
-    if ok and not _seen("replied", thread):
+    # Reif 10-19: "a reply within a minute or two with our response" -- G's mail_responder on the host
+    # now answers every verified mail from Reif with the real response, so the canned "Got it. -- G"
+    # would only be a second, empty mail. Kept behind G_MAIL_GOT_IT=1 for a host without the responder.
+    if ok and os.environ.get("G_MAIL_GOT_IT") == "1" and not _seen("replied", thread):
         _note("replied", thread)
         subject = email.get("subject") or ""
         payload = {"from": os.environ.get("MAIL_FROM") or "G <alerts@philanthropy.org>",
