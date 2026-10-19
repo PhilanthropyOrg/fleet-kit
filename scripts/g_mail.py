@@ -47,23 +47,67 @@ def _headers(email: dict) -> dict:
     return {str(k).lower(): str(v) for k, v in h.items()} if isinstance(h, dict) else {}
 
 
+def _stamps(raw: str) -> list[str]:
+    """One Authentication-Results value per stamp. Outlook mail carries two such headers, and
+    Resend hands them over as one JSON list in a string (seen 2026-10-19: every mail from
+    reif@philanthropy.org was held because the value began with '["amazonses.com')."""
+    raw = (raw or "").strip()
+    if raw.startswith("["):
+        try:
+            v = json.loads(raw)
+        except ValueError:
+            v = None
+        if isinstance(v, list):
+            return [str(x) for x in v]
+    return [raw] if raw else []
+
+
+def _same_org(d: str, domain: str) -> bool:
+    return bool(d) and (d == domain or domain.endswith("." + d) or d.endswith("." + domain))
+
+
+def _google_default_key(d: str, domain: str) -> bool:
+    """Google Workspace signs a domain's mail with its default key when the owner never set up
+    DKIM: header.i=@<domain-with-dashes>.<date>.gappssmtp.com. Only that tenant can produce it,
+    so it proves the From domain (thegoodproject.net and goodcapital.co have no SPF or DKIM of
+    their own, 2026-10-19)."""
+    return bool(re.fullmatch(re.escape(domain.replace(".", "-")) + r"\.\d+\.gappssmtp\.com", d))
+
+
+def _aligned(stamp: str, domain: str) -> bool:
+    """A pass (spf, dkim or dmarc) whose checked domain is the From domain. SES writes
+    'spf=pass (comment) client-ip=..; envelope-from=a@d; helo=..; dkim=pass header.i=@d;
+    dmarc=pass header.from=d', so the domain token can sit a few ';' after its method."""
+    text = re.sub(r"\([^)]*\)", " ", stamp)
+    passing = False
+    method = ""
+    for k, v in re.findall(r"([\w.\-]+)=([^\s;]+)", text):
+        k, v = k.lower(), v.strip("<>\"'").lower()
+        if k in ("spf", "dkim", "dmarc"):
+            method, passing = k, v == "pass"
+            continue
+        if not passing or k not in ("header.d", "header.i", "header.from", "smtp.mailfrom", "envelope-from", "mailfrom"):
+            continue
+        d = v.rpartition("@")[2]
+        if _same_org(d, domain) or (method == "dkim" and _google_default_key(d, domain)):
+            return True
+    return False
+
+
 def verified(email: dict, allow: str | None = None, authserv: str | None = None) -> bool:
-    """From is on the allowlist AND the provider's Authentication-Results shows dkim=pass or
-    spf=pass for the From domain. A pass for another domain proves nothing about a forged From;
-    the header must carry the provider's own stamp, since a sender can write one too."""
+    """From is on the allowlist AND the provider's own Authentication-Results stamp shows a
+    spf, dkim or dmarc pass for the From domain. A pass for another domain proves nothing about
+    a forged From; the stamp must be the provider's, since a sender can write one too."""
     allow, authserv = allow or FROM_DEFAULT, (authserv or AUTHSERV_DEFAULT).lower()
     sender = inbox.bare_address(email.get("from") or "")
     if sender not in {a.strip().lower() for a in allow.split(",") if a.strip()}:
         return False
-    ar = _headers(email).get("authentication-results", "")
-    if ar.strip().split(";", 1)[0].strip().split(" ")[0].lower() != authserv:
-        return False
     domain = sender.rpartition("@")[2]
-    for m in re.finditer(r"\b(dkim|spf)=pass\b[^;]*", ar, re.I):
-        for t in re.finditer(r"(?:header\.d|header\.i|smtp\.mailfrom)=([^\s;]+)", m.group(0), re.I):
-            d = t.group(1).rpartition("@")[2].strip("<>").lower()
-            if d and (domain == d or domain.endswith("." + d)):
-                return True
+    for stamp in _stamps(_headers(email).get("authentication-results", "")):
+        if stamp.strip().split(";", 1)[0].strip().split(" ")[0].lower() != authserv:
+            continue
+        if _aligned(stamp, domain):
+            return True
     return False
 
 
