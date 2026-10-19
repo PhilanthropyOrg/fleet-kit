@@ -340,6 +340,8 @@ jobs:
         run: python3 scripts/test_judge_judy_carry_forward.py
       - name: run test_judge_judy_prior_block.py
         run: python3 scripts/test_judge_judy_prior_block.py
+      - name: run test_judge_judy_design_walk_gh13212.py
+        run: python3 scripts/test_judge_judy_design_walk_gh13212.py
       - name: run test_judge_judy_no_tools.py
         run: python3 scripts/test_judge_judy_no_tools.py
       - name: run test_inbox_came_in.py
