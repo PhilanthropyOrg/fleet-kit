@@ -135,20 +135,22 @@ behind-pace week builds more. Spawn exactly those, release the `deferred`. Never
 2. **Read the ranking marie already did — you do not rank.**
 
    2a. **First, check for an open Reif-priority epic — it outranks marie's ranking entirely**
-   (never step 0: fixing a red Reif-priority PR outranks building a new one).
-   `fleet:reif-priority` is Reif naming a goal directly; its items go first, no RICE contest:
+   (never step 0: a red Reif-priority PR outranks a new build).
+   `fleet:reif-priority` is Reif naming a goal directly; its items go first, no RICE contest,
+   Jobs (MANDATE priority 1) first. A bare `--limit 20` is the 20 newest of ~230: audit finds
+   took 10/10 slots on 10-19.
    ```
+   gh issue list --state open --label fleet:reif-priority --search "jobs in:title" --json number,title,body --limit 20
    gh issue list --state open --label fleet:reif-priority --json number,title,body --limit 20
    ```
-   Apply 2b's claimed/needs-human-op/dead-end filters to these issues and their referenced
-   children. Survivors go at the FRONT of step 3's `--items` (`gh#<epic-number>` convention);
-   2a-bis and 2b follow. Empty or fully blocked: 2b is the whole list (H§10).
+   Apply 2b's filters to these and their children; survivors go at the FRONT of step 3's
+   `--items`, then 2a-bis and 2b. Empty or fully blocked: 2b is the whole list (H§10).
    **A MANDATE `PRIORITY:` line naming issues "in order" goes ahead of even this tier:** the
-   first open, unclaimed one is the hour's build, alone, before `priority-high` (H§28). Never close a
-   `fleet:reif-priority` issue yourself: that's marie's call (marie.md Part C).
+   first open, unclaimed one is the hour's build, alone, before `priority-high` (H§28). Never
+   close a Reif-priority issue yourself (marie's call).
    **Reif-priority items ride only with each other, at most 3 to a batch, never with a 2b
-   item.** A 2b item in the same PR drags Reif's work through its review and lint (H§28).
-   Pack the Reif tier as its own `--items` list first, then 2b as a second call.
+   item** (H§28): a 2b item drags Reif's work through its review and lint.
+   Pack the Reif tier as its own `--items` call, then 2b.
 
    **Never narrow or drop an acceptance criterion silently (philanthropy#8475)** — on
    `fleet:reif-priority` and `fleet:user-asked` items alike. Dispatch only against what
