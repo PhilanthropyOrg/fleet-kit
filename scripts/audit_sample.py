@@ -11,6 +11,8 @@ the endpoint itself allows one SELECT and a 3s timeout). The OFFSET is the run s
 (2h windows since the epoch), so each run reads a different org inside every stratum and the
 whole range is covered over days, not the same 20 forever.
 
+most_visited reads our own human page views (dash_events, 7 days: see VISITED_DAYS).
+
 Usage: audit_sample.py --lane orgs|jobs [--slot N] [--print-sql (orgs)]
 Prints JSON lines {"stratum", "ein", "name" | "pid", ...}. A stratum whose query fails prints
 {"stratum", "error"} -- an unreadable stratum is a finding, not a skip.
@@ -63,6 +65,22 @@ ORG_STRATA = {
     "viken": ("SELECT o.ein, o.name FROM organizations o WHERE " + _O + " AND o.ein IN ('"
               + "','".join(VIKEN) + "') ORDER BY o.ein LIMIT {limit} OFFSET {off}", "", "", 2, 1),
 }
+# most_visited: the report pages people land on. No Google clicks table is queryable, so it
+# counts our own human page views: dash_events visitor/viewed rows (the superadmin "Top
+# pages" card), which the beacon tags with payload.ein on /990/report/<ein> pages. Visitor
+# rows are pruned after 7 days (events_prune), so 28 days cannot be answered. dash_events is
+# a separate database and cannot join organizations, so names and fixtures come in a second
+# query. The cut is a literal from the slot, so the same SQL runs on Postgres and SQLite.
+VISITED_DAYS, VISITED_LIMIT, VISITED_SPAN, QUERY_CAP_S = 7, 2, 100, 3.0
+# 2026-10-19: this query took 6.3s on prod, over the cap, so the stratum prints this as its
+# error row and sends nothing. Set it to "" once a per-EIN source answers inside the cap.
+VISITED_UNREADABLE = ("no visits query fits the 3s cap: 7 days of dash_events took 6.3s on prod "
+                      "(2026-10-19); org_profile_views_daily is not readable via /990/api/query")
+_VISITED = ("SELECT json_extract(payload,'$.ein') AS ein, COUNT(*) AS visits FROM dash_events "
+            "WHERE source='visitor' AND kind='viewed' AND ts > '{since}' "
+            "AND payload LIKE '%\"ein\"%' AND json_extract(payload,'$.bot') IS NULL "
+            "AND json_extract(payload,'$.ein') NOT LIKE '0000000%' "
+            "GROUP BY ein ORDER BY visits DESC, ein LIMIT {limit} OFFSET {off}")
 # fk6: job_postings is not exposed by /990/api/query (all 6 strata answered 400), so the jobs
 # lane reads the PUBLIC pages a job seeker sees, with the same x-atlas-test header.
 SITE = os.environ.get("AUDIT_SITE", "https://philanthropy.org")
@@ -217,6 +235,30 @@ def sql_for(strata: dict, slot: int) -> dict[str, str]:
     return out
 
 
+def most_visited_sql(slot: int) -> str:
+    since = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(slot * 7200 - VISITED_DAYS * 86400))
+    off = (slot * VISITED_LIMIT) % VISITED_SPAN
+    return _VISITED.format(since=since, limit=VISITED_LIMIT, off=off)
+
+
+def most_visited(slot: int) -> list[dict]:
+    """{"stratum", ein, name, visits} for the slot's place in the most-visited list."""
+    if VISITED_UNREADABLE:
+        raise RuntimeError(VISITED_UNREADABLE)
+    t0 = time.monotonic()
+    visits = {r["ein"]: r["visits"] for r in query(most_visited_sql(slot))
+              if str(r["ein"]).isdigit()}
+    took = time.monotonic() - t0
+    if took > QUERY_CAP_S:
+        raise RuntimeError(f"visits query took {took:.1f}s, over the {QUERY_CAP_S:.0f}s cap")
+    if not visits:
+        return []
+    names = query("SELECT ein, name FROM organizations WHERE " + _REAL.format(a="")
+                  + " AND ein IN ('" + "','".join(sorted(visits)) + "')")
+    return sorted(({"stratum": "most_visited", "ein": r["ein"], "name": r["name"],
+                    "visits": visits[r["ein"]]} for r in names), key=lambda r: -r["visits"])
+
+
 def query(sql: str) -> list[dict]:
     req = urllib.request.Request(
         API, data=json.dumps({"sql": sql, "limit": 50}).encode(),
@@ -242,14 +284,16 @@ def main(argv: list[str] | None = None) -> int:
             if "error" in row:
                 print(f"audit_sample: stratum {row['stratum']}: {row['error']}", file=sys.stderr)
         return 0
-    for stratum, sql in sql_for(ORG_STRATA, a.slot).items():
+    for stratum, sql in {**sql_for(ORG_STRATA, a.slot),
+                         "most_visited": most_visited_sql(a.slot)}.items():
         if a.print_sql:
             print(json.dumps({"stratum": stratum, "sql": sql}))
             continue
         try:
-            rows = query(sql)
+            rows = (most_visited(a.slot) if stratum == "most_visited"
+                    else [{"stratum": stratum, **row} for row in query(sql)])
             for row in rows:
-                print(json.dumps({"stratum": stratum, **row}))
+                print(json.dumps(row))
             if not rows:
                 print(json.dumps({"stratum": stratum, "error": "no rows"}))
         except Exception as e:  # noqa: BLE001 -- an unreadable stratum is reported, not hidden
