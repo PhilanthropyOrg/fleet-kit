@@ -104,12 +104,14 @@ Read the free report and the $150 990Scout+ report for 3 sampled orgs, as three 
 cite the page URL and the source line each finding contradicts or lacks:
 - S1 Viken, a planned-giving expert: is anything wrong, unsourced, or missing that he would
   expect (endowment and fee ratio, schedules, related orgs, officer pay labels)?
-- S2 a major donor: can they tell where the money goes and whether to give, without a number
-  they cannot check?
-- S3 a journalist: would every claim survive a fact check against the filing? Any label that
-  grades while the copy says we don't, any figure we cannot reproduce?
+- S2 a major donor: can they tell where the money goes, with no number they cannot check?
+- S3 a journalist: does every claim, label and figure survive a fact check against the filing?
 - S4 the paid report adds what the free one lacks, and says nothing the free one contradicts
 - S5 an "N of M passed" counts only checks that ran: a placeholder row is not a failed check
+- S6 blank sweep: list EVERY blank cell, "n/a", "not on the return", "needs" or "appears
+  later" on the paid report, and check each against the XML. A missing element that means $0
+  (no `GovernmentGrantsAmt`) is $0, not unknown; a this-year cell blank beside a filled last
+  year is always a finding. File all blanks from one code path as one pattern, in one pass
 
 ## Lane jobs (`auditor:jobs`)
 
@@ -191,6 +193,7 @@ closed):
 | Paid headline "0 of 1 data checks passed" when none ran (#13133) | S5 |
 | "Public support share 1%" on 36% of filers, a stored 1.0 (#13141) | step 3 spike, D3 |
 | Workday jobs read "Where: Savannah, GA", the org's HQ (#13144) | step 3 spike, J7 |
+| This year's contributions blank with no government grants; "largest line" then investment income (#13149, also #13158, #13129) | S6 |
 
 A hole that reaches us by hand and is not in this table is a missed check: add a row and the
 check in the same PR that fixes it.
