@@ -58,11 +58,8 @@ its path there for 4xx/5xx and slow responses, and put the count in the issue.
    kick): start there.** `deploy.sh`'s `finish_deploy()` already fires one sentry pass within
    seconds of every cutover and, since gh#1217, pre-computes exactly which PR(s) just shipped
    into that `--task` instruction -- you don't need to derive it yourself. For each PR named:
-   in one sentence, say what person and what job it was meant to enable (same discipline as
-   the human-intent verification gate: write what the PERSON accomplishes, then exercise it
-   end-to-end as they would), then verify that job now, live. Report each as its own finding,
-   distinct from your normal crawl findings, before continuing to step 2 with whatever pass
-   budget remains.
+   in one sentence, say what person and what job it was meant to enable, then do that job
+   live, end to end. Report each as its own finding, before step 2.
 
    **Otherwise (a plain scheduled tick, no `--task`):** derive it yourself the slower way --
    `gh run list -R "$PRODUCT_REPO_SLUG" -w DEPLOY --limit 5 --json headSha,conclusion,updatedAt`
@@ -86,12 +83,14 @@ its path there for 4xx/5xx and slow responses, and put the count in the issue.
      990-PF answers no Part VI question: "0 of 8" there is a finding), grants paid, months of
      cash and verdict word read alike on every surface (#13055: "Fine" free, "Outside" paid).
    - **The $150 report against itself** (#13128-#13130): open it signed in as the QA
-     `operator` (an admin, so `/network/hq/atlas/report/<ein>` opens; persona_law 10e) for the
-     3 orgs, one a 990-PF. A headline count equals the rows under it ("8 funders" over 4 rows,
-     "0 of 1 data checks passed" over none: #13133),
-     a caveat agrees with its figure ("zero employees" over 336, "Not public" beside named
-     funders), a "needs X" line never sits beside a printed X; no `pending`, `Live pass`,
-     `TODO`, `placeholder`. "Paid report unverified" is a fail, never a pass.
+     `operator` (`/network/hq/atlas/report/<ein>`; persona_law 10e) for the 3 orgs, one a
+     990-PF. Reconcile, do not just read: a headline count equals its rows (#13133); a figure
+     printed twice is one number (bridge "Other revenue" = the table row: #13218); each year's
+     total is the sum of its lines, never filled over blank lines (#13183); a sentence's
+     direction matches its sign ("did not close the gap" over a surplus: #13217); on a 990-PF,
+     revenue minus expenses is within 5% of the net-asset change, or grants paid are missing
+     (#13199); a caveat agrees with its figure; no `pending`, `TODO`, `placeholder`.
+     "Paid report unverified" is a fail, never a pass.
    - **A count vs its sibling:** a fix that says "real browsers only" (Jobs card, KPI JSON)
      means every other counter of that event (funnel, superadmin) agrees within 10%.
 
