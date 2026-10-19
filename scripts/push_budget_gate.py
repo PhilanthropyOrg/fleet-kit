@@ -136,8 +136,21 @@ def read_meter(now: float, fetch=None) -> dict | None:
     return m
 
 
-def verdict(pct: float, moves: str, why: str = "") -> tuple[bool, str]:
+JOBS_P1 = ("13056", "13057", "13058", "13059")  # Reif 10-18 9:11 PM: Jobs P1 lane past 100%
+
+
+def jobs_p1_issue(body: str) -> str:
+    """The Jobs P1 issue a claims PR closes or is part of, else ''."""
+    m = re.search(r"(?:Closes|Fixes|Resolves|Part of)\s+#(130(?:5[6-9]))\b", body or "", re.I)
+    return m.group(1) if m and m.group(1) in JOBS_P1 else ""
+
+
+def verdict(pct: float, moves: str, why: str = "", body: str = "") -> tuple[bool, str]:
     """(allowed, reason). The whole rule, in one place."""
+    # Jobs P1 lane (Reif 10-18 9:11 PM): a claims PR that closes #13056-#13059 pushes past 100%, logged as
+    # bypass. The $250 month wall stays hard: GitHub's enterprise budget stop refuses every run past it.
+    if pct >= HARD_PCT and moves.strip().startswith("Moves: claims") and jobs_p1_issue(body):
+        return True, "bypass"
     if why:
         if "revert" not in why.lower():
             return False, "--why is only for a deploy-gate revert"
@@ -149,6 +162,12 @@ def verdict(pct: float, moves: str, why: str = "") -> tuple[bool, str]:
         return False, (f"{pct:.0f}% of today's Actions share is spent: only a PR whose body starts "
                        "`Moves: claims`, `Moves: $150 report sales` or `Moves: jobs` may push")
     return True, "ok"
+
+
+def pr_body(wt: str) -> str:
+    branch = _run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=wt)
+    body = _run(["gh", "pr", "view", branch, "--json", "body", "--jq", ".body"], cwd=wt) if branch else ""
+    return body or _run(["git", "log", "-1", "--format=%B"], cwd=wt)
 
 
 def moves_line(wt: str) -> str:
@@ -187,7 +206,10 @@ def check(wt: str, why: str = "", now: float | None = None, meter: dict | None =
     if meter is None:
         record({**row, "verdict": "unread"})
         return True, "meter unreadable (logged)"
-    ok, reason = verdict(meter["pct"], moves, why)
+    body = pr_body(wt)
+    ok, reason = verdict(meter["pct"], moves, why, body)
+    if reason == "bypass" and not why:
+        row["why"] = f"jobs-p1-lane #{jobs_p1_issue(body)}"
     tag = "bypass" if reason == "bypass" else ("allow" if ok else "refuse")
     record({**row, "verdict": tag, "pct": meter["pct"], "share": meter["share"], "spent": meter["spent"],
             "past_cap": ok and meter["pct"] >= HARD_PCT})

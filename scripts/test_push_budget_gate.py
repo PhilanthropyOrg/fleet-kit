@@ -160,5 +160,19 @@ class GitLevelPrePush(unittest.TestCase):
         self.assertIn("core.hooksPath /fleet-kit/scripts/git-hooks", src)
 
 
+class JobsP1Lane(unittest.TestCase):
+    def test_claims_pr_closing_a_jobs_p1_issue_pushes_past_100_as_bypass(self):
+        ok, reason = gate.verdict(130.0, "Moves: claims", body="Moves: claims\n\nCloses #13059")
+        self.assertTrue(ok); self.assertEqual(reason, "bypass")
+
+    def test_other_claims_pr_still_refused_past_100(self):
+        ok, _ = gate.verdict(130.0, "Moves: claims", body="Moves: claims\n\nCloses #12999")
+        self.assertFalse(ok)
+
+    def test_non_claims_pr_naming_a_jobs_issue_still_refused(self):
+        ok, _ = gate.verdict(130.0, "Moves: none (trust)", body="Part of #13058")
+        self.assertFalse(ok)
+
+
 if __name__ == "__main__":
     unittest.main()
