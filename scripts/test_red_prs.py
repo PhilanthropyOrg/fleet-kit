@@ -356,8 +356,9 @@ class Dedup(unittest.TestCase):
         red = pr(checks=Detector.RED_LINT, commits=[commit("w", 10, "d" * 40)])
         with tempfile.TemporaryDirectory() as d:
             os.environ["FLEET_LOG_DIR"] = d
-            orig = pr_ci_wait.fetch
+            orig, orig_gate = pr_ci_wait.fetch, red_prs.push_refused
             pr_ci_wait.fetch = lambda n, repo, gh=None: red
+            red_prs.push_refused = lambda *a, **k: ""
             try:
                 self.assertEqual(red_prs.main(["claim", "7986"]), 0)
                 self.assertEqual(red_prs.main(["claim", "7986"]), 1)
@@ -365,9 +366,30 @@ class Dedup(unittest.TestCase):
                 self.assertEqual(data["7986"]["attempts"], 1)
                 pr_ci_wait.fetch = lambda n, repo, gh=None: None
                 self.assertEqual(red_prs.main(["claim", "7986"]), 0, "unreadable PR fails open")
+                pr_ci_wait.fetch = lambda n, repo, gh=None: red
+                red_prs.push_refused = lambda *a, **k: "spent"
+                self.assertEqual(red_prs.main(["claim", "7987"]), 1, "closed push gate skips")
+                data = json.loads((Path(d) / "red_pr_dispatch.json").read_text())
+                self.assertNotIn("7987", data, "a gate skip burns no attempt")
             finally:
-                pr_ci_wait.fetch = orig
+                pr_ci_wait.fetch, red_prs.push_refused = orig, orig_gate
                 os.environ.pop("FLEET_LOG_DIR", None)
+
+
+class PushRefused(unittest.TestCase):
+    """2026-10-19: 4 fixer passes ran past 100% of the Actions share and could not push."""
+
+    def test_reads_gate(self):
+        gh = lambda args: (0, "Moves: none (fix)\nFixes #1")  # noqa: E731
+        under = lambda now: {"pct": 50.0}  # noqa: E731
+        over = lambda now: {"pct": 108.2}  # noqa: E731
+        self.assertEqual(red_prs.push_refused(1, None, NOW, under, gh), "")
+        self.assertIn("spent", red_prs.push_refused(1, None, NOW, over, gh))
+        self.assertIn("Moves", red_prs.push_refused(1, None, NOW, lambda now: {"pct": 90.0}, gh))
+        money = lambda args: (0, "Moves: jobs\nFixes #1")  # noqa: E731
+        self.assertEqual(red_prs.push_refused(1, None, NOW, lambda now: {"pct": 90.0}, money), "")
+        self.assertEqual(red_prs.push_refused(1, None, NOW, lambda now: None, gh), "", "meter unread fails open")
+        self.assertEqual(red_prs.push_refused(1, None, NOW, over, lambda args: (1, "x")), "", "body unread fails open")
 
 
 class RunMemberPregate(unittest.TestCase):
