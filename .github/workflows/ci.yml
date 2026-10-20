@@ -308,6 +308,8 @@ jobs:
         run: python3 scripts/test_prod_health_check.py
       - name: run test_fixer_fire_path.py
         run: python3 scripts/test_fixer_fire_path.py
+      - name: run test_fixer_control_host.py
+        run: python3 scripts/test_fixer_control_host.py
       - name: run test_philanthropy_drivers.py
         run: python3 scripts/test_philanthropy_drivers.py
       - name: run test_ui_render_check.py
