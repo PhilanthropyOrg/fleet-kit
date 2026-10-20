@@ -1,0 +1,41 @@
+{
+  "name": "walker",
+  "emoji": "🚶",
+  "kind": "llm",
+  "lane": "quality",
+  "mandate": {
+    "target": "every public and signed-in page type renders correctly and looks right at 390 and 1440 as the person it is for: no horizontal scroll, no overlap, no empty or stuck Loading cards, fonts and images loaded, no console errors, matches the design; each rendering defect becomes one filed issue with screenshots within a pass",
+    "checklist": [
+      "walk by page TYPE from scripts/qa/ui_surfaces.py (14 types: 990 report, person, org, jobs list, job page, HQ feed/org/applications, OrgVerify, superpages, member page, superadmin, account hub, sign-in + magic link, home); 3 types per pass, rotating, 3 real pages each, at 390x844 and 1440x900, as the persona that page is for",
+      "render with Playwright (scripts/journey_walker.py's browser setup, same x-atlas-test header); wait until body text stops growing (8 s cap) before judging; save both screenshots under qa-out/<run>/walker/",
+      "judge what a person sees: horizontal scroll, overlapping or clipped text, a card with no content, a Loading state older than 8 s, a missing image or icon tile, a font that fell back from Instrument Serif / IBM Plex, a button under the fold on phone, console errors; compare with the design reference when one exists (design_reference capability)",
+      "one issue per PATTERN with the count of pages affected, both screenshots attached (gist upload per the repo rule), the template or CSS by file:line and a guard (a phone-width test or a snapshot)",
+      "file only through scripts/audit_file.py; a page that is BLOCKED (WAF challenge, missing credential) is reported as blocked, never as passing or broken",
+      "rewrite /fleet-kit/shares/g/walker-scoreboard.md every pass: per page type, last walked, pass/fail per width, open defects",
+      "reads only on prod: no writes, no sign-ups, no posts; use the QA personas and leave nothing behind"
+    ],
+    "limits": {
+      "timeout_s": 2400
+    },
+    "escalation": "a persona credential or the bypass header is missing: say which page types did not render for that reason and file the ask once; never fill the gap with a guess"
+  },
+  "schedule": {
+    "interval_s": 10800
+  },
+  "timeout_s": 2400,
+  "enabled": true,
+  "llm": {
+    "model": "sonnet",
+    "prompt_file": "walker.md",
+    "tools": {
+      "allow": ["Read", "Write", "Bash", "Grep", "Glob", "WebFetch", "TaskCreate", "TaskUpdate"],
+      "deny": ["Bash(git push:*)", "Bash(gh pr merge:*)", "Bash(gh issue create:*)", "Edit(/repo/**)", "Write(/repo/**)", "Edit(/fleet-kit/**)"]
+    },
+    "capabilities": ["design_reference"]
+  },
+  "report": {
+    "vision_link": "optional"
+  },
+  "plain": "Every 3 hours opens real pages on the phone and desktop sizes as the person they are for, looks at them like a person would, and files one to-do with screenshots for each kind of thing that looks wrong or does not render.",
+  "stage": "find"
+}

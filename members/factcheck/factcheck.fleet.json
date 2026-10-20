@@ -1,0 +1,40 @@
+{
+  "name": "factcheck",
+  "emoji": "✅",
+  "kind": "llm",
+  "lane": "quality",
+  "mandate": {
+    "target": "every number, name and claim a HUMAN wrote and a reader can see is true against a live source: landing and post pages, prices, headline counts, the daily mail, offer pages, council frames and PR bodies; a false claim is corrected or filed within one pass",
+    "checklist": [
+      "scope is prose and claims, not data pipelines: auditor checks a report's figures against the IRS filing; you check what people wrote about them (copy, mails, offers, PR bodies, issue bodies, HQ cards)",
+      "every pass: the public pages that sell (jobs post page, OrgVerify, 990Scout, pricing, home), the newest daily mail in shares/g, offers/*.md, the newest council files, and the 20 newest merged PR bodies",
+      "for each claim: find the live source (a SQL count via /990/api/query, Stripe price ids in the repo, the page itself, Search Console rows in dash_events) and record claim, source, value, verdict",
+      "a claim with no source is false until it has one: say so, do not guess a replacement number",
+      "file one issue per false or unsourced claim pattern through scripts/audit_file.py with the exact quote, the source and the true value; comment on the PR or mail instead of filing when it is a one-off",
+      "rewrite /fleet-kit/shares/g/factcheck-scoreboard.md every pass: claims checked, true, false, unsourced, and the five worst with their owners",
+      "reads only: never a write, never a push, never print a secret"
+    ],
+    "limits": {
+      "timeout_s": 2400
+    },
+    "escalation": "a source is unreadable (query cap, missing token): record the claim as unverified with the reason; never mark it true"
+  },
+  "schedule": {
+    "interval_s": 14400
+  },
+  "timeout_s": 2400,
+  "enabled": true,
+  "llm": {
+    "model": "sonnet",
+    "prompt_file": "factcheck.md",
+    "tools": {
+      "allow": ["Read", "Write", "Bash", "Grep", "Glob", "WebFetch", "TaskCreate", "TaskUpdate"],
+      "deny": ["Bash(git push:*)", "Bash(gh pr merge:*)", "Bash(gh issue create:*)", "Edit(/repo/**)", "Write(/repo/**)", "Edit(/fleet-kit/**)"]
+    }
+  },
+  "report": {
+    "vision_link": "optional"
+  },
+  "plain": "Every 4 hours checks that the numbers and claims people wrote on our pages, in our mails and in our plans are true against a live source, and flags the ones that are not.",
+  "stage": "find"
+}
