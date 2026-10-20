@@ -90,12 +90,14 @@ lines and put the pass total in the Report. Then by reading:
 - D5 crawler inflation: funnel and click counts that include non-browser user agents or one
   IP at machine speed
 - D6 a source the fleet reads (GSC, IRS index) returned nothing today; PostHog is shut down (Reif, 10-07), so its silence and its alerts are not findings
+- D7 rollup lag, every hop after D2: list pages read `organizations.fin_*`, the report reads
+  `filings`; a rollup a year behind passed every report-page check (#13317, 50+ of the top 200)
 
-Run D2, D4, D5 and D6 with one script on the sample:
+Run D2, D4-D7 with one script on the sample:
 `audit_sample.py --lane orgs > $WT_PATH/sample.jsonl; audit_datain.py --sample $WT_PATH/sample.jsonl`.
 D2 derives the tax year from `filing_index.tax_period`, D4 scans each org's public JSON and
 report page, D5 reads the superadmin Jobs card's crawler flag (dash_events is not queryable),
-D6 checks the newest GSC point. Exit 2 and a `CHECK dN DID NOT RUN` line mean a check did not
+D6 checks the newest GSC point, D7 the top 200 by revenue. Exit 2 and a `CHECK dN DID NOT RUN` line mean a check did not
 run: report it as not run, never as clean.
 
 ## Lane scout-report (`auditor:scout-report`)
@@ -177,7 +179,6 @@ closed):
 | Street addresses on report pages and public JSON | T8, D4 |
 | Hospitals in Jobs, and in the jobs sitemap (#13103) | J6, J11 |
 | Newest jobs noindex with no JobPosting (#13126) | J11 |
-| Hub GSC metric stale since 10-13 | D1, J10 |
 | A crawler inflating the Apply funnel | D5, J9 |
 | Wrong employers (2,602) | J5, D3 |
 | Duplicate jobs | J8 |
@@ -192,7 +193,7 @@ closed):
 | Workday jobs read "Where: Savannah, GA", the org's HQ (#13144) | step 3 spike, J7 |
 | One ATS board filed under a small wrong org (#13155) | J5 |
 | Closed jobs left in the open-jobs sitemap, 7 of 49 answer 410 (#13161) | J11 |
-| Hub metric url_inspection_indexed_pct silent 13 days (#13163) | D1 |
+| Hub GSC metric stale since 10-13; url_inspection_indexed_pct silent 13 days (#13163) | D1, J10 |
 | Roster "FY2025 did not itemize Part VII" over the FY2025 roster (#13165) | T10 |
 | "Meets" the reserves test with -$33M net assets (#13166) | S5 |
 | Paid report contradicts the free page: revocation "Not checked" (#13235), investment income takes Part I line 10 (#13239), one program row as all program revenue (#13263) | S4, T4 |
@@ -202,6 +203,7 @@ closed):
 | iCIMS jobs read the employer's HQ city, 209 of the newest 500 (#13264) | step 3 spike, J7 |
 | "Jobs at Group Return": a filing label as the org name in titles and sitemap (#13280) | J5 |
 | Paid report lists FY2025 twice for two returns ending in one year (#13278) | S4 |
+| Largest list shows last year's revenue for 13 of the top 30, report right (#13317) | D7 |
 
 A hole that reaches us by hand and is not in this table is a missed check: add a row and the
 check in the same PR that fixes it.

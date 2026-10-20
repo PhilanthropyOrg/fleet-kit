@@ -13,8 +13,12 @@ here reads only what the lane can reach:
      superadmin Jobs card shows: jobs.real[].crawler_hit in /990/api/signals/kpi (X-PM-Token).
   d6 sources: the newest Search Console point (hub.*gsc* in dash_metric_points) is over 2 days
      old. The IRS index has no date column, so its silence is not checked here.
+  d7 rollup lag: the next hop after d2. List pages (/990/nonprofits/largest, rankings, cards)
+     read organizations.fin_*, the report page reads filings, so a rollup that was not re-run
+     shows last year's revenue on the list while the report is right (#13317: Fidelity
+     Charitable $19.0B listed, $30.6B filed; 13 of the top 30). Checks the top D7_TOP by revenue.
 
-Usage: audit_datain.py [d2 d4 d5 d6] [--sample sample.jsonl]   (sample = audit_sample.py output)
+Usage: audit_datain.py [d2 d4 d5 d6 d7] [--sample sample.jsonl]   (sample = audit_sample.py output)
 Prints JSON lines {"check", "finding"} or {"check", "ok"}. A check that cannot run prints
 {"check", "error"} plus a stderr line, and the run exits 2: an unrun check is never a clean pass.
 """
@@ -41,6 +45,11 @@ D2_SQL = ("SELECT i.ein, i.tax_period FROM (SELECT ein, tax_period FROM filing_i
           "CASE WHEN substr(i.tax_period, 5, 2) = '12' THEN 0 ELSE 1 END) LIMIT 200")
 D6_SQL = "SELECT MAX(ts) AS m FROM dash_metric_points WHERE metric_key LIKE 'hub.%gsc%'"
 STALE_DAYS = 2
+D7_TOP = 200
+D7_SQL = ("SELECT ein, fin_year, y FROM (SELECT o.ein, o.fin_year, (SELECT MAX(f.tax_year) FROM "
+          "filings f WHERE f.ein = o.ein AND f.total_revenue IS NOT NULL) AS y FROM (SELECT ein, "
+          "fin_year FROM organizations WHERE fin_revenue IS NOT NULL ORDER BY fin_revenue DESC "
+          f"LIMIT {D7_TOP}) o) t WHERE y > fin_year OR (fin_year IS NULL AND y IS NOT NULL)")
 
 
 def d2(q=query) -> list[str]:
@@ -135,8 +144,18 @@ def d6(q=query, now: dt.datetime | None = None) -> list[str]:
     return []
 
 
+def d7(q=query) -> list[str]:
+    rows = q(D7_SQL)
+    if not rows:
+        return []
+    eg = ", ".join(f"{r['ein']} shows {r['fin_year']}, filed {r['y']}" for r in rows[:5])
+    n = f"{len(rows)}+" if len(rows) >= 50 else str(len(rows))  # /990/api/query caps at 50 rows
+    return [f"{n} of the {D7_TOP} largest orgs show an older year's figures on list pages than "
+            f"their newest filing (organizations.fin_year < filings.tax_year; e.g. {eg})"]
+
+
 def run(names: list[str], eins: list[str], checks: dict | None = None) -> list[dict]:
-    checks = checks or {"d2": d2, "d4": lambda: d4(eins), "d5": d5, "d6": d6}
+    checks = checks or {"d2": d2, "d4": lambda: d4(eins), "d5": d5, "d6": d6, "d7": d7}
     out = []
     for name in names:
         try:
@@ -150,7 +169,7 @@ def run(names: list[str], eins: list[str], checks: dict | None = None) -> list[d
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("checks", nargs="*", default=["d2", "d4", "d5", "d6"])
+    ap.add_argument("checks", nargs="*", default=["d2", "d4", "d5", "d6", "d7"])
     ap.add_argument("--sample", help="audit_sample.py --lane orgs output (JSON lines)")
     a = ap.parse_args(argv)
     eins = []
