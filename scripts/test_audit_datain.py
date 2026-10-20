@@ -141,6 +141,22 @@ def test_d6_flags_a_search_console_feed_that_stopped():
     assert ad.d6(lambda sql: [{"m": "2026-10-16 23:00:00"}], now) == []
 
 
+def test_d7_flags_a_list_rollup_a_year_behind_the_newest_filing():
+    import sqlite3
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    db.execute("CREATE TABLE organizations (ein TEXT, fin_year INT, fin_revenue INT)")
+    db.execute("CREATE TABLE filings (ein TEXT, tax_year INT, total_revenue INT)")
+    db.executemany("INSERT INTO organizations VALUES (?, ?, ?)", [
+        ("110303001", 2023, 18985204861), ("941340523", 2024, 9), ("555555555", 2024, 1)])
+    db.executemany("INSERT INTO filings VALUES (?, ?, ?)", [
+        ("110303001", 2024, 30633210968), ("110303001", 2023, 18985204861),
+        ("941340523", 2024, 9), ("555555555", 2025, None)])  # no revenue: not a newer year
+    out = ad.d7(lambda sql: [dict(r) for r in db.execute(sql)])
+    assert len(out) == 1 and "110303001 shows 2023, filed 2024" in out[0], out
+    assert "941340523" not in out[0] and "555555555" not in out[0], out
+
+
 def test_a_check_that_cannot_run_is_loud_and_fails_the_run():
     import contextlib
     import io
