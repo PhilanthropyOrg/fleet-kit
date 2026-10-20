@@ -86,8 +86,15 @@ node_stdin() {
   [[ "$b" =~ ^[0-9]+(\.[0-9]+)?$ ]] && printf 'env FLEET_ACTIONS_BUDGET_USD %s\n' "$b"
   return 0
 }
-talk "minion --items $items" node_stdin
-[ "$accepted" = 1 ] || run_here "node did not accept (ssh rc=$rc)"
+# A busy or briefly unreachable node is asked again before the hub takes the batch (10-20: one
+# ssh blip at 10:31 put a minion and its full test run on dino at load 48 while lucky sat idle).
+asks="${FLEET_NODE_ASK_TRIES:-6}"
+for ask in $(seq 1 "$asks"); do
+  talk "minion --items $items" node_stdin
+  [ "$accepted" = 1 ] && break
+  [ "$ask" -lt "$asks" ] && { echo "[node_minion] node did not accept (ssh rc=$rc), ask $ask/$asks"; sleep "${FLEET_NODE_ASK_WAIT_S:-80}"; }
+done
+[ "$accepted" = 1 ] || run_here "node did not accept after $asks asks (ssh rc=$rc)"
 tries=0
 while [ "$done" = 0 ] && [ "$rc" != 0 ] && [ "$tries" -lt "${FLEET_NODE_ATTACH_TRIES:-5}" ]; do
   tries=$((tries + 1))

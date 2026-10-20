@@ -74,7 +74,8 @@ class NodeMinion(unittest.TestCase):
         (self.d / "nodecfg" / "config").write_text("Host fleet-node\n")
         self.local = _sh(self.d / "run_member.sh", f'echo "local $@" >> {self.d}/ran\n')
         self.env = dict(os.environ, FLEET_RUN_MEMBER_LOCAL=str(self.local), FLEET_LOG_DIR=str(self.d),
-                        FLEET_NODE_DIR=str(self.d / "nodecfg"), FLEET_NODE_ATTACH_WAIT_S="0")
+                        FLEET_NODE_DIR=str(self.d / "nodecfg"), FLEET_NODE_ATTACH_WAIT_S="0",
+                        FLEET_NODE_ASK_WAIT_S="0")
 
     def _run(self, ssh_body: str, items="21,22"):
         ssh = _sh(self.d / "ssh", f'echo "$@" > {self.d}/ssh_args\n' + ssh_body)
@@ -99,6 +100,14 @@ class NodeMinion(unittest.TestCase):
             (self.d / "ran").unlink(missing_ok=True)
             self._run(body)
             self.assertEqual(self._local_ran(), "local minion --items 21,22\n", body)
+
+    def test_blip_then_accept_stays_on_the_node(self):
+        n = self.d / "asks"
+        r = self._run(f'echo x >> {n}\n[ $(wc -l < {n}) -ge 3 ] || exit 255\n'
+                      "echo 'node-accepted host=lucky'\necho 'node-done rc=0'\n")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(self._local_ran(), "", "a short blip must not put the batch on the hub")
+        self.assertEqual(len(n.read_text().splitlines()), 3)
 
     def test_dropped_after_accept_is_not_run_twice(self):
         r = self._run("echo 'node-accepted host=lucky'\nexit 255\n")
