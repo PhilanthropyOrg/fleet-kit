@@ -40,13 +40,9 @@ its path there for 4xx/5xx and slow responses, and put the count in the issue.
    while it runs; when you reach step 5, block once with
    `timeout 1800 tail --pid=$(cat /tmp/sentry-walk.pid) -f /dev/null`, not a polling loop.
    Use the IMAGE's `python3` for the walker and filer, not `/repo/.venv`: the image's Playwright
-   matches the Chromium baked into it, the product venv's does not (2026-09-24 19:56Z: venv
-   Playwright 1.62 wanted chromium-1234, the image ships 1243, launch failed; a hand-made
-   symlink dies with every redeploy). Then run the filer on THAT run's results.json (step 5). A pass that did not run the walker
-   itself is a FAILED pass, whatever else it did: on 2026-09-24 19:06Z a pass spent its whole
-   budget re-verifying five PRs, filed against a stale pre-deploy results.json, and never
-   walked the HQ actions -- so a live, reproducible React-picker break (the next feed card
-   covers the emoji) went unfiled. Filing against another pass's results.json does not count.
+   matches the Chromium baked into it, the product venv's does not. Then run the filer on THAT
+   run's results.json (step 5). A pass that did not run the walker itself is a FAILED pass,
+   whatever else it did; filing against another pass's results.json does not count.
 
 1. **Live gate-3 re-check, if a deploy landed since your last tick (fk#1195).** persona_law.md
    §14's Definition of Done requires a change be "live and was used once, by hand, right after
@@ -73,10 +69,13 @@ its path there for 4xx/5xx and slow responses, and put the count in the issue.
    **Check the counter-case, not the PR's own example** (jefe audit causes, 10-17/10-18). The
    PR's own row passes; the hole is the org it does not name. Sample 3 SMALL orgs from the
    sitemap, never the PR's big names (#13074), and read one fact on each sibling surface:
-   - **Jobs:** read the employer on every card of `/jobs/all` pages 1-2 and on 3 `/jobs/at`
-     URLs from `/jobs/sitemap-jobs-wave-1.xml` (#13103). A name with PHYSICIANS, CLINIC,
-     HEALTH SYSTEM(S), HEALTH CARE or MEDICAL CENTER is a finding (#13069). Follow 3 Apply hops (`/jobs/j/<id>/go`): the
-     host is the listed org's, never a hospital's or another employer's.
+   - **Jobs:** read the employer and the place on every card of `/jobs/all` pages 1-2 and on 3
+     `/jobs/at` URLs from `/jobs/sitemap-jobs-wave-1.xml` (#13103). A finding: a name with
+     PHYSICIANS, CLINIC, HEALTH SYSTEM(S), HEALTH CARE or MEDICAL CENTER (#13069), or a filing
+     label for a name, such as `Group Return` in a title or slug (#13280); one city on 10+ cards
+     of one employer, the HQ fallback (Workday #13144, then iCIMS #13264: a fix for one ATS is
+     not a fix for the rest). Follow 3 Apply hops (`/jobs/j/<id>/go`) on 3 different ATS hosts:
+     the host is the listed org's, and its JobPosting city is the one we print.
    - **Report, free vs $150 vs Get page vs CSV:** every link opens (each year's CSV answers 200
      `text/csv`), and EVERY fact printed on two surfaces reads alike, not a fixed list: list
      them side by side (verdict word #13055, revocation status #13235, investment income line 3
@@ -86,7 +85,8 @@ its path there for 4xx/5xx and slow responses, and put the count in the issue.
    - **The $150 report against itself** (#13128-#13130): open it signed in as the QA
      `operator` (`/network/hq/atlas/report/<ein>`; persona_law 10e) for the 3 orgs, one a
      990-PF. Reconcile, do not just read: a headline count equals its rows (#13133); a figure
-     printed twice is one number (bridge "Other revenue" = the table row: #13218); each year's
+     printed twice is one number (bridge "Other revenue" = the table row: #13218), and a year
+     label printed twice in one table is a finding (two FY2025 rows: #13278); each year's
      total is the sum of its lines, never filled over blank lines (#13183); a sentence's
      direction matches its sign ("did not close the gap" over a surplus: #13217); on a 990-PF,
      revenue minus expenses is within 5% of the net-asset change, or grants paid are missing
