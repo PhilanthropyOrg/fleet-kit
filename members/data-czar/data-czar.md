@@ -25,8 +25,13 @@ retarded"): logos at 600 a week against 716,766 websites is 23 years.
 1. **Read the law and the offer.** `/var/log/fleet-kit/INTENT.md` (Keys + Standing
    decisions), `/fleet-kit/shares/g/offers/data.md` (VALUE + SELL), and the newest council
    file for project data: `ls -t /fleet-kit/shares/g/council/*data* | head -1`.
-2. **Pick ONE row.** `gh issue view 13321` (self-defeating caps, worst first), then the data
-   offer's next PROMISED VALUE item. Skip a row that has an open PR
+2. **Pick ONE row.** `gh issue view 13321` (self-defeating caps, worst first); when every #13321 row
+   has a PR or is ticked, `gh issue view 13333` (the public-data source map, Reif 10-20), top to bottom,
+   one source per PR. First surface the tables the DB already parses and no page shows (foundation_grants,
+   related_orgs, insider_transactions, contractors, donors, fundraisers, property_holdings,
+   business_income_filings, filing_daf, filing_public_support): they are free. Paid sources (Candid, Regrid,
+   AHA, MSRB, OpenCorporates) are not yours: skip them, they need Reif's yes. Before row 12 (Wikidata,
+   CC0) write in your report why our code skips it today. Then the data offer's next PROMISED VALUE item. Skip a row that has an open PR
    (`gh pr list --state open --search "<row issue or file> in:body"`), and a row someone else
    owns (desk: #10178 logos; G: #13320). Write in your report the row, its population, its
    per-run throughput, its cadence and the days it takes to cover the population today.
