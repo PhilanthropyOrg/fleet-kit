@@ -1,0 +1,56 @@
+{
+  "name": "factcheck",
+  "emoji": "✅",
+  "kind": "llm",
+  "lane": "quality",
+  "mandate": {
+    "target": "every public page that shows a nonprofit's numbers tells the IRS truth: each figure, name, year and flag on the page equals what the organization's own filing says; every org gets checked in turn (largest first), the checked ledger grows every pass, and each mismatch pattern becomes one filed issue with a count, the shared code and a guard test",
+    "checklist": [
+      "coverage, not a sample: work the ledger /fleet-kit/shares/g/factcheck-ledger.jsonl (EIN, pages checked, verdict, date); each pass takes the next 30 orgs by revenue not yet checked in 30 days, plus any org named in a Reif or Viken report",
+      "the source is the filing: the IRS e-file XML (or the raw filing fields we stored from it, filings/raw), the Business Master File row, the 990-N postcard record; never our rollup tables or another page of ours",
+      "pages per org: the 990 report, its people and salary pages, the org page, its list and ranking rows, the PDF; every number on each page is recomputed from the source and compared; a value that cannot be traced is a finding, not a pass",
+      "one issue per PATTERN with the count of orgs affected, the template or query by file:line and a guard test; a one-org slip gets a ledger row and a comment on the open pattern issue",
+      "file only through scripts/audit_file.py; never gh issue create; coordinate with auditor's 990-truth lane by reading its open issues first and commenting rather than refiling",
+      "rewrite /fleet-kit/shares/g/factcheck-scoreboard.md every pass: orgs checked, pages checked, exact, off, untraceable; the five worst patterns with their issues",
+      "reads only: x-atlas-test header for pages, /990/api/query for SQL (one SELECT, 3 s cap), IRS sources over HTTP; never a write, never a push, never print a secret"
+    ],
+    "limits": {
+      "timeout_s": 2400
+    },
+    "escalation": "the IRS source for an org is unreadable (XML missing, index stale, query cap): record that org as untraceable with the reason and move on; never mark it exact"
+  },
+  "schedule": {
+    "interval_s": 14400
+  },
+  "timeout_s": 2400,
+  "enabled": true,
+  "llm": {
+    "model": "sonnet",
+    "prompt_file": "factcheck.md",
+    "tools": {
+      "allow": [
+        "Read",
+        "Write",
+        "Bash",
+        "Grep",
+        "Glob",
+        "WebFetch",
+        "TaskCreate",
+        "TaskUpdate"
+      ],
+      "deny": [
+        "Bash(git push:*)",
+        "Bash(gh pr merge:*)",
+        "Bash(gh issue create:*)",
+        "Edit(/repo/**)",
+        "Write(/repo/**)",
+        "Edit(/fleet-kit/**)"
+      ]
+    }
+  },
+  "report": {
+    "vision_link": "required"
+  },
+  "plain": "Every 4 hours takes the next 30 nonprofits in turn and checks that every number on their pages matches their own IRS filing, keeps a ledger of who has been checked, and adds one to-do per kind of mistake.",
+  "stage": "find"
+}

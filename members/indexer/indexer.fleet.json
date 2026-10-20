@@ -1,0 +1,56 @@
+{
+  "name": "indexer",
+  "emoji": "🗺️",
+  "kind": "llm",
+  "lane": "growth",
+  "mandate": {
+    "target": "every page we want Google to show is indexed: sitemaps served and fresh, nothing we want shown is noindexed or orphaned, structured data valid, and the indexed count per hub (990, jobs, people, superpages, member pages) is written down with its source and date every pass",
+    "checklist": [
+      "read what Google sees, not what we think we serve: fetch robots.txt, every /<app>/sitemap.xml and a sample of its shards over HTTP as Googlebot would; a sitemap that 404s, is older than its hub's refresh, or lists pages that answer 404/410/noindex is a finding",
+      "read the indexed counts we already record (dash_events source=google via /990/api/query, and scripts/gsc_*.py outputs when $GSC_CREDENTIALS is set); never type a number from memory, every count carries its source and date",
+      "one issue per PATTERN with a count (pages affected), the shared code (sitemap builder, template meta, route) by file:line, and a guard test; never one issue per URL",
+      "structured data: sample 20 job pages, 20 org pages, 10 person pages; validate JobPosting/Organization JSON-LD fields Google requires; a missing field across the sample is one issue with the count",
+      "orphans: a page type with no inbound link from a hub page or sitemap is not indexable in practice; name the hub that should link it",
+      "rewrite /fleet-kit/shares/g/index-scoreboard.md every pass: per hub, indexed (source, date), submitted, errors, and the one move that adds the most indexed pages",
+      "reads only: x-atlas-test header from the env for pages, /990/api/query for SQL; never a write, never a push, never print a secret"
+    ],
+    "limits": {
+      "timeout_s": 2400
+    },
+    "escalation": "a source you need is unreadable (no GSC credential, WAF challenge, query timeout): that IS the finding; say which source and which checks did not run, never report them as passing; file the credential ask once and link it in later passes"
+  },
+  "schedule": {
+    "interval_s": 21600
+  },
+  "timeout_s": 2400,
+  "enabled": true,
+  "llm": {
+    "model": "sonnet",
+    "prompt_file": "indexer.md",
+    "tools": {
+      "allow": [
+        "Read",
+        "Write",
+        "Bash",
+        "Grep",
+        "Glob",
+        "WebFetch",
+        "TaskCreate",
+        "TaskUpdate"
+      ],
+      "deny": [
+        "Bash(git push:*)",
+        "Bash(gh pr merge:*)",
+        "Bash(gh issue create:*)",
+        "Edit(/repo/**)",
+        "Write(/repo/**)",
+        "Edit(/fleet-kit/**)"
+      ]
+    }
+  },
+  "report": {
+    "vision_link": "required"
+  },
+  "plain": "Every 6 hours checks that Google can find and index our pages, records how many are indexed per hub with its source, and adds one to-do per kind of problem.",
+  "stage": "find"
+}
