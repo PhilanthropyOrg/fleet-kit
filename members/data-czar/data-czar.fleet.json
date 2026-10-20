@@ -1,0 +1,58 @@
+{
+  "name": "data-czar",
+  "emoji": "🗃️",
+  "kind": "llm",
+  "lane": "data",
+  "mandate": {
+    "target": "philanthropy.org is the definitive record for every org: completeness per field per org (name, EIN, status, mission, website, logo/icon, banner, address, people, financials by year, causes, socials), the source that fills each field, the cron that keeps it fresh, and a public completeness number; every pass ships one PR that closes one gap",
+    "checklist": [
+      "read /var/log/fleet-kit/INTENT.md, /fleet-kit/shares/g/offers/data.md (VALUE + SELL) and the newest council file for project data in /fleet-kit/shares/g/council/ before choosing work",
+      "take the next unfinished row of philanthropy #13321 (self-defeating caps, worst first) or the data offer's next PROMISED VALUE item; skip a row that already has an open PR or is named as someone else's (desk owns #10178 logos, G owns #13320)",
+      "ONE PR per row from your worktree: 'Moves: none (fix)' (or claims / paid verified orgs when it moves those), 'Offer: data VALUE <n>', 'Part of #13321' or the item's own issue, never Closes for a number that has not moved yet",
+      "every PR carries a guard test that fails if the cap or gap comes back: population / per-run throughput x cadence <= the field's freshness target",
+      "run only the test files you touched with pytest -q, plus preflight_gate.py; arm auto-merge and drive the PR to green with pr_ci_wait.py",
+      "rewrite /fleet-kit/shares/g/data-scoreboard.md every pass: per field, orgs filled of all orgs (source, date), the source and cron that fill it, days to full at today's throughput, and the PR this pass shipped",
+      "never load prod: read-only checks through /990/api/query only, one SELECT at a time, 3 s cap, at most 2 sequential requests; no sweeps, crawls or bulk reads; no mass mail; no deletes of org data; anything that spends money waits for Reif's yes"
+    ],
+    "limits": {
+      "timeout_s": 5400
+    },
+    "escalation": "a row needs a decision: check /fleet-kit/shares/g/asked.md first and build the default if it is there; otherwise ship what needs no decision as 'Part of', ask once through ask.py and link the ask in later passes. A row that needs prod writes, DDL or money is reported as blocked with the exact step, never worked around"
+  },
+  "schedule": {
+    "interval_s": 10800
+  },
+  "timeout_s": 5400,
+  "enabled": true,
+  "llm": {
+    "model": "sonnet",
+    "prompt_file": "data-czar.md",
+    "tools": {
+      "allow": [
+        "Read",
+        "Edit",
+        "Write",
+        "Bash",
+        "Grep",
+        "Glob",
+        "WebFetch",
+        "TaskCreate",
+        "TaskUpdate"
+      ],
+      "deny": [
+        "Bash(git stash:*)",
+        "Bash(git push --force:*)",
+        "Bash(git push origin main:*)",
+        "Bash(git push origin HEAD:main)",
+        "Bash(gh issue create:*)",
+        "Bash(psql:*)",
+        "Edit(/fleet-kit/**)"
+      ]
+    }
+  },
+  "report": {
+    "vision_link": "required"
+  },
+  "plain": "Every 3 hours finds the biggest hole in what our org pages know, ships one change that fills it for every org, and keeps a count of how complete the pages are.",
+  "stage": "build"
+}

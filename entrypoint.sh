@@ -182,7 +182,7 @@ case "${1:-cron-foreground}" in
     # `FLEET_CRON_MEMBERS=judge-judy`) to schedule only those. dont-shoot-the-messenger is
     # excluded from ALL_CRON_MEMBERS because its own cron line is already commented out
     # (archived 2026-09-04, see below) -- re-enabling it is a separate step from this mechanism.
-    ALL_CRON_MEMBERS=(the-fixer judge-judy gru marie sentry librarian librarian-scrub red dont-shoot-the-messenger jefe dumbledore auditor indexer factcheck walker)
+    ALL_CRON_MEMBERS=(the-fixer judge-judy gru marie sentry librarian librarian-scrub red dont-shoot-the-messenger jefe dumbledore auditor indexer factcheck walker data-czar)
     if [ -n "${FLEET_CRON_MEMBERS:-}" ]; then
       IFS=', ' read -ra RESOLVED_CRON_MEMBERS <<< "$FLEET_CRON_MEMBERS"
       for m in "${RESOLVED_CRON_MEMBERS[@]}"; do
@@ -427,6 +427,11 @@ case "${1:-cron-foreground}" in
       fi
       if cron_member_enabled walker; then
         echo "29 1,4,7,10,13,16,19,22 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh walker >> $LOG_DIR/walker.log 2>&1"
+      fi
+      # Reif 2026-10-20: data-czar, the definitive record for every org; builds one PR per gap
+      # every 3h. Hours 2,5,8.. are the 3h phase sentry and walker do not use; :11 is unclaimed.
+      if cron_member_enabled data-czar; then
+        echo "11 2,5,8,11,14,17,20,23 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh data-czar >> $LOG_DIR/data-czar.log 2>&1"
       fi
       # fleet-kit#785: red, the adversary, every 6h (paced -- held when the hour has no headroom).
       if cron_member_enabled red; then
