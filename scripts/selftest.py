@@ -7594,6 +7594,9 @@ def _judge_judy_pick_pr_distinguishes_gh_failure_from_confirmed_empty():
     start = src.index("pick_pr() {")
     end = src.index("\nreport_run()", start)
     fn_src = src[start:end]
+    # pick_pr calls ghr (retry wrapper) defined earlier in the script; carry it into the harness.
+    ghr_start = src.index("ghr() {")
+    fn_src = src[ghr_start:src.index("\n", ghr_start)] + "\n" + fn_src
     assert "return 2" in fn_src, "pick_pr no longer signals a gh-call failure distinctly from a confirmed-empty queue"
     assert "return 1" in fn_src, "pick_pr no longer signals a confirmed-empty queue"
 
@@ -7608,6 +7611,7 @@ REPO_SLUG="acme/widgets"
 CONTEXT="fleet-code-review"
 REQUIRED_CHECKS=""
 SETTLE_S=0
+GHR_SLEEP_S=0
 {fn_src}
 pick_pr "" ""
 """
