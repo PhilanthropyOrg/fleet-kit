@@ -28,13 +28,29 @@
     "model": "sonnet",
     "prompt_file": "indexer.md",
     "tools": {
-      "allow": ["Read", "Write", "Bash", "Grep", "Glob", "WebFetch", "TaskCreate", "TaskUpdate"],
-      "deny": ["Bash(git push:*)", "Bash(gh pr merge:*)", "Bash(gh issue create:*)", "Edit(/repo/**)", "Write(/repo/**)", "Edit(/fleet-kit/**)"]
+      "allow": [
+        "Read",
+        "Write",
+        "Bash",
+        "Grep",
+        "Glob",
+        "WebFetch",
+        "TaskCreate",
+        "TaskUpdate"
+      ],
+      "deny": [
+        "Bash(git push:*)",
+        "Bash(gh pr merge:*)",
+        "Bash(gh issue create:*)",
+        "Edit(/repo/**)",
+        "Write(/repo/**)",
+        "Edit(/fleet-kit/**)"
+      ]
     }
   },
   "report": {
     "vision_link": "required"
   },
-  "plain": "Every 6 hours checks that Google can find and index our pages (sitemaps, noindex, structured data, orphans), writes the indexed count per hub with its source, and files one to-do per kind of problem.",
+  "plain": "Every 6 hours checks that Google can find and index our pages, records how many are indexed per hub with its source, and adds one to-do per kind of problem.",
   "stage": "find"
 }

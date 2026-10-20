@@ -28,14 +28,32 @@
     "model": "sonnet",
     "prompt_file": "walker.md",
     "tools": {
-      "allow": ["Read", "Write", "Bash", "Grep", "Glob", "WebFetch", "TaskCreate", "TaskUpdate"],
-      "deny": ["Bash(git push:*)", "Bash(gh pr merge:*)", "Bash(gh issue create:*)", "Edit(/repo/**)", "Write(/repo/**)", "Edit(/fleet-kit/**)"]
+      "allow": [
+        "Read",
+        "Write",
+        "Bash",
+        "Grep",
+        "Glob",
+        "WebFetch",
+        "TaskCreate",
+        "TaskUpdate"
+      ],
+      "deny": [
+        "Bash(git push:*)",
+        "Bash(gh pr merge:*)",
+        "Bash(gh issue create:*)",
+        "Edit(/repo/**)",
+        "Write(/repo/**)",
+        "Edit(/fleet-kit/**)"
+      ]
     },
-    "capabilities": ["design_reference"]
+    "capabilities": [
+      "design_reference"
+    ]
   },
   "report": {
     "vision_link": "optional"
   },
-  "plain": "Every 3 hours opens real pages on the phone and desktop sizes as the person they are for, looks at them like a person would, and files one to-do with screenshots for each kind of thing that looks wrong or does not render.",
+  "plain": "Every 3 hours opens real pages at phone and desktop size as the person they are for, looks at them like a person would, and adds one to-do with screenshots per kind of defect.",
   "stage": "find"
 }

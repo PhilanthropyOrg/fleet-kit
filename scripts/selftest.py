@@ -15956,6 +15956,8 @@ def _roster_is_ten_members_after_fk1195_fold():
         # a1 (Reif, 2026-10-16): "we just need fleet auditors" -- sentry checks a page loads,
         # auditor checks it is TRUE against the filing. Four lanes on cron every 2h.
         "auditor",
+        # Reif 2026-10-19: one member each for pages indexed, fact checking, and walking pages.
+        "indexer", "factcheck", "walker",
     }
     assert set(member_dirs) == expected, \
         f"roster drifted from fk#1195's fold: have {sorted(member_dirs)}, want {sorted(expected)}"

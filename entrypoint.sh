@@ -182,7 +182,7 @@ case "${1:-cron-foreground}" in
     # `FLEET_CRON_MEMBERS=judge-judy`) to schedule only those. dont-shoot-the-messenger is
     # excluded from ALL_CRON_MEMBERS because its own cron line is already commented out
     # (archived 2026-09-04, see below) -- re-enabling it is a separate step from this mechanism.
-    ALL_CRON_MEMBERS=(the-fixer judge-judy gru marie sentry librarian librarian-scrub red dont-shoot-the-messenger jefe dumbledore auditor)
+    ALL_CRON_MEMBERS=(the-fixer judge-judy gru marie sentry librarian librarian-scrub red dont-shoot-the-messenger jefe dumbledore auditor indexer factcheck walker)
     if [ -n "${FLEET_CRON_MEMBERS:-}" ]; then
       IFS=', ' read -ra RESOLVED_CRON_MEMBERS <<< "$FLEET_CRON_MEMBERS"
       for m in "${RESOLVED_CRON_MEMBERS[@]}"; do
@@ -416,6 +416,17 @@ case "${1:-cron-foreground}" in
         echo "39 0,2,4,6,8,10,12,14,16,18,20,22 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh auditor --task \"lane=data-in\" >> $LOG_DIR/auditor.log 2>&1"
         echo "9 1,3,5,7,9,11,13,15,17,19,21,23 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh auditor --task \"lane=scout-report\" >> $LOG_DIR/auditor.log 2>&1"
         echo "39 1,3,5,7,9,11,13,15,17,19,21,23 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh auditor --task \"lane=jobs\" >> $LOG_DIR/auditor.log 2>&1"
+      fi
+      # Reif 2026-10-19: one member each for getting pages indexed (6h), fact checking what
+      # people wrote (4h), and walking pages to see they render and look right (3h).
+      if cron_member_enabled indexer; then
+        echo "23 0,6,12,18 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh indexer >> $LOG_DIR/indexer.log 2>&1"
+      fi
+      if cron_member_enabled factcheck; then
+        echo "47 0,4,8,12,16,20 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh factcheck >> $LOG_DIR/factcheck.log 2>&1"
+      fi
+      if cron_member_enabled walker; then
+        echo "29 1,4,7,10,13,16,19,22 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh walker >> $LOG_DIR/walker.log 2>&1"
       fi
       # fleet-kit#785: red, the adversary, every 6h (paced -- held when the hour has no headroom).
       if cron_member_enabled red; then
