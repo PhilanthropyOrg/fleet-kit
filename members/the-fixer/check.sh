@@ -369,6 +369,22 @@ if [ -n "${FIXER_HEALTH_URL:-}" ] && [ -n "${FIXER_PAGE_URL:-}" ]; then
       PROD_DOWN="degraded error_pct=${DEG_ERR_PCT}% p95=${DEG_P95_S}s (two consecutive breaching samples on $FIXER_PAGE_URL)"
     fi
   fi
+  # Our network, not prod (dumbledore 2026-10-20): the host's own NAT reset about half of all
+  # connects that morning (api.github.com and www.google.com too), and this check fired
+  # "PROD DOWN (health=000)" 7 times in 7 hours, each pass ending "no PR opened". A probe that
+  # cannot reach a control host has not observed prod. Two control probes; either failing
+  # means the network is flaky, so no fire. FIXER_CONTROL_URL= (empty) turns this off.
+  CONTROL_URL="${FIXER_CONTROL_URL-https://www.google.com/generate_204}"
+  if [ -n "$PROD_DOWN" ] && [ -n "$CONTROL_URL" ]; then
+    for _ in 1 2; do
+      CTRL=$(curl -s -m 20 -o /dev/null -w '%{http_code}' "$CONTROL_URL" 2>/dev/null)
+      case "$CTRL" in 2*|3*) ;; *)
+        log "control host failed too (${CTRL:-000} on $CONTROL_URL) -- local network, not prod; not firing: $PROD_DOWN"
+        PROD_NOTE="${PROD_NOTE:-} (prod unobserved: control host failed ${CTRL:-000})"
+        PROD_DOWN=""; break ;;
+      esac
+    done
+  fi
 fi
 
 FIRE_SHA=""
