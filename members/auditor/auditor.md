@@ -199,6 +199,9 @@ closed):
 | "501(c)(92)" for 4947(a)(1) trusts (#13237); Ways-to-give rows lack the promised label (#13236) | S3 |
 | No return on file, yet the report prints "Not flagged" checks (#13238) | S5 |
 | This year's contributions blank with no government grants; "largest line" then investment income (#13149, also #13158, #13129) | S6 |
+| iCIMS jobs read the employer's HQ city, 209 of the newest 500 (#13264) | step 3 spike, J7 |
+| "Jobs at Group Return": a filing label as the org name in titles and sitemap (#13280) | J5 |
+| Paid report lists FY2025 twice for two returns ending in one year (#13278) | S4 |
 
 A hole that reaches us by hand and is not in this table is a missed check: add a row and the
 check in the same PR that fixes it.
