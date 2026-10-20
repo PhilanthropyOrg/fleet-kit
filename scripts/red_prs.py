@@ -58,6 +58,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import pr_ci_wait  # noqa: E402 -- one definition of "red" for detector, router and fixer
+import push_budget_gate  # noqa: E402
 
 FLEET_BRANCH = re.compile(r"^(member|minion)/")
 # A minion's own branch: its DRAFT PR is unfinished work the next minion resumes, not a human's.
@@ -344,6 +345,23 @@ def rows_now(repo: str | None, gh=pr_ci_wait._gh, now: float | None = None, *,
     return mark_superseded([r for r in (describe(p, pri, t, kit) for p in prs) if r], prs)
 
 
+def push_refused(pr: int, repo: str | None, now: float, meter=None, gh=pr_ci_wait._gh) -> str:
+    """push_budget_gate's refusal for this PR's next push, or '' when it would push.
+
+    2026-10-19 20:32-21:56 UTC: past 100% of the day's Actions share, 4 fixer passes ($3.03) on
+    #13222/#13227 committed their fix, hit the refused push, and stopped. A fixer that cannot push
+    delivers nothing, so it is not sent. Any failed read lets it go (fail open)."""
+    m = (meter or push_budget_gate.read_meter)(now)
+    if not m or float(m.get("pct") or 0) < push_budget_gate.SOFT_PCT:
+        return ""
+    rc, body = gh(["pr", "view", str(pr), "--json", "body", "-q", ".body"] + (["--repo", repo] if repo else []))
+    if rc != 0:
+        return ""
+    lines = body.strip().splitlines()
+    ok, reason = push_budget_gate.verdict(float(m["pct"]), lines[0] if lines else "", body=body)
+    return "" if ok else reason
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="the fleet's red PRs and their fixer dispatch")
     ap.add_argument("cmd", choices=["list", "due", "claim"])
@@ -369,6 +387,10 @@ def main(argv: list[str] | None = None) -> int:
         if info["state"] not in ("RED", "BLOCK", "CONFLICT"):
             print(f"red_prs: PR #{a.pr} is {info['state']} -- not a red-PR dispatch, not recorded")
             return 0
+        refused = "" if a.kit else push_refused(a.pr, a.repo, now)
+        if refused:
+            print(f"red_prs: SKIP PR #{a.pr} -- push gate closed: {refused}")
+            return 1
         content = info["last_real_commit"] or info["head"]
         with _locked_ledger(ledger_path(a.kit)) as box:
             kills = killed_fixer_runs(ledger_path(a.kit).parent).get(a.pr, [])
