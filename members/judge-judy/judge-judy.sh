@@ -132,7 +132,12 @@ if ! command -v account_pool_run >/dev/null 2>&1; then
   account_pool_run() { "$@"; }
 fi
 
-REPO_SLUG=$(gh repo view --json nameWithOwner -q '.nameWithOwner' 2>/dev/null || echo "")
+# fk (desk 10-20): on a flaky link 1 in 3 gh calls gets "connection reset by peer"; one reset used to
+# fail the whole queue scan (0 PRs reviewed for an hour, six green PRs jammed). Every gh call the
+# scan and the repo lookup make goes through ghr: up to 3 tries, 5 s apart, before it counts as failed.
+ghr() { local i out rc; for i in 1 2 3; do out=$("$@"); rc=$?; [ "$rc" -eq 0 ] && { printf '%s' "$out"; return 0; }; [ "$i" -lt 3 ] && sleep "${GHR_SLEEP_S:-5}"; done; return "$rc"; }
+
+REPO_SLUG=$(ghr gh repo view --json nameWithOwner -q '.nameWithOwner' 2>/dev/null || echo "")
 [ -z "$REPO_SLUG" ] && { log "FATAL: cannot resolve repo slug (gh auth?)"; exit 1; }
 
 unqueue_pr() { # <pr>
@@ -200,7 +205,7 @@ pick_pr() {
   # Oldest-created first: gh pr list's default (newest-first) order lets a steady stream of
   # new PRs starve a long-lived one indefinitely -- fleet-kit#181 measured PR#149 skipped 8
   # consecutive ticks (~2h) because newer PRs kept landing ahead of it in list order.
-  pr_list_json=$(gh pr list --state open --json number,isDraft,createdAt 2>/dev/null)
+  pr_list_json=$(ghr gh pr list --state open --json number,isDraft,createdAt 2>/dev/null)
   pr_list_rc=$?
   if [ "$pr_list_rc" -ne 0 ]; then
     return 2   # can't tell if the queue is empty -- the list call itself failed
@@ -208,7 +213,7 @@ pick_pr() {
   for pr in $(printf '%s' "$pr_list_json" | jq -r --arg x "$explicit" 'sort_by(.createdAt) | .[] | select((.isDraft | not) or ((.number | tostring) == $x)) | .number' 2>/dev/null); do
     [ -n "$explicit" ] && [ "$pr" != "$explicit" ] && continue
     case " $skip_list " in *" $pr "*) continue ;; esac
-    head=$(gh pr view "$pr" --json headRefOid,commits -q '.headRefOid + " " + (.commits[-1] | if ((.messageHeadline // "") | startswith("Merge ")) then "" else .committedDate end)' 2>/dev/null)
+    head=$(ghr gh pr view "$pr" --json headRefOid,commits -q '.headRefOid + " " + (.commits[-1] | if ((.messageHeadline // "") | startswith("Merge ")) then "" else .committedDate end)' 2>/dev/null)
     view_rc=$?
     if [ "$view_rc" -ne 0 ]; then
       gh_failure=1
@@ -230,7 +235,7 @@ pick_pr() {
         continue
       fi
     fi
-    statuses=$(timeout 25s gh api "repos/${REPO_SLUG}/statuses/${head}" 2>/dev/null)
+    statuses=$(ghr timeout 25s gh api "repos/${REPO_SLUG}/statuses/${head}" 2>/dev/null)
     api_rc=$?
     if [ "$api_rc" -ne 0 ]; then
       gh_failure=1
@@ -245,7 +250,7 @@ pick_pr() {
     if [ "${review_seen:-0}" -gt 0 ]; then
       block_at=$(jq -r --arg c "$CONTEXT" '[.[] | select(.context==$c)][0] | select(.state=="failure") | .updated_at // empty' <<<"$statuses" 2>/dev/null)
       edited_at=""
-      [ -n "$block_at" ] && edited_at=$(timeout 25s gh api graphql -F owner="${REPO_SLUG%%/*}" -F name="${REPO_SLUG#*/}" -F n="$pr" \
+      [ -n "$block_at" ] && edited_at=$(ghr timeout 25s gh api graphql -F owner="${REPO_SLUG%%/*}" -F name="${REPO_SLUG#*/}" -F n="$pr" \
         -f query='query($owner:String!,$name:String!,$n:Int!){repository(owner:$owner,name:$name){pullRequest(number:$n){lastEditedAt}}}' \
         -q '.data.repository.pullRequest.lastEditedAt // empty' 2>/dev/null)
       if [ -z "$edited_at" ] || [[ ! "$edited_at" > "$block_at" ]]; then continue; fi
@@ -255,7 +260,7 @@ pick_pr() {
       # Reviewing a dead head is pure spend: skip if any named required check is red at this head.
       checks=0
       for name in $REQUIRED_CHECKS; do
-        n=$(timeout 25s gh api "repos/${REPO_SLUG}/commits/${head}/check-runs" \
+        n=$(ghr timeout 25s gh api "repos/${REPO_SLUG}/commits/${head}/check-runs" \
           --jq ".check_runs[] | select(.name==\"$name\") | select(.conclusion==\"failure\" or .conclusion==\"timed_out\" or .conclusion==\"cancelled\")" 2>/dev/null | wc -l | tr -d ' ')
         checks=$((checks + ${n:-0}))
       done
