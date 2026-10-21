@@ -180,10 +180,14 @@ def gate_candidates(candidates: list[dict], parents: dict | None = None) -> dict
                 or SEVERITY_LIVE_LABEL in quality_gate._label_names(labels)):
             eligible.append(number)
         else:
+            # dumbledore msg#1427 (#13321/#13333/#13336/#13338): each HAD a line, free text
+            # with no KR id; "no Vision-link line" sent jefe and the filer the wrong way.
             dropped.append({
                 "number": number,
-                "reason": "no Vision-link line (neither a real link nor explicit "
-                          "'none (maintenance)')",
+                "reason": (f"Vision-link `{raw[:60]}` names no registered KR id (use "
+                           "okr.<id> or 'none (maintenance)')") if raw else
+                          ("no Vision-link line (neither a real link nor explicit "
+                           "'none (maintenance)')"),
             })
     return {"eligible": eligible, "dropped": dropped}
 

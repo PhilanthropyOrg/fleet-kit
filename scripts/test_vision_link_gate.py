@@ -181,5 +181,16 @@ class SeverityLiveTests(unittest.TestCase):
         self.assertEqual([d["number"] for d in result["dropped"]], [9301])
 
 
+class FreeTextLinkReasonTests(unittest.TestCase):
+    """dumbledore msg#1427: a free-text line is named in the reason, not called missing."""
+
+    def test_reason_names_the_free_text(self):
+        result = vlg.gate_candidates([{"number": 13321, "comments": [],
+                                       "body": "Vision-link: definitive org record (Reif 10-20)"}])
+        reason = result["dropped"][0]["reason"]
+        self.assertIn("`definitive org record (Reif 10-20)` names no registered KR id", reason)
+        self.assertNotIn("no Vision-link line", reason)
+
+
 if __name__ == "__main__":
     unittest.main()
