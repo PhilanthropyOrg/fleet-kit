@@ -136,3 +136,9 @@ def test_every_org_sample_draws_one_filer_with_negative_total_assets():
     # #13444: the ratio tests broke only on negative-asset filers, which no random draw hit.
     sql = asm.sql_for(asm.ORG_STRATA, 7)["negative_assets"]
     assert "f.total_assets_eoy < 0" in sql and "LIMIT 1 " in sql
+
+
+def test_every_org_sample_draws_one_filer_with_negative_revenue():
+    # #13500: "Surplus margin 142%" printed only on negative-revenue filers, which no draw hit.
+    sql = asm.sql_for(asm.ORG_STRATA, 7)["negative_revenue"]
+    assert "f.total_revenue < 0" in sql and "LIMIT 1 " in sql

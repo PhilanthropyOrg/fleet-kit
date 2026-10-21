@@ -20,7 +20,7 @@ Your lane arrives as `lane=<name>` in the operator instruction. Work only that l
 
 1. **Sample.** `python3 /fleet-kit/scripts/audit_sample.py --lane orgs` (or `--lane jobs`):
    the 10 largest, a hospital, a church with no 990, a foundation/DAF sponsor, one under
-   $200k, one with negative assets, two filed this week, Salvation Army, plus Viken's fixed set (Shriners 36-2193608,
+   $200k, one with negative assets, one with negative revenue, two filed this week, Salvation Army, plus Viken's fixed set (Shriners 36-2193608,
    YMCA 36-3258696). A stratum that prints `error` is your first finding. `--lane jobs`
    reads public pages, not SQL (`job_postings` is not in `/990/api/query`): newest, highest-paid, leadership, one per
    ATS (workday, icims, greenhouse, lever, adp, from the `/go` hop's host) and closed (a pid from an
@@ -114,7 +114,8 @@ cite the page URL and the source line each finding contradicts or lacks:
 - S5 an "N of M passed" counts only checks that ran: a placeholder row is not a failed check;
   a "Meets" whose input is negative, zero or missing is a finding (#13166, -$33M net assets).
   Read EVERY test row on the `negative_assets` org, not the one a filed issue named: a fix
-  to one row of a shared test helper leaves its siblings open (#13444 after #13166)
+  to one row of a shared test helper leaves its siblings open (#13444 after #13166). Same on
+  `negative_revenue`: any percent over a base of zero or less is a finding (#13500)
 - S6 blank sweep: list EVERY blank cell, "n/a", "not on the return", "needs" or "appears
   later" on the paid report, and check each against the XML. A missing element that means $0
   (no `GovernmentGrantsAmt`) is $0, not unknown; a row filled in one year column and blank in
@@ -220,6 +221,7 @@ closed):
 | Start-of-year liabilities and net assets blank on 98% of balance sheets (#13434) | S6 |
 | "Meets" net-assets-to-assets at 100% when both are negative, 286 filers (#13444) | S5, negative_assets |
 | Free filing history blank "Money out" where the paid report prints it, 191K rows (#13445) | S6 |
+| "Surplus margin 142%" on a deficit with revenue -$123K, 6,988 filings (#13500) | S5, negative_revenue |
 
 A hole that reaches us by hand and is not in this table is a missed check: add a row and the
 check in the same PR that fixes it.
