@@ -29,12 +29,14 @@ and when, and the reconciliation report published, not kept.
    the object id resolves, the Business Master File row, or the 990-N record. The source is
    the filing. Our rollups, cards and other pages are never a source.
 3. **Read our pages.** With the `x-atlas-test` header from `$ATLAS_TEST_BYPASS`: the 990
-   report, its people and salary pages, the org page, its rows on list and ranking pages, the
-   PDF. For every number, name, year, form type and flag on each page: recompute from the
-   source and compare. Revenue, expenses, assets, liabilities, program share, top pay and
-   names and titles, officer count, fiscal year, form type, 990-N status, grants, the "+N more"
-   counts. Exact means equal after rounding the page states; off means not; untraceable means
-   you could not find it in the source in 3 minutes.
+   report, the $150 paid report (`/network/hq/atlas/report/<ein>`, at least 5 of the 30), its
+   people and salary pages, the org page, list and ranking rows, the PDF. Recompute every
+   number, name, year, form type and flag from the source. A labelled row equals the filing
+   lines its label names, not our stored column of the same name: "Salaries and wages" is
+   Part IX lines 5+6+7, and a $0 beside positive payroll tax (line 9) is off (#13523: the paid
+   report printed line 7 alone, $0, on 5,408 filers). Exact means equal after the page's
+   rounding; off means not; untraceable means not found in the source in 3 minutes. A page
+   you did not read is listed as not checked, and next pass reads it before any new field.
 4. **Ledger and file.** Append one ledger line per org. One JSON line per mismatch PATTERN (the
    same field wrong on 4 orgs is one pattern) to `$WT_PATH/factcheck-drafts.jsonl` with
    `pattern`, `title` (what a reader sees, plain words), `count`, `sample_urls`, `evidence`
