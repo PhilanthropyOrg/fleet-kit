@@ -327,7 +327,8 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as exc:  # noqa: BLE001
             log(f"g_mail: fetch of {data.get('email_id')} failed: {exc} -- Resend retries")
             self.send_response(503); self.end_headers(); return
-        got = g_mail.take(email, env_value("G_MAIL_FROM") or None, env_value("G_MAIL_AUTHSERV_ID") or None)
+        got = g_mail.take(email, env_value("G_MAIL_FROM") or None, env_value("G_MAIL_AUTHSERV_ID") or None,
+                          data=data)
         log(f"g_mail: {data.get('email_id')} {got}")
         self.send_response(200); self.end_headers(); self.wfile.write(got.encode())
 

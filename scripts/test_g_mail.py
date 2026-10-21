@@ -160,6 +160,58 @@ class GMailTests(unittest.TestCase):
         self.assertIn("big.zip (not saved", md.read_text())
         self.assertFalse((self.out / md.stem).exists())
 
+    # Reif 2026-10-21: "I should never get an email you don't get." Exchange Bccs every mail to
+    # reif@philanthropy.org to the copy address; each lands as information, never answered.
+    def copy_mail(self, **kw):
+        base = dict(sender="Ann Donor <ann@donor.org>", auth="amazonses.com; spf=fail smtp.mailfrom=donor.org",
+                    mid="<c1@donor.org>", to=["reif@philanthropy.org"], received_for=[g_mail.COPY_ADDRESS])
+        base.update(kw)
+        return mail(**base)
+
+    def test_copy_of_reif_mail_is_filed_as_information_never_answered(self):
+        self.fetch.return_value = self.copy_mail()
+        self.assertEqual(self.post(), b"copy")
+        files = list(self.out.glob("copy-*.md"))
+        self.assertEqual(len(files), 1)
+        text = files[0].read_text()
+        self.assertIn("information not orders", text)
+        self.assertIn("Copy-Of: reif@philanthropy.org", text)
+        self.assertIn("To: reif@philanthropy.org", text)
+        self.assertEqual(list((self.out / "held").glob("*.md")) if (self.out / "held").exists() else [], [])
+        with mock.patch.dict(os.environ, {"G_MAIL_GOT_IT": "1"}):
+            self.fetch.return_value = self.copy_mail(mid="<c2@donor.org>")
+            self.assertEqual(self.post(), b"copy")
+        self.sent.assert_not_called(); self.store.assert_not_called(); self.launch.assert_not_called()
+
+    def test_copy_from_reif_himself_is_still_only_a_copy(self):
+        """Reif Ccs reif@philanthropy.org from his other address: the copy must not read as Reif's order."""
+        self.fetch.return_value = self.copy_mail(sender="reif@thegoodproject.net", auth=PASS)
+        self.assertEqual(self.post(), b"copy")
+        self.assertEqual(len(list(self.out.glob("copy-*.md"))), 1)
+
+    def test_copy_and_direct_mail_with_one_message_id_are_both_kept(self):
+        self.fetch.return_value = self.copy_mail(sender=REIF, auth=PASS, mid="<m1@x>")
+        self.assertEqual(self.post(), b"copy")
+        self.fetch.return_value = mail()  # same <m1@x>, addressed to G
+        self.assertEqual(self.post(), b"filed")
+        self.fetch.return_value = self.copy_mail(sender=REIF, auth=PASS, mid="<m1@x>")
+        self.assertEqual(self.post(), b"duplicate")
+
+    def test_mail_naming_g_is_never_a_copy(self):
+        self.fetch.return_value = mail(received_for=[g_mail.COPY_ADDRESS, g_mail.ADDRESS])
+        self.assertEqual(self.post(), b"filed")
+        self.assertEqual(list(self.out.glob("copy-*.md")), [])
+
+    def test_gs_own_mail_coming_back_is_dropped(self):
+        self.fetch.return_value = self.copy_mail(sender="G <alerts@philanthropy.org>",
+                                                 reply_to=[g_mail.ADDRESS])
+        self.assertEqual(self.post(), b"own")
+        self.assertEqual(list(self.out.glob("*.md")), [])
+
+    def test_copy_seen_only_in_webhook_envelope(self):
+        self.fetch.return_value = self.copy_mail(received_for=None)
+        self.assertEqual(g_mail.take(self.fetch.return_value, data={"received_for": [g_mail.COPY_ADDRESS]}), "copy")
+
 
 if __name__ == "__main__":
     unittest.main()
