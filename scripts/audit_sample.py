@@ -61,6 +61,9 @@ ORG_STRATA = {
                  "ON o.ein = i.ein WHERE " + _O + " AND i.return_type = '990EZ' "
                  "ORDER BY i.object_id DESC LIMIT {limit} OFFSET {off}", "", "", 1, 500),
     "small_under_200k": (_REV, "f.total_revenue BETWEEN 1 AND 199999", "o.ein", 1, 5000),
+    # #13444: ~290 filers report negative total assets, so a random sample never draws one
+    # and every ratio test ("Meets" at 100% for -$492K over -$491K) went unchecked on them.
+    "negative_assets": (_REV, "f.total_assets_eoy < 0", "o.ein", 1, 200),
     "filed_this_week": ("SELECT i.ein, o.name FROM filing_index i JOIN organizations o "
                         "ON o.ein = i.ein WHERE " + _O + " ORDER BY i.object_id DESC "
                         "LIMIT {limit} OFFSET {off}", "", "", 2, 50),
