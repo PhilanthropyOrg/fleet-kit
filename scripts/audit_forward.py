@@ -6,6 +6,10 @@ one per kind of mistake, keyed by an `Audit-pattern: <key>` line. A pattern mean
 (auditor, sentry, a persona walk) let a hole through; dumbledore fixes that lane. jefe runs
 `send` as a step of its pass; its pregate runs `pending` so a new pattern wakes it.
 
+A pattern the auditor found with a check its charter already holds (the body cites `S6`) is
+that lane working, not a hole it let through: it is marked seen and not sent. 76 forwards in
+10-17..10-21 were all auditor finds, and dumbledore's acks kept saying "no lane missed it".
+
 State: $FLEET_LOG_DIR/audit_forwarded.json, the pattern keys already sent. fleet_msg dedupes
 only 6h, so without this a pattern open for a week would be sent 28 times.
 
@@ -40,6 +44,27 @@ def patterns(issues: list[dict]) -> dict[str, dict]:
     return out
 
 
+CHARTER = HERE.parent / "members" / "auditor" / "auditor.md"
+
+
+def charter_checks() -> set[str]:
+    """The check ids the auditor charter defines (`- S6 blank sweep ...` -> S6)."""
+    try:
+        text = CHARTER.read_text()
+    except OSError:
+        return set()
+    return set(re.findall(r"^\s*- ([TSDJ]\d{1,2})\b", text, re.M))
+
+
+def own_check(issue: dict, checks: set[str]) -> str:
+    """The existing check that caught this auditor find, or '' when it is a real lane miss."""
+    body = issue.get("body") or ""
+    if not re.search(r"^\d+ affected\. Found by the auditor\b|^Found by the auditor\b", body, re.M):
+        return ""
+    cited = [c for c in re.findall(r"\b([TSDJ]\d{1,2})\b", body) if c in checks]
+    return cited[0] if cited else ""
+
+
 def new_patterns(issues: list[dict], sent: set[str]) -> dict[str, dict]:
     return {k: i for k, i in patterns(issues).items() if k not in sent}
 
@@ -66,6 +91,15 @@ def main(argv: list[str] | None = None) -> int:
     a.repo = af.repo_slug(a.repo)
     sent = load_sent()
     new = new_patterns(open_audit_issues(a.repo), sent)
+    checks = charter_checks()
+    for key, i in list(new.items()):
+        c = own_check(i, checks)
+        if c:
+            del new[key]
+            if a.cmd == "send":
+                sent.add(key)
+                state_path().write_text(json.dumps(sorted(sent)))
+                print(f"skipped {key} (#{i['number']}): the auditor's {c} caught it as designed")
     if a.cmd == "pending":
         print(f"FIRE {len(new)} new audit pattern(s)" if new else "green no new audit pattern")
         return 0

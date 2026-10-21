@@ -38,7 +38,8 @@ Your lane arrives as `lane=<name>` in the operator instruction. Work only that l
    names another city (#13144).
 4. **Draft** one JSON line per pattern to `$WT_PATH/audit-drafts.jsonl` with: `pattern`,
    `lane`, `title` (plain words, what a person sees), `count`, `sample_urls`, `evidence`
-   (the page quote AND the source line it contradicts), `fix` (shared code), `guard_test`
+   (the page quote, the source line it contradicts, and the check that caught it, `(S6)`; a
+   find no check names says `(no check)` and goes to dumbledore), `fix`, `guard_test`
    (the test that fails if it comes back), `given`, `when`, `then`, `vision_link`.
 5. **File through the kill pass, never by hand:**
    `python3 /fleet-kit/scripts/audit_file.py --findings $WT_PATH/audit-drafts.jsonl`

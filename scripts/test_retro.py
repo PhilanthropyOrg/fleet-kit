@@ -129,6 +129,26 @@ class AuditForward(unittest.TestCase):
         self.assertTrue(out.call_args_list[0].args[0].startswith("FIRE 1"))
         self.assertTrue(out.call_args_list[1].args[0].startswith("green"))
 
+    def test_a_find_by_an_existing_auditor_check_is_not_a_lane_miss(self):
+        own = [{"number": 13518, "title": "fees not on the return",
+                "body": "2 affected. Found by the auditor (scout-report).\n\n## Evidence\n"
+                        "absent 11f is $0 (S6 rule)\n\nAudit-pattern: fees-not-on-return\n"},
+               {"number": 13500, "title": "surplus margin on a deficit",
+                "body": "2 affected. Found by the auditor (scout-report).\n\n"
+                        "Audit-pattern: surplus-on-deficit\n"},
+               {"number": 13600, "title": "Viken: S9 pages",
+                "body": "Found by Viken. (S99)\nAudit-pattern: viken-hole\n"}]
+        calls = []
+        with mock.patch.object(audit_forward, "open_audit_issues", return_value=own), \
+                mock.patch.object(subprocess, "run", side_effect=lambda a, **k: calls.append(a)), \
+                mock.patch("builtins.print") as out:
+            audit_forward.main(["send", "--repo", "O/R"])
+            audit_forward.main(["pending", "--repo", "O/R"])
+        keys = [c[c.index("--key") + 1] for c in calls]
+        self.assertEqual(keys, ["audit:surplus-on-deficit", "audit:viken-hole"])
+        self.assertIn("S6 caught it", out.call_args_list[0].args[0])
+        self.assertTrue(out.call_args_list[-1].args[0].startswith("green"))
+
     def test_jefe_pregate_asks_audit_forward_when_the_inbox_is_empty(self):
         sh = (ROOT / "members" / "jefe" / "pregate.sh").read_text()
         self.assertIn("audit_forward.py\" pending", sh)
