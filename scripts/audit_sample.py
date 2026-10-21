@@ -55,6 +55,11 @@ ORG_STRATA = {
     "foundation_daf": ("SELECT i.ein, o.name FROM filing_index i JOIN organizations o "
                        "ON o.ein = i.ein WHERE " + _O + " AND i.return_type = '990PF' "
                        "ORDER BY i.object_id DESC LIMIT {limit} OFFSET {off}", "", "", 1, 500),
+    # #13390: half of all filers file a 990-EZ, whose lines the paid report read as full-990
+    # elements; small_under_200k mixes forms, so EZ filers get a stratum of their own.
+    "ez_filer": ("SELECT i.ein, o.name FROM filing_index i JOIN organizations o "
+                 "ON o.ein = i.ein WHERE " + _O + " AND i.return_type = '990EZ' "
+                 "ORDER BY i.object_id DESC LIMIT {limit} OFFSET {off}", "", "", 1, 500),
     "small_under_200k": (_REV, "f.total_revenue BETWEEN 1 AND 199999", "o.ein", 1, 5000),
     "filed_this_week": ("SELECT i.ein, o.name FROM filing_index i JOIN organizations o "
                         "ON o.ein = i.ein WHERE " + _O + " ORDER BY i.object_id DESC "
