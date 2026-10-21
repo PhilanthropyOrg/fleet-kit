@@ -115,6 +115,8 @@ cite the page URL and the source line each finding contradicts or lacks:
   later" on the paid report, and check each against the XML. A missing element that means $0
   (no `GovernmentGrantsAmt`) is $0, not unknown; a this-year cell blank beside a filled last
   year is always a finding. File all blanks from one code path as one pattern, in one pass
+- S7 every breakdown table (revenue by source, expenses, assets) adds to its own Total row, and
+  "Largest line" is the largest row; check the `ez_filer` org first (#13390: 22% shown as all)
 
 ## Lane jobs (`auditor:jobs`)
 
@@ -204,6 +206,7 @@ closed):
 | "Jobs at Group Return": a filing label as the org name in titles and sitemap (#13280) | J5 |
 | Paid report lists FY2025 twice for two returns ending in one year (#13278) | S4 |
 | Largest list shows last year's revenue for 13 of the top 30, report right (#13317) | D7 |
+| 990-EZ revenue rows sum to 22% of Total, "largest line" the 22% (#13390) | S7, ez_filer |
 
 A hole that reaches us by hand and is not in this table is a missed check: add a row and the
 check in the same PR that fixes it.
