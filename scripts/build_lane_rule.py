@@ -66,7 +66,9 @@ def hour_cap(env: Mapping[str, str] | None = None, rows: list[dict] | None = Non
         base = max(0, int(env.get("FLEET_MINION_MAX_PER_HOUR", "")))
     except (TypeError, ValueError):
         return 0
-    rows = rows if rows is not None else account_meter.load(env.get("FLEET_METER_FILE", ""))
+    # 2026-10-21: "" here read as "no file", so with FLEET_METER_FILE unset (the hub) the cap
+    # never saw G's meter and stayed 1 while tank.py printed "builder cap +1" (phil +31 points).
+    rows = rows if rows is not None else account_meter.load(env.get("FLEET_METER_FILE") or None)
     return account_meter.paced_hour_cap(base, rows)
 
 
