@@ -231,6 +231,13 @@ class Blocked(Exception):
         self.headers = headers
 
 
+class StepBlocked(Exception):
+    """ONE step the checker could not look at (a challenge page, a persona state no QA user
+    sits in), while the rest of the journey still runs. `Blocked` above drops the whole
+    journey; this keeps the other steps' verdicts and records this one as `blocked`, never
+    `fail` (philanthropy#13448: the daily walk writes BLOCKED, never FAIL, for these)."""
+
+
 # --- catalog ---------------------------------------------------------------------------------
 
 def load_catalog(path: Path) -> dict:
@@ -554,6 +561,9 @@ class JourneyCtx:
             fn()
         except Blocked:
             raise
+        except StepBlocked as exc:
+            status = "blocked"
+            detail = redact_secret(str(exc), self.users.bypass)
         except Exception as exc:  # noqa: BLE001 -- a step failing is DATA, not a crash (AC3)
             status = "fail"
             detail = redact_secret(f"{type(exc).__name__}: {exc}", self.users.bypass)
@@ -1018,6 +1028,8 @@ JOURNEY_RUNNERS = {
 }
 import journey_hq  # noqa: E402 -- HQ feed actions as the QA personas; see its docstring
 JOURNEY_RUNNERS.update(journey_hq.make_runners(sys.modules[__name__]))
+import journey_money  # noqa: E402 -- the daily walk's money journeys (philanthropy#13448)
+JOURNEY_RUNNERS.update(journey_money.make_runners(sys.modules[__name__]))
 
 
 # --- orchestration ---------------------------------------------------------------------------
@@ -1030,6 +1042,10 @@ def run_all(catalog: dict, users: TestUsers, browser, base_out: Path, run_id: st
     journeys_out, blocked = [], []
     for journey in catalog["journeys"]:
         if journey_filter and journey["id"] not in journey_filter:
+            continue
+        # philanthropy#13448: a journey another walker owns (the 6 AM daily walk) runs only when
+        # named, so sentry's 3-hourly pass does not walk it and file it a second time.
+        if journey.get("walked_by") and not (journey_filter and journey["id"] in journey_filter):
             continue
         runner = JOURNEY_RUNNERS.get(journey["id"])
         if runner is None:
@@ -1076,7 +1092,8 @@ def run_all(catalog: dict, users: TestUsers, browser, base_out: Path, run_id: st
 def summarize(journeys_out: list[dict], blocked: list[dict]) -> dict:
     steps_passed = sum(1 for j in journeys_out for s in j["steps"] if s["status"] == "pass")
     steps_failed = sum(1 for j in journeys_out for s in j["steps"] if s["status"] == "fail")
-    journeys_passed = sum(1 for j in journeys_out if all(s["status"] == "pass" for s in j["steps"]))
+    steps_blocked = sum(1 for j in journeys_out for s in j["steps"] if s["status"] == "blocked")
+    journeys_passed = sum(1 for j in journeys_out if all(s["status"] in ("pass", "blocked") for s in j["steps"]))
     journeys_failed = len(journeys_out) - journeys_passed
     return {
         "journeys_passed": journeys_passed,
@@ -1085,6 +1102,7 @@ def summarize(journeys_out: list[dict], blocked: list[dict]) -> dict:
         "max_blocked_streak": max((b.get("blocked_streak", 0) for b in blocked), default=0),
         "steps_passed": steps_passed,
         "steps_failed": steps_failed,
+        "steps_blocked": steps_blocked,
     }
 
 
