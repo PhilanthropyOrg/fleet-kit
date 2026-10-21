@@ -130,3 +130,9 @@ if __name__ == "__main__":
         if name.startswith("test_") and callable(fn):
             fn()
             print(f"ok {name}")
+
+
+def test_every_org_sample_draws_one_filer_with_negative_total_assets():
+    # #13444: the ratio tests broke only on negative-asset filers, which no random draw hit.
+    sql = asm.sql_for(asm.ORG_STRATA, 7)["negative_assets"]
+    assert "f.total_assets_eoy < 0" in sql and "LIMIT 1 " in sql

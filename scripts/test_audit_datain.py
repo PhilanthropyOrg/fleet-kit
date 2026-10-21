@@ -33,12 +33,12 @@ def test_every_org_stratum_leaves_out_fixture_orgs():
     db = sqlite3.connect(":memory:")
     db.executescript(
         "CREATE TABLE organizations (ein, name, ntee_code, revenue_amt, is_fixture);"
-        "CREATE TABLE filings (ein, tax_year, total_revenue);"
+        "CREATE TABLE filings (ein, tax_year, total_revenue, total_assets_eoy);"
         "CREATE TABLE filing_index (object_id, ein, return_type, tax_period);")
     for ein, name, fx in (("000000024", "National Disco Ball Foundation", 0),
                           ("123456789", "SALVATION ARMY TEST FIXTURE", 1)):
         db.execute("INSERT INTO organizations VALUES (?, ?, 'E20', 9e12, ?)", (ein, name, fx))
-        db.execute("INSERT INTO filings VALUES (?, 2023, 100)", (ein,))
+        db.execute("INSERT INTO filings VALUES (?, 2023, 100, -5)", (ein,))
         db.execute("INSERT INTO filing_index VALUES (9, ?, '990PF', '202312')", (ein,))
     db.execute("UPDATE organizations SET ntee_code = 'X20' WHERE ein = '000000024'")
     for name, sql in asm.sql_for(asm.ORG_STRATA, 0).items():
