@@ -163,8 +163,8 @@ class GMailTests(unittest.TestCase):
     # Reif 2026-10-21: "I should never get an email you don't get." Exchange Bccs every mail to
     # reif@philanthropy.org to the copy address; each lands as information, never answered.
     def copy_mail(self, **kw):
-        base = dict(sender="Ann Donor <ann@donor.org>", auth="amazonses.com; spf=fail smtp.mailfrom=donor.org",
-                    mid="<c1@donor.org>", to=["reif@philanthropy.org"], received_for=[g_mail.COPY_ADDRESS])
+        base = {"sender": "Ann Donor <ann@donor.org>", "auth": "amazonses.com; spf=fail smtp.mailfrom=donor.org",
+                "mid": "<c1@donor.org>", "to": ["reif@philanthropy.org"], "received_for": [g_mail.COPY_ADDRESS]}
         base.update(kw)
         return mail(**base)
 
