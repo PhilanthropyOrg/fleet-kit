@@ -135,6 +135,15 @@ def test_d5_reads_the_superadmin_crawler_flag():
     assert rows == [{"check": "d5", "error": "RuntimeError: kpi jobs.real is empty: timeout"}], rows
 
 
+def test_d1_flags_every_frozen_dashboard_key_in_one_line():
+    rows = [{"metric_key": "claim.pending_count.v1", "m": "2026-09-24 19:00:00"},
+            {"metric_key": "ui.sessions_24h.v1", "m": "2026-09-25 01:00:00"}]
+    out = ad.d1(lambda sql: rows)
+    assert len(out) == 1 and out[0].startswith("2 dashboard keys") and "froze 2026-09-24" in out[0]
+    assert "latest::" in ad.D1_SQL and ad.d1(lambda sql: []) == []
+    assert ad.d1(lambda sql: rows * 25)[0].startswith("50+")
+
+
 def test_d6_flags_a_search_console_feed_that_stopped():
     now = dt.datetime(2026, 10, 17, 9)
     assert "2026-10-14, 3 days old" in ad.d6(lambda sql: [{"m": "2026-10-14 00:00:00"}], now)[0]

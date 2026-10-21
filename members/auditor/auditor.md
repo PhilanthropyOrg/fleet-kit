@@ -84,8 +84,8 @@ lines and put the pass total in the Report. Then by reading:
 
 ## Lane data-in (`auditor:data-in`)
 
-- D1 freshness: ONE query, newest point per `dash_metric_points` key (`GROUP BY` key), every key
-  checked against its cadence in /repo/docs/ops/crons.md, never a spot-check (#13163 sat 13 days)
+- D1 freshness: every `dash_metric_points` key 3+ days behind the newest; a writer "off" in
+  crons.md still counts, the card shows its number as current (#13163 13 days, #13429 27)
 - D2 completeness: filings in the IRS index (`filing_index`) with no row in `filings`
 - D3 garbage rates: ALL-CAPS or initials-only person names, missing city, duplicate orgs or
   people, an employer name that does not match the EIN's org, one exact value on a big share
@@ -97,12 +97,10 @@ lines and put the pass total in the Report. Then by reading:
 - D7 rollup lag, every hop after D2: list pages read `organizations.fin_*`, the report reads
   `filings`; a rollup a year behind passed every report-page check (#13317, 50+ of the top 200)
 
-Run D2, D4-D7 with one script on the sample:
+Run D1, D2, D4-D7 with one script on the sample:
 `audit_sample.py --lane orgs > $WT_PATH/sample.jsonl; audit_datain.py --sample $WT_PATH/sample.jsonl`.
-D2 derives the tax year from `filing_index.tax_period`, D4 scans each org's public JSON and
-report page, D5 reads the superadmin Jobs card's crawler flag (dash_events is not queryable),
-D6 checks the newest GSC point, D7 the top 200 by revenue. Exit 2 and a `CHECK dN DID NOT RUN` line mean a check did not
-run: report it as not run, never as clean.
+What each check reads is in the script's docstring. Exit 2 and a `CHECK dN DID NOT RUN` line
+mean a check did not run: report it as not run, never as clean.
 
 ## Lane scout-report (`auditor:scout-report`)
 
@@ -117,10 +115,10 @@ cite the page URL and the source line each finding contradicts or lacks:
   a "Meets" whose input is negative, zero or missing is a finding (#13166, -$33M net assets)
 - S6 blank sweep: list EVERY blank cell, "n/a", "not on the return", "needs" or "appears
   later" on the paid report, and check each against the XML. A missing element that means $0
-  (no `GovernmentGrantsAmt`) is $0, not unknown; a this-year cell blank beside a filled last
-  year is always a finding. File all blanks from one code path as one pattern, in one pass
-- S7 every breakdown table (revenue by source, expenses, assets) adds to its own Total row, and
-  "Largest line" is the largest row; check the `ez_filer` org first (#13390: 22% shown as all)
+  (no `GovernmentGrantsAmt`) is $0, not unknown; a row filled in one year column and blank in
+  the other is always a finding (#13434). File all blanks from one code path as one pattern
+- S7 every breakdown table adds to its own Total row, and "Largest line" is the largest row;
+  check the `ez_filer` org and one negative-total filer first (#13390, #13433: no "-3%" share)
 
 ## Lane jobs (`auditor:jobs`)
 
@@ -213,6 +211,9 @@ closed):
 | 990-EZ revenue rows sum to 22% of Total, "largest line" the 22% (#13390) | S7, ez_filer |
 | One filing FY2025 on the report, tax year 2024 on /financials (#13406, factcheck) | T10 |
 | Liabilities labelled "Pt X Ln 26" are computed; filed figure missing (#13407, factcheck) | T12 |
+| 35 dashboard keys frozen since 09-24, card shows them as current (#13429) | D1 (scripted) |
+| Revenue rows add to $2,888 under a -$105,333 Total, shares "-3%" (#13433) | S7 |
+| Start-of-year liabilities and net assets blank on 98% of balance sheets (#13434) | S6 |
 
 A hole that reaches us by hand and is not in this table is a missed check: add a row and the
 check in the same PR that fixes it.
