@@ -55,9 +55,25 @@ class PureRules(unittest.TestCase):
         self.assertEqual(rule.allowed_labels({"FLEET_BUILD_ONLY_LABELS": " bug, ,lane:orgverify "}),
                          ["bug", "lane:orgverify"])
         self.assertEqual(rule.allowed_labels({}), [])
-        self.assertEqual(rule.hour_cap({"FLEET_MINION_MAX_PER_HOUR": "1"}), 1)
+        self.assertEqual(rule.hour_cap({"FLEET_MINION_MAX_PER_HOUR": "1"}, rows=[]), 1)
         self.assertEqual(rule.hour_cap({"FLEET_MINION_MAX_PER_HOUR": "x"}), 0)
         self.assertEqual(rule.hour_cap({}), 0)
+
+    def test_unset_meter_file_reads_the_default_meter_and_raises_the_cap(self):
+        # 2026-10-21: FLEET_METER_FILE unset made hour_cap read no meter, so phil 31 points
+        # behind pace still got cap 1 while tank.py promised +1.
+        import account_meter
+        with tempfile.TemporaryDirectory() as d:
+            meter = Path(d) / "meter.json"
+            meter.write_text(json.dumps({"ts": time.time(), "rows": [
+                {"name": "phil", "week_left": 82, "elapsed": 48}]}))
+            old, account_meter.DEFAULT_FILE = account_meter.DEFAULT_FILE, str(meter)
+            try:
+                self.assertGreater(rule.hour_cap({"FLEET_MINION_MAX_PER_HOUR": "1"}), 1)
+                self.assertEqual(rule.hour_cap({"FLEET_MINION_MAX_PER_HOUR": "1",
+                                                "FLEET_METER_FILE": str(Path(d) / "none")}), 1)
+            finally:
+                account_meter.DEFAULT_FILE = old
 
     def test_started_in_window_counts_only_recent_minion_starts(self):
         now = 1_800_000_000.0
@@ -96,7 +112,7 @@ class PackerHourCap(unittest.TestCase):
         # A member host's fleet.env sets the CI day cap; past 500 minutes every batch was deferred.
         e = {k: v for k, v in os.environ.items()
              if not k.startswith("FLEET_MINION_") and k != "FLEET_CI_MINUTES_DAILY_MAX"}
-        e.update(env, FLEET_LOG_DIR=runs_dir)
+        e.update(env, FLEET_LOG_DIR=runs_dir, FLEET_METER_FILE=str(Path(runs_dir, "no-meter.json")))
         r = subprocess.run([sys.executable, str(HERE / "fanout.py"), "batches", "--turn-budget", "0",
                             "--unit-turns", "30", "--items", json.dumps(items)],
                            capture_output=True, text=True, env=e, timeout=30)
@@ -150,7 +166,8 @@ class DispatchGuard(unittest.TestCase):
             Path(d, "runs.jsonl").write_text("".join(l + "\n" for l in runs_lines))
             e = {k: v for k, v in os.environ.items() if not k.startswith("FLEET_")}
             e.update(env, PATH=d + os.pathsep + os.environ.get("PATH", ""), FLEET_REPO="x/y",
-                     FLEET_LOG_DIR=d, FLEET_ENV_FILE=str(Path(d, "none.env")), HOME=d)
+                     FLEET_LOG_DIR=d, FLEET_ENV_FILE=str(Path(d, "none.env")), HOME=d,
+                     FLEET_METER_FILE=str(Path(d, "no-meter.json")))
             return subprocess.run(["bash", str(HERE / "run_member.sh"), "minion", *args],
                                   capture_output=True, text=True, env=e, timeout=20)
 
