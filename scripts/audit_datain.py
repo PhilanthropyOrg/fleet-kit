@@ -3,6 +3,10 @@
 
 The lane's first pass (10-17 04:39) ran D1-D4 in part and could not run D5 or D6. Each check
 here reads only what the lane can reach:
+  d1 freshness: every dash_metric_points key (latest:: lists aside) whose newest point is over
+     D1_STALE_DAYS behind the newest point of any key. A writer marked "off" in crons.md is not
+     an excuse: the dashboard still shows its number as current (#13429, 35 keys frozen 27 days
+     while D1 was a by-hand query). The query caps at 50 rows, so 50 reads as "50+".
   d2 completeness: the newest IRS index rows (filing_index) with no row in filings. The index
      has tax_period (YYYYMM), not tax_year: the tax year is the year the period began, so
      202312 -> 2023 and 202306 -> 2022 (the IRS rule; prod's filings rows agree).
@@ -18,7 +22,7 @@ here reads only what the lane can reach:
      shows last year's revenue on the list while the report is right (#13317: Fidelity
      Charitable $19.0B listed, $30.6B filed; 13 of the top 30). Checks the top D7_TOP by revenue.
 
-Usage: audit_datain.py [d2 d4 d5 d6 d7] [--sample sample.jsonl]   (sample = audit_sample.py output)
+Usage: audit_datain.py [d1 d2 d4 d5 d6 d7] [--sample sample.jsonl]   (sample = audit_sample.py output)
 Prints JSON lines {"check", "finding"} or {"check", "ok"}. A check that cannot run prints
 {"check", "error"} plus a stderr line, and the run exits 2: an unrun check is never a clean pass.
 """
@@ -43,6 +47,10 @@ D2_SQL = ("SELECT i.ein, i.tax_period FROM (SELECT ein, tax_period FROM filing_i
           f"ORDER BY object_id DESC LIMIT {D2_WINDOW}) i WHERE NOT EXISTS (SELECT 1 FROM filings f "
           "WHERE f.ein = i.ein AND f.tax_year = CAST(substr(i.tax_period, 1, 4) AS INT) - "
           "CASE WHEN substr(i.tax_period, 5, 2) = '12' THEN 0 ELSE 1 END) LIMIT 200")
+D1_STALE_DAYS = 3
+D1_SQL = ("SELECT metric_key, MAX(ts) AS m FROM dash_metric_points WHERE metric_key NOT LIKE "
+          "'latest::%' GROUP BY metric_key HAVING MAX(ts)::timestamp < (SELECT MAX(ts)::timestamp "
+          f"FROM dash_metric_points) - INTERVAL '{D1_STALE_DAYS} days' ORDER BY 2 LIMIT 50")
 D6_SQL = "SELECT MAX(ts) AS m FROM dash_metric_points WHERE metric_key LIKE 'hub.%gsc%'"
 STALE_DAYS = 2
 D7_TOP = 200
@@ -50,6 +58,16 @@ D7_SQL = ("SELECT ein, fin_year, y FROM (SELECT o.ein, o.fin_year, (SELECT MAX(f
           "filings f WHERE f.ein = o.ein AND f.total_revenue IS NOT NULL) AS y FROM (SELECT ein, "
           "fin_year FROM organizations WHERE fin_revenue IS NOT NULL ORDER BY fin_revenue DESC "
           f"LIMIT {D7_TOP}) o) t WHERE y > fin_year OR (fin_year IS NULL AND y IS NOT NULL)")
+
+
+def d1(q=query) -> list[str]:
+    rows = q(D1_SQL)
+    if not rows:
+        return []
+    n = "50+" if len(rows) >= 50 else str(len(rows))
+    eg = ", ".join(f"{r['metric_key']} {str(r['m'])[:10]}" for r in rows[:5])
+    return [f"{n} dashboard keys have no point in the last {D1_STALE_DAYS} days of the newest "
+            f"one; the oldest froze {str(rows[0]['m'])[:10]} (e.g. {eg})"]
 
 
 def d2(q=query) -> list[str]:
@@ -155,7 +173,7 @@ def d7(q=query) -> list[str]:
 
 
 def run(names: list[str], eins: list[str], checks: dict | None = None) -> list[dict]:
-    checks = checks or {"d2": d2, "d4": lambda: d4(eins), "d5": d5, "d6": d6, "d7": d7}
+    checks = checks or {"d1": d1, "d2": d2, "d4": lambda: d4(eins), "d5": d5, "d6": d6, "d7": d7}
     out = []
     for name in names:
         try:
@@ -169,7 +187,7 @@ def run(names: list[str], eins: list[str], checks: dict | None = None) -> list[d
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("checks", nargs="*", default=["d2", "d4", "d5", "d6", "d7"])
+    ap.add_argument("checks", nargs="*", default=["d1", "d2", "d4", "d5", "d6", "d7"])
     ap.add_argument("--sample", help="audit_sample.py --lane orgs output (JSON lines)")
     a = ap.parse_args(argv)
     eins = []
