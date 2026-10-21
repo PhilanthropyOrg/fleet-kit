@@ -223,6 +223,7 @@ closed):
 | "Meets" net-assets-to-assets at 100% when both are negative, 286 filers (#13444) | S5, negative_assets |
 | Free filing history blank "Money out" where the paid report prints it, 191K rows (#13445) | S6 |
 | "Surplus margin 142%" on a deficit with revenue -$123K, 6,988 filings (#13500) | S5, negative_revenue |
+| "Salaries and wages $0" over $85K payroll tax: the row reads Part IX line 7 only, 5,408 filers (#13523) | S7, factcheck step 3 |
 
 A hole that reaches us by hand and is not in this table is a missed check: add a row and the
 check in the same PR that fixes it.
