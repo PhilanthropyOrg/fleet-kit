@@ -278,7 +278,9 @@ def file_gaps(m: dict, repo: str | None = None) -> list[dict]:
                             for it in its)
                 + "\n\nDone = the item's `owner` in docs/prod_readiness.json is an existing live member whose "
                   "charter runs its `check` (no new members: fold it into the closest lane), and the next "
-                  "daily audit scores it watched.")
+                  "daily audit scores it watched.\n\n## Acceptance\n- Given each item's owner charter runs "
+                  "its check, when the next daily audit runs, then it scores every item watched.\n\n"
+                  "Vision-link: none (maintenance)\nOffer: none (fix)")
         out.append(issue_cluster.file_issue(f"blind spot: {area} checks unowned or overdue", body,
                                             ["fleet:backlog", LANE_LABEL, issue_cluster.MEGA_LABEL],
                                             repo=repo, who="librarian", open_issues=open_issues)

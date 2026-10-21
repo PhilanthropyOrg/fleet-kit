@@ -72,9 +72,13 @@ lines and put the pass total in the Report. Then by reading:
 - T7 names read like names (no ALL CAPS, no initials-only like "k h")
 - T8 no street address or personal email on a public page (city and state only)
 - T9 related orgs (Schedule R) are listed once each, linked when we have the EIN
-- T10 years: every year shown or named in a label equals the XML tax period; "latest" is latest
+- T10 years: every year shown or named in a label equals the XML tax period; "latest" is latest;
+  the report, /financials and the paid report name one filing's year alike (sample a non-December
+  year end first: #13406 FY2025 vs tax year 2024)
 - T11 every link answers 200 and goes to the right target (header, body and footer links)
-- T12 every number on a card can be reproduced from the XML line it cites (deck numbers too)
+- T12 every number on a card can be reproduced from the XML line it cites (deck numbers too); a
+  figure labelled with a form line ("Pt X Ln 26") is that element's filed value, never one we
+  computed, and an absent element says so (#13407)
 - T13 a figure printed twice (tile, its reason line, the fact box, a headline) reads the same at
   one rounding; nothing under 100% prints 100 (or 100¢)
 
@@ -207,6 +211,8 @@ closed):
 | Paid report lists FY2025 twice for two returns ending in one year (#13278) | S4 |
 | Largest list shows last year's revenue for 13 of the top 30, report right (#13317) | D7 |
 | 990-EZ revenue rows sum to 22% of Total, "largest line" the 22% (#13390) | S7, ez_filer |
+| One filing FY2025 on the report, tax year 2024 on /financials (#13406, factcheck) | T10 |
+| Liabilities labelled "Pt X Ln 26" are computed; filed figure missing (#13407, factcheck) | T12 |
 
 A hole that reaches us by hand and is not in this table is a missed check: add a row and the
 check in the same PR that fixes it.
