@@ -152,6 +152,24 @@ class Inflows(unittest.TestCase):
         self.assertIn("**Needed:** port", filed[0][1])
         self.assertIn("FAC", filed[1][1])
 
+    def test_filed_bodies_pass_grus_intake_gate(self):
+        # philanthropy#13403/#13404 carried no Vision-link and were dropped as needs-spec every pass
+        import issue_cluster
+        filed = []
+        orig = issue_cluster.file_issue, issue_cluster.list_open
+        issue_cluster.list_open = lambda repo: []
+        issue_cluster.file_issue = lambda title, body, labels, **kw: filed.append((body, labels)) or {"action": "created"}
+        try:
+            srcs = [dict(s, kr="okr.traffic") if s["id"] == "cf" else s for s in SOURCES]
+            inflows.file_issues(inflows.score(srcs, _capture(), now=NOW))
+        finally:
+            issue_cluster.file_issue, issue_cluster.list_open = orig
+        self.assertIn("Vision-link: okr.traffic", filed[0][0])
+        self.assertIn("Vision-link: none (maintenance)", filed[1][0])
+        for body, labels in filed:
+            self.assertEqual(issue_cluster.spec_gaps(body, labels), [], body)
+            self.assertIn("Offer: none (fix)", body)
+
 
 class RealRepoFiles(unittest.TestCase):
     def test_every_checklist_item_has_exactly_one_existing_member_as_owner(self):

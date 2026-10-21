@@ -134,6 +134,12 @@ def hq_section(rows: list[dict], now: float | None = None) -> str:
     return head + "".join(f" | {k}: {', '.join(v)}" for k, v in sorted(by.items()))
 
 
+def _spec_lines(kr: str | None) -> str:
+    """The lines gru's intake gate reads; without them every inflow issue is dropped to
+    needs-spec (philanthropy#13403/#13404, jefe msg#1442). `kr` comes from the registry row."""
+    return f"Vision-link: {kr or 'none (maintenance)'}\nOffer: none (fix)"
+
+
 def file_issues(rows: list[dict], repo: str | None = None) -> list[dict]:
     """One deduped issue per DOWN / NO_CREDENTIAL source saying exactly what's needed, plus ONE
     'needs Reif' issue listing every credential only Reif can supply."""
@@ -152,7 +158,8 @@ def file_issues(rows: list[dict], repo: str | None = None) -> list[dict]:
         body = (f"Daily data-inflows audit (`scripts/coverage_map.py`, librarian; registry "
                 f"`docs/data_inflows.json`): **{r['name']}** is **{r['status']}**.\n\n"
                 f"- feeds: {r['feeds']}\n- owner: `{r['owner']}`\n- evidence: {r['note'] or '-'}\n\n"
-                f"**Needed:** {r['need']}\n\nDone = the next daily audit scores `{r['id']}` OK.")
+                f"**Needed:** {r['need']}\n\n## Acceptance\n- Given the fix is deployed, when the next "
+                f"daily audit runs, then it scores `{r['id']}` OK.\n\n{_spec_lines(r.get('kr'))}")
         out.append(issue_cluster.file_issue(f"data inflow {r['id']} is {r['status']}", body, labels,
                                             repo=repo, who="librarian", open_issues=open_issues)
                    | {"id": r["id"]})
@@ -160,7 +167,9 @@ def file_issues(rows: list[dict], repo: str | None = None) -> list[dict]:
         body = ("Credentials or accounts only Reif can supply. Each unblocks one data inflow in "
                 "`docs/data_inflows.json`; librarian's daily audit fails until it is set or Reif "
                 "retires the row.\n\n"
-                + "\n".join(f"- [ ] **{r['name']}** (`{r['id']}`, {r['status']}): {r['need']}" for r in reif))
+                + "\n".join(f"- [ ] **{r['name']}** (`{r['id']}`, {r['status']}): {r['need']}" for r in reif)
+                + "\n\n## Acceptance\n- Given a credential is set or its row retired, when the next daily "
+                  "audit runs, then that row no longer fails.\n\n" + _spec_lines(None))
         out.append(issue_cluster.file_issue("needs Reif: credentials for data inflows", body,
                                             labels, repo=repo, who="librarian",
                                             open_issues=open_issues) | {"id": "needs-reif"})
