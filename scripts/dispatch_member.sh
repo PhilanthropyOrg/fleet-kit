@@ -60,6 +60,16 @@ if [ "$member" = minion ] && [ -f "${FLEET_NODE_DIR:-/root/.fleet-node}/config" 
   RUN_MEMBER="${FLEET_NODE_MINION:-$KIT_DIR/scripts/node_minion.sh}"
 fi
 log="$LOG_DIR/$member-$tag.dispatch.log"
+# Spent push gate: a minion builds to push, and past 100% every push is refused until 00:00 UTC,
+# so hold the batch for $0 (gru, vp_due and hand routes all come through here). Override for a
+# deliberate build-ahead: FLEET_DISPATCH_IGNORE_PUSH_GATE=1.
+if [ "$member" = minion ] && [ "${FLEET_DISPATCH_IGNORE_PUSH_GATE:-0}" != 1 ]; then
+  held="$(python3 "$KIT_DIR/scripts/push_budget_gate.py" --dispatch "$3" 2>/dev/null)"
+  if [ -n "$held" ]; then
+    echo "held minion ${3}: $held (no pass spawned)" | tee -a "$log"
+    exit 0
+  fi
+fi
 # Repeat-quiet lane: a lane whose last full pass was quiet under 4h ago gets no nerd -- no pid,
 # no run row. scripts/nerd_repeat_quiet.py decides it for $0 (it cost ~3 model turns, 28x/day).
 if [ "$member" = nerd ]; then

@@ -30,6 +30,13 @@ class DispatchMember(unittest.TestCase):
         self.env = dict(os.environ, FLEET_RUN_MEMBER=str(self.stub), FLEET_LOG_DIR=self.d,
                         FLEET_DISPATCH_POLL_S="0.2",
                         FLEET_NODE_DIR=self.d)  # a host worker-node config reroutes minions
+        self._meter(50.0)
+
+    def _meter(self, pct):  # push_budget_gate's cache, so no test reads the live billing API
+        import json
+        Path(self.d, "push_gate_meter.json").write_text(json.dumps({
+            "ts": time.time(), "day": time.strftime("%Y-%m-%d", time.gmtime()), "share": 10.0,
+            "spent": pct / 10, "pct": pct}))
 
     def _wait_done(self, lines=1):
         deadline = time.time() + 10
@@ -72,6 +79,22 @@ class DispatchMember(unittest.TestCase):
         self.assertIn("pid=", out)
         self.assertIn("1 minion --item 11601", self._wait_done())
         self.assertTrue(Path(self.d, "minion-item11601.dispatch.log").exists())
+
+    def test_spent_push_gate_holds_a_minion_but_not_jobs_p1(self):
+        # 2026-10-22: 25 minion passes ran past the cap; every push was refused.
+        self._meter(262.0)
+        out = subprocess.run(["bash", str(SCRIPT), "minion", "--items", "13402,13629"], env=self.env,
+                             capture_output=True, text=True).stdout
+        self.assertIn("held minion 13402,13629: push gate at 262%", out)
+        self.assertNotIn("pid=", out)
+        out = subprocess.run(["bash", str(SCRIPT), "minion", "--item", "13057"], env=self.env,
+                             capture_output=True, text=True).stdout
+        self.assertIn("pid=", out, "a Jobs P1 item keeps its bypass")
+        env = dict(self.env, FLEET_DISPATCH_IGNORE_PUSH_GATE="1")
+        out = subprocess.run(["bash", str(SCRIPT), "minion", "--items", "13402"], env=env,
+                             capture_output=True, text=True).stdout
+        self.assertIn("pid=", out)
+        self.assertEqual(2, len(self._wait_done(2).splitlines()))
 
     def test_claim_item_takes_several_numbers(self):
         import json

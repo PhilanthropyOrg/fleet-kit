@@ -24,7 +24,8 @@ logs `unread`: a push is never stranded on a failed read, and the row says so.
 
 Used three ways: as a PreToolUse hook (JSON payload on stdin, exit 2 = block), as
 `--check [--wt DIR]` from scripts that push (worktree_builder.sh, minion_checkpoint.py), and
-as the `--why` wrapper above.
+as the `--why` wrapper above. `--dispatch <items>` (dispatch_member.sh) holds a minion batch
+that could only be refused.
 """
 from __future__ import annotations
 
@@ -216,6 +217,20 @@ def check(wt: str, why: str = "", now: float | None = None, meter: dict | None =
     return ok, reason
 
 
+def dispatch_hold(items: str, now: float, meter: dict | None = None) -> str:
+    """Why a minion batch should not start now, or '' to start it. A minion's whole product is a
+    push; past 100% every push is refused until 00:00 UTC. 2026-10-22: 25 minion passes ($22)
+    ran past the cap, #13402 was rebuilt 4x and #13600 resumed 3x, none pushed. Jobs P1 items
+    keep their bypass; an unread meter holds nothing."""
+    meter = meter if meter is not None else read_meter(now)
+    if not meter or meter["pct"] < HARD_PCT:
+        return ""
+    if set(re.findall(r"\d+", items)) & set(JOBS_P1):
+        return ""
+    return (f"push gate at {meter['pct']:.0f}% of today's Actions share; a minion could not push "
+            "before 00:00 UTC")
+
+
 def today_counts(now: float, path: Path | None = None) -> dict[str, int]:
     """Today's verdict counts plus `past_cap`, for tank.py and retro.py."""
     day = time.strftime("%Y-%m-%d", time.gmtime(now))
@@ -273,6 +288,11 @@ def main(argv: list[str]) -> int:
     if argv[:1] == ["--summary"]:
         print(summary(time.time()))
         return 0
+    if argv[:1] == ["--dispatch"]:
+        why = dispatch_hold(" ".join(argv[1:]), time.time())
+        if why:
+            print(why)
+        return 3 if why else 0
     if argv[:1] == ["--check"]:
         wt = argv[argv.index("--wt") + 1] if "--wt" in argv else os.getcwd()
         ok, reason = check(wt)
