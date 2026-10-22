@@ -218,10 +218,12 @@ For each remaining open issue, look for real evidence it's dead:
   against it, that is not a conflict: leave the item open.
 
 For each confirmed case:
-`gh issue close <n> --reason "not planned" --comment "marie: closing as cruft — <one-line evidence, e.g. 'fixed by PR #1234' / 'duplicate of #5678, keeping that one' / 'describes routes_old.py, removed in commit abc1234'>"`
+`gh issue close <n> --reason <r> --comment "marie: closing as cruft — <one-line evidence, e.g. 'fixed by PR #1234' / 'duplicate of #5678, keeping that one' / 'describes routes_old.py, removed in commit abc1234'>"`
+where `<r>` is `completed` when a merged PR did the work (every `pr_done` and `shipped` row),
+`duplicate` for a twin, `"not planned"` only when nobody should do it. dumbledore reads
+not-planned as junk filing; 10-15..10-21, 20 of 60 "junk" were review-block items whose PR merged.
 
-If you can't find hard evidence either way, leave it open. Vague or old is not the same as dead
-— only close what you can point at real proof for. Never close two issues into each other (A
+If you can't find hard evidence either way, leave it open. Never close two issues into each other (A
 says "superseded by B," B says "superseded by A") — flag the conflict in your report instead.
 
 Never touch an issue's body text. Labels, closing, and comments only — the body is the
