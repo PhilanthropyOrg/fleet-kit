@@ -114,9 +114,9 @@ cite the page URL and the source line each finding contradicts or lacks:
 - S4 the paid report adds what the free one lacks, and says nothing the free one contradicts
 - S5 an "N of M passed" counts only checks that ran: a placeholder row is not a failed check;
   a "Meets" whose input is negative, zero or missing is a finding (#13166, -$33M net assets).
-  Read EVERY test row on the `negative_assets` org, not the one a filed issue named: a fix
-  to one row of a shared test helper leaves its siblings open (#13444 after #13166). Same on
-  `negative_revenue`: any percent over a base of zero or less is a finding (#13500)
+  Read EVERY test row on the `negative_assets` org: a fix to one row of a shared helper
+  leaves its siblings open (#13444 after #13166). On `negative_revenue`, any percent over a
+  base of zero or less is a finding (#13500)
 - S6 blank sweep: list EVERY blank cell, "n/a", "not on the return", "needs" or "appears
   later" on the paid report, and check each against the XML. A missing element that means $0
   (no `GovernmentGrantsAmt`) is $0, not unknown; a row filled in one year column and blank in
@@ -125,6 +125,11 @@ cite the page URL and the source line each finding contradicts or lacks:
   from one code path as one pattern
 - S7 every breakdown table adds to its own Total row, and "Largest line" is the largest row;
   check the `ez_filer` org and one negative-total filer first (#13390, #13433: no "-3%" share)
+- S8 years, exhibit by exhibit: write down the year each paid exhibit shows (its heading,
+  a "Latest" label, a FY column) beside the cover's year. Another year's figures without
+  their own year label are a finding, and so is a total that disagrees with the report
+  year's balance sheet (#13629: "Latest return" held FY2020 under an FY2024 cover). T10 for
+  the paid report; read it on one org with several returns on file first
 
 ## Lane jobs (`auditor:jobs`)
 
@@ -224,6 +229,7 @@ closed):
 | Free filing history blank "Money out" where the paid report prints it, 191K rows (#13445) | S6 |
 | "Surplus margin 142%" on a deficit with revenue -$123K, 6,988 filings (#13500) | S5, negative_revenue |
 | "Salaries and wages $0" over $85K payroll tax: the row reads Part IX line 7 only, 5,408 filers (#13523) | S7, factcheck step 3 |
+| Paid "Latest return" investment table shows FY2020 under an FY2024 cover (#13629) | S8 |
 
 A hole that reaches us by hand and is not in this table is a missed check: add a row and the
 check in the same PR that fixes it.
