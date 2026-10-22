@@ -100,6 +100,15 @@ def test_by_design_drops_are_recorded_not_labeled() -> None:
     print("ok  epics / VP-pending world-class: recorded, not labeled")
 
 
+def test_person_owned_desk_issue_sits_out_and_loses_needs_spec() -> None:
+    # jefe msg#1478: #13543/#13545 had no Vision-link and 'Owner: person session'.
+    p = gd.plan([_item(8, ["quality:solid", gd.NEEDS_SPEC], "Fix it.\n\nOwner: person session (building now).")], "r5")
+    assert p["eligible"] == [] and p["dropped"][0]["action"] == "by-design", p
+    assert p["actions"] == [{"number": 8, "op": "remove_label", "label": gd.NEEDS_SPEC}], p
+    assert gd.plan([_item(9, ["quality:solid"], "The owner of this page.")], "r6")["dropped"][0]["action"] == "needs-spec"
+    print("ok  person-owned desk issue: recorded by-design, needs-spec removed, never built")
+
+
 def test_apply_labels_comments_logs_and_files_the_ask() -> None:
     calls = []
 

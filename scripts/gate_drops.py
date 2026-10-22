@@ -110,6 +110,10 @@ BY_DESIGN = ("tracking-only parent", "world-class with no")
 # fleet_init.py files a new product's first issues with this marker and a `Blocked by #N` line
 # naming the founding issue each one needs first (CI needs a stack; a page needs CI).
 FOUNDING_MARKER = "<!-- fleet-founding"
+# Desk issues a person session is already building (jefe msg#1478: #13543, #13545, #13573).
+# They are filed from claude.ai/code where no fleet hook runs, often with no Vision-link, so the
+# gate labeled them needs-spec and re-sent them to marie + jefe every pass. They sit out by design.
+PERSON_OWNED = re.compile(r"^\s*Owner:\s*person session", re.I | re.M)
 
 
 def _names(labels) -> list[str]:
@@ -253,8 +257,11 @@ def plan(items: list[dict], run_id: str, parents: dict | None = None,
     `waits`: founding_waits() output; those items sit this pass out, by design."""
     waits = waits or {}
     waiting = [it["number"] for it in items if it["number"] in waits]
-    items = [it for it in items if it["number"] not in waits]
+    owned = [it for it in items if PERSON_OWNED.search(it.get("body") or "")]
+    items = [it for it in items if it["number"] not in waits and it not in owned]
     actions: list[dict] = []   # {"number", "op": add_label|remove_label|comment, ...}
+    actions += [{"number": it["number"], "op": "remove_label", "label": NEEDS_SPEC}
+                for it in owned if NEEDS_SPEC in _names(it.get("labels"))]
     fixed: set[int] = set()
     patched = []
     for it in items:
@@ -287,6 +294,8 @@ def plan(items: list[dict], run_id: str, parents: dict | None = None,
                             "action": "fixed"} for n in eligible if n in fixed]
     records += [{"number": n, "gate": "founding-order", "action": "by-design",
                  "reason": f"waits for founding issue #{waits[n]} to close"} for n in waiting]
+    records += [{"number": it["number"], "gate": "person-owned", "action": "by-design",
+                 "reason": "Owner: person session (a person is building it)"} for it in owned]
     newly: list[dict] = []
 
     for d in drops:
