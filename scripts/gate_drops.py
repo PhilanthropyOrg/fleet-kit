@@ -604,28 +604,51 @@ def built_by_prs(prs: list[dict], now: float, hours: float = BUILT_HOURS) -> dic
 TRIED_HOURS = 24.0
 
 
-def tried_by_runs(runs: list[dict], now: float, hours: float = TRIED_HOURS) -> dict[int, str]:
+def tried_by_runs(runs: list[dict], now: float, hours: float = TRIED_HOURS,
+                  spent_pct: float | None = None) -> dict[int, str]:
     """Pure. item -> why, for every item a minion already tried in the last `hours` and left
     with no commit and no PR (status ok or quiet, commits 0, no checkpoint_pr). 2026-10-08,
     after built_by_prs landed: the hour's one slot went to #10032+#10034, which two minions had
     already read that day and dropped as 'too wide, needs slicing'; the third read the same and
-    opened nothing. A re-read a few hours later finds the same item; marie must slice it first."""
+    opened nothing. A re-read a few hours later finds the same item; marie must slice it first.
+
+    `spent_pct` (push_budget_gate's day share, 100+ = spent): an item a minion committed today
+    (UTC) with no PR is held too, since its push can only be refused again before 00:00 UTC.
+    2026-10-22: #13402+#13629+#13640 were rebuilt 4 times (09:12-13:15Z) at 171%, never pushed."""
     out: dict[int, str] = {}
     import red_prs
+    spent = spent_pct is not None and spent_pct >= 100.0
+    today = time.strftime("%Y-%m-%d", time.gmtime(now))
     for r in runs:
         if (r.get("member") or "") != "minion" or (r.get("kind") or "llm") != "llm":
             continue
         if (r.get("status") or "") not in ("ok", "quiet"):
             continue
-        if (r.get("commits") or 0) or r.get("checkpoint_pr") or r.get("pr"):
+        if r.get("checkpoint_pr") or r.get("pr"):
             continue
         t = r.get("recorded_at")
         if not isinstance(t, (int, float)) or now - t > hours * 3600:
             continue
-        why = f"minion tried {time.strftime('%Y-%m-%d %H:%MZ', time.gmtime(t))}, no commit, no PR"
+        when = time.strftime('%Y-%m-%d %H:%MZ', time.gmtime(t))
+        if r.get("commits") or 0:
+            if not (spent and when.startswith(today)):
+                continue
+            why = f"minion built it {when}, push refused at {spent_pct:.0f}% of today's Actions share; waits for 00:00 UTC"
+        else:
+            why = f"minion tried {when}, no commit, no PR"
         for n in red_prs.items_of(f"minion-item{r.get('item_id') or ''}-0-0"):
             out.setdefault(n, why)
     return out
+
+
+def _push_gate_pct() -> float | None:
+    """Today's push_budget_gate share spent, or None when unread (fails open: nothing held)."""
+    try:
+        import push_budget_gate
+        meter = push_budget_gate.read_meter(time.time())
+    except Exception:  # noqa: BLE001 -- an unread meter must not stop the pass
+        return None
+    return meter["pct"] if meter else None
 
 
 def fetch_minion_runs(now: float, hours: float = TRIED_HOURS, db_path=None) -> list[dict]:
@@ -834,7 +857,7 @@ def main(argv=None) -> int:
             return 1
         only = build_lane_rule.allowed_labels()
         built = built_by_prs(fetch_prs_touching(a.repo, time.time()), time.time())
-        tried = tried_by_runs(fetch_minion_runs(time.time()), time.time())
+        tried = tried_by_runs(fetch_minion_runs(time.time()), time.time(), spent_pct=_push_gate_pct())
         held = {**tried, **built}
         todo = candidates(backlog, only, held)
         built_dropped = {i["number"]: built[i["number"]] for i in candidates(backlog, only) if i["number"] in built}

@@ -142,3 +142,22 @@ def test_fetch_minion_runs_reads_fleet_db_and_fails_open(tmp_path):
     assert gate_drops.tried_by_runs(runs, 1_000_000.0) == {
         10032: "minion tried 1970-01-12 13:46Z, no commit, no PR", 10034: "minion tried 1970-01-12 13:46Z, no commit, no PR"}
     assert gate_drops.fetch_minion_runs(1_000_000.0, db_path=tmp_path / "missing" / "x.db") == []
+
+
+def test_tried_by_runs_holds_a_built_unpushed_item_only_while_the_day_is_spent():
+    now = 1_792_627_200.0 + 13 * 3600  # 2026-10-22 13:00Z
+    runs = [
+        {"member": "minion", "kind": "llm", "item_id": "13402_13629_13640", "status": "ok",
+         "commits": 1, "checkpoint_pr": None, "pr": None, "recorded_at": now - 3600},
+        # yesterday's commit: the gate has reset since, so it may be resumed
+        {"member": "minion", "kind": "llm", "item_id": "13000", "status": "ok",
+         "commits": 2, "checkpoint_pr": None, "pr": None, "recorded_at": now - 14 * 3600},
+        {"member": "minion", "kind": "llm", "item_id": "13001", "status": "ok",
+         "commits": 1, "checkpoint_pr": 13700, "pr": None, "recorded_at": now - 3600},
+    ]
+    assert gate_drops.tried_by_runs(runs, now) == {}
+    assert gate_drops.tried_by_runs(runs, now, spent_pct=99.0) == {}
+    held = gate_drops.tried_by_runs(runs, now, spent_pct=171.0)
+    assert set(held) == {13402, 13629, 13640}
+    assert held[13629] == ("minion built it 2026-10-22 12:00Z, push refused at 171% of today's "
+                           "Actions share; waits for 00:00 UTC")
