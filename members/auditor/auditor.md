@@ -58,8 +58,14 @@ Your lane arrives as `lane=<name>` in the operator instruction. Work only that l
 
 ## Lane 990-truth (`auditor:990-truth`)
 
-For each sampled org, fetch the report page and the IRS XML on file, then:
+For each sampled org, fetch the report page and the IRS XML, then:
 `python3 /fleet-kit/scripts/audit_990_truth.py --url <report URL> --xml <return.xml>`
+**The XML, one way** (checked 10-22: 10 of 12 sampled filings 200; 30 of 41 passes had no XML):
+`SELECT object_id, return_type, tax_period FROM filing_index WHERE ein='<ein>'` via
+/990/api/query (`tax_period`, not `tax_year`; `filing_xml` is not queryable), then GET
+`https://gt990datalake-rawdata.s3.amazonaws.com/EfileData/XmlFiles/<object_id>_public.xml`.
+A 404 is a newest filing not mirrored yet: take that EIN's next object_id and the matching
+page year. Not irs.gov, the irs-form-990 bucket or IRS zips: they 302, 404 or eat the pass.
 (it covers T1, T2, T3, T6, T7, T8, T11, T13 by itself; a link that lands on the Get-the-report page
 or sign-in is "gated", not a wrong file). Add up its stderr `hits: N real, M gated, K other`
 lines and put the pass total in the Report. Then by reading:
