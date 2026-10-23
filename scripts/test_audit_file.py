@@ -101,6 +101,27 @@ def test_a_filed_finding_passes_the_issue_create_hook_and_gru_intake():
     assert eligible, why
 
 
+def test_a_reseen_issue_is_commented_once_a_day_unless_the_count_moves():
+    # fk#1789: 37 identical "still open, 50 affected" comments a day on 3 issues.
+    state, t = {"seen": {}, "killed": {}}, 1_000_000.0
+    assert af.should_comment(state, 13429, 50, t)  # never said
+    state["seen"]["13429"] = {"ts": t, "count": 50}
+    assert not af.should_comment(state, 13429, 50, t + 2 * 3600)  # same count, 2h later
+    assert not af.should_comment(state, 13429, 60, t + 2 * 3600)  # +20% is not news
+    assert af.should_comment(state, 13429, 63, t + 2 * 3600)  # +26% is
+    assert af.should_comment(state, 13429, 50, t + 86400)  # a day on, say it again
+
+
+def test_a_killed_draft_is_held_for_seven_days_and_state_survives_a_reload():
+    import tempfile
+    path = Path(tempfile.mkdtemp()) / "audit_file_state.json"
+    assert af.load_state(path) == {"seen": {}, "killed": {}}  # no file yet: empty, not a crash
+    af.save_state({"seen": {}, "killed": {"datain:d2": 1_000_000.0}}, path)
+    state = af.load_state(path)
+    assert af.held_kills(state, 1_000_000.0 + 6 * 86400) == {"datain:d2"}
+    assert af.held_kills(state, 1_000_000.0 + 7 * 86400) == set()
+
+
 def test_a_finding_the_intake_gate_would_drop_is_not_filed():
     bad = {**GOOD, "vision_link": "Targets KR2"}
     [(action, _, detail)] = af.plan([bad], [], {af.pattern_key(bad): (True, "real")})
