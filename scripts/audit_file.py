@@ -14,6 +14,8 @@ The auditor drafts findings as JSON lines. Nothing reaches the board until it su
      It also sees every open audit issue's title, so the same defect under a new pattern key
      becomes a comment on the open issue (`duplicate_of`), not a twin (#12944/#13012/#13029:
      one months-of-cash bug filed three times, 10-17).
+  4. quiet repeats (fk#1789): a re-seen issue gets a comment only once a day, or when its count
+     moved 25%+; a killed draft is not re-reviewed for 7 days. State: audit_file_state.json.
 
 Usage: audit_file.py --findings drafts.jsonl [--repo OWNER/REPO] [--dry-run]
 """
@@ -21,9 +23,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -32,6 +36,9 @@ import issue_cluster as ic  # noqa: E402
 REQUIRED = ("pattern", "lane", "title", "count", "sample_urls", "evidence", "fix",
             "guard_test", "given", "when", "then")
 LABELS = "bug,lane:audit,fleet:backlog,quality:solid"
+# fk#1789: 37 "still open, 50 affected" comments a day on the same 3 issues, and the same drafts
+# killed every 2h. Re-seen speaks once a day or on a 25% move; a kill holds for 7 days.
+RESEEN_QUIET_S, RESEEN_MOVE, KILL_HOLD_S = 86400, 0.25, 7 * 86400
 VERDICT_SCHEMA = json.dumps({
     "type": "object", "required": ["verdicts"],
     "properties": {"verdicts": {"type": "array", "items": {
@@ -148,6 +155,41 @@ def plan(findings: list[dict], open_issues: list[dict], verdicts: dict) -> list[
     return out
 
 
+def state_path() -> Path:
+    return Path(os.environ.get("FLEET_LOG_DIR", "/var/log/fleet-kit")) / "audit_file_state.json"
+
+
+def load_state(path: Path | None = None) -> dict:
+    try:
+        s = json.loads((path or state_path()).read_text())
+    except (OSError, ValueError):
+        s = {}
+    return {"seen": s.get("seen", {}), "killed": s.get("killed", {})}
+
+
+def save_state(state: dict, path: Path | None = None) -> None:
+    path = path or state_path()
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(state))
+    tmp.replace(path)
+
+
+def should_comment(state: dict, number: int, count, now: float) -> bool:
+    """A re-seen issue is spoken to once a day, or sooner when its count moved 25% or more."""
+    last = state["seen"].get(str(number))
+    if not last or now - last.get("ts", 0) >= RESEEN_QUIET_S:
+        return True
+    try:
+        was, new = float(last.get("count") or 0), float(count)
+    except (TypeError, ValueError):
+        return False
+    return abs(new - was) >= RESEEN_MOVE * max(was, 1.0)
+
+
+def held_kills(state: dict, now: float) -> set[str]:
+    return {k for k, ts in state["killed"].items() if now - ts < KILL_HOLD_S}
+
+
 def _gh(args: list[str]) -> str:
     return subprocess.run(["gh", *args], capture_output=True, text=True, check=True).stdout
 
@@ -191,6 +233,12 @@ def main(argv: list[str] | None = None) -> int:
     open_issues = json.loads(_gh(["issue", "list", "--repo", a.repo, "--label", "lane:audit",
                                   "--state", "open", "--limit", "300",
                                   "--json", "number,title,body"]))
+    now, state = time.time(), load_state()
+    held = held_kills(state, now)
+    for f in findings:
+        if pattern_key(f) in held:
+            print(f"HELD {f.get('title', '?')}: killed within 7 days, not re-reviewed")
+    findings = [f for f in findings if pattern_key(f) not in held]
     fresh = [f for f in findings if not missing_fields(f)
              and pattern_key(f) not in existing_patterns(open_issues)]
     verdicts = kill_pass(fresh, open_issues) if fresh else {}
@@ -198,16 +246,23 @@ def main(argv: list[str] | None = None) -> int:
         title = f.get("title", "?")
         if action == "drop":
             print(f"DROP {title}: {detail}")
+            if str(detail).startswith("killed:"):
+                state["killed"][pattern_key(f)] = now
+        elif action == "comment" and not should_comment(state, detail, f["count"], now):
+            print(f"SEEN #{detail} {title}: now {f['count']} affected (said today; no comment)")
         elif action == "comment":
             print(f"SEEN #{detail} {title}: now {f['count']} affected")
             if not a.dry_run:
                 _gh(["issue", "comment", str(detail), "--repo", a.repo, "--body",
                      f"Auditor re-check: still open, {f['count']} affected.\n\n{f['evidence']}"])
+                state["seen"][str(detail)] = {"ts": now, "count": f["count"]}
         else:
             print(f"FILE {title} ({f['count']} affected): {detail}")
             if not a.dry_run:
                 print(_gh(["issue", "create", "--repo", a.repo, "--title", title,
                            "--label", LABELS, "--body", issue_body(f)]).strip())
+    if not a.dry_run:
+        save_state(state)
     return 0
 
 
