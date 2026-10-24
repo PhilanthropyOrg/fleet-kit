@@ -15,7 +15,8 @@
 #   order) via `claude -p`. On the first account that succeeds, prints its stdout and returns
 #   0, with ACCOUNT_POOL_SELECTED set to that account's name. On failure, classifies the
 #   failure from the command's stderr (`exhausted` if the output matches a weekly-limit
-#   phrase, `unauthenticated` if it matches a login phrase, else `other`) and tries the next
+#   phrase, `network` if a connection error (fk#1752: returns 1, no gate, no failover),
+#   `unauthenticated` if it matches a login phrase, else `other`) and tries the next
 #   account. Returns 3 (ACCOUNT_POOL_ALL_EXHAUSTED) only when every account failed.
 #
 # Env: FLEET_ACCOUNTS (default "primary" — one account still gets the classification/logging
@@ -543,7 +544,14 @@ _account_pool_classify_failure() {
       echo "exhausted"; return
     fi
   fi
-  if grep -qiE "not logged in|please (log|sign) in|invalid api key|unauthorized|token (has been )?revoked|401" <<<"$out"; then
+  # fk#1752: a dropped connection says nothing about the account. 10-20 (95 min of host Wi-Fi
+  # loss) and 10-23 20:42 CDT (DNS down) both gated healthy accounts as `unauthenticated`
+  # for hours. Checked before the auth phrases, and 401 is anchored, because a bare `401`
+  # also matched issue numbers like #13401 in the member's own transcript.
+  if grep -qiE "ECONNRESET|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|connection (dropped|error|refused)|no response from api|temporary failure in name resolution|could not resolve host|getaddrinfo" <<<"$out"; then
+    echo "network"; return
+  fi
+  if grep -qiE "not logged in|please (log|sign) in|invalid api key|unauthorized|token (has been )?revoked|\b401\b" <<<"$out"; then
     echo "unauthenticated"; return
   fi
   echo "other"
@@ -818,6 +826,14 @@ account_pool_run() {
     _account_pool_log "account=$account command failed rc=$rc reason=$reason"
     export ACCOUNT_POOL_LAST_REASON="$reason"
     [ -n "${ACCOUNT_POOL_REASON_FILE:-}" ] && printf '%s\n' "$reason" > "$ACCOUNT_POOL_REASON_FILE" 2>/dev/null
+    # fk#1752: a network failure gates nothing and is not retried on the next account (the
+    # next one shares the same broken uplink, and a mid-pass drop would re-run the whole pass).
+    if [ "$reason" = "network" ]; then
+      export ACCOUNT_POOL_SELECTED="$account"
+      [ -n "${ACCOUNT_POOL_SELECTED_FILE:-}" ] && printf '%s\n' "$account" > "$ACCOUNT_POOL_SELECTED_FILE" 2>/dev/null
+      _account_pool_log "account=$account network failure -- not an account signal; no gate, not failing over"
+      return 1
+    fi
     case "$reason" in
       exhausted) _account_pool_mark_exhausted "$account" "$(cat "$capture")"; continue ;;
       unauthenticated) _account_pool_note_unauthenticated "$account"; continue ;;
