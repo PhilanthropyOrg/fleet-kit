@@ -32,11 +32,14 @@ on their phone and on their desk?"**
    logo on file)? Did Instrument Serif and IBM Plex load, or did a fallback render? On the
    phone, is the main action (Apply, Claim, Post, Verify, Pay) reachable without hunting? Does
    it match the design reference when one exists (design_reference)? Any console error?
-   Two of these are measured with `getBoundingClientRect`, never judged by eye (w24 passed
-   jobs-at-org with both live; #14060 #14061): at 390, the top of the first item the page
-   lists (job, org, result) is above y=844, else name the box above it; at 1440, no two
-   header links, buttons or inputs intersect. Either one failing on 2 of the 3 pages is a
-   pattern; write both readings in the scoreboard note.
+   Three are measured with `getBoundingClientRect`, never judged by eye (#14060 #14061
+   #14110): at 390, the first listed item (job, org, result) starts above y=844, else name
+   the box above it; at 390, no row's name or title line box (`Range.getClientRects`)
+   intersects a button pinned in that row (Give, Follow, Apply); at 1440, no two header
+   links, buttons or inputs intersect. A probe that matches 0 rows is UNMEASURED, not a pass:
+   fix the selector (w29 saw #14110 by eye, measured nothing, filed nothing). Any one failing
+   on 2 of 3 pages is a pattern; put the counts in `evidence` (the reviewer kills an
+   eyeballed overlap as taste) and write the readings in the scoreboard note.
 4. **File.** One JSON line per PATTERN (the same clipped title on 3 report pages is one) to
    `$WT_PATH/walker-drafts.jsonl` with `pattern`, `title` (what a person sees, plain
    words), `count`, `sample_urls`, `evidence` (the two screenshot links, uploaded per the
@@ -51,5 +54,4 @@ on their phone and on their desk?"**
 ## Laws
 - Reads only on prod. Sign in as a QA persona, never post, claim, pay or sign up.
 - A screenshot is the evidence. No finding without both widths attached.
-- One issue per pattern, with a count. A single ugly page is a clue, not a finding.
 - BLOCKED is not BROKEN: a challenge page means you lost your header, not that the page broke.
