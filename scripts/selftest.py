@@ -16010,6 +16010,68 @@ def _roster_is_ten_members_after_fk1195_fold():
         "sentry never gained the live gate-3 re-check after deploy"
 
 
+def _daily_walk_writes_blocked_never_fail_and_files_once_gh13448():
+    """philanthropy#13448: the 6 AM walk's file counts right, a step it could not look at is
+    BLOCKED (never FAIL), no secret reaches a line, and the filing plan caps at 5 new a day,
+    comments "Still broken" on an open twin, "Passes now" on a fixed one, and never twice a day."""
+    import datetime as _dt
+    import daily_walk as dw
+    import issue_cluster
+    import journey_walker as jw
+    cat = jw.load_catalog(ROOT / "members" / "sentry" / "journeys.yaml")
+    walk = {j["id"]: j for j in cat["journeys"] if j["id"] in dw.WALK_IDS}
+    assert set(walk) == set(dw.WALK_IDS) and all(j.get("walked_by") == "daily-walk" for j in walk.values())
+    assert all(jid in jw.JOURNEY_RUNNERS for jid in dw.WALK_IDS)
+    claim = walk["walk-claim-hq-verify"]
+    n = len(claim["steps"])
+    out = [{"id": "walk-claim-hq-verify--desktop", "steps": [
+        {"index": 0, "status": "pass", "url": "https://philanthropy.org/990/claim/1?t=SECRETTOKEN1", "seen": "Claim this org"},
+        {"index": 1, "status": "blocked", "url": "https://philanthropy.org/x", "seen": "", "detail": "challenge page"},
+        {"index": 2, "status": "fail", "url": "https://philanthropy.org/login", "seen": "Sign in", "detail": "landed on /login hdr=s3cr3t-bypass"},
+    ]}]
+    blocked = [{"id": "walk-donor-give", "viewport": "desktop", "reason": "Cloudflare challenge"}]
+    rows = dw.rows_from(cat, out, blocked, secrets=("s3cr3t-bypass",))
+    vps = {jid: len(j.get("viewports") or ["desktop"]) for jid, j in walk.items()}
+    assert len(rows) == sum(len(walk[j]["steps"]) * vps[j] for j in walk), len(rows)
+    claim_rows = [r for r in rows if r["journey"] == "walk-claim-hq-verify" and r["viewport"] == "desktop"]
+    assert [r["status"] for r in claim_rows[:3]] == ["PASS", "BLOCKED", "FAIL"]
+    assert all(r["status"] == "BLOCKED" and "step 2 failed" in r["why"] for r in claim_rows[3:n])
+    assert all(r["status"] == "BLOCKED" and r["why"] == "Cloudflare challenge" for r in rows if r["journey"] == "walk-donor-give" and r["viewport"] == "desktop")
+    when = _dt.datetime(2026, 10, 21, 6, 0, tzinfo=dw.CT)
+    md = dw.render(rows, when, "https://philanthropy.org")
+    p, m, f, b = dw.counts(rows)
+    assert (p, f) == (1, 1) and b == m - 2
+    assert md.splitlines()[0] == f"Walk this morning (2026-10-21, 6:00 AM Central): 1 of {m} steps pass, 1 fail, {b} blocked", md.splitlines()[0]
+    assert "SECRETTOKEN1" not in md and "s3cr3t-bypass" not in md and "[REDACTED]" in md
+    step_lines = [ln for ln in md.splitlines() if ln.split(" · ")[0] in ("PASS", "FAIL", "BLOCKED")]
+    assert len(step_lines) == m and sum(ln.startswith("FAIL · ") for ln in step_lines) == 1
+    assert step_lines[2].startswith('FAIL · walk-claim-hq-verify/2 owner lands on /hq · https://philanthropy.org/login · "Sign in"')
+    # an issue body passes the fleet's intake gate and carries the walk's markers
+    fails = [r for r in rows if r["status"] == "FAIL"]
+    body = dw.issue_body(fails, when)
+    assert issue_cluster.spec_gaps(body, dw.LABELS + ["lane:orgverify"]) == [], issue_cluster.spec_gaps(body, dw.LABELS)
+    for must in ("Vision-link: okr.orgverify", "Walk: daily", "Walk-key: walk-claim-hq-verify/2", "Given a person on", "Best in class:", "Strategy:"):
+        assert must in body, must
+    assert dw.issue_title(fails).startswith("Cruft: ") and dw.walk_keys([{"number": 7, "body": body}]) == {"walk-claim-hq-verify/2": 7}
+    # filing plan: new -> create; open twin -> "Still broken"; fixed -> "Passes now"; cap 5; never twice a day
+    def row(key, status):
+        return {**fails[0], "key": key, "status": status}
+    many = [row(f"j/{i}", "FAIL") for i in range(7)] + [row("old/1", "FAIL"), row("fixed/2", "PASS")]
+    plan = dw.plan_filing(many, {"old/1": 11, "fixed/2": 12}, {}, when)
+    kinds = [a[0] for a in plan]
+    assert kinds.count("create") == 5 and kinds.count("over_cap") == 2, kinds
+    assert ("comment", 11) in [(a[0], a[1]) for a in plan] and any(a[0] == "comment" and a[1] == 11 and a[3].startswith("Still broken on 2026-10-21") for a in plan)
+    assert any(a[0] == "comment" and a[1] == 12 and a[3].startswith("Passes now on 2026-10-21") for a in plan)
+    again = dw.plan_filing(many, {"old/1": 11, "fixed/2": 12}, {"created": [1, 2, 3, 4, 5], "created_keys": [f"j/{i}" for i in range(5)], "commented": ["old/1", "fixed/2"]}, when)
+    assert [a[0] for a in again] == ["over_cap", "over_cap"], again
+    # a step only some widths pass is not "passes now"
+    half = [row("fixed/2", "PASS"), {**row("fixed/2", "BLOCKED")}]
+    assert dw.plan_filing(half, {"fixed/2": 12}, {}, when) == []
+    # journey_walker: StepBlocked is its own verdict; summarize counts it apart from fails
+    s = jw.summarize([{"id": "x", "steps": [{"status": "pass"}, {"status": "blocked"}]}], [])
+    assert s["steps_blocked"] == 1 and s["steps_failed"] == 0 and s["journeys_passed"] == 1
+
+
 def _judge_judy_records_pool_declines_and_stops_the_walk_fk989():
     """A tick the account pool declined is recorded as budget_declined, not as nothing at all.
 
@@ -16533,6 +16595,7 @@ if __name__ == "__main__":
     check("fold_candidates reads the repo slug from FLEET_REPO_URL, never the /repo checkout path", _fold_candidates_uses_slug_not_checkout_path)
     check("roster is 10 members after fk#1195's fold, no archived member still on cron, every moved duty lands (fk#1195)", _roster_is_ten_members_after_fk1195_fold)
     check("judge-judy records a pool-declined tick as budget_declined and stops the walk (fk#989)", _judge_judy_records_pool_declines_and_stops_the_walk_fk989)
+    check("daily walk writes BLOCKED never FAIL, no secret, files max 5 a day and re-tests open walk issues (philanthropy#13448)", _daily_walk_writes_blocked_never_fail_and_files_once_gh13448)
     for n in ok:
         print(f"  ok    {n}")
     for n, why in skipped:
