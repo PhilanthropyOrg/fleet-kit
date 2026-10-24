@@ -12,7 +12,9 @@ EVERY push to the philanthropy repo:
   80% to 100%             -> only a PR whose body's first line is `Moves: claims`,
                              `Moves: $150 report sales` or `Moves: jobs` (Jobs is priority 1,
                              INTENT 10-18 jobs-pushes-skip-gate; no PR yet: the head commit's body)
-  100% and over           -> nothing pushes until the next UTC day
+  100% and over           -> nothing pushes until the next UTC day, except a `Moves: jobs` PR on a
+                             Jobs launch day (LAUNCH_DAYS; Reif 10-23 11:19 PM: "Pause other build
+                             lanes", Jobs live by 7 AM Central 10-24), logged as bypass
 
 The only bypass is a deploy-gate revert: `push_budget_gate.py --why "deploy-gate revert ..."
 -- git push ...`. Every verdict is a row in $FLEET_LOG_DIR/push_gate.jsonl; a push that lands
@@ -138,6 +140,7 @@ def read_meter(now: float, fetch=None) -> dict | None:
 
 
 JOBS_P1 = ("13056", "13057", "13058", "13059")  # Reif 10-18 9:11 PM: Jobs P1 lane past 100%
+LAUNCH_DAYS = ("2026-10-24",)  # UTC days a `Moves: jobs` push passes 100% (Jobs launch, MANDATE 10-23)
 
 
 def jobs_p1_issue(body: str) -> str:
@@ -146,8 +149,10 @@ def jobs_p1_issue(body: str) -> str:
     return m.group(1) if m and m.group(1) in JOBS_P1 else ""
 
 
-def verdict(pct: float, moves: str, why: str = "", body: str = "") -> tuple[bool, str]:
+def verdict(pct: float, moves: str, why: str = "", body: str = "", day: str = "") -> tuple[bool, str]:
     """(allowed, reason). The whole rule, in one place."""
+    if pct >= HARD_PCT and day in LAUNCH_DAYS and moves.strip().startswith("Moves: jobs"):
+        return True, "bypass"
     # Jobs P1 lane (Reif 10-18 9:11 PM): a claims PR that closes #13056-#13059 pushes past 100%, logged as
     # bypass. The $250 month wall stays hard: GitHub's enterprise budget stop refuses every run past it.
     if pct >= HARD_PCT and moves.strip().startswith("Moves: claims") and jobs_p1_issue(body):
@@ -208,9 +213,9 @@ def check(wt: str, why: str = "", now: float | None = None, meter: dict | None =
         record({**row, "verdict": "unread"})
         return True, "meter unreadable (logged)"
     body = pr_body(wt)
-    ok, reason = verdict(meter["pct"], moves, why, body)
+    ok, reason = verdict(meter["pct"], moves, why, body, row["day"])
     if reason == "bypass" and not why:
-        row["why"] = f"jobs-p1-lane #{jobs_p1_issue(body)}"
+        row["why"] = f"jobs-p1-lane #{jobs_p1_issue(body)}" if jobs_p1_issue(body) else "jobs-launch-day"
     tag = "bypass" if reason == "bypass" else ("allow" if ok else "refuse")
     record({**row, "verdict": tag, "pct": meter["pct"], "share": meter["share"], "spent": meter["spent"],
             "past_cap": ok and meter["pct"] >= HARD_PCT})
