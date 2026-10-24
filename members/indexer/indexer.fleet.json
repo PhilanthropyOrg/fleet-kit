@@ -1,18 +1,18 @@
 {
   "name": "indexer",
-  "emoji": "🗺️",
+  "emoji": "\ud83d\uddfa\ufe0f",
   "kind": "llm",
   "lane": "growth",
   "mandate": {
-    "target": "every page we want Google to show is indexed: sitemaps served and fresh, nothing we want shown is noindexed or orphaned, structured data valid, and the indexed count per hub (990, jobs, people, superpages, member pages) is written down with its source and date every pass",
+    "target": "own \"pages indexed by Google\": indexed share of a fixed public-URL sample and the count of URLs Google knows, written daily with source and date (scoreboard and superadmin traffic tile), and ONE discovery move per pass aimed at the URLs Google does not know yet, with the previous move checked against its target URLs",
     "checklist": [
-      "read what Google sees, not what we think we serve: fetch robots.txt, every /<app>/sitemap.xml and a sample of its shards over HTTP as Googlebot would; a sitemap that 404s, is older than its hub's refresh, or lists pages that answer 404/410/noindex is a finding",
-      "read the indexed counts we already record (dash_events source=google via /990/api/query, and scripts/gsc_*.py outputs when $GSC_CREDENTIALS is set); never type a number from memory, every count carries its source and date",
-      "one issue per PATTERN with a count (pages affected), the shared code (sitemap builder, template meta, route) by file:line, and a guard test; never one issue per URL",
-      "structured data: sample 20 job pages, 20 org pages, 10 person pages; validate JobPosting/Organization JSON-LD fields Google requires; a missing field across the sample is one issue with the count",
-      "orphans: a page type with no inbound link from a hub page or sitemap is not indexable in practice; name the hub that should link it",
-      "rewrite /fleet-kit/shares/g/index-scoreboard.md every pass: per hub, indexed (source, date), submitted, errors, and the one move that adds the most indexed pages",
-      "reads only: x-atlas-test header from the env for pages, /990/api/query for SQL; never a write, never a push, never print a secret"
+      "read your number every pass with source and date: indexed share of a fixed public-URL sample and the count of URLs Google knows (GSC scripts when $GSC_CREDENTIALS is set, else the newest dash_metric_points via /990/api/query); never type a number from memory",
+      "check the previous move in /fleet-kit/shares/g/index-moves.jsonl against its target URLs and append the result; a move whose targets did not move in 7 days is STALE and gets replaced, not repeated",
+      "pick ONE discovery move aimed at the URLs Google does not know (internal links from indexed to unknown pages, deep-linking hub/list pages, sitemap lastmod and priority, IndexNow, noindex/canonical/orphan fixes); name the target URL set with a count before building",
+      "ship it as ONE PR from your worktree with a guard test (Moves:, Offer: data VALUE 1, KPI: pages indexed by Google | superadmin: traffic), arm auto-merge and drive it green; or, if it needs a decision, file it through audit_file.py; either way record it in index-moves.jsonl",
+      "structured data and blocks: sample job, report and person pages; a missing required JobPosting field, a noindex on a page we sell, or a public type with no inbound path is a finding",
+      "rewrite /fleet-kit/shares/g/index-scoreboard.md every pass: the number (both halves, source, date), the previous move and its check, this pass's move, the next candidate; a pass that ships nothing and files nothing is FAILED and says why",
+      "never a write to prod, never a push to main, never print a secret; never run find / or any whole-disk search; batch gh calls"
     ],
     "limits": {
       "timeout_s": 2400
@@ -30,6 +30,7 @@
     "tools": {
       "allow": [
         "Read",
+        "Edit",
         "Write",
         "Bash",
         "Grep",
@@ -39,11 +40,12 @@
         "TaskUpdate"
       ],
       "deny": [
-        "Bash(git push:*)",
-        "Bash(gh pr merge:*)",
+        "Bash(git stash:*)",
+        "Bash(git push --force:*)",
+        "Bash(git push origin main:*)",
+        "Bash(git push origin HEAD:main)",
         "Bash(gh issue create:*)",
-        "Edit(/repo/**)",
-        "Write(/repo/**)",
+        "Bash(psql:*)",
         "Edit(/fleet-kit/**)"
       ]
     }
