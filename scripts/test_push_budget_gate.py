@@ -173,6 +173,11 @@ class JobsP1Lane(unittest.TestCase):
         ok, _ = gate.verdict(130.0, "Moves: none (trust)", body="Part of #13058")
         self.assertFalse(ok)
 
+    def test_jobs_pr_pushes_past_100_on_a_launch_day_only(self):
+        self.assertEqual(gate.verdict(130.0, "Moves: jobs", day="2026-10-24"), (True, "bypass"))
+        self.assertFalse(gate.verdict(130.0, "Moves: jobs", day="2026-10-25")[0])
+        self.assertFalse(gate.verdict(130.0, "Moves: none (fix)", day="2026-10-24")[0])
+
 
 if __name__ == "__main__":
     unittest.main()
