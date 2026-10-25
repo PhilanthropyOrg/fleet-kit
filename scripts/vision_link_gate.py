@@ -64,6 +64,10 @@ SEVERITY_LIVE_LABEL = "fleet:severity-live"
 # not) never defeats the match, and a real link that merely mentions "maintenance" (not starting
 # with "none(") is never swallowed by it.
 _MAINTENANCE_RE = re.compile(r"^none\(.*maintenance.*?\)")
+# jefe msg#1601 (#14201/#14202): a solid bug filed with a bare "Vision-link: none" sat at
+# needs-spec 4 gate passes for punctuation. A bare "none" (or "none." / "none -- why") says the
+# same thing as "none (maintenance)"; "none (some other reason)" and "nonetheless ..." still do not.
+_BARE_NONE_RE = re.compile(r"^none(?:$|[.\-\u2013\u2014:;,])")
 
 
 def _normalize(value: str) -> str:
@@ -119,7 +123,7 @@ def kr_ids(path: Path | None = None) -> list[str]:
 def _classify_value(raw: str) -> tuple[str, str]:
     # A maintenance value is only ever "none (...maintenance...)" -- a prefix match on the
     # normalized value, so a reason clause never defeats it (gh#584).
-    if _MAINTENANCE_RE.match(_normalize(raw)):
+    if _MAINTENANCE_RE.match(_normalize(raw)) or _BARE_NONE_RE.match(_normalize(raw)):
         return STATUS_MAINTENANCE, raw
     # Reif, 2026-09-16, on six merged PRs none of which moved a KR: "shouldnt that be the case
     # with setting up the okrs, we did this". It was not, because any prose counted as a link
