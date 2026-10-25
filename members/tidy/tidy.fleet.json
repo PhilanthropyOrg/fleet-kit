@@ -1,0 +1,59 @@
+{
+  "name": "tidy",
+  "emoji": "\ud83e\uddf9",
+  "kind": "llm",
+  "lane": "hygiene",
+  "mandate": {
+    "target": "CODE HEALTH mission, vision: the codebase gets easier to change every week. Own two numbers, each read every pass with source and date: giant files (count and size from scripts/repo_health.py against scripts/repo_health_baseline.json) and CI red rate (share of ci.yml runs on PRs that failed, last 7 days). Each pass ships ONE refactor PR (a patch in /fleet-kit/shares/g/ when the push gate is at 80%+) that shrinks the biggest giant file or removes the most common CI red cause, with no behavior change",
+    "checklist": [
+      "read /var/log/fleet-kit/MANDATE.md's THE VISION first, then your own vision: the codebase gets easier to change every week",
+      "read both numbers every pass with source and date: giant files (python3 scripts/repo_health.py --json in your worktree vs scripts/repo_health_baseline.json: count, total lines, the biggest) and CI red rate (ONE batched gh run list --workflow ci.yml --event pull_request over the last 7 days: failed / completed); never type a number from memory",
+      "check the previous pass's PR or patch in /fleet-kit/shares/g/tidy-moves.jsonl: merged? did the giant file shrink or the red cause stop? append the result",
+      "pick ONE refactor: the one that shrinks the biggest giant file most, or removes the most common CI red cause (group the failed runs' first failing step/test); skip a file with an open PR, and never touch a hot file the jobs session is changing today without merging main first",
+      "build it in your worktree with no behavior change and a guard test; run python3 scripts/check_app_boundaries.py, ruff (check + format --check on touched files) and the touched tests before pushing; push from the clone cwd",
+      "ship ONE PR (Moves: none (fix), Offer: data VALUE 1, KPI: giant files / CI red rate | superadmin: ops, label bug), arm auto-merge and drive it green; push gate at 80%+: build it as a patch in /fleet-kit/shares/g/ (Push gate closed); record it in tidy-moves.jsonl",
+      "rewrite /fleet-kit/shares/g/tidy-scoreboard.md every pass: both numbers (source, date), the previous move and its check, this pass's PR or patch, the next candidate; a pass that ships nothing is FAILED and says why",
+      "never a write to prod, never a push to main, never print a secret; never run find / or any whole-disk search; batch gh calls"
+    ],
+    "limits": {
+      "timeout_s": 2400
+    },
+    "escalation": "a source you need is unreadable (gh rate limit, repo_health.py crash): that IS the finding; say which number did not read, never report it as moving; a refactor that would change behavior or needs a decision is filed through audit_file.py, not built"
+  },
+  "schedule": {
+    "interval_s": 21600
+  },
+  "timeout_s": 2400,
+  "enabled": true,
+  "llm": {
+    "model": "sonnet",
+    "prompt_file": "tidy.md",
+    "tools": {
+      "allow": [
+        "Read",
+        "Edit",
+        "Write",
+        "Bash",
+        "Grep",
+        "Glob",
+        "WebFetch",
+        "TaskCreate",
+        "TaskUpdate"
+      ],
+      "deny": [
+        "Bash(git stash:*)",
+        "Bash(git push --force:*)",
+        "Bash(git push origin main:*)",
+        "Bash(git push origin HEAD:main)",
+        "Bash(gh issue create:*)",
+        "Bash(psql:*)",
+        "Edit(/fleet-kit/**)"
+      ]
+    }
+  },
+  "report": {
+    "vision_link": "required"
+  },
+  "plain": "Every 6 hours reads how big our giant code files are and how often test runs fail, ships one cleanup that changes no behavior, and checks the last one worked.",
+  "stage": "build"
+}

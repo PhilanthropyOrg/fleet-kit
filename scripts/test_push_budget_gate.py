@@ -56,6 +56,7 @@ class PushBudgetGate(unittest.TestCase):
         self.assertEqual([r["verdict"] for r in self.rows()], ["refuse", "allow", "allow", "allow"])
 
     def test_100_percent_refuses_everything(self):
+        gate.record({"ts": NOW, "why": gate.HOURLY_WHY, "verdict": "bypass"})  # this hour's build is used
         for moves in (NONE, CLAIMS, SALES, JOBS):
             ok, why = gate.check(str(self.wt), now=NOW, meter=meter(100), moves=moves)
             self.assertFalse(ok)
@@ -75,7 +76,7 @@ class PushBudgetGate(unittest.TestCase):
     def test_hook_blocks_a_bare_push_and_ignores_other_repos(self):
         payload = {"tool_name": "Bash", "tool_input": {"command": "git add a.py && git push -u origin HEAD"}}
         with mock.patch.object(gate, "read_meter", return_value=meter(100)), \
-                mock.patch.object(gate, "moves_line", return_value=CLAIMS):
+                mock.patch.object(gate, "moves_line", return_value=SALES):
             self.assertIn("BLOCKED (push_budget_gate)", gate.decide(payload, {"WT_PATH": str(self.wt)}))
             self.assertIsNone(gate.decide({"tool_name": "Bash", "tool_input": {"command": "git status"}},
                                           {"WT_PATH": str(self.wt)}))
@@ -177,6 +178,38 @@ class JobsP1Lane(unittest.TestCase):
         self.assertEqual(gate.verdict(130.0, "Moves: jobs", day="2026-10-24"), (True, "bypass"))
         self.assertFalse(gate.verdict(130.0, "Moves: jobs", day="2026-10-25")[0])
         self.assertFalse(gate.verdict(130.0, "Moves: none (fix)", day="2026-10-24")[0])
+
+
+class HourlyBuild(unittest.TestCase):
+    """MANDATE 10-24: "Fixes + OrgVerify keep 1 build an hour", even past 100%."""
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.logs = Path(self.tmp.name)
+        self.wt = self.logs / "wt"
+        subprocess.run(["git", "init", "-q", str(self.wt)], check=True)
+        subprocess.run(["git", "-C", str(self.wt), "remote", "add", "origin",
+                        "https://github.com/PhilanthropyOrg/philanthropy.git"], check=True)
+        env = mock.patch.dict(os.environ, {"FLEET_LOG_DIR": str(self.logs)})
+        env.start()
+        self.addCleanup(env.stop)
+
+    def test_one_orgverify_or_fix_push_per_hour_past_100(self):
+        self.assertEqual(gate.check(str(self.wt), now=NOW, meter=meter(218), moves="Moves: claims"),
+                         (True, "bypass"))
+        self.assertFalse(gate.check(str(self.wt), now=NOW + 60, meter=meter(218), moves="Moves: none (fix)")[0])
+        self.assertTrue(gate.check(str(self.wt), now=NOW + 3600, meter=meter(218), moves="Moves: none (fix)")[0])
+        rows = [json.loads(x) for x in (self.logs / "push_gate.jsonl").read_text().splitlines()]
+        self.assertEqual([r["why"] for r in rows if r["verdict"] == "bypass"], ["hourly-build"] * 2)
+
+    def test_none_pr_never_gets_the_hourly_slot(self):
+        self.assertFalse(gate.check(str(self.wt), now=NOW, meter=meter(218), moves="Moves: none")[0])
+        self.assertTrue(gate.hour_slot_free(NOW))
+
+    def test_dispatch_waits_only_once_the_hour_is_used(self):
+        self.assertEqual(gate.dispatch_hold("13385", NOW, meter=meter(218)), "")
+        gate.check(str(self.wt), now=NOW, meter=meter(218), moves="Moves: claims")
+        self.assertIn("could not push", gate.dispatch_hold("13385", NOW + 60, meter=meter(218)))
 
 
 if __name__ == "__main__":
