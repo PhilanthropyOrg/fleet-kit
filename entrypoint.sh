@@ -182,7 +182,7 @@ case "${1:-cron-foreground}" in
     # `FLEET_CRON_MEMBERS=judge-judy`) to schedule only those. dont-shoot-the-messenger is
     # excluded from ALL_CRON_MEMBERS because its own cron line is already commented out
     # (archived 2026-09-04, see below) -- re-enabling it is a separate step from this mechanism.
-    ALL_CRON_MEMBERS=(the-fixer judge-judy gru marie sentry librarian librarian-scrub red dont-shoot-the-messenger jefe dumbledore auditor indexer factcheck walker data-czar)
+    ALL_CRON_MEMBERS=(the-fixer judge-judy gru marie sentry librarian librarian-scrub red dont-shoot-the-messenger jefe dumbledore auditor indexer factcheck walker data-czar tidy)
     if [ -n "${FLEET_CRON_MEMBERS:-}" ]; then
       IFS=', ' read -ra RESOLVED_CRON_MEMBERS <<< "$FLEET_CRON_MEMBERS"
       for m in "${RESOLVED_CRON_MEMBERS[@]}"; do
@@ -420,7 +420,8 @@ case "${1:-cron-foreground}" in
       # Reif 2026-10-19: one member each for getting pages indexed (6h), fact checking what
       # people wrote (4h), and walking pages to see they render and look right (3h).
       if cron_member_enabled indexer; then
-        echo "23 0,6,12,18 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh indexer >> $LOG_DIR/indexer.log 2>&1"
+        # Reif 2026-10-24: indexer is now the search mission owner (id kept), one PR per pass, every 3h.
+        echo "23 0,3,6,9,12,15,18,21 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh indexer >> $LOG_DIR/indexer.log 2>&1"
       fi
       if cron_member_enabled factcheck; then
         echo "47 0,4,8,12,16,20 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh factcheck >> $LOG_DIR/factcheck.log 2>&1"
@@ -432,6 +433,11 @@ case "${1:-cron-foreground}" in
       # every 3h. Hours 2,5,8.. are the 3h phase sentry and walker do not use; :11 is unclaimed.
       if cron_member_enabled data-czar; then
         echo "11 2,5,8,11,14,17,20,23 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh data-czar >> $LOG_DIR/data-czar.log 2>&1"
+      fi
+      # Reif 2026-10-24: tidy, the code health mission owner (giant files, CI red rate), one
+      # no-behavior-change refactor PR every 6h. Hours 3,9,15,21 at :43 are unclaimed.
+      if cron_member_enabled tidy; then
+        echo "43 3,9,15,21 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh tidy >> $LOG_DIR/tidy.log 2>&1"
       fi
       # fleet-kit#785: red, the adversary, every 6h (paced -- held when the hour has no headroom).
       if cron_member_enabled red; then

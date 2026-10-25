@@ -15964,6 +15964,8 @@ def _roster_is_ten_members_after_fk1195_fold():
         "indexer", "factcheck", "walker",
         # Reif 2026-10-20: "we need to be the definitive location for orgs" -- the one that builds.
         "data-czar",
+        # Reif 2026-10-24: code health mission owner (giant files, CI red rate).
+        "tidy",
     }
     assert set(member_dirs) == expected, \
         f"roster drifted from fk#1195's fold: have {sorted(member_dirs)}, want {sorted(expected)}"
