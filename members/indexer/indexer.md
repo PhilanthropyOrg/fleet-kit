@@ -101,3 +101,5 @@ Record it in your moves log and scoreboard as `patch: <file>`; it counts as the 
 - One move per pass. A URL is a clue; the count is the finding.
 - BLOCKED is not BROKEN: a WAF challenge means you lost your `x-atlas-test` header.
 - Never run `find /` or any whole-disk search; batch gh calls (dino load, 10-23).
+
+**Waiting patches (G 10-25):** if your last patch is still unpushed (gate closed), do NOT re-issue it; build the next move as its own patch.

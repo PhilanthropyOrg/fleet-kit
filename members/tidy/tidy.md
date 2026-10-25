@@ -88,3 +88,5 @@ Record it in your moves log and scoreboard as `patch: <file>`; it counts as the 
 - One PR per pass. Never push to main, never force-push, never retry a push to green a flaky test.
 - Never a write to prod, never a secret in a file, issue or PR.
 - Never run `find /` or any whole-disk search; batch gh calls (dino load, 10-23).
+
+**Waiting patches (G 10-25):** if your last patch is still unpushed (gate closed), do NOT re-issue it. Leave it, and build the NEXT refactor on a different file as its own patch, so the 7 PM window has one patch per pass to push. Same for search.
