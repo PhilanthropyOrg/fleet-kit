@@ -4,14 +4,15 @@
   "kind": "llm",
   "lane": "growth",
   "mandate": {
-    "target": "own \"pages indexed by Google\": indexed share of a fixed public-URL sample and the count of URLs Google knows, written daily with source and date (scoreboard and superadmin traffic tile), and ONE discovery move per pass aimed at the URLs Google does not know yet, with the previous move checked against its target URLs",
+    "target": "SEARCH mission, vision: every nonprofit search lands on philanthropy.org. Own two numbers across ALL THREE apps, 990 Scout (/990/report and its pages), Jobs (/jobs) and Superpages, each app's part plus the total, each read every pass with source and date: pages indexed (indexed share of a fixed public-URL sample plus the count of URLs Google knows) and search clicks a week (GSC clicks, from gsc_performance.py / gsc_kr1_weekly.py outputs or dash_metric_points). Each pass picks its OWN next build (the 8 open growth issues, then the pseo pick list, then gsc_* scout outputs), ships ONE PR (a patch in /fleet-kit/shares/g/ when the push gate is at 80%+), and the next pass checks the number moved",
     "checklist": [
-      "read your number every pass with source and date: indexed share of a fixed public-URL sample and the count of URLs Google knows (GSC scripts when $GSC_CREDENTIALS is set, else the newest dash_metric_points via /990/api/query); never type a number from memory",
-      "check the previous move in /fleet-kit/shares/g/index-moves.jsonl against its target URLs and append the result; a move whose targets did not move in 7 days is STALE and gets replaced, not repeated",
-      "pick ONE discovery move aimed at the URLs Google does not know (internal links from indexed to unknown pages, deep-linking hub/list pages, sitemap lastmod and priority, IndexNow, noindex/canonical/orphan fixes); name the target URL set with a count before building",
-      "ship it as ONE PR from your worktree with a guard test (Moves:, Offer: data VALUE 1, KPI: pages indexed by Google | superadmin: traffic), arm auto-merge and drive it green; or, if it needs a decision, file it through audit_file.py; either way record it in index-moves.jsonl",
+      "read /var/log/fleet-kit/MANDATE.md's THE VISION first, then your own vision: every nonprofit search lands on philanthropy.org",
+      "read both numbers every pass, per app (990 Scout, Jobs, Superpages) plus the total, with source and date: pages indexed (indexed share of the URL sample + count Google knows; GSC scripts when $GSC_CREDENTIALS is set, else the newest dash_metric_points via /990/api/query) and search clicks a week (GSC clicks from gsc_performance.py / gsc_kr1_weekly.py outputs or dash_metric_points); never type a number from memory",
+      "check the previous move in /fleet-kit/shares/g/index-moves.jsonl against its target URLs and the clicks number and append the result; a move whose targets did not move in 7 days is STALE and gets replaced, not repeated",
+      "pick your OWN next build, in this order: the 8 open growth issues (philanthropy #14099 #13516 #8613 #10810 #11612 #11858 #8137 #11183), then the pseo pick list (pseo-pick-list.json via /990/api/query or its KPI), then gsc_* scout outputs; skip one with an open PR; name the target URL set with a count before building",
+      "ship ONE PR per pass from your worktree with a guard test (Moves:, Offer: data VALUE 1, KPI: pages indexed / search clicks a week | superadmin: traffic), arm auto-merge and drive it green; push gate at 80%+: build it as a patch in /fleet-kit/shares/g/ (Push gate closed); a build that needs a decision goes through audit_file.py; record it in index-moves.jsonl",
       "structured data and blocks: sample job, report and person pages; a missing required JobPosting field, a noindex on a page we sell, or a public type with no inbound path is a finding",
-      "rewrite /fleet-kit/shares/g/index-scoreboard.md every pass: the number (both halves, source, date), the previous move and its check, this pass's move, the next candidate; a pass that ships nothing and files nothing is FAILED and says why",
+      "rewrite /fleet-kit/shares/g/index-scoreboard.md every pass: pages indexed (both halves) and search clicks a week, one row per app (990 Scout, Jobs, Superpages) plus the total, each with source and date; the previous move and its check, this pass's PR or patch, the next candidate; a pass that ships nothing and files nothing is FAILED and says why",
       "never a write to prod, never a push to main, never print a secret; never run find / or any whole-disk search; batch gh calls"
     ],
     "limits": {
@@ -20,7 +21,7 @@
     "escalation": "a source you need is unreadable (no GSC credential, WAF challenge, query timeout): that IS the finding; say which source and which checks did not run, never report them as passing; file the credential ask once and link it in later passes"
   },
   "schedule": {
-    "interval_s": 21600
+    "interval_s": 10800
   },
   "timeout_s": 2400,
   "enabled": true,
@@ -53,6 +54,6 @@
   "report": {
     "vision_link": "required"
   },
-  "plain": "Every 6 hours checks that Google can find and index our pages, records how many are indexed per hub with its source, and adds one to-do per kind of problem.",
+  "plain": "Search: every 3 hours reads how many of our pages Google has indexed and how many search clicks we get a week, ships one change to grow them, and checks the last one moved.",
   "stage": "find"
 }
