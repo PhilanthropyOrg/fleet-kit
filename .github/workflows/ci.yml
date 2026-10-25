@@ -368,6 +368,8 @@ jobs:
         run: python3 scripts/test_charter_budget.py
       - name: run test_push_budget_gate.py
         run: python3 scripts/test_push_budget_gate.py
+      - name: run test_spawn_counts.py
+        run: python3 scripts/test_spawn_counts.py
       - name: run test_retro.py
         run: python3 scripts/test_retro.py
       - name: run test_real_path_rule.py
