@@ -14,7 +14,9 @@ EVERY push to the philanthropy repo:
                              INTENT 10-18 jobs-pushes-skip-gate; no PR yet: the head commit's body)
   100% and over           -> nothing pushes until the next UTC day, except a `Moves: jobs` PR on a
                              Jobs launch day (LAUNCH_DAYS; Reif 10-23 11:19 PM: "Pause other build
-                             lanes", Jobs live by 7 AM Central 10-24), logged as bypass
+                             lanes", Jobs live by 7 AM Central 10-24), logged as bypass, and ONE
+                             OrgVerify or fix push per UTC hour (HOURLY_LINES; Reif 10-24 11:10 PM:
+                             "Fixes + OrgVerify keep 1 build an hour"), logged as bypass `hourly-build`
 
 The only bypass is a deploy-gate revert: `push_budget_gate.py --why "deploy-gate revert ..."
 -- git push ...`. Every verdict is a row in $FLEET_LOG_DIR/push_gate.jsonl; a push that lands
@@ -141,6 +143,11 @@ def read_meter(now: float, fetch=None) -> dict | None:
 
 JOBS_P1 = ("13056", "13057", "13058", "13059")  # Reif 10-18 9:11 PM: Jobs P1 lane past 100%
 LAUNCH_DAYS = ("2026-10-24",)  # UTC days a `Moves: jobs` push passes 100% (Jobs launch, MANDATE 10-23)
+# Past 100%, one push per UTC hour whose first line is one of these (MANDATE 10-24: "Fixes + OrgVerify
+# keep 1 build an hour"). 10-25 05Z: gate at 218% of a $4 share held gru's orgverify batch and the-fixer.
+HOURLY_LINES = ("Moves: claims", "Moves: verified", "Moves: paid verified orgs", "Moves: orgverify",
+                "Moves: none (fix)")
+HOURLY_WHY = "hourly-build"
 
 
 def jobs_p1_issue(body: str) -> str:
@@ -149,8 +156,28 @@ def jobs_p1_issue(body: str) -> str:
     return m.group(1) if m and m.group(1) in JOBS_P1 else ""
 
 
-def verdict(pct: float, moves: str, why: str = "", body: str = "", day: str = "") -> tuple[bool, str]:
+def hour_slot_free(now: float, path: Path | None = None) -> bool:
+    """True when no `hourly-build` bypass has pushed in this UTC hour."""
+    hour = int(now // 3600)
+    try:
+        lines = (path or log_dir() / "push_gate.jsonl").read_text().splitlines()
+    except OSError:
+        return True
+    for ln in lines[-500:]:
+        try:
+            r = json.loads(ln)
+        except ValueError:
+            continue
+        if r.get("why") == HOURLY_WHY and int(float(r.get("ts", 0)) // 3600) == hour:
+            return False
+    return True
+
+
+def verdict(pct: float, moves: str, why: str = "", body: str = "", day: str = "",
+            slot_free: bool = False) -> tuple[bool, str]:
     """(allowed, reason). The whole rule, in one place."""
+    if pct >= HARD_PCT and slot_free and not why and moves.strip().startswith(HOURLY_LINES):
+        return True, "hourly"
     if pct >= HARD_PCT and day in LAUNCH_DAYS and moves.strip().startswith("Moves: jobs"):
         return True, "bypass"
     # Jobs P1 lane (Reif 10-18 9:11 PM): a claims PR that closes #13056-#13059 pushes past 100%, logged as
@@ -213,8 +240,11 @@ def check(wt: str, why: str = "", now: float | None = None, meter: dict | None =
         record({**row, "verdict": "unread"})
         return True, "meter unreadable (logged)"
     body = pr_body(wt)
-    ok, reason = verdict(meter["pct"], moves, why, body, row["day"])
-    if reason == "bypass" and not why:
+    ok, reason = verdict(meter["pct"], moves, why, body, row["day"],
+                         slot_free=meter["pct"] >= HARD_PCT and hour_slot_free(now))
+    if reason == "hourly":
+        row["why"], reason = HOURLY_WHY, "bypass"
+    elif reason == "bypass" and not why:
         row["why"] = f"jobs-p1-lane #{jobs_p1_issue(body)}" if jobs_p1_issue(body) else "jobs-launch-day"
     tag = "bypass" if reason == "bypass" else ("allow" if ok else "refuse")
     record({**row, "verdict": tag, "pct": meter["pct"], "share": meter["share"], "spent": meter["spent"],
@@ -226,9 +256,9 @@ def dispatch_hold(items: str, now: float, meter: dict | None = None) -> str:
     """Why a minion batch should not start now, or '' to start it. A minion's whole product is a
     push; past 100% every push is refused until 00:00 UTC. 2026-10-22: 25 minion passes ($22)
     ran past the cap, #13402 was rebuilt 4x and #13600 resumed 3x, none pushed. Jobs P1 items
-    keep their bypass; an unread meter holds nothing."""
+    keep their bypass; an unread meter holds nothing; a free hourly-build slot holds nothing."""
     meter = meter if meter is not None else read_meter(now)
-    if not meter or meter["pct"] < HARD_PCT:
+    if not meter or meter["pct"] < HARD_PCT or hour_slot_free(now):
         return ""
     if set(re.findall(r"\d+", items)) & set(JOBS_P1):
         return ""
