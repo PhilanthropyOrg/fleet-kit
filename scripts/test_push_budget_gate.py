@@ -73,6 +73,16 @@ class PushBudgetGate(unittest.TestCase):
         with mock.patch.object(gate, "read_meter", return_value=meter(120)):
             self.assertIn("FLEET BUG: 1 push(es) past the cap", gate.summary(NOW))
 
+    def test_summary_past_cap_names_the_hourly_slot_and_its_push_is_no_bug(self):
+        with mock.patch.object(gate, "read_meter", return_value=meter(300)):
+            self.assertIn("hourly slot FREE", gate.summary(NOW))
+            self.assertEqual(gate.check(str(self.wt), "", NOW, meter(300), CLAIMS), (True, "bypass"))
+            line = gate.summary(NOW)
+        self.assertIn("hourly slot used", line)
+        self.assertNotIn("FLEET BUG", line)
+        with mock.patch.object(gate, "read_meter", return_value=meter(50)):
+            self.assertNotIn("hourly slot", gate.summary(NOW))
+
     def test_hook_blocks_a_bare_push_and_ignores_other_repos(self):
         payload = {"tool_name": "Bash", "tool_input": {"command": "git add a.py && git push -u origin HEAD"}}
         with mock.patch.object(gate, "read_meter", return_value=meter(100)), \

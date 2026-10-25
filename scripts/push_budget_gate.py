@@ -281,7 +281,8 @@ def today_counts(now: float, path: Path | None = None) -> dict[str, int]:
             continue
         if r.get("day") == day:
             n[r.get("verdict", "?")] = n.get(r.get("verdict", "?"), 0) + 1
-            n["past_cap"] = n.get("past_cap", 0) + bool(r.get("past_cap"))
+            # the hourly OrgVerify/fix slot is sanctioned, not a past-cap leak
+            n["past_cap"] = n.get("past_cap", 0) + bool(r.get("past_cap") and r.get("why") != HOURLY_WHY)
     return n
 
 
@@ -295,6 +296,12 @@ def summary(now: float) -> str:
             f"{n.get('bypass', 0)} bypass")
     if n.get("past_cap"):
         line += f"; FLEET BUG: {n['past_cap']} push(es) past the cap"
+    # 10-25: gru read "301%" as "nothing pushes until 00:00 UTC" and skipped 9 passes of orgverify
+    # builds while this slot sat free; the line it reads names the slot.
+    if m and m["pct"] >= HARD_PCT:
+        line += ("; hourly slot FREE: one OrgVerify or fix push (" + " | ".join(HOURLY_LINES) +
+                 ") passes this UTC hour, so build the orgverify lane" if hour_slot_free(now)
+                 else "; hourly slot used this UTC hour")
     return line
 
 
