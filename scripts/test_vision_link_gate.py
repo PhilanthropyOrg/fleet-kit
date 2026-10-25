@@ -41,6 +41,15 @@ class ClassifyValueTests(unittest.TestCase):
         status, _ = vlg._classify_value("  None ( Maintenance )  ")
         self.assertEqual(status, vlg.STATUS_MAINTENANCE)
 
+    def test_bare_none_is_maintenance_msg1601(self):
+        # jefe msg#1601: #14201/#14202 said "Vision-link: none" and sat at needs-spec.
+        for raw in ("none", "None", "none.", "none -- wording fix", "none: maintenance"):
+            self.assertEqual(vlg._classify_value(raw)[0], vlg.STATUS_MAINTENANCE, raw)
+
+    def test_none_with_other_reason_or_prose_stays_missing(self):
+        for raw in ("none (Reif direct ask)", "nonetheless helps claims"):
+            self.assertEqual(vlg._classify_value(raw)[0], vlg.STATUS_MISSING, raw)
+
     def test_real_link_mentioning_maintenance_is_not_swallowed(self):
         # A real link that happens to use the word "maintenance" must not be mis-read as the
         # maintenance token just because the substring appears somewhere in the value.
