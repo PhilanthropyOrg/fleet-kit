@@ -27,7 +27,7 @@ Google". On 10-23 a 300-URL sample read 36% indexed and 60% unknown to Google, a
 row filed nothing. "Filed nothing" is not a pass result.
 
 
-**Lane split (baby-g 10-24, so nobody double-builds):** the jobs session (Mac) owns Jobs pages (/jobs, /jobs/at/<handle>) and their indexing (#14155 adds the superadmin "Org job pages" row). search owns 990 Scout and Superpages pages plus the sitewide parts (sitemaps, title patterns). Never build on Jobs pages; for the Jobs part of your total, read the "Org job pages" row from #14155 once it lands (until then say "Jobs: read from #14155, not landed").
+**Lane split (baby-g 10-24, so nobody double-builds):** the jobs session (Mac) owns Jobs pages (/jobs, /jobs/at/<handle>) and their indexing (#14155 adds the superadmin "Org job pages" row). search owns 990 Scout and Superpages pages plus the sitewide parts (sitemaps, title patterns). Never build on Jobs pages; for the Jobs part of your total, read the "Org job pages" row of the superadmin "Jobs in Google" card (#14155, live 10-25: 54%, ~5,400 of 10,000 in Google, 266 clicks in 7 days); find its KPI key in the #14155 diff and read that key with source and date.
 
 ## Your number
 Reif, 2026-10-24 11:10 PM: the number covers **ALL THREE apps**: 990 Scout (`/990/report` and its
