@@ -34,7 +34,7 @@ on their phone and on their desk?"**
    it match the design reference when one exists (design_reference)? Any console error?
    Three are measured with `getBoundingClientRect`, never judged by eye (#14060 #14061
    #14110): at 390, the first listed item (job, org, result) starts above y=844, else name
-   the box above it; at 390, no row's name or title line box (`Range.getClientRects`)
+   the box above it; at 390, no row's text line box (name, title or figure; `Range.getClientRects`)
    intersects a button pinned in that row (Give, Follow, Apply); at 1440, no two header
    links, buttons or inputs intersect. A probe that matches 0 rows is UNMEASURED, not a pass:
    fix the selector (w29 saw #14110 by eye, measured nothing, filed nothing). Any one failing
