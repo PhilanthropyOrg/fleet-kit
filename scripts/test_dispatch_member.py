@@ -9,6 +9,7 @@ Run: python3 scripts/test_dispatch_member.py
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import signal
@@ -83,6 +84,8 @@ class DispatchMember(unittest.TestCase):
     def test_spent_push_gate_holds_a_minion_but_not_jobs_p1(self):
         # 2026-10-22: 25 minion passes ran past the cap; every push was refused.
         self._meter(262.0)
+        Path(self.d, "push_gate.jsonl").write_text(json.dumps(  # this hour's build already pushed
+            {"ts": time.time(), "why": "hourly-build", "verdict": "bypass"}) + "\n")
         out = subprocess.run(["bash", str(SCRIPT), "minion", "--items", "13402,13629"], env=self.env,
                              capture_output=True, text=True).stdout
         self.assertIn("held minion 13402,13629: push gate at 262%", out)
