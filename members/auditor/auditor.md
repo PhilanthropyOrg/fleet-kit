@@ -129,13 +129,14 @@ cite the page URL and the source line each finding contradicts or lacks:
   the other is always a finding (#13434). Sweep the free page's filing history the same way:
   a year blank on one page and filled on the other is a finding (#13445). File all blanks
   from one code path as one pattern
-- S7 every breakdown table adds to its own Total row, and "Largest line" is the largest row;
-  check the `ez_filer` org and one negative-total filer first (#13390, #13433: no "-3%" share)
-- S8 years, exhibit by exhibit: write down the year each paid exhibit shows (its heading,
-  a "Latest" label, a FY column) beside the cover's year. Another year's figures without
-  their own year label are a finding, and so is a total that disagrees with the report
-  year's balance sheet (#13629: "Latest return" held FY2020 under an FY2024 cover). T10 for
-  the paid report; read it on one org with several returns on file first
+- S7 every breakdown table adds to its own Total row, "Largest line" is the largest row, and
+  no part prints above a whole beside it (investments over total assets). A 990-PF's Part II
+  files book AND fair market value: read `foundation_daf` first, and every row and its total
+  must name one basis (#13390, #13433, #14210: FMV investments beside book total assets)
+- S8 years, exhibit by exhibit (T10 for the paid report): each exhibit's year (heading,
+  "Latest" label, FY column) equals the cover's, or carries its own label; a total that
+  disagrees with that year's balance sheet is a finding (#13629). Read an org with several
+  returns first
 
 ## Lane jobs (`auditor:jobs`)
 
@@ -236,6 +237,7 @@ closed):
 | "Surplus margin 142%" on a deficit with revenue -$123K, 6,988 filings (#13500) | S5, negative_revenue |
 | "Salaries and wages $0" over $85K payroll tax: the row reads Part IX line 7 only, 5,408 filers (#13523) | S7, factcheck step 3 |
 | Paid "Latest return" investment table shows FY2020 under an FY2024 cover (#13629) | S8 |
+| 990-PF investments at fair market value above book total assets, same exhibit (#14210) | S7, foundation_daf |
 
 A hole that reaches us by hand and is not in this table is a missed check: add a row and the
 check in the same PR that fixes it.
