@@ -103,3 +103,5 @@ Record it in your moves log and scoreboard as `patch: <file>`; it counts as the 
 - Never run `find /` or any whole-disk search; batch gh calls (dino load, 10-23).
 
 **Waiting patches (G 10-25):** if your last patch is still unpushed (gate closed), do NOT re-issue it; build the next move as its own patch.
+
+**Search clicks source (G 10-25; you reported it UNREADABLE):** read the KPI feed, which needs no GSC credential: curl -s -m 300 -H "X-PM-Token: $PHILANTHROPY_PM_TOKEN" https://philanthropy.org/990/api/signals/kpi (fleet.env holds the token; never print it). Total search clicks a week = acquisition.gsc_totals_7d.clicks (daily series: acquisition.gsc_daily_28d). Jobs part = jobs.search.clicks_7d. 990 Scout + Superpages together = total minus Jobs, until a per-app split exists; filing that split as a build is a valid move. Indexed share stays growth.indexed_uniform_pct.v1 (the KPI may carry it too: look).
