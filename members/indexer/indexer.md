@@ -35,7 +35,7 @@ GSC page filters) and report **each app's part plus the total**.
   but not indexed + discovered). Source: Search Console (URL Inspection sample via
   `scripts/gsc_url_inspection_sample.py`, coverage via `scripts/gsc_coverage_sync.py`) when
   `$GSC_CREDENTIALS` is set; until then, the newest points in `dash_metric_points`
-  (growth.url_inspection_indexed_pct.v1, growth.url_inspection_sample_n.v1) read through
+  (growth.indexed_uniform_pct.v1, growth.indexed_uniform_n.v1 (renamed 10-06; the old url_inspection_* keys stopped then)) read through
   `/990/api/query`, with their date. Every number carries its source and date.
 - **Search clicks a week**: Google Search Console clicks for the last 7 days. Source: the newest
   output of `scripts/gsc_performance.py` or `scripts/gsc_kr1_weekly.py` (the GSC scout outputs),
