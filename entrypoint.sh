@@ -409,13 +409,14 @@ case "${1:-cron-foreground}" in
       if cron_member_enabled gru; then
         echo "53 13 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh nerd --task \"lane=orgverify — the daily end-to-end owner walk (MANDATE)\" >> $LOG_DIR/nerd.log 2>&1"
       fi
-      # a1 (Reif, 2026-10-16): auditor, "is it TRUE", four lanes each every 2h, staggered so
-      # one lane runs per hour slot. :09 and :39 are unclaimed.
+      # a1 (Reif, 2026-10-16): auditor, "is it TRUE", four lanes, staggered. Each lane every 6h
+      # since fk#1805 (dumbledore 10-26): at 2h, 46 of 48 runs/day re-saw open issues ($18-21/d).
+      # :09 and :39 are unclaimed.
       if cron_member_enabled auditor; then
-        echo "9 0,2,4,6,8,10,12,14,16,18,20,22 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh auditor --task \"lane=990-truth\" >> $LOG_DIR/auditor.log 2>&1"
-        echo "39 0,2,4,6,8,10,12,14,16,18,20,22 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh auditor --task \"lane=data-in\" >> $LOG_DIR/auditor.log 2>&1"
-        echo "9 1,3,5,7,9,11,13,15,17,19,21,23 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh auditor --task \"lane=scout-report\" >> $LOG_DIR/auditor.log 2>&1"
-        echo "39 1,3,5,7,9,11,13,15,17,19,21,23 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh auditor --task \"lane=jobs\" >> $LOG_DIR/auditor.log 2>&1"
+        echo "9 0,6,12,18 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh auditor --task \"lane=990-truth\" >> $LOG_DIR/auditor.log 2>&1"
+        echo "39 0,6,12,18 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh auditor --task \"lane=data-in\" >> $LOG_DIR/auditor.log 2>&1"
+        echo "9 3,9,15,21 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh auditor --task \"lane=scout-report\" >> $LOG_DIR/auditor.log 2>&1"
+        echo "39 3,9,15,21 * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh auditor --task \"lane=jobs\" >> $LOG_DIR/auditor.log 2>&1"
       fi
       # Reif 2026-10-19: one member each for getting pages indexed (6h), fact checking what
       # people wrote (4h), and walking pages to see they render and look right (3h).
