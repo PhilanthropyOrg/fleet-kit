@@ -221,6 +221,12 @@ class HourlyBuild(unittest.TestCase):
         gate.check(str(self.wt), now=NOW, meter=meter(218), moves="Moves: claims")
         self.assertIn("could not push", gate.dispatch_hold("13385", NOW + 60, meter=meter(218)))
 
+    def test_moves_line_found_below_a_bullet_or_trailer(self):
+        body = "* OrgVerify: back from Stripe\n\nMoves: orgverify\n\nCo-Authored-By: x <y@z>"
+        self.assertEqual(gate.first_moves(body), "Moves: orgverify")
+        self.assertEqual(gate.first_moves("Co-Authored-By: x <y@z>"), "Co-Authored-By: x <y@z>")
+        self.assertEqual(gate.first_moves(""), "")
+
 
 if __name__ == "__main__":
     unittest.main()
