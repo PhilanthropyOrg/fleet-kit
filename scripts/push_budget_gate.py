@@ -204,12 +204,19 @@ def pr_body(wt: str) -> str:
 
 
 def moves_line(wt: str) -> str:
-    """First line of the branch's open PR body, else the first body line of the head commit."""
+    """The `Moves:` line of the branch's open PR body, else of the head commit body; failing both,
+    the first non-empty line. 7 days to 10-26: 76 past-cap pushes with a free hourly slot were
+    refused because line 1 was `* OrgVerify: ...`, `Co-Authored-By:` or `Claude-Session:`."""
     branch = _run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=wt)
     body = _run(["gh", "pr", "view", branch, "--json", "body", "--jq", ".body"], cwd=wt) if branch else ""
     if not body:
         body = _run(["git", "log", "-1", "--format=%b"], cwd=wt)
-    return next((ln.strip() for ln in body.splitlines() if ln.strip()), "")
+    return first_moves(body)
+
+
+def first_moves(body: str) -> str:
+    lines = [ln.strip() for ln in (body or "").splitlines() if ln.strip()]
+    return next((ln for ln in lines if ln.startswith("Moves:")), lines[0] if lines else "")
 
 
 def targets_philanthropy(wt: str) -> bool:
