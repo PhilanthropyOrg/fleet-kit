@@ -10,6 +10,9 @@ THE KEYS. INTENT.md opens with a `## Keys` section, one line per direction:
 The date is the day he first said it; phrases are lowercase substrings. A desk inbox item
 (DESK_DIR/YYYYMMDD-HHMMSS.md, Central time) dated AFTER a key's day whose text holds one of
 its phrases is a repeat. Keys only grow: librarian adds one for every new direction.
+An item that quotes anything ("His words: ...") counts only phrases inside its quoted spans,
+Reif's own words; a relay with no quote (it opens `baby-g`, `From baby-g`, `[desk`, `Review
+desk`, `From M`) counts none. G citing a rule back is the fleet obeying it (fk#1740, fk#1796).
 
   repeats [--hours 24]   one line per repeat in the window: item, key
   pregate                `green` when no desk item is newer than INTENT.md and it is not the
@@ -29,6 +32,15 @@ from zoneinfo import ZoneInfo
 CENTRAL = ZoneInfo("America/Chicago")
 KEY_LINE = re.compile(r"^- (\d{4}-\d{2}-\d{2}) ([\w.+-]+): (.+)$")
 ITEM_NAME = re.compile(r"^(\d{8}-\d{6})\.md$")
+RELAY = re.compile(r"^[\s#>*]*(baby-g\b|from\s+(baby-g|m)\b|\[desk\b|review desk\b)", re.I)
+QUOTED = re.compile(r"\"([^\"\n]+)\"|\u201c([^\u201d\n]+)\u201d|(?<!\w)'([^'\n]+)'(?!\w)")
+
+
+def spoken(text: str) -> str:
+    """Reif's words in a desk item: its quoted spans if it has any, else the whole item
+    unless an agent wrote it."""
+    quotes = "\n".join("".join(g) for g in QUOTED.findall(text))
+    return quotes or ("" if RELAY.match(text) else text)
 
 
 def intent_path() -> Path:
@@ -71,7 +83,7 @@ def repeats(items, keys) -> list[tuple[str, str]]:
     out = []
     for ts, name, text in items:
         day = dt.datetime.fromtimestamp(ts, CENTRAL).strftime("%Y-%m-%d")
-        low = text.lower()
+        low = spoken(text).lower()
         for kday, kname, phrases in keys:
             if kday < day and any(p in low for p in phrases):
                 out.append((name, kname))

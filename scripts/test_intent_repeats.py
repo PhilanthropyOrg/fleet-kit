@@ -48,6 +48,16 @@ class IntentRepeats(unittest.TestCase):
         n = ir.count_repeats(at("20261017-120000"), 48, self.intent, self.desk)
         self.assertEqual(n, 1)
 
+    def test_a_relay_counts_only_reifs_quoted_words(self):
+        # fk#1740/#1796: G's brief citing a rule back is the fleet obeying it
+        self.item("20261017-090000", "baby-g: the public /jobs number (hospitals out) is live")
+        self.item("20261017-091000", "From baby-g: Reif asks 'why are hospitals still on /jobs?'")
+        self.item("20261017-092000", "[desk 9:20] health system rows filtered, per the rule")
+        self.item("20261017-093000", "Make the hospital rows go away")  # Reif's own words
+        self.item("20261017-094000", 'REIF (Oct 17), hospital page. His words: "ship the Give card"')
+        n = ir.count_repeats(at("20261017-120000"), 24, self.intent, self.desk)
+        self.assertEqual(n, 2)
+
     def test_no_keys_is_unmeasured_not_zero(self):
         self.intent.write_text("# INTENT.md\n\n## Standing decisions\n")
         self.assertIsNone(ir.count_repeats(at("20261017-120000"), 24, self.intent, self.desk))
