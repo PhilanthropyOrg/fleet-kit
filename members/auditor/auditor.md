@@ -168,8 +168,9 @@ closed):
 - J10 jobs metrics are fresh under the 3-day rule; the hub Google metric is not stale
 - J11 what Google is told matches what Jobs shows: sitemap-jobs-open counts the open jobs,
   closed ones have left it; 3 URLs from EACH `/jobs/sitemap*.xml` file (the `/jobs/at` wave
-  files too) pass J5 and J6; every sampled open job, newest first, reads `index` with JobPosting
-  JSON-LD (#13103 hospital org pages in wave-1, #13126 newest Workday jobs noindex)
+  files too) pass J5 and J6; robots and JobPosting JSON-LD agree on every sampled job, both
+  ways: `index` carries one, `noindex` carries none. Sample each noindex kind on purpose
+  (description under 200 chars, unconfirmed, closed) (#13126, #14225)
 - J12 a sample of open jobs is indexed: GSC URL inspection when the key exists, else a
   `site:` query, and say which one you used
 - J13 a test that depends on today's date is a finding (it passes today, fails next week)
@@ -201,10 +202,9 @@ closed):
 | Street addresses on report pages and public JSON | T8, D4 |
 | Hospitals in Jobs, and in the jobs sitemap (#13103) | J6, J11 |
 | Newest jobs noindex with no JobPosting (#13126) | J11 |
+| Short jobs noindex yet carrying JobPosting, 7 of 40 (#14225) | J11 |
 | A crawler inflating the Apply funnel | D5, J9 |
 | Wrong employers (2,602) | J5, D3 |
-| Duplicate jobs | J8 |
-| The date-dependent jobs test | J13 |
 | Apply clicks out that went unrecorded | J2 |
 | Owner-posted jobs missing from /jobs/all and the org page (#12899) | J4 |
 | "III · Programs" lit under Schedules filed; T3 had exempted it (#12982) | T3 |
