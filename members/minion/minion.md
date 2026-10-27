@@ -147,24 +147,21 @@ said "created the 11 tasks but never updated them" again and again.
    `nohup` or `pgrep` wait loop (background tasks are off, run_member.sh).**
    `gh issue edit` is denied by design: board labels are gru's and marie's. Name the label
    you would set in your `Outcome:` line and move on; never re-ask for it (asks #71-#109).
-3b. **A browser ships in this image — USE IT when the item touches rendered UI.** Playwright +
-   headless chromium are installed and verified live; "no browser tooling" was the reason 15
-   of your own self-critiques gave for missing an issue's OWN acceptance criteria. Same
-   incantation nerd.md uses:
+3b. **A browser ships in this image — USE IT when the item touches rendered UI.** Your page
+   is not on prod yet, so shoot it from your branch, styled, at 1440 and 390
+   (`scripts/branch_shots.py`; an unstyled shot kept #14357 a draft 3 passes, 10-25..27):
 
    ```
-   python3 -c "
-   from playwright.sync_api import sync_playwright
-   with sync_playwright() as p:
-       b = p.chromium.launch(args=['--no-sandbox','--disable-dev-shm-usage'])
-       pg = b.new_page(); pg.goto('<url>', timeout=45000)
-       print(pg.title()); pg.screenshot(path='/tmp/shot.png'); b.close()
-   "
+   PYTHONPATH=src $(bash /fleet-kit/scripts/test_python.sh) /fleet-kit/scripts/branch_shots.py \
+     dump --path <page> --out /tmp/s     # signed-in page: --html <file your test wrote>
+   python3 /fleet-kit/scripts/branch_shots.py shoot --out /tmp/s --name <page> \
+     --dest /fleet-kit/shares/g/pr<N>
    ```
 
-   `--no-sandbox` is required (root in a container). If the acceptance criteria ask for a
-   rendered page, a screenshot, or "looks right" — render it and say what you saw.
-   **"I could not verify visually" is now a false statement.**
+   A page already live: Playwright's `sync_playwright()` with
+   `p.chromium.launch(args=['--no-sandbox'])` (root in a container) and `pg.goto(<url>)`.
+   Read both PNGs, then cite them: `Design walk: as <person>, 1440 <path>, 390 <path>, reads
+   clean` (or `reads wrong: ...`). **"I could not verify visually" is a false statement.**
 3c. **When the item touches rendered UI, call the `design_reference` tool before you build and
    again before you call the item done.** It is design law, not optional: every UI build and
    every UI check runs it. Paste the tool call and its output in your PR body — or, if it
