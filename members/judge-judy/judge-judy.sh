@@ -507,6 +507,14 @@ If the diff touches a template (any .html or .jinja file, including mail templat
     log "PR #$PR: dependabot version-pin-only diff -- plain-language/See-it rules waived"
   fi
 
+  # Owner decision 2026-10-27: PRs from the Paperclip seats (head branch ops/*) ship on their
+  # own. Block only for real harm; paperwork, plain language, See it, screenshots, design walk,
+  # style and low/medium polish become non-blocking notes (verdict approve, notes in findings).
+  if [[ "${HEAD_REF:-}" == ops/* ]]; then
+    BODY_RULES="This PR comes from an AI seat and ships on its own. Set your verdict to block ONLY for real harm: (1) a bug that breaks or crashes a page or a job, (2) a security hole, (3) data loss or a write to IRS facts, (4) a change to money (prices, amounts, charges, refunds) or to legal text (/terms, /privacy) when the PR body does not say the Owner approved it. Everything else is NOT blocking: body rules, plain language, a missing 'See it:' line, screenshots, design walk, style, low or medium polish, and the closing-keyword rule above. Set your verdict to approve and list those as findings with severity low, so they post as notes. If you do block, every finding must be one of the four real harms."
+    log "PR #$PR: ops/ branch -- only real harm blocks, paperwork is notes"
+  fi
+
   # Carry an approval forward when only main moved. 2026-09-30: 48% of 3 days' review spend
   # ($76 of $158) re-reviewed PRs already reviewed; #8555 was approved 11 times, once per
   # auto_update_branch "Merge main" head, same diff each time. Same diff + same body at a new
