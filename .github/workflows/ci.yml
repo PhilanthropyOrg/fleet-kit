@@ -380,6 +380,8 @@ jobs:
         run: python3 scripts/test_redact_secrets.py
       - name: run test_untrusted_text.py
         run: python3 scripts/test_untrusted_text.py
+      - name: run test_branch_shots.py
+        run: python3 scripts/test_branch_shots.py
 
   # Not a required check (see selftest above for why) -- but still runs on every PR, and its
   # failures are still visible on the PR's checks tab. `--with-deps` here can still fail on an
