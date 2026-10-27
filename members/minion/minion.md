@@ -133,31 +133,18 @@ said "created the 11 tasks but never updated them" again and again.
    individually. If an item turns out genuinely blocked or its spec doesn't hold up once you're
    building it, drop it (see step 11) and continue with the rest of the batch — one bad item
    does not sink the others.
-3. **Test locally** before you push — the command is `bash /fleet-kit/scripts/verified_test.sh`
-   with NO arguments. It runs `preflight_gate.py` FIRST: `ruff check --fix` + `ruff format` on
-   the files you changed (at the ruff version the repo's CI pins), then `ruff check` /
-   `ruff format --check`, then the repo's cheap CI gates (`repo_health.py --check`,
-   `docs_freshness.py`, ...). The autofix rewrites files — re-read your diff after it. A red
-   preflight is a red receipt and the push hook blocks: fix what it printed (a ratchet means
-   split or shrink the file you grew, never raise the baseline). It runs the tests with the
-   repo's cached test env (`scripts/test_python.sh`; the container's own python3 has none of the
-   product's dependencies and `/repo/.venv` points at a host-only interpreter, so never build
-   your own venv; for a targeted run use `$(bash /fleet-kit/scripts/test_python.sh) -m pytest
-   <files>` with `PYTHONPATH=src`). Then it runs the repo's
-   diff-scoped tests where the repo ships a runner
-   (philanthropy's `scripts/tests_for_diff.py`) and writes the receipt the push hook checks.
-   **You run only the TARGETED tests near what you changed, never the full suite (Reif,
-   2026-09-29): the full suite runs in the product repo's CI on your PR.** A diff too wide to
-   scope runs no local tests; push, then `pr_ci_wait.py <PR>` IS its test run. Your `Evidence:`
-   line pastes the targeted result plus that note, e.g. `` `verified_test.sh` tests_for_diff
-   green (12 passed); full suite in CI on the PR ``. A raw whole-tree
-   `pytest tests/` is blocked by that hook: it cannot produce a receipt. **You are a
-   one-shot `claude -p` pass (persona_law.md §12), and a minion runs with background tasks OFF
-   (`CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`, set by run_member.sh): run `verified_test.sh`
-   and every other command in the FOREGROUND, in one Bash call. It may take up to 30 min
-   (queueing for a test slot included; pass `timeout: 2700000` for up to 45) and its output comes back in that same call. Never a
-   shell `&`, `nohup`, or a `pgrep -f verified_test.sh` / `ps | grep` wait loop: other minions'
-   test runs match the same pattern.** There is no wakeup: `ScheduleWakeup` is denied.
+3. **Lint, never test locally (Reif's 10-15 law, "make it law"; the-fixer since fk#1676).**
+   Run `bash /fleet-kit/scripts/verified_test.sh --lint` in the FOREGROUND: `preflight_gate.py`
+   (`ruff check --fix` + `ruff format` at CI's pinned ruff, then the repo's cheap CI gates;
+   seconds). It rewrites files, so re-read your diff; a red preflight is fixed, never a raised
+   baseline. It writes the receipt `minion_checkpoint.py` reads. **Before the push, not after:**
+   `check_pr_body.py` on your body file and `push_budget_gate.py --summary` (14 passes 10-25..27
+   ran a 13-45 min test run, then learned a body line or the budget refused them). Then push:
+   CI on the PR is the test run, and `pr_ci_wait.py <PR>` waits for it. One named test file you
+   are writing (`$(bash /fleet-kit/scripts/test_python.sh) -m pytest <file>`, `PYTHONPATH=src`)
+   is fine; the suite or `tests_for_diff` is not. Evidence: `` `verified_test.sh --lint` green;
+   tests in CI on the PR ``. Every command runs in the foreground, in one Bash call: no `&`,
+   `nohup` or `pgrep` wait loop (background tasks are off, run_member.sh).**
    `gh issue edit` is denied by design: board labels are gru's and marie's. Name the label
    you would set in your `Outcome:` line and move on; never re-ask for it (asks #71-#109).
 3b. **A browser ships in this image — USE IT when the item touches rendered UI.** Playwright +
@@ -216,7 +203,7 @@ said "created the 11 tasks but never updated them" again and again.
    stale and reverting someone else's work — merge the default branch and re-check.
 6b. **Checkpoint early: push and open a DRAFT PR after your first green commit** (2026-09-26:
    two 5400s batches timed out with nothing pushed and the next pass restarted from zero).
-   Once `verified_test.sh` is green on your first real commit: `git push -u origin HEAD`, then
+   Once `verified_test.sh --lint` is green on your first real commit: `git push -u origin HEAD`, then
    `gh pr create --draft` naming every item as `Part of #N`. Write every PR body inside YOUR
    worktree's git dir (`--body-file "$(git rev-parse --git-dir)/pr_body.md"`, never committed),
    never `/tmp/body.md`: minions share `/tmp`, and
@@ -276,7 +263,7 @@ said "created the 11 tasks but never updated them" again and again.
    ```
    exit 0 GREEN/MERGED -> report. exit 3 PENDING -> run it again. exit 1 RED/BLOCK -> it prints
    each failing check's failing log lines and judge-judy's findings: fix ALL of them in your
-   worktree (review findings are part of the job, not a follow-up), `verified_test.sh`, commit,
+   worktree (review findings are part of the job, not a follow-up), `verified_test.sh --lint`, commit,
    push, and loop. Never background it, never end your turn "waiting for CI": a Stop hook
    (`pr_done_hook.py`) refuses to let your pass end while the PR is RED/BLOCK/PENDING and hands
    you the same output. If your budget runs out mid-loop, say so in the report with the PR's

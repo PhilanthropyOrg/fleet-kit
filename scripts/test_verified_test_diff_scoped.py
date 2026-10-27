@@ -115,5 +115,19 @@ class WrapperRunsTheRepoRunner(unittest.TestCase):
         self.assertTrue(receipt["args"].startswith("ci-only"), receipt)
 
 
+    def test_lint_runs_no_tests_and_writes_a_lint_only_pass_receipt(self):
+        # Reif 10-15 law: no prepush test runs; the minion lints, pushes, and CI tests.
+        d = self._repo()
+        r = subprocess.run(["bash", str(ROOT / "scripts" / "verified_test.sh"), "--lint"], cwd=d,
+                           capture_output=True, text=True, env=dict(os.environ, WT_PATH=d))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertFalse(os.path.exists(os.path.join(d, "RAN_DIFF")), "tests_for_diff ran under --lint")
+        receipt = json.loads(pathlib.Path(subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "pretest_push_hook.py"), "--receipt-path", d],
+            capture_output=True, text=True).stdout.strip()).read_text())
+        self.assertEqual(receipt["status"], "pass")
+        self.assertTrue(receipt["args"].startswith("lint-only"), receipt)
+
+
 if __name__ == "__main__":
     unittest.main()
