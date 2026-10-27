@@ -466,3 +466,134 @@ journeys:
         observable_result: A card for the visitor's fixture org appears live within 30s.
       - action: Visitor reopens the claim page.
         observable_result: The page says the org is verified / managed by them within 15s.
+
+  # --- The daily user walk (philanthropy#13448), 6:00 AM Central, scripts/daily_walk.py. ----------
+  # Reif 10-21: "nothing in the system looks at what a person meets." These run ONLY when named
+  # (walked_by), read-only, as the QA personas: no claim, application, gift or checkout is ever
+  # sent. Each step's `label` is its name in ~/G/walk/<date>.md; `owner` + `lane_label` route a
+  # failure to its lane as a Cruft: issue. Implementations: scripts/journey_money.py.
+
+  - id: walk-claim-hq-verify
+    name: "Daily walk: claim -> HQ -> verify"
+    walked_by: daily-walk
+    owner: orgverify
+    lane_label: lane:orgverify
+    vision_link: okr.orgverify
+    description: >
+      A person finds Claim on their org's report and reaches the claim screen; an owner signs in,
+      lands on /hq (the one door, philanthropy#13475), reads the Get verified checklist card,
+      opens the verify screen and reads the price. Stops before Stripe.
+    preconditions: [signed out, then QA_SESSION_TOKEN for the owner persona]
+    test_users: [owner]
+    viewports: [desktop, mobile_390]
+    steps:
+      - label: Claim on a report
+        action: Signed out, open the fixture org's 990 report and find a visible Claim link.
+        observable_result: A visible link whose text says Claim and whose href holds /claim/.
+      - label: claim screen opens
+        action: Open the Claim link (signed out). Nothing is submitted.
+        observable_result: The page says claim and shows the claim form or the sign-in field.
+      - label: owner lands on /hq
+        action: Sign in as owner through the QA link with next=/hq.
+        observable_result: The browser ends on /hq, not /login or another HQ page.
+      - label: Get verified card on /hq
+        action: Read the verification card on /hq.
+        observable_result: "The verification card shown at this width (#get-verified-cta on desktop, the phone copy at 390) is visible within 15s, says verify and shows an N of M count."
+      - label: verify screen opens
+        action: Open the card's verify link (/network/hq/orgverify).
+        observable_result: The page answers < 400 and shows a "Step N of M" or "Get verified" line.
+      - label: price and pay rule
+        action: Read GET /orgverify/api/<ein>/pay as the owner.
+        observable_result: It answers 200 with at least one price.
+      - label: checkout up to Stripe
+        action: If Pay is offered, find the Pay control; never start the checkout.
+        observable_result: BLOCKED unless proof passed; the walk never starts a Stripe session.
+
+  - id: walk-job-seeker-apply
+    name: "Daily walk: job seeker -> apply"
+    walked_by: daily-walk
+    owner: jobs
+    lane_label: bug
+    vision_link: okr.clicks
+    description: >
+      A job seeker opens /jobs, opens a job, taps Apply and lands on the employer's listing or our
+      apply gate (signed out: sign in first). No application is ever sent.
+    preconditions: [signed out]
+    viewports: [desktop, mobile_390]
+    steps:
+      - label: /jobs lists jobs
+        action: Open https://philanthropy.org/jobs.
+        observable_result: At least one /jobs/j/ link.
+      - label: open a job
+        action: Open one listed job (seeded pick from the first 30).
+        observable_result: The job page has a title (h1).
+      - label: find Apply
+        action: Find the visible Apply link on the job page.
+        observable_result: A visible link named Apply.
+      - label: Apply leads somewhere
+        action: Read where Apply goes, without following it into the employer's site and without a cookie.
+        observable_result: >
+          A redirect to the employer's own listing, or our apply gate (sign-in or apply page) that
+          says sign in, join or apply.
+
+  - id: walk-donor-give
+    name: "Daily walk: donor -> give"
+    walked_by: daily-walk
+    owner: give
+    lane_label: bug
+    vision_link: okr.conversion
+    description: >
+      A donor opens a charity's page and finds the Pledge give form drawn and ready. Nothing is
+      typed into it and no gift is given.
+    preconditions: [signed out]
+    viewports: [desktop, mobile_390]
+    steps:
+      - label: Give on a charity page
+        action: Open the 990 report of EIN 53-0196605 (DAILY_WALK_GIVE_EIN).
+        observable_result: The org name and a Give control are on the page.
+      - label: Pledge form on the page
+        action: Read the page for the Pledge form.
+        observable_result: A .plg-donate div with data-ein and the pledge.to/embed/widget.js script.
+      - label: Pledge form draws
+        action: Open Give if it is folded, and wait for Pledge's iframe (https only).
+        observable_result: A pledge.to iframe is on the page within 20s.
+
+  - id: walk-random-pages
+    name: "Daily walk: random pages"
+    walked_by: daily-walk
+    owner: "990"
+    lane_label: bug
+    vision_link: none (maintenance)
+    description: >
+      Reif 10-21: "there also needs to be an element of random checking as well." One of each,
+      picked by a seeded random from the live sitemaps: a 990 report, a public org page, a job, a
+      person page, an HQ screen (owner) and an automatic mail (the staff Mail page's kept copy).
+    preconditions: [signed out; QA_SESSION_TOKEN for owner and operator]
+    test_users: [owner, operator]
+    viewport_invariant_reason: one random sample a day; the walker member renders page types at 390 and 1440
+    viewports: [desktop]
+    steps:
+      - label: random 990 report
+        action: Open a random report from a random shard of /990/sitemap.xml.
+        observable_result: The org name and a dollar figure, revenue or expense line.
+      - label: random org page
+        owner: orgverify
+        lane_label: lane:orgverify
+        action: Open /990/org/<ein> for a random employer in /jobs/sitemap-jobs-wave-1.xml.
+        observable_result: A page answering < 400 with the org's name.
+      - label: random job
+        owner: jobs
+        action: Open a random job from /jobs/sitemap-jobs-open.xml.
+        observable_result: A title and an Apply link.
+      - label: random person page
+        action: Open a random officer from the random report (else /990/people/).
+        observable_result: A page with the person's name.
+      - label: random HQ screen
+        owner: orgverify
+        lane_label: lane:orgverify
+        action: As owner, open a random HQ screen linked from /hq.
+        observable_result: It answers < 400 without bouncing to /login.
+      - label: random automatic mail
+        owner: mail
+        action: As operator, open a random sequence on the staff Mail page and read its last kept mail.
+        observable_result: The sequence page answers < 400; a kept mail shows its subject and preview.
