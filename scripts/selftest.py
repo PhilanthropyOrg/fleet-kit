@@ -15958,7 +15958,7 @@ def _roster_is_ten_members_after_fk1195_fold():
         # line (asserted below), so the scheduled roster is unchanged until he turns it on.
         "growth",
         # a1 (Reif, 2026-10-16): "we just need fleet auditors" -- sentry checks a page loads,
-        # auditor checks it is TRUE against the filing. Four lanes on cron every 2h.
+        # auditor checks it is TRUE against the filing. Four lanes on cron, each every 6h.
         "auditor",
         # Reif 2026-10-19: one member each for pages indexed, fact checking, and walking pages.
         "indexer", "factcheck", "walker",

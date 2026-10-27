@@ -20,7 +20,7 @@
     "escalation": "a source you need is unreadable (no token, query timeout, WAF challenge) -- that IS the finding: say which source and which checks did not run, and never report them as passing"
   },
   "schedule": {
-    "interval_s": 7200
+    "interval_s": 21600
   },
   "timeout_s": 3000,
   "enabled": true,
