@@ -6,6 +6,7 @@
 #
 #   bash /fleet-kit/scripts/verified_test.sh                 # tests near the diff (tests_for_diff)
 #   bash /fleet-kit/scripts/verified_test.sh tests/test_x.py # narrower, recorded as such
+#   bash /fleet-kit/scripts/verified_test.sh --lint          # preflight only (the minion default)
 #
 # Width defaults to the box's core count, not 4: the pool machines have 6-7 cores and the
 # hosted runners this replaces had 4, so the local run should not inherit their ceiling.
@@ -32,6 +33,21 @@ fi
 # Receipt is written AFTER the run, against the content as it stands THEN -- computing it up
 # front would certify a tree the suite never saw if a test writes into the worktree.
 rm -f "$RECEIPT"
+
+# --lint (Reif's 10-15 law, "no prepush test runs on lucky"): preflight only, then a receipt that
+# says no test ran, so minion_checkpoint.py's green save and `ready` still work. CI on the PR is
+# the test run. 10-25..27: minion passes spent 13-45 min in this script's test half, then hit a
+# body or budget gate (14 self-critiques); the-fixer got this law in fk#1676, the minion did not.
+if [ "${1:-}" = "--lint" ]; then
+  if python3 "$(dirname "$(readlink -f "$0")")/preflight_gate.py" "$WT"; then code=0; else code=1; fi
+  HASH="$(python3 "$HOOK" --content-hash "$WT")"
+  if [ "$code" -eq 0 ]; then STATUS=pass; else STATUS=fail; fi
+  printf '{"status":"%s","content":"%s","args":"lint-only (CI runs the tests on the PR)","exit":%d,"preflight":"%s","ts":%d}\n' \
+    "$STATUS" "$HASH" "$code" "$STATUS" "$(date +%s)" > "$RECEIPT"
+  [ "$code" -eq 0 ] && echo "verified_test: LINT PASS. No test ran here; CI on the PR is the test run -- evidence line: \`verified_test.sh --lint\` green; tests in CI on the PR."
+  [ "$code" -ne 0 ] && echo "verified_test: preflight (lint / repo gates) FAILED -- fix what it printed" >&2
+  exit "$code"
+fi
 
 # 2026-09-29: preflight + pytest are the CPU-heavy part; at most FLEET_TEST_SLOTS run at once on
 # this box, the rest queue here in the foreground (scripts/test_slots.sh).
