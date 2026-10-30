@@ -7,7 +7,7 @@ no --limit, so gh handed back its default 30 newest PRs; the oldest-first sort (
 that window only. About 25 green armed heads below it never got a fleet-code-review status, and an
 explicit `judge-judy.sh <pr>` for one of them found nothing to review. Mutation: drop --limit from
 the list call -> RED."""
-import re, subprocess, tempfile, unittest, os
+import json, re, subprocess, tempfile, unittest, os
 from pathlib import Path
 
 SH = (Path(__file__).resolve().parents[1] / "members/judge-judy/judge-judy.sh").read_text()
@@ -67,6 +67,47 @@ class PickPrSeesTheWholeQueue(unittest.TestCase):
         r = pick("14")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(r.stdout.strip(), "14 sha14")
+
+
+# philanthropy 10-30: a green PR for the company's top goal waited 3h20m for review behind 14 older
+# heads. A PR labelled review:next goes first; each group stays oldest-created first.
+# Mutation: drop labels from the list call or the label key from the sort -> RED.
+PICK_SRC = SH[SH.index("pick_pr() {"):SH.index("report_run() {")]
+ORDER = re.search(r"--arg p \"\$\{PRIORITY_LABEL-review:next\}\" '([^']+)'", PICK_SRC).group(1)
+
+
+def lane(prs, label="review:next", explicit=""):
+    out = subprocess.run(["jq", "-r", "--arg", "x", explicit, "--arg", "p", label, ORDER],
+                         input=json.dumps(prs), capture_output=True, text=True, check=True).stdout
+    return [int(x) for x in out.split()]
+
+
+def _pr(n, created, labels=(), draft=False):
+    return {"number": n, "createdAt": created, "isDraft": draft, "labels": [{"name": l} for l in labels]}
+
+
+QUEUE = [_pr(3, "2026-10-30T16:57:00Z", ["review:next"]), _pr(1, "2026-10-30T06:00:00Z"),
+         _pr(2, "2026-10-30T07:00:00Z", ["bug"]), _pr(4, "2026-10-30T18:00:00Z", ["review:next"]),
+         _pr(5, "2026-10-30T05:00:00Z", ["review:next"], draft=True)]
+
+
+class PriorityLane(unittest.TestCase):
+    def test_labelled_prs_go_first_then_oldest_first(self):
+        self.assertEqual(lane(QUEUE), [3, 4, 1, 2])
+
+    def test_empty_label_is_the_plain_oldest_first_queue(self):
+        self.assertEqual(lane(QUEUE, label=""), [1, 2, 3, 4])
+
+    def test_a_draft_still_waits_unless_it_is_the_explicit_pr(self):
+        self.assertNotIn(5, lane(QUEUE))
+        self.assertEqual(lane(QUEUE, explicit="5")[0], 5)
+
+    def test_a_pr_with_no_labels_field_does_not_break_the_sort(self):
+        self.assertEqual(lane([{"number": 7, "createdAt": "x", "isDraft": False}]), [7])
+
+    def test_pick_pr_asks_gh_for_labels(self):
+        self.assertIn("--json number,isDraft,createdAt,labels", PICK_SRC)
+        self.assertIn('PRIORITY_LABEL="${JUDGE_JUDY_PRIORITY_LABEL-review:next}"', SH)
 
 
 if __name__ == "__main__":

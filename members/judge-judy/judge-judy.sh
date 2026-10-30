@@ -14,6 +14,7 @@
 #   - Reviews PRs one at a time in a loop, oldest-created first, until either the queue is
 #     empty or FLEET_TICK_BUDGET_USD (default $15/tick) is spent -- so a quiet repo still
 #     reviews everything in one tick instead of trickling one PR per 15-min schedule run.
+#     A PR labelled review:next (JUDGE_JUDY_PRIORITY_LABEL; empty turns it off) goes ahead of that queue.
 #     Budget is checked BEFORE each pick using the actual cost of the last call made this
 #     tick (first call in a tick always runs -- there's no prior cost to check against), so
 #     one hung/expensive review can't silently blow through many multiples of the cap.
@@ -88,6 +89,8 @@ APPROVED_DIR="$HOME/.cache/fleet-kit/judge-judy-approved"  # pr-<N>.fp: "<patch-
 TICK_BUDGET_USD="${FLEET_TICK_BUDGET_USD:-15}"
 # A head younger than this is left to a later tick (pick_pr); 0 turns the wait off.
 SETTLE_S="${JUDGE_JUDY_SETTLE_S:-600}"
+# A PR with this label is reviewed before the rest of the queue (pick_pr); empty turns the lane off.
+PRIORITY_LABEL="${JUDGE_JUDY_PRIORITY_LABEL-review:next}"
 # The diff is capped, not because big diffs don't deserve review, but because an unbounded
 # prompt can blow the context window and produce an unparseable half-answer — which then
 # reads as a reviewer outage.
@@ -207,12 +210,15 @@ pick_pr() {
   # consecutive ticks (~2h) because newer PRs kept landing ahead of it in list order.
   # --limit: without it gh returns only the 30 newest, so with 87 open (philanthropy 10-30) the
   # sort above ran over the newest 30 and every older PR, explicit override included, was unseen.
-  pr_list_json=$(ghr gh pr list --state open --limit 1000 --json number,isDraft,createdAt 2>/dev/null)
+  # Priority lane: a PR labelled $PRIORITY_LABEL goes ahead of the oldest-first queue. On 10-30 a
+  # green PR for the company's top goal waited 3h20m behind 14 older heads; the owner's target
+  # is under 30 min. Within the lane, and outside it, the order stays oldest-created first.
+  pr_list_json=$(ghr gh pr list --state open --limit 1000 --json number,isDraft,createdAt,labels 2>/dev/null)
   pr_list_rc=$?
   if [ "$pr_list_rc" -ne 0 ]; then
     return 2   # can't tell if the queue is empty -- the list call itself failed
   fi
-  for pr in $(printf '%s' "$pr_list_json" | jq -r --arg x "$explicit" 'sort_by(.createdAt) | .[] | select((.isDraft | not) or ((.number | tostring) == $x)) | .number' 2>/dev/null); do
+  for pr in $(printf '%s' "$pr_list_json" | jq -r --arg x "$explicit" --arg p "${PRIORITY_LABEL-review:next}" 'sort_by([(($p == "") or ([.labels[]?.name] | index($p) == null)), .createdAt]) | .[] | select((.isDraft | not) or ((.number | tostring) == $x)) | .number' 2>/dev/null); do
     [ -n "$explicit" ] && [ "$pr" != "$explicit" ] && continue
     case " $skip_list " in *" $pr "*) continue ;; esac
     head=$(ghr gh pr view "$pr" --json headRefOid,commits -q '.headRefOid + " " + (.commits[-1] | if ((.messageHeadline // "") | startswith("Merge ")) then "" else .committedDate end)' 2>/dev/null)
