@@ -8,6 +8,7 @@ main-merge head (carry-forward approves those with no model call) and an explici
 import json
 import pathlib
 import re
+import shlex
 import subprocess
 import unittest
 
@@ -42,6 +43,41 @@ class SettleTest(unittest.TestCase):
         self.assertIn('[ -z "$explicit" ] && [ "$SETTLE_S" -gt 0 ] && [ -n "$pushed_at" ]', PICK)
         # the wait comes before the status lookup, so a fresh head costs no extra API call
         self.assertLess(PICK.index("SETTLE_S"), PICK.index("statuses=$("))
+
+
+# PHIA-1182 (2026-10-30): `gh pr list` returns the newest 30 by default, so with no --limit the
+# oldest-first sort (fleet-kit#181) only reordered those 30 and a PR at position 31+ was never
+# reviewed (13+ green PRs at positions 31-65). Runs pick_pr's own list arguments against a fake gh
+# that caps the way the real one does.
+LIST_ARGS = shlex.split(re.search(r"ghr gh pr list ([^)]*?) 2>/dev/null\)", PICK).group(1))
+
+
+def fake_gh_pr_list(args, prs):
+    limit = int(args[args.index("--limit") + 1]) if "--limit" in args else 30
+    return sorted(prs, key=lambda p: p["createdAt"], reverse=True)[:limit]
+
+
+def open_prs(n):
+    return [{"number": 100 + i, "isDraft": False,
+             "createdAt": f"2026-10-{1 + i // 24:02d}T{i % 24:02d}:00:00Z"} for i in range(n)]
+
+
+class PrListLimitTest(unittest.TestCase):
+    def test_the_list_call_sets_a_limit_far_past_gh_default(self):
+        self.assertIn("--limit", LIST_ARGS)
+        self.assertGreaterEqual(int(LIST_ARGS[LIST_ARGS.index("--limit") + 1]), 500)
+
+    def test_the_oldest_of_87_open_prs_is_picked_first(self):
+        listed = fake_gh_pr_list(LIST_ARGS, open_prs(87))
+        self.assertEqual(len(listed), 87)
+        self.assertEqual(min(listed, key=lambda p: p["createdAt"])["number"], 100)
+
+    def test_a_pr_at_position_31_is_in_the_scan(self):
+        self.assertIn(100, {p["number"] for p in fake_gh_pr_list(LIST_ARGS, open_prs(31))})
+
+    def test_without_a_limit_gh_would_hide_it(self):
+        listed = {p["number"] for p in fake_gh_pr_list(["--state", "open"], open_prs(31))}
+        self.assertNotIn(100, listed)
 
 
 if __name__ == "__main__":
