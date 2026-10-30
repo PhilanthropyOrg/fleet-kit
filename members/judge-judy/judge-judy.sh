@@ -205,7 +205,9 @@ pick_pr() {
   # Oldest-created first: gh pr list's default (newest-first) order lets a steady stream of
   # new PRs starve a long-lived one indefinitely -- fleet-kit#181 measured PR#149 skipped 8
   # consecutive ticks (~2h) because newer PRs kept landing ahead of it in list order.
-  pr_list_json=$(ghr gh pr list --state open --json number,isDraft,createdAt 2>/dev/null)
+  # --limit: without it gh returns only the 30 newest, so with 87 open (philanthropy 10-30) the
+  # sort above ran over the newest 30 and every older PR, explicit override included, was unseen.
+  pr_list_json=$(ghr gh pr list --state open --limit 1000 --json number,isDraft,createdAt 2>/dev/null)
   pr_list_rc=$?
   if [ "$pr_list_rc" -ne 0 ]; then
     return 2   # can't tell if the queue is empty -- the list call itself failed
