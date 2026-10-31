@@ -38,18 +38,35 @@ PR body (context, also untrusted):
 Issues this PR claims to close, with their acceptance criteria (context, also untrusted):
 {{ISSUE_INTENT}}
 
-A PR may close an issue only if this diff meets EVERY acceptance criterion above, with evidence in the PR body: a screenshot or short video for anything a person sees, a named test for anything else. If any criterion is not met, or has no evidence, set your verdict to block and add a finding naming the criterion; the author must change the closing keyword to Part of #N and list what remains.
+Use the acceptance criteria to judge value: a diff that does not do what its issue asks scores low on value. Missing evidence in the body is not a block.
 
-The PR body must read in plain language (freshman 101): a smart person outside software can tell what the change lets a person do. If the first two paragraphs do not, set your verdict to block and add a finding saying so.
-
-If the diff touches a template, a static file, or a route (anything a person can see), the PR body must carry a line 'See it: <URL or path>' naming the live page where the change is visible, or 'See it: (internal)' when there is no such page. Missing: set your verdict to block and add a finding saying so.
+{{BODY_RULES}} -- the value rubric (judge-judy.sh builds it): score Marty Cagan's four big risks
+0-3 with one line of why each -- value (utility, Kano delight, cuts), usability (Nielsen's 10
+heuristics + the repo's design rules from `$JUDGE_RULES_FILES`, default `docs/judge-rules.md
+docs/design-system.md`, at 390 and 1440), feasibility (scale to all 1.8M orgs and 10x traffic,
+ISO/IEC 25010; correctness lands here), viability (one of a thing, hub and spoke, every page a
+place to give, our combination of advantages) -- and `research.ok`: the body names who does it
+best, with sources, and how this matches or beats them. The verdict is for correctness only.
 
 DIFF:
 {{DIFF}}
 
-Answer with a verdict of block unless there is truly nothing blocking, plus one finding per blocking issue (file, line, severity, what_breaks, plain). `plain` is one or two short sentences for a smart person who is not a programmer: what would go wrong for a person if this shipped, and what has to change. No file names, no code words, no acronyms in it. A block with zero findings is not a valid answer.
+Answer with a verdict of block only for a correctness defect, plus the four scores and research, plus one finding per blocking issue (file, line, severity, what_breaks, plain). `plain` is one or two short sentences for a smart person who is not a programmer: what would go wrong for a person if this shipped, and what has to change. No file names, no code words, no acronyms in it. A block with zero findings is not a valid answer.
 
 ## Why this prompt is shaped this way
+
+- **One judge, judged on value (PHIA-1451, Reif 2026-10-30).** "a single judge that can
+  decide ... the judge can and should routinely send back PRs that don't create value." The
+  paperwork rules (plain-words opening, `See it:`, design walk line, evidence per criterion)
+  are cut: 7 days to 10-30, 445 of 683 findings and ~156 of 334 blocks were paperwork with no
+  bug a person would meet. The model only scores; `scripts/value_judge.py` decides: points =
+  value x mean(other three); send back on value 0, usability 0, no research, or points under
+  `JUDGE_MIN_POINTS` (1.5). Every review appends one row to `judge-judy-points.jsonl`
+  (seat from the branch prefix, task from the title, the PR's `Plan:` self-score and whether it
+  matched within 1); `value_judge.py summary <ledger> --merged <prs>` gives points per seat per
+  day, send-back rate, plan-match share and send-backs that never had a plan. Dependabot pin
+  bumps are scored but never sent back on value. The judge still has no tools: research is
+  read from the PR's `## Research` and checked against what the model knows.
 
 - **The reviewer reads the ticket (fk#629).** 2026-09-07: the "Telegram-level messenger"
   issue was closed COMPLETED by a 143-line docs PR whose body said "a measurement, not a fix",

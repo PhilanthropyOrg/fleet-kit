@@ -95,7 +95,13 @@ def parse(raw: str) -> dict:
     if verdict == "block" and not findings:
         return {"ok": False, "reason": "verdict=block with an empty findings list -- nothing a human can act on"}
 
-    return {"ok": True, "verdict": verdict, "findings": findings, "findings_text": _findings_text(findings)}
+    out = {"ok": True, "verdict": verdict, "findings": findings, "findings_text": _findings_text(findings)}
+    # PHIA-1451: the four-risk value scores ride along; value_judge.py turns them into the
+    # send-back and the points. Optional, so a verdict without them still parses.
+    for k in ("scores", "research"):
+        if isinstance(obj.get(k), dict):
+            out[k] = obj[k]
+    return out
 
 
 def main(argv=None) -> int:

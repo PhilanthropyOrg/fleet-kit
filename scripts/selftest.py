@@ -5374,8 +5374,11 @@ def _messenger_brief_restates_the_strategy_and_points_at_pages():
     assert "**See it: <live URL>**" in charter, "landed lines must carry the live URL"
     law = (ROOT / "agents" / "persona_law.md").read_text()
     assert "`See it: <URL>`" in law and "See it: (internal)" in law, "persona law 10d lacks the See it line"
+    # PHIA-1451 (Reif 2026-10-30): the reviewer judges value, not paperwork; the See it line is
+    # the author's, never a block.
     for f in ("members/judge-judy/judge-judy.sh", "members/judge-judy/judge-judy.md"):
-        assert "'See it: <URL or path>'" in (ROOT / f).read_text(), f"{f} does not block a visible change without a See it line"
+        txt = (ROOT / f).read_text()
+        assert "four big risks" in txt and "'See it: <URL or path>'" not in txt, f"{f} is not the value judge"
     # Reif answers decisions on the console, never by replying to the sending inbox.
     assert "ask.py file --member dont-shoot-the-messenger" in charter and "console_url" in charter, "decisions must be filed as asks"
     src = (ROOT / "scripts" / "messenger_brief.py").read_text()
