@@ -53,6 +53,8 @@
 set -uo pipefail
 
 [ -f "${FLEET_ENV_FILE:-./fleet.env}" ] && . "${FLEET_ENV_FILE:-./fleet.env}"
+# PHIA-1504: value_card.py is a child process; fleet.env may set the board vars without export.
+export PAPERCLIP_API_URL PAPERCLIP_API_KEY PAPERCLIP_HOST 2>/dev/null || true
 
 KIT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 REPO="${FLEET_REPO:?set FLEET_REPO in fleet.env}"

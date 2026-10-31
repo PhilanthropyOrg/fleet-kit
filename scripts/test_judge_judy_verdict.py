@@ -136,6 +136,32 @@ class ValueJudge(unittest.TestCase):
         self.assertEqual(seen[0], ("http://172.18.0.3:3100/api/issues/PHIA-1", "localhost:3100", "Bearer k"))
         self.assertIsNone(seen[1][1])
 
+    def test_a_card_read_that_fails_says_why_not_no_card(self):
+        # PHIA-1504: #14830 had a card, but the table said "no card" -- a failed read looked like none.
+        import value_card as vc
+        from unittest import mock
+        with mock.patch.dict(os.environ, {}, clear=True):
+            out = vc.fetch("PHIA-1")
+        self.assertEqual(out["task"], "PHIA-1")
+        self.assertIn("not in the judge's environment", out["error"])
+
+        def _404(req, timeout=None):
+            if "/documents/" in req.full_url:
+                raise vc.urllib.error.HTTPError(req.full_url, 404, "nf", {}, None)
+            return io.StringIO("{}")
+        env = {"PAPERCLIP_API_URL": "http://b", "PAPERCLIP_API_KEY": "k"}
+        with mock.patch.dict(os.environ, env), mock.patch.object(vc.urllib.request, "urlopen", _404):
+            out = vc.fetch("PHIA-1")
+        self.assertEqual(out["card"], "")
+        self.assertNotIn("error", out)
+        text = vj.apply(_scored(), "", "1", "h", "t", "g/x", False, out)["scores_text"]
+        self.assertIn("| Research (no card) |", text)
+        text = vj.apply(_scored(), "", "1", "h", "t", "g/x", False,
+                        {"task": "PHIA-1", "error": "HTTP 403"})["scores_text"]
+        self.assertIn("| Research (card unread: HTTP 403) |", text)
+        sh = (Path(__file__).resolve().parents[1] / "members/judge-judy/judge-judy.sh").read_text()
+        self.assertIn("export PAPERCLIP_API_URL PAPERCLIP_API_KEY PAPERCLIP_HOST", sh)
+
     def test_review_again_label_and_task_from_branch(self):
         import re as _re
         import subprocess

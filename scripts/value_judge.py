@@ -124,7 +124,8 @@ def _scores_of(obj: dict):
 def scores_text(nums, whys, research, pts, plan, reasons, card=None) -> str:
     lines = ["| Risk | Score | Why |", "|---|---|---|"]
     lines += [f"| {r.title()} | {nums[r]}/3 | {whys[r]} |" for r in RISKS]
-    src = "card" if (card or {}).get("card") else "no card"
+    card = card or {}
+    src = "card" if card.get("card") else (f"card unread: {card['error']}" if card.get("error") else "no card")
     lines.append(f"| Research ({src}) | {'yes' if research.get('ok') else 'no'} | {research.get('why', '')} |")
     lines.append("")
     lines.append(f"**Value points: {pts}** (Value x average of the other three).")
