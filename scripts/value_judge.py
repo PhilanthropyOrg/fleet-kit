@@ -8,17 +8,25 @@ scored 0-3 with one line of why, plus a research check. The model scores; this s
 so the send-back rule and the points formula are code a test can pin, not prose a model may drift.
 
   points    = value x mean(usability, feasibility, viability)      (0..9)
-  send back = value 0, usability 0, no research, or points < JUDGE_MIN_POINTS (default 1.5)
+  send back = value 0, usability 0, a thin value card, or points < JUDGE_MIN_POINTS (default 1.5)
+
+Paul, 2026-10-31 (value gate): the why and the research come from the value card on the task
+(scripts/value_card.py), never from a set section in the PR body -- 10 of 10 sampled vertical
+PRs had no `## Research`, so requiring one would be a paperwork block with a new name. A card
+the judge finds thin sends the PR back with "edit the card", and the judge re-reads the card
+with no new commit. A PR whose task has no card is not held unless JUDGE_CARD_REQUIRED=1. The
+judge scores blind: the self-score is cut from the card before the model sees it, and the gap
+is logged here afterwards. The seat is the task's owner on the board, not the branch prefix.
 
 Paul, 2026-10-31 ("check before building"): a seat posts a plan with its own four-risk
-self-score before it writes code, and copies it into the PR body as a line like
-  Plan: Value 2, Usability 3, Feasibility 2, Viability 2 (PHIA-123)
-Each review records whether the PR had a plan and whether the self-score matched the judge's
+self-score before it writes code (on the card; a PR-body line like
+  Plan: Value 2, Usability 3, Feasibility 2, Viability 2
+is read too when there is no card). Each review records whether the PR had a plan and whether the self-score matched the judge's
 (every risk within 1), so the ledger answers "are seats learning to judge?" and "how many
 send-backs never had a plan?".
 
 Usage:
-  value_judge.py apply --body BODY_FILE --pr N --head SHA --title T --ref BRANCH [--exempt]
+  value_judge.py apply --body BODY_FILE --pr N --head SHA --title T --ref BRANCH [--exempt] [--card CARD_JSON]
       stdin: judge_judy_verdict.py's output. stdout: the same object with verdict, findings_text
       and a `ledger` row folded in. Exit 0 always; an unscored verdict passes through unchanged.
   value_judge.py summary LEDGER [--merged N,N,...] [--days 7]
@@ -37,6 +45,7 @@ from collections import defaultdict
 
 RISKS = ("value", "usability", "feasibility", "viability")
 MIN_POINTS = float(os.environ.get("JUDGE_MIN_POINTS", "1.5"))
+CARD_REQUIRED = os.environ.get("JUDGE_CARD_REQUIRED", "0") == "1"
 
 # The schema fragment judge-judy.sh merges into VERDICT_SCHEMA (kept here so one file owns it).
 _RISK = {"type": "object", "properties": {"score": {"type": "integer", "minimum": 0, "maximum": 3},
@@ -74,15 +83,25 @@ def points(scores: dict) -> float:
     return round(scores["value"] * sum(rest) / len(rest), 2)
 
 
-def judge(scores: dict, research_ok: bool) -> list:
-    """Reasons to send the PR back; empty means it passes on value."""
+def judge(scores: dict, research_ok: bool, card: dict | None = None, research_why: str = "") -> list:
+    """Reasons to send the PR back; empty means it passes on value.
+
+    Research is judged from the task's value card. No card -> no research send-back (unless
+    JUDGE_CARD_REQUIRED and the board answered); a thin card -> edit the card, no new commit."""
+    card = card or {}
+    task = card.get("task") or "the task"
     reasons = []
     if scores["value"] == 0:
         reasons.append("Value is 0: no person gets something they came for, saves a step, or loses dead weight.")
     if scores["usability"] == 0:
         reasons.append("Usability is 0: a person could not use what this changes.")
-    if not research_ok:
-        reasons.append("No research: the PR must name who does this best, with sources, and how it matches or beats them.")
+    if card.get("card") and not research_ok:
+        reasons.append(f"The value card on {task} is thin: {research_why or 'best in class is missing'}. "
+                       "Edit the card (Best in class: who, link, how we match or beat it); "
+                       "the judge reads it again with no new commit.")
+    elif card and not card.get("card") and CARD_REQUIRED:
+        reasons.append(f"No value card on {task}: add one (User, Need, Data, Guess, Best in class, self-score) "
+                       "as the task document 'value-card'; the judge reads it again with no new commit.")
     p = points(scores)
     if not reasons and p < MIN_POINTS:
         reasons.append(f"Too little value to ship: {p} points, the bar is {MIN_POINTS}.")
@@ -102,17 +121,18 @@ def _scores_of(obj: dict):
     return nums, {r: str(s[r].get("why", "")) for r in RISKS}
 
 
-def scores_text(nums, whys, research, pts, plan, reasons) -> str:
+def scores_text(nums, whys, research, pts, plan, reasons, card=None) -> str:
     lines = ["| Risk | Score | Why |", "|---|---|---|"]
     lines += [f"| {r.title()} | {nums[r]}/3 | {whys[r]} |" for r in RISKS]
-    lines.append(f"| Research | {'yes' if research.get('ok') else 'no'} | {research.get('why', '')} |")
+    src = "card" if (card or {}).get("card") else "no card"
+    lines.append(f"| Research ({src}) | {'yes' if research.get('ok') else 'no'} | {research.get('why', '')} |")
     lines.append("")
     lines.append(f"**Value points: {pts}** (Value x average of the other three).")
     if plan:
         lines.append("Plan self-score: " + ", ".join(f"{r.title()} {plan[r]}" for r in RISKS)
                      + (" -- matches the judge." if plan_matches(plan, nums) else " -- differs from the judge by more than 1."))
     else:
-        lines.append("No plan line in the PR body (Plan: Value n, Usability n, Feasibility n, Viability n).")
+        lines.append("No self-score on the value card (scored blind either way).")
     if reasons:
         lines.append("")
         lines.append("**Sent back on value:**")
@@ -124,7 +144,9 @@ def plan_matches(plan, nums) -> bool:
     return all(abs(plan[r] - nums[r]) <= 1 for r in RISKS)
 
 
-def apply(verdict: dict, body: str, pr: str, head: str, title: str, ref: str, exempt: bool) -> dict:
+def apply(verdict: dict, body: str, pr: str, head: str, title: str, ref: str, exempt: bool,
+          card: dict | None = None) -> dict:
+    card = card if isinstance(card, dict) else {}
     out = dict(verdict)
     if not verdict.get("ok"):
         return out
@@ -134,16 +156,17 @@ def apply(verdict: dict, body: str, pr: str, head: str, title: str, ref: str, ex
     research = verdict.get("research") if isinstance(verdict.get("research"), dict) else {}
     research_ok = bool(research.get("ok"))
     pts = points(nums)
-    plan = plan_score(body)
-    reasons = [] if exempt else judge(nums, research_ok)
+    plan = plan_score("plan " + card["plan"]) if card.get("plan") else plan_score(body)
+    reasons = [] if exempt else judge(nums, research_ok, card, str(research.get("why", "")))
     correctness = verdict.get("verdict")
     final = "block" if (correctness == "block" or reasons) else "approve"
-    text = scores_text(nums, whys, research, pts, plan, reasons)
+    text = scores_text(nums, whys, research, pts, plan, reasons, card)
     out["verdict"] = final
     out["scores_text"] = text
     out["findings_text"] = (verdict.get("findings_text") or "") + ("\n\n" if verdict.get("findings_text") else "") + text
     out["ledger"] = {
-        "ts": time.time(), "pr": pr, "head": head, "seat": seat_of(ref), "task": task_of(title, ref),
+        "ts": time.time(), "pr": pr, "head": head, "seat": card.get("owner") or seat_of(ref),
+        "task": card.get("task") or task_of(title, ref), "card": bool(card.get("card")),
         "scores": nums, "research_ok": research_ok, "points": pts, "verdict": final,
         "correctness": correctness, "value_reasons": reasons, "exempt": exempt,
         "plan": plan, "plan_matched": plan_matches(plan, nums) if plan else None,
@@ -186,6 +209,7 @@ def main(argv=None) -> int:
     a.add_argument("--title", default="")
     a.add_argument("--ref", default="")
     a.add_argument("--exempt", action="store_true")
+    a.add_argument("--card", default="")
     s = sub.add_parser("summary")
     s.add_argument("ledger")
     s.add_argument("--merged", default=None)
@@ -205,7 +229,14 @@ def main(argv=None) -> int:
                 body = f.read()
         except OSError:
             body = ""
-        json.dump(apply(verdict, body, args.pr, args.head, args.title, args.ref, args.exempt), sys.stdout)
+        card = {}
+        if args.card:
+            try:
+                with open(args.card, encoding="utf-8") as f:
+                    card = json.load(f)
+            except (OSError, json.JSONDecodeError):
+                card = {}
+        json.dump(apply(verdict, body, args.pr, args.head, args.title, args.ref, args.exempt, card), sys.stdout)
         return 0
     rows = []
     try:

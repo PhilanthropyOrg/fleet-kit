@@ -80,12 +80,44 @@ class ValueJudge(unittest.TestCase):
         self.assertEqual(out["ledger"]["seat"], "jobs")
 
     def test_each_send_back_rule(self):
+        card = {"task": "PHIA-9", "owner": "jobs", "card": "User: a donor\nBest in class: ?", "plan": ""}
         for kw, word in (({"v": 0}, "Value is 0"), ({"u": 0}, "Usability is 0"),
-                         ({"research": False}, "No research"),
+                         ({"research": False}, "value card on PHIA-9 is thin"),
                          ({"v": 1, "u": 1, "f": 1, "b": 1}, "Too little value")):
-            out = vj.apply(_scored(**kw), "", "1", "abc", "t", "g/x", False)
+            out = vj.apply(_scored(**kw), "", "1", "abc", "t", "g/x", False, card)
             self.assertEqual(out["verdict"], "block", kw)
             self.assertIn(word, out["findings_text"], kw)
+
+    def test_no_research_section_is_never_a_send_back(self):
+        # Paul 10-31: 10 of 10 vertical PRs had no ## Research; with no card there is no hold.
+        out = vj.apply(_scored(research=False), "## Why\nx", "1", "h", "t", "g/x", False)
+        self.assertEqual(out["verdict"], "approve")
+        out = vj.apply(_scored(research=False), "", "1", "h", "t", "g/x", False,
+                       {"task": "PHIA-9", "owner": "g", "card": "", "plan": ""})
+        self.assertEqual(out["verdict"], "approve")
+
+    def test_card_owner_is_the_seat_and_its_self_score_is_logged_blind(self):
+        card = {"task": "PHIA-1217", "owner": "atlas", "card": "User: x",
+                "plan": "Self-score: Value 2, Usability 2, Feasibility 2, Viability 2"}
+        out = vj.apply(_scored(), "", "1", "h", "Quadrant words", "phia1217-quadrant-words", False, card)
+        self.assertEqual(out["ledger"]["seat"], "atlas")
+        self.assertEqual(out["ledger"]["task"], "PHIA-1217")
+        self.assertTrue(out["ledger"]["plan_matched"])
+        self.assertTrue(out["ledger"]["card"])
+
+    def test_value_card_cuts_the_self_score_before_the_judge_sees_it(self):
+        import value_card as vc
+        card, plan = vc.blind("User: a donor\nNeed: x\n4-risk self-score: Value 3, Usability 2, Feasibility 2, Viability 1\nBest in class: Candid")
+        self.assertNotIn("Value 3", card)
+        self.assertIn("Best in class: Candid", card)
+        self.assertEqual(vj.plan_score("plan " + plan)["value"], 3)
+        self.assertEqual(vc.fetch("not-a-task"), {})
+
+    def test_shell_reads_the_card_and_cuts_paperwork(self):
+        sh = (Path(__file__).resolve().parents[1] / "members/judge-judy/judge-judy.sh").read_text()
+        self.assertIn('--card "$CARD_FILE"', sh)
+        self.assertIn("VALUE CARD", sh)
+        self.assertNotIn("should carry '## Why'", sh)
 
     def test_a_correctness_block_stays_a_block(self):
         bug = [{"file": "a.py", "line": 1, "severity": "high", "what_breaks": "x", "plain": "y"}]
