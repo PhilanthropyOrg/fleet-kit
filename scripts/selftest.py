@@ -5374,8 +5374,11 @@ def _messenger_brief_restates_the_strategy_and_points_at_pages():
     assert "**See it: <live URL>**" in charter, "landed lines must carry the live URL"
     law = (ROOT / "agents" / "persona_law.md").read_text()
     assert "`See it: <URL>`" in law and "See it: (internal)" in law, "persona law 10d lacks the See it line"
+    # PHIA-1451 (Reif 2026-10-30): the reviewer judges value, not paperwork; the See it line is
+    # the author's, never a block.
     for f in ("members/judge-judy/judge-judy.sh", "members/judge-judy/judge-judy.md"):
-        assert "'See it: <URL or path>'" in (ROOT / f).read_text(), f"{f} does not block a visible change without a See it line"
+        txt = (ROOT / f).read_text()
+        assert "four big risks" in txt and "'See it: <URL or path>'" not in txt, f"{f} is not the value judge"
     # Reif answers decisions on the console, never by replying to the sending inbox.
     assert "ask.py file --member dont-shoot-the-messenger" in charter and "console_url" in charter, "decisions must be filed as asks"
     src = (ROOT / "scripts" / "messenger_brief.py").read_text()
@@ -5495,9 +5498,10 @@ def _judge_runs_the_closes_gate_and_reads_the_issue():
     assert gate < call, "closes gate must run before the review model call"
     assert 'VERDICT="VERDICT: block"' in js[gate:call], "a gate block must set the verdict the shared handler reads"
     assert 'if [ "$GATE_VERDICT" != "block" ]; then' in js[gate:call], "the model call must be skipped when the gate blocked"
-    assert "EVERY acceptance criterion" in js and "freshman 101" in js, "prompt lacks the acceptance/plain-language rules"
+    # PHIA-1451: the criteria now feed the value score; missing evidence is no longer a block.
+    assert "Use the acceptance criteria to judge value" in js and "four big risks" in js, "prompt lacks the criteria/value rules"
     md = (ROOT / "members" / "judge-judy" / "judge-judy.md").read_text()
-    assert "{{ISSUE_INTENT}}" in md and "EVERY acceptance criterion" in md, "judge-judy.md is out of sync with the prompt"
+    assert "{{ISSUE_INTENT}}" in md and "Use the acceptance criteria to judge value" in md, "judge-judy.md is out of sync with the prompt"
     assert "Part of #N" in (ROOT / "members" / "minion" / "minion.md").read_text()
     law = (ROOT / "agents" / "persona_law.md").read_text()
     assert "## 13. Freshman 101 language" in law and "## 14. Definition of Done" in law
@@ -6840,7 +6844,12 @@ def _judge_judy_reviews_big_prs():
         "judge-judy passes the prompt as an argument again: >128 KB dies with rc 126"
     assert caps["MAX_DIFF_BYTES"] >= 300000, caps
     prompt = src[start:start + fixed]
-    assert 'head -c "$MAX_BODY_BYTES" "$BODY_FILE"' in prompt, "PR body goes into the prompt uncapped"
+    # PHIA-1451: the body goes in as BODY_PROMPT (self-score line cut, for a blind score), capped
+    # where it is built; the value card has its own cap.
+    assert "${BODY_PROMPT}" in prompt and re.search(r'^\s*BODY_PROMPT=.*head -c "\$MAX_BODY_BYTES"\)$', src, re.M), \
+        "PR body goes into the prompt uncapped"
+    assert re.search(r'^\s*CARD_TEXT=.*head -c "\$\{MAX_CARD_BYTES:-\d+\}"\)$', src, re.M), \
+        "value card goes into the prompt uncapped"
     assert 'head -c "$MAX_INTENT_BYTES"' in prompt, "closed-issue text goes into the prompt uncapped"
 
     assert '! gh pr diff "$PR" > "$DIFF_FILE" 2>/dev/null && ! pr_diff_local "$PR" > "$DIFF_FILE"' in src, \
