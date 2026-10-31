@@ -5498,9 +5498,10 @@ def _judge_runs_the_closes_gate_and_reads_the_issue():
     assert gate < call, "closes gate must run before the review model call"
     assert 'VERDICT="VERDICT: block"' in js[gate:call], "a gate block must set the verdict the shared handler reads"
     assert 'if [ "$GATE_VERDICT" != "block" ]; then' in js[gate:call], "the model call must be skipped when the gate blocked"
-    assert "EVERY acceptance criterion" in js and "freshman 101" in js, "prompt lacks the acceptance/plain-language rules"
+    # PHIA-1451: the criteria now feed the value score; missing evidence is no longer a block.
+    assert "Use the acceptance criteria to judge value" in js and "four big risks" in js, "prompt lacks the criteria/value rules"
     md = (ROOT / "members" / "judge-judy" / "judge-judy.md").read_text()
-    assert "{{ISSUE_INTENT}}" in md and "EVERY acceptance criterion" in md, "judge-judy.md is out of sync with the prompt"
+    assert "{{ISSUE_INTENT}}" in md and "Use the acceptance criteria to judge value" in md, "judge-judy.md is out of sync with the prompt"
     assert "Part of #N" in (ROOT / "members" / "minion" / "minion.md").read_text()
     law = (ROOT / "agents" / "persona_law.md").read_text()
     assert "## 13. Freshman 101 language" in law and "## 14. Definition of Done" in law
