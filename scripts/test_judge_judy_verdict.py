@@ -2,7 +2,9 @@
 "I want all reports to be written in plain english"), and the rendered text leads with it."""
 from __future__ import annotations
 
+import io
 import json
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -112,6 +114,27 @@ class ValueJudge(unittest.TestCase):
         self.assertIn("Best in class: Candid", card)
         self.assertEqual(vj.plan_score("plan " + plan)["value"], 3)
         self.assertEqual(vc.fetch("not-a-task"), {})
+
+    def test_value_card_sends_the_board_host_header(self):
+        import value_card as vc
+        from unittest import mock
+        seen = []
+
+        class _R(io.StringIO):
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+
+        def _open(req, timeout=None):
+            seen.append((req.full_url, req.get_header("Host"), req.get_header("Authorization")))
+            return _R("{}")
+        env = {"PAPERCLIP_API_URL": "http://172.18.0.3:3100", "PAPERCLIP_API_KEY": "k",
+               "PAPERCLIP_HOST": "localhost:3100"}
+        with mock.patch.dict(os.environ, env), mock.patch.object(vc.urllib.request, "urlopen", _open):
+            self.assertEqual(vc._get("/api/issues/PHIA-1"), {})
+            del os.environ["PAPERCLIP_HOST"]
+            vc._get("/api/issues/PHIA-1")
+        self.assertEqual(seen[0], ("http://172.18.0.3:3100/api/issues/PHIA-1", "localhost:3100", "Bearer k"))
+        self.assertIsNone(seen[1][1])
 
     def test_review_again_label_and_task_from_branch(self):
         import re as _re
