@@ -130,7 +130,7 @@ class ValueJudge(unittest.TestCase):
         env = {"PAPERCLIP_API_URL": "http://172.18.0.3:3100", "PAPERCLIP_API_KEY": "k",
                "PAPERCLIP_HOST": "localhost:3100"}
         with mock.patch.dict(os.environ, env), mock.patch.object(vc.urllib.request, "urlopen", _open):
-            self.assertEqual(vc._get("/api/issues/PHIA-1"), {})
+            self.assertEqual(vc._get("/api/issues/PHIA-1"), ({}, ""))
             del os.environ["PAPERCLIP_HOST"]
             vc._get("/api/issues/PHIA-1")
         self.assertEqual(seen[0], ("http://172.18.0.3:3100/api/issues/PHIA-1", "localhost:3100", "Bearer k"))
@@ -161,6 +161,37 @@ class ValueJudge(unittest.TestCase):
         self.assertIn("| Research (card unread: HTTP 403) |", text)
         sh = (Path(__file__).resolve().parents[1] / "members/judge-judy/judge-judy.sh").read_text()
         self.assertIn("export PAPERCLIP_API_URL PAPERCLIP_API_KEY PAPERCLIP_HOST", sh)
+
+    def test_card_read_waits_past_a_slow_board_and_reads_issue_and_card_at_once(self):
+        # PHIA-1504: board reads ran p95 ~105 s; at 20 s, 7 of 13 verdicts said "card unread: TimeoutError".
+        import threading
+        import value_card as vc
+        from unittest import mock
+        timeouts, inside, peak, lock = [], [0], [0], threading.Lock()
+
+        class _R(io.StringIO):
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+
+        def _slow(req, timeout=None):
+            timeouts.append(timeout)
+            with lock:
+                inside[0] += 1
+                peak[0] = max(peak[0], inside[0])
+            import time
+            time.sleep(0.2)
+            with lock:
+                inside[0] -= 1
+            if "/documents/" in req.full_url:
+                return _R(json.dumps({"body": "User: a donor", "updatedAt": "2026-10-31T19:20:14Z"}))
+            return _R("{}")
+        env = {"PAPERCLIP_API_URL": "http://b", "PAPERCLIP_API_KEY": "k"}
+        with mock.patch.dict(os.environ, env), mock.patch.object(vc.urllib.request, "urlopen", _slow):
+            out = vc.fetch("PHIA-1")
+        self.assertEqual(out["card"], "User: a donor")
+        self.assertNotIn("error", out)
+        self.assertGreaterEqual(min(timeouts), 120)
+        self.assertEqual(peak[0], 2)
 
     def test_review_again_label_and_task_from_branch(self):
         import re as _re
