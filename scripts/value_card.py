@@ -12,7 +12,8 @@ separately as `plan`, so value_judge.py can log the gap after the judge has scor
 
 Usage: value_card.py TASK  (PHIA-123)  ->  JSON on stdout, `{}` when there is no board to ask.
   {"task", "owner", "card", "card_updated_at", "plan"}   card is "" when the task has none.
-Reads PAPERCLIP_API_URL and PAPERCLIP_API_KEY (a read-only key) from the environment. Never
+Reads PAPERCLIP_API_URL and PAPERCLIP_API_KEY (a read-only key) from the environment, and sends
+PAPERCLIP_HOST as the Host header when set (PHIA-1504: lucky's worker reaches the board by IP). Never
 fatal: any failure prints `{}` and the judge goes on without a card.
 """
 from __future__ import annotations
@@ -40,7 +41,10 @@ def _get(path: str):
     base, key = os.environ.get("PAPERCLIP_API_URL"), os.environ.get("PAPERCLIP_API_KEY")
     if not base or not key:
         return None
-    req = urllib.request.Request(base.rstrip("/") + path, headers={"Authorization": f"Bearer {key}"})
+    headers = {"Authorization": f"Bearer {key}"}
+    if os.environ.get("PAPERCLIP_HOST"):  # the worker reaches the board by IP; it answers only to its own Host
+        headers["Host"] = os.environ["PAPERCLIP_HOST"]
+    req = urllib.request.Request(base.rstrip("/") + path, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=20) as r:
             return json.load(r)
