@@ -6844,7 +6844,12 @@ def _judge_judy_reviews_big_prs():
         "judge-judy passes the prompt as an argument again: >128 KB dies with rc 126"
     assert caps["MAX_DIFF_BYTES"] >= 300000, caps
     prompt = src[start:start + fixed]
-    assert 'head -c "$MAX_BODY_BYTES" "$BODY_FILE"' in prompt, "PR body goes into the prompt uncapped"
+    # PHIA-1451: the body goes in as BODY_PROMPT (self-score line cut, for a blind score), capped
+    # where it is built; the value card has its own cap.
+    assert "${BODY_PROMPT}" in prompt and re.search(r'^\s*BODY_PROMPT=.*head -c "\$MAX_BODY_BYTES"\)$', src, re.M), \
+        "PR body goes into the prompt uncapped"
+    assert re.search(r'^\s*CARD_TEXT=.*head -c "\$\{MAX_CARD_BYTES:-\d+\}"\)$', src, re.M), \
+        "value card goes into the prompt uncapped"
     assert 'head -c "$MAX_INTENT_BYTES"' in prompt, "closed-issue text goes into the prompt uncapped"
 
     assert '! gh pr diff "$PR" > "$DIFF_FILE" 2>/dev/null && ! pr_diff_local "$PR" > "$DIFF_FILE"' in src, \
