@@ -666,7 +666,8 @@ if [ -n "$CUSTOM_RUNNER" ]; then
   fi
   log "pass start (custom runner=$CUSTOM_RUNNER)"
   [ -n "$MAX_BUDGET" ] && export FLEET_MAX_BUDGET_USD="$MAX_BUDGET"
-  "$RUNNER_PATH"
+  # PHIA-1696: `--task lane=<n>` reaches the runner, so judge-judy can run a second lane.
+  FLEET_LANE="$LANE" "$RUNNER_PATH"
   RC=$?
   log "pass end rc=$RC (custom runner)"
   exit "$RC"

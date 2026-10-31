@@ -383,7 +383,11 @@ EXPLICIT_PR="${1:-}"
 # flock was confirmed deployed, and "another judge-judy tick still holds" has never once fired
 # across 106 pass-start events (~25h) of log history -- zero evidence the mutex ever blocked a
 # tick. $LOG_DIR is proven persistent (judge-judy.log itself spans days).
-LOCKFILE="$LOG_DIR/judge-judy.lock"
+#
+# Lanes (PHIA-1696): one lane reviewed one PR at a time, and 15 PRs of one seat waited in that
+# single queue. FLEET_LANE (run_member.sh's `--task lane=<n>`) gives each lane its own tick lock,
+# so the lanes run side by side on the same cron; claim_pr below keeps them off the same PR.
+LOCKFILE="$LOG_DIR/judge-judy${FLEET_LANE:+-lane$FLEET_LANE}.lock"
 mkdir -p "$(dirname "$LOCKFILE")"
 exec 9>"$LOCKFILE"
 if command -v flock >/dev/null 2>&1; then
@@ -398,6 +402,13 @@ if command -v flock >/dev/null 2>&1; then
     exit 0
   fi
 fi
+
+# claim_pr <pr>: 0 when this process now holds the PR's review claim, 1 when another lane holds
+# it. fd 6 (not 7/8/9, see run_member.sh's lock note): re-opening it for the next PR drops the
+# last claim, and exit drops it too, so a dead lane never wedges a PR.
+claim_pr() {
+  exec 6>"$LOG_DIR/judge-judy-pr-$1.lock" && flock -n 6
+}
 
 SPENT_USD="0"
 LAST_CALL_USD="0"
@@ -463,6 +474,20 @@ while :; do
   fi
   PR=${PICK% *}
   HEAD_SHA=${PICK#* }
+  # The other lane may be reviewing this PR, or may have posted its verdict between our scan and
+  # now: take the claim, then look again, so one head never gets two reviews (a later POST would
+  # flip the fresher verdict, PR #175).
+  if ! claim_pr "$PR"; then
+    log "PR #$PR: another review lane holds it -- next PR"
+    SKIPPED_THIS_TICK="$SKIPPED_THIS_TICK $PR"
+    continue
+  fi
+  RECHECK=$(pick_pr "$PR" "")
+  if [ "$RECHECK" != "$PR $HEAD_SHA" ]; then
+    log "PR #$PR: no longer needs this review after the claim (${RECHECK:-reviewed meanwhile}) -- next PR"
+    SKIPPED_THIS_TICK="$SKIPPED_THIS_TICK $PR"
+    continue
+  fi
   log "PR #$PR head ${HEAD_SHA:0:12} -- reviewing (model=$MODEL)"
 
   DIFF_FILE=$(mktemp "${TMPDIR:-/tmp}/fleet_review_diff.XXXXXX")
