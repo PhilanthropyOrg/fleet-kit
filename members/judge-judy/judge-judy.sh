@@ -523,10 +523,11 @@ while :; do
   # The model scores; scripts/value_judge.py decides the send-back and the points.
   VALUE_EXEMPT=""
   RULES_TEXT=""
-  for f in ${JUDGE_RULES_FILES:-docs/judge-rules.md docs/design-system.md}; do
+  # docs/ui-rules.md: the owner's 13 UI rules (PHIA-1451); every UI send-back cites one by name.
+  for f in ${JUDGE_RULES_FILES:-docs/ui-rules.md docs/design-system.md}; do
     [ -r "$f" ] && RULES_TEXT="$RULES_TEXT
 --- $f ---
-$(head -c "${JUDGE_RULES_BYTES:-6000}" "$f")"
+$(head -c "${JUDGE_RULES_BYTES:-10000}" "$f")"
   done
   BODY_RULES="Then judge VALUE, as the one judge for this repo. Use your own judgment and what you know of best practice, not a checklist. Score each of Marty Cagan's four big risks 0-3 (0 none, 1 weak, 2 solid, 3 best in class) with one line of why a smart person outside software can read:
 - value: will people want it? Utility (a real person gets what they came for, or saves a step), delight (Kano: basic, performance or delighter), and cuts (code, steps or pages removed with no loss of value earn points; a pure refactor that cuts code scores here).
@@ -535,7 +536,7 @@ $(head -c "${JUDGE_RULES_BYTES:-6000}" "$f")"
 - viability: does it work for the business? One of a thing (one HQ at /hq, one org record everywhere), hub and spoke, every page a place to give, and our advantages: public hard-to-read data made beautiful and useful, matching donors and providers to orgs, verified org owners, a festival of giving.
 Research and the why come from the task's VALUE CARD below (User, Need, Data, Guess, Best in class), not from any section of the PR body; a PR body needs no set sections. Set research.ok true only if the card's Best in class names who does this best, with a source (a link or a named product), and says how this matches or beats them; why says what was named or missing, in words the seat can fix by editing the card. A bug fix or a cut needs only two lines on its card. With no card, set research.ok from what you know and say so. Never block for missing paperwork (no screenshot, no 'See it:' line, no section): scores decide the send-back, not your verdict. Your verdict is for correctness only.${RULES_TEXT:+
 
-Design rules (from the repo, context):$RULES_TEXT}"
+Design rules (from the repo, context). When usability is low because of a UI rule, name that rule (for example '6. Blue means authority') in usability.why:$RULES_TEXT}"
   if gh pr view "$PR" --json author,files -q 'select(.author.login == "app/dependabot" or .author.login == "dependabot[bot]" or .author.login == "dependabot") | [.files[].path | select(test("(^|/)(pyproject\\.toml|uv\\.lock|requirements[^/]*\\.txt|package(-lock)?\\.json|yarn\\.lock|pnpm-lock\\.yaml)$|^\\.github/workflows/") | not)] | length == 0' 2>/dev/null | grep -qx true; then
     BODY_RULES="This PR is an automated dependency-version bump: its body is the upstream release notes. Block only if the new version would break this repo's code. Score the four risks anyway (research.ok may be false); a version bump is never sent back on value."
     VALUE_EXEMPT="--exempt"

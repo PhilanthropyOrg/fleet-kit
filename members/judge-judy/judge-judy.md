@@ -45,8 +45,8 @@ Use the acceptance criteria to judge value: a diff that does not do what its iss
 
 {{BODY_RULES}} -- the value rubric (judge-judy.sh builds it): score Marty Cagan's four big risks
 0-3 with one line of why each -- value (utility, Kano delight, cuts), usability (Nielsen's 10
-heuristics + the repo's design rules from `$JUDGE_RULES_FILES`, default `docs/judge-rules.md
-docs/design-system.md`, at 390 and 1440), feasibility (scale to all 1.8M orgs and 10x traffic,
+heuristics + the repo's design rules from `$JUDGE_RULES_FILES`, default `docs/ui-rules.md
+docs/design-system.md`, each UI send-back citing a rule by name, at 390 and 1440), feasibility (scale to all 1.8M orgs and 10x traffic,
 ISO/IEC 25010; correctness lands here), viability (one of a thing, hub and spoke, every page a
 place to give, our combination of advantages) -- and `research.ok`: the task's VALUE CARD (not
 the PR body) names who does it best, with a source, and how this matches or beats them. The PR
