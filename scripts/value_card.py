@@ -16,6 +16,8 @@ Usage: value_card.py TASK  (PHIA-123)  ->  JSON on stdout, `{}` when TASK is not
 Reads PAPERCLIP_API_URL and PAPERCLIP_API_KEY (a read-only key) from the environment, and sends
 PAPERCLIP_HOST as the Host header when set (PHIA-1504: lucky's worker reaches the board by IP). Never
 fatal: any failure prints `{}` and the judge goes on without a card.
+Each read waits JUDGE_CARD_TIMEOUT seconds (default 150): board reads ran p95 ~105 s on 10-31 (PHIA-1340)
+and 7 of 13 verdicts said "card unread: TimeoutError" at 20 s. The issue and the card are read at once.
 """
 from __future__ import annotations
 
@@ -25,8 +27,10 @@ import re
 import sys
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 
 CARD_KEY = os.environ.get("JUDGE_CARD_KEY", "value-card")
+TIMEOUT = float(os.environ.get("JUDGE_CARD_TIMEOUT") or 150)
 _SELF_RE = re.compile(r"^[^\n]*\b(self[- ]?score|4[- ]risk|four[- ]risk|plan)\b[^\n]*value\D{0,4}[0-3][^\n]*$",
                       re.IGNORECASE | re.MULTILINE)
 
@@ -39,43 +43,38 @@ def blind(card: str) -> tuple[str, str]:
     return (card[:m.start()] + card[m.end():]).strip(), m.group(0)
 
 
-LAST_ERROR = ""  # why the last _get returned None, for the score table (PHIA-1504)
-
-
 def _get(path: str):
-    global LAST_ERROR
-    LAST_ERROR = ""
+    """(json or None, why it is None: '' on success) -- the why goes to the score table (PHIA-1504)."""
     base, key = os.environ.get("PAPERCLIP_API_URL"), os.environ.get("PAPERCLIP_API_KEY")
     if not base or not key:
-        LAST_ERROR = "PAPERCLIP_API_URL or PAPERCLIP_API_KEY not in the judge's environment"
-        return None
+        return None, "PAPERCLIP_API_URL or PAPERCLIP_API_KEY not in the judge's environment"
     headers = {"Authorization": f"Bearer {key}"}
     if os.environ.get("PAPERCLIP_HOST"):  # the worker reaches the board by IP; it answers only to its own Host
         headers["Host"] = os.environ["PAPERCLIP_HOST"]
     req = urllib.request.Request(base.rstrip("/") + path, headers=headers)
     try:
-        with urllib.request.urlopen(req, timeout=20) as r:
-            return json.load(r)
+        with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+            return json.load(r), ""
     except urllib.error.HTTPError as e:
-        LAST_ERROR = f"HTTP {e.code}"
-        return None
+        return None, f"HTTP {e.code}"
     except Exception as e:  # never fatal: the judge goes on without a card
-        LAST_ERROR = type(e).__name__ + (f": {getattr(e, 'reason', '')}" if getattr(e, "reason", "") else "")
-        return None
+        return None, type(e).__name__ + (f": {getattr(e, 'reason', '')}" if getattr(e, "reason", "") else "")
 
 
 def fetch(task: str) -> dict:
     if not re.fullmatch(r"PHIA-\d+", task or ""):
         return {}
-    issue = _get(f"/api/issues/{task}")
-    if not isinstance(issue, dict):
-        return {"task": task, "error": LAST_ERROR or "board answered with no issue"}
-    owner = None
-    if issue.get("assigneeAgentId"):
-        agent = _get(f"/api/agents/{issue['assigneeAgentId']}")
-        owner = (agent or {}).get("urlKey") or (agent or {}).get("name")
-    doc = _get(f"/api/issues/{task}/documents/{CARD_KEY}")
-    doc_error = "" if isinstance(doc, dict) or LAST_ERROR == "HTTP 404" else LAST_ERROR
+    with ThreadPoolExecutor(2) as pool:  # slow board: read the issue and the card at once
+        card_read = pool.submit(_get, f"/api/issues/{task}/documents/{CARD_KEY}")
+        issue, issue_error = _get(f"/api/issues/{task}")
+        if not isinstance(issue, dict):
+            return {"task": task, "error": issue_error or "board answered with no issue"}
+        owner = None
+        if issue.get("assigneeAgentId"):
+            agent, _ = _get(f"/api/agents/{issue['assigneeAgentId']}")
+            owner = (agent or {}).get("urlKey") or (agent or {}).get("name")
+        doc, doc_error = card_read.result()
+    doc_error = "" if isinstance(doc, dict) or doc_error == "HTTP 404" else doc_error
     body = doc.get("body", "") if isinstance(doc, dict) else ""
     card, plan = blind(body)
     out = {"task": task, "owner": owner, "card": card,

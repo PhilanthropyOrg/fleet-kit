@@ -277,7 +277,8 @@ pick_pr() {
       # PHIA-1451: a thin value card is fixed on the task, not in the PR -- a card edited after
       # the block re-reviews the same head with no new commit and no CI rerun.
       if [ -n "$block_at" ] && { [ -z "$edited_at" ] || [[ ! "$edited_at" > "$block_at" ]]; }; then
-        card_at=$(python3 "${KIT_DIR:-.}/scripts/value_card.py" "$(pr_task "$pr" "$pr_list_json")" 2>/dev/null \
+        # A short wait here: this check runs once per blocked PR on every pass (PHIA-1504).
+        card_at=$(JUDGE_CARD_TIMEOUT=30 python3 "${KIT_DIR:-.}/scripts/value_card.py" "$(pr_task "$pr" "$pr_list_json")" 2>/dev/null \
           | jq -r '.card_updated_at // empty' 2>/dev/null)
         [ -n "$card_at" ] && [[ "$card_at" > "$block_at" ]] && edited_at="$card_at"
       fi
