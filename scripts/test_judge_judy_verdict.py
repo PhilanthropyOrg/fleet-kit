@@ -113,6 +113,23 @@ class ValueJudge(unittest.TestCase):
         self.assertEqual(vj.plan_score("plan " + plan)["value"], 3)
         self.assertEqual(vc.fetch("not-a-task"), {})
 
+    def test_review_again_label_and_task_from_branch(self):
+        import re as _re
+        import subprocess
+        sh = (Path(__file__).resolve().parents[1] / "members/judge-judy/judge-judy.sh").read_text()
+        fn = _re.search(r"^pr_task\(\) \{.*?^\}", sh, _re.S | _re.M).group(0)
+        jq = _re.search(r"jq -e --arg n \"\$pr\" --arg l \"\$AGAIN_LABEL\" '([^']+)'", sh).group(1)
+        prs = json.dumps([{"number": 7, "title": "Quadrant words", "headRefName": "phia1217-quadrant-words",
+                           "labels": [{"name": "review:again"}]},
+                          {"number": 8, "title": "x (PHIA-12)", "headRefName": "g/y", "labels": []}])
+        script = fn + f"\npr_task 7 '{prs}'; pr_task 8 '{prs}'\n" + "".join(
+            f"printf '%s' '{prs}' | jq -e --arg n {n} --arg l review:again '{jq}' >/dev/null && echo again{n}\n"
+            for n in (7, 8))
+        out = subprocess.run(["bash", "-c", script], capture_output=True, text=True).stdout.split()
+        self.assertEqual(out, ["PHIA-1217", "PHIA-12", "again7"])
+        self.assertIn("Paperwork findings from that round no longer apply", sh)
+        self.assertIn('labels/${AGAIN_LABEL}', sh)
+
     def test_shell_reads_the_card_and_cuts_paperwork(self):
         sh = (Path(__file__).resolve().parents[1] / "members/judge-judy/judge-judy.sh").read_text()
         self.assertIn('--card "$CARD_FILE"', sh)

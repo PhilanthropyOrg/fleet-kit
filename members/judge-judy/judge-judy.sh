@@ -91,6 +91,9 @@ TICK_BUDGET_USD="${FLEET_TICK_BUDGET_USD:-15}"
 SETTLE_S="${JUDGE_JUDY_SETTLE_S:-600}"
 # A PR with this label is reviewed before the rest of the queue (pick_pr); empty turns the lane off.
 PRIORITY_LABEL="${JUDGE_JUDY_PRIORITY_LABEL-review:next}"
+# A PR labelled review:again is judged again at the same head, once; the label comes off after
+# the verdict. PHIA-1451: 43 PRs blocked by the old paperwork rules get one look from the value judge.
+AGAIN_LABEL="${JUDGE_JUDY_AGAIN_LABEL-review:again}"
 # The diff is capped, not because big diffs don't deserve review, but because an unbounded
 # prompt can blow the context window and produce an unparseable half-answer — which then
 # reads as a reviewer outage.
@@ -263,7 +266,10 @@ pick_pr() {
     # edited after it. A block often asks for a body-only fix ("change Closes to Part of"), and
     # that edit leaves the head as it was: philanthropy#12618 (OrgVerify step 3) sat 13h on a
     # block its body had already answered, and the-fixer's 3 passes ran out.
-    if [ "${review_seen:-0}" -gt 0 ]; then
+    if [ "${review_seen:-0}" -gt 0 ] && [ -n "$AGAIN_LABEL" ] && printf '%s' "$pr_list_json" \
+        | jq -e --arg n "$pr" --arg l "$AGAIN_LABEL" '.[] | select((.number | tostring) == $n) | [.labels[]?.name] | index($l) != null' >/dev/null 2>&1; then
+      log "PR #$pr head ${head:0:12}: labelled $AGAIN_LABEL -- judging again"
+    elif [ "${review_seen:-0}" -gt 0 ]; then
       block_at=$(jq -r --arg c "$CONTEXT" '[.[] | select(.context==$c)][0] | select(.state=="failure") | .updated_at // empty' <<<"$statuses" 2>/dev/null)
       edited_at=""
       [ -n "$block_at" ] && edited_at=$(ghr timeout 25s gh api graphql -F owner="${REPO_SLUG%%/*}" -F name="${REPO_SLUG#*/}" -F n="$pr" \
@@ -607,7 +613,7 @@ This PR closes an issue it does not finish (closes_gate.py, fk#629). Change the 
     PRIOR_NOTE="This PR was reviewed before. At head $(head -1 "$BLOCK_FILE" | cut -c1-12) the review blocked it with:
 $(tail -n +2 "$BLOCK_FILE" | head -c 4000)
 
-Check each of those first: one still not fixed stays a block. A NEW finding blocks this round only if its severity is high (a person loses data, money or access, or a page breaks) or it sits in code this push changed. Anything else the earlier round could have raised goes in findings with severity low and does not block: approve once every earlier finding is fixed and nothing new is high."
+Paperwork findings from that round no longer apply and must be dropped: a missing screenshot, 'See it:' line, design walk line, section, plain-words opening or evidence per criterion is never a block (PHIA-1451). Check each remaining finding first: one still not fixed stays a block. A NEW finding blocks this round only if its severity is high (a person loses data, money or access, or a page breaks) or it sits in code this push changed. Anything else the earlier round could have raised goes in findings with severity low and does not block: approve once every earlier finding is fixed and nothing new is high."
   fi
 
 # See judge-judy.md (this member's own charter) for the annotated version of this template.
@@ -853,6 +859,7 @@ $ERR_VISION_LINK"
 
   fi  # end of the model-review section (closes gate may have set VERDICT already)
 
+  [ -n "$AGAIN_LABEL" ] && timeout 25s gh api -X DELETE "repos/${REPO_SLUG}/issues/${PR}/labels/${AGAIN_LABEL}" >/dev/null 2>&1 || true
   if [ "$VERDICT" = "VERDICT: approve" ]; then
     post_status "$HEAD_SHA" "success" "Code review passed ($REVIEWER_LABEL)" \
       && log "PR #$PR: APPROVED -- status posted" \
