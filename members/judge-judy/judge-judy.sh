@@ -207,12 +207,6 @@ pass_empty_pr() { # <pr> <sha>
 #   2 -> `gh pr list` itself failed, or a `gh pr view`/`gh api` call failed partway through the
 #        per-PR scan -- the queue was NOT fully accounted for, so this must never be reported
 #        the same as case 1.
-# The PHIA-N a PR works on: from its title, else its branch name (phia1217-..., ops/phia-1145-...).
-pr_task() {
-  printf '%s' "$2" | jq -r --arg n "$1" '.[] | select((.number | tostring) == $n) | (.title + " " + .headRefName)' 2>/dev/null \
-    | grep -oiE 'phia-?[0-9]+' | head -1 | tr -d '-' | sed -E 's/^[pP][hH][iI][aA]/PHIA-/'
-}
-
 pick_pr() {
   local pr head pushed_at age statuses review_seen block_at edited_at card_at checks explicit="${1:-}" skip_list="${2:-}"
   local gh_failure=0 pr_list_json pr_list_rc view_rc api_rc
@@ -266,7 +260,7 @@ pick_pr() {
     # edited after it. A block often asks for a body-only fix ("change Closes to Part of"), and
     # that edit leaves the head as it was: philanthropy#12618 (OrgVerify step 3) sat 13h on a
     # block its body had already answered, and the-fixer's 3 passes ran out.
-    if [ "${review_seen:-0}" -gt 0 ] && [ -n "$AGAIN_LABEL" ] && printf '%s' "$pr_list_json" \
+    if [ "${review_seen:-0}" -gt 0 ] && [ -n "${AGAIN_LABEL:-}" ] && printf '%s' "$pr_list_json" \
         | jq -e --arg n "$pr" --arg l "$AGAIN_LABEL" '.[] | select((.number | tostring) == $n) | [.labels[]?.name] | index($l) != null' >/dev/null 2>&1; then
       log "PR #$pr head ${head:0:12}: labelled $AGAIN_LABEL -- judging again"
     elif [ "${review_seen:-0}" -gt 0 ]; then
@@ -278,7 +272,7 @@ pick_pr() {
       # PHIA-1451: a thin value card is fixed on the task, not in the PR -- a card edited after
       # the block re-reviews the same head with no new commit and no CI rerun.
       if [ -n "$block_at" ] && { [ -z "$edited_at" ] || [[ ! "$edited_at" > "$block_at" ]]; }; then
-        card_at=$(python3 "$KIT_DIR/scripts/value_card.py" "$(pr_task "$pr" "$pr_list_json")" 2>/dev/null \
+        card_at=$(python3 "${KIT_DIR:-.}/scripts/value_card.py" "$(pr_task "$pr" "$pr_list_json")" 2>/dev/null \
           | jq -r '.card_updated_at // empty' 2>/dev/null)
         [ -n "$card_at" ] && [[ "$card_at" > "$block_at" ]] && edited_at="$card_at"
       fi
@@ -300,6 +294,12 @@ pick_pr() {
   done
   [ "$gh_failure" -eq 1 ] && return 2
   return 1
+}
+
+# The PHIA-N a PR works on: from its title, else its branch name (phia1217-..., ops/phia-1145-...).
+pr_task() {
+  printf '%s' "$2" | jq -r --arg n "$1" '.[] | select((.number | tostring) == $n) | (.title + " " + .headRefName)' 2>/dev/null \
+    | grep -oiE 'phia-?[0-9]+' | head -1 | tr -d '-' | sed -E 's/^[pP][hH][iI][aA]/PHIA-/'
 }
 
 report_run() { # <pr> <head_sha> <usage_file> <outcome-line> <evidence-line> <self-critique-line> [report-text]
