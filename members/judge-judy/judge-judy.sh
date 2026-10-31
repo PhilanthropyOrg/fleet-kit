@@ -11,10 +11,11 @@
 # review locally through your own account.
 #
 # CONTRACT
-#   - Reviews PRs one at a time in a loop, oldest-created first, until either the queue is
+#   - Reviews PRs one at a time in a loop, newest-created first, until either the queue is
 #     empty or FLEET_TICK_BUDGET_USD (default $15/tick) is spent -- so a quiet repo still
 #     reviews everything in one tick instead of trickling one PR per 15-min schedule run.
-#     A PR labelled review:next (JUDGE_JUDY_PRIORITY_LABEL; empty turns it off) goes ahead of that queue.
+#     Reverts and red-main fixes go first, then a PR labelled review:next (JUDGE_JUDY_PRIORITY_LABEL;
+#     empty turns it off), then the rest.
 #     Budget is checked BEFORE each pick using the actual cost of the last call made this
 #     tick (first call in a tick always runs -- there's no prior cost to check against), so
 #     one hung/expensive review can't silently blow through many multiples of the cap.
@@ -215,15 +216,17 @@ pick_pr() {
   # consecutive ticks (~2h) because newer PRs kept landing ahead of it in list order.
   # --limit: without it gh returns only the 30 newest, so with 87 open (philanthropy 10-30) the
   # sort above ran over the newest 30 and every older PR, explicit override included, was unseen.
-  # Priority lane: a PR labelled $PRIORITY_LABEL goes ahead of the oldest-first queue. On 10-30 a
-  # green PR for the company's top goal waited 3h20m behind 14 older heads; the owner's target
-  # is under 30 min. Within the lane, and outside it, the order stays oldest-created first.
+  # Order, three lanes (PHIA-1451, desk 10-31 2:45 AM): main sat red from 14725 with no deploy for
+  # 2h while green revert 14855 waited behind 34 older PRs. (0) a revert or red-main fix -- title
+  # starts "Revert"/"Reland" (or has it after a colon) or says deploys/main red; (1) a PR labelled
+  # $PRIORITY_LABEL (10-30: a top-goal PR waited 3h20m); (2) the rest. Each lane newest-created
+  # first, so the freshest heads are judged before stale ones. Aim: green revert to review < 15 min.
   pr_list_json=$(ghr gh pr list --state open --limit 1000 --json number,isDraft,createdAt,labels,title,headRefName 2>/dev/null)
   pr_list_rc=$?
   if [ "$pr_list_rc" -ne 0 ]; then
     return 2   # can't tell if the queue is empty -- the list call itself failed
   fi
-  for pr in $(printf '%s' "$pr_list_json" | jq -r --arg x "$explicit" --arg p "${PRIORITY_LABEL-review:next}" 'sort_by([(($p == "") or ([.labels[]?.name] | index($p) == null)), .createdAt]) | .[] | select((.isDraft | not) or ((.number | tostring) == $x)) | .number' 2>/dev/null); do
+  for pr in $(printf '%s' "$pr_list_json" | jq -r --arg x "$explicit" --arg p "${PRIORITY_LABEL-review:next}" 'map(. + {t: (if ((.title // "") | test("(^|:\\s*)(revert|reland)\\b|\\b(deploys?|main) (is |are )?red\\b|\\bred (main|deploys?)\\b"; "i")) then 0 elif ($p != "" and ([.labels[]?.name] | index($p) != null)) then 1 else 2 end)}) | sort_by(.createdAt) | reverse | sort_by(.t) | .[] | select((.isDraft | not) or ((.number | tostring) == $x)) | .number' 2>/dev/null); do
     [ -n "$explicit" ] && [ "$pr" != "$explicit" ] && continue
     case " $skip_list " in *" $pr "*) continue ;; esac
     head=$(ghr gh pr view "$pr" --json headRefOid,commits -q '.headRefOid + " " + (.commits[-1] | if ((.messageHeadline // "") | startswith("Merge ")) then "" else .committedDate end)' 2>/dev/null)
