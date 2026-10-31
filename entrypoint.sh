@@ -316,6 +316,11 @@ case "${1:-cron-foreground}" in
       fi
       if cron_member_enabled judge-judy; then
         echo "*/15 * * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh judge-judy >> $LOG_DIR/judge-judy.log 2>&1"
+        # PHIA-1696: more review lanes on the same tick (FLEET_REVIEW_LANES, default 2; 1 turns
+        # them off). Each lane has its own locks and claims a PR before reviewing it.
+        for lane in $(seq 2 "${FLEET_REVIEW_LANES:-2}"); do
+          echo "*/15 * * * * root export GH_TOKEN=\$(cat $TOKEN_FILE) && bash /fleet-kit/scripts/run_member.sh judge-judy --task lane=$lane >> $LOG_DIR/judge-judy.log 2>&1"
+        done
       fi
       # auto_update_branch.sh (gh#172): nothing else in this repo keeps an open PR's branch
       # current with main, so one merge pushes every other open PR BEHIND/BLOCKED forever --
