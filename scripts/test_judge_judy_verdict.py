@@ -57,12 +57,13 @@ import value_judge as vj
 
 
 def _scored(verdict="approve", v=2, u=2, f=2, b=2, research=True, findings=None,
-            who=("a donor reading a 990 report", "report checkouts a week")):
+            who=("a donor reading a 990 report", "report checkouts a week"), visible=True):
     obj = {"verdict": verdict, "findings": findings or [],
            "beneficiary": {"user": who[0], "number": who[1]},
            "scores": {r: {"score": n, "why": r + " why"} for r, n in
                       zip(vj.RISKS, (v, u, f, b))},
            "research": {"ok": research, "why": "named Zillow, Candid"}}
+    obj["scores"]["usability"]["visible"] = visible
     return jv.parse(_envelope(obj))
 
 
@@ -289,6 +290,61 @@ class ValueJudge(unittest.TestCase):
         self.assertEqual(s["points_per_seat_per_day"], [{"seat": "jobs", "day": "2026-10-26", "points": 4.0}])
         self.assertEqual(s["sent_back_without_plan"], 1)
         self.assertEqual(s["plan_match_share"], 1.0)
+
+    def test_nothing_visible_is_usability_n_a_and_left_out_of_points(self):
+        # PHIA-1917: Usability 2 meant both "nothing visible" and "visible, follows the rules".
+        out = vj.apply(_scored(v=3, u=2, f=3, b=1, visible=False), "", "1", "h", "t", "g/x", False)
+        self.assertEqual(out["ledger"]["points"], 6.0)  # 3 x mean(3, 1); Usability left out
+        self.assertFalse(out["ledger"]["usability_visible"])
+        self.assertIn("| Usability | n/a, nothing a person sees |", out["scores_text"])
+        self.assertIn("Usability left out", out["scores_text"])
+        seen = vj.apply(_scored(v=3, u=2, f=3, b=1, visible=True), "", "1", "h", "t", "g/x", False)
+        self.assertEqual(seen["ledger"]["points"], 6.0)
+        self.assertTrue(seen["ledger"]["usability_visible"])
+        self.assertIn("| Usability | 2/3 |", seen["scores_text"])
+        # visible false never hides a marked-down usability: a 0 still sends back
+        low = vj.apply(_scored(u=0, visible=False), "", "1", "h", "t", "g/x", False)
+        self.assertEqual(low["verdict"], "block")
+        self.assertTrue(low["ledger"]["usability_visible"])
+        # an older verdict with no visible field reads as visible
+        old = _scored()
+        del old["scores"]["usability"]["visible"]
+        self.assertTrue(vj.apply(old, "", "1", "h", "t", "g/x", False)["ledger"]["usability_visible"])
+
+    def test_one_head_in_ten_is_sampled_by_sha(self):
+        heads = [f"{i:08x}" + "0" * 32 for i in range(1000)]
+        self.assertEqual(sum(vj.sampled(h, 10) for h in heads), 100)
+        self.assertTrue(vj.sampled("0000000a" + "f" * 32, 10))
+        self.assertFalse(vj.sampled("0000000b", 10))
+        self.assertFalse(vj.sampled("0000000a", 0))
+        self.assertFalse(vj.sampled("not-hex", 10))
+        self.assertEqual(vj.main(["sample", "--head", "00000014"]), 0)
+        self.assertEqual(vj.main(["sample", "--head", "00000015"]), 1)
+
+    def test_calibration_pairs_the_judge_with_the_stronger_model(self):
+        base = vj.apply(_scored(), "", "7", "h", "t", "jobs/x", False)["ledger"]
+        strong = _scored(v=3, u=3, f=2, b=3)
+        row = vj.pair(base, strong, "opus")
+        self.assertEqual(row["model"], "opus")
+        self.assertEqual(row["judge"]["scores"], {"value": 2, "usability": 2, "feasibility": 2, "viability": 2})
+        self.assertEqual(row["strong"]["points"], 8.0)
+        self.assertIsNone(vj.pair(base, {"ok": False}, "opus"))
+        rep = vj.calibration([row], now=row["ts"] + 1)
+        self.assertEqual(rep["pairs"], 1)
+        self.assertEqual(rep["verdict_agree"], 1.0)
+        self.assertEqual(rep["mean_gap_per_risk"]["value"], 1.0)
+        self.assertEqual(rep["all_2s"], {"judge": 1, "strong": 0})
+        self.assertEqual(rep["differs_by_2_or_more"], [])
+        self.assertEqual(vj.calibration([])["pairs"], 0)
+
+    def test_shell_samples_and_rejudges_after_the_verdict(self):
+        sh = (Path(__file__).resolve().parents[1] / "members/judge-judy/judge-judy.sh").read_text()
+        self.assertIn('value_judge.py" sample --head "${HEAD_SHA:-}"', sh)
+        self.assertIn("judge-judy-calibration.jsonl", sh)
+        self.assertIn('${JUDGE_CALIBRATE_MODEL:-opus}', sh)
+        self.assertIn("usability.visible", sh)
+        loop_end = sh.rindex("  calibrate_pass\n  cleanup_pass\n")
+        self.assertGreater(loop_end, sh.index('post_status "$HEAD_SHA" "success" "Code review passed'))
 
     def test_shell_schema_carries_the_same_scores_fragment(self):
         sh = (Path(__file__).resolve().parents[1] / "members/judge-judy/judge-judy.sh").read_text()
