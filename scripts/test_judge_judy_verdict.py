@@ -105,6 +105,22 @@ class ValueJudge(unittest.TestCase):
         self.assertIn("**Who gets it:** a donor reading a 990 report", out["scores_text"])
         self.assertEqual(out["ledger"]["number"], "report checkouts a week")
 
+    def test_half_paid_at_merge_half_owed_until_the_read_and_a_cut_in_full(self):
+        # PHIA-1918: the second half waits for check48 on the named metric.
+        obj = _scored(v=3, u=3, f=2, b=1)
+        obj["beneficiary"].update(metric="jobs/applies", guess=4, cut=False)
+        led = vj.apply(obj, "", "1", "h", "t", "jobs/x", False)["ledger"]
+        self.assertEqual((led["points"], led["pay_at_merge"], led["pay_on_read"]), (6.0, 3.0, 3.0))
+        self.assertEqual((led["metric"], led["guess"], led["cut"]), ("jobs/applies", 4.0, False))
+        obj["beneficiary"]["cut"] = True
+        out = vj.apply(obj, "", "1", "h", "t", "jobs/x", False)
+        self.assertEqual((out["ledger"]["pay_at_merge"], out["ledger"]["pay_on_read"]), (6.0, 0.0))
+        self.assertIn("paid in full at merge", out["scores_text"])
+        back = vj.apply(_scored(v=0), "", "1", "h", "t", "jobs/x", False)["ledger"]
+        self.assertEqual((back["pay_at_merge"], back["pay_on_read"]), (0.0, 0.0))
+        old = vj.apply(_scored(), "", "1", "h", "t", "jobs/x", False)["ledger"]  # verdict with no metric fields
+        self.assertEqual((old["metric"], old["guess"], old["pay_at_merge"]), ("", 0.0, 2.0))
+
     def test_task_description_stands_in_for_a_missing_card(self):
         import value_card as vc
         from unittest import mock
