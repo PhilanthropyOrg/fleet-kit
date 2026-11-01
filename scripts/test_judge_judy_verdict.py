@@ -121,6 +121,18 @@ class ValueJudge(unittest.TestCase):
         old = vj.apply(_scored(), "", "1", "h", "t", "jobs/x", False)["ledger"]  # verdict with no metric fields
         self.assertEqual((old["metric"], old["guess"], old["pay_at_merge"]), ("", 0.0, 2.0))
 
+    def test_a_measuring_tool_caps_at_value_2(self):
+        # G 11-01 (PHIA-2043): tools scored on the visitor number they gate, never Value 3.
+        obj = _scored(v=3, u=2, f=2, b=2)
+        obj["beneficiary"].update(metric="jobs/applies", guess=1, cut=False, tool=True)
+        out = vj.apply(obj, "", "247", "h", "t", "automation/x", False)
+        self.assertEqual(out["ledger"]["scores"]["value"], 2)
+        self.assertTrue(out["ledger"]["tool"])
+        self.assertIn("capped at 2", out["scores_text"])
+        self.assertEqual(out["verdict"], "approve")
+        sh = (Path(__file__).resolve().parents[1] / "members/judge-judy/judge-judy.sh").read_text()
+        self.assertIn("measuring tools (G, PHIA-2043)", sh)
+
     def test_task_description_stands_in_for_a_missing_card(self):
         import value_card as vc
         from unittest import mock

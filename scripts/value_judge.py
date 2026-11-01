@@ -15,6 +15,9 @@ value. The judge now names the user and the user number it expects to move (`ben
 user or number caps Value at 1, and Value 1 is a send-back. The bar moved from 1.5 to 3 points, so
 Value 2 needs the other three to average 1.5 or more.
 
+G, 2026-11-01 (PHIA-2043): a measuring tool -- a PR that changes no page but makes points or the gate follow
+one visitor number measured today -- is scored on that number, Value 2 at most (`beneficiary.tool`, capped here).
+
 PHIA-1918 (pay on the read): half the points are paid at merge, the other half only after the 48-hour
 read (check48.py) shows the named metric moved at least half the guess. A cut is paid in full at merge.
 The judge names `metric` (a kpi_daily key, vertical/metric), `guess` (change per day) and `cut`; the
@@ -68,8 +71,8 @@ SCORES_SCHEMA = {
                  "required": ["ok", "why"]},
     "beneficiary": {"type": "object", "properties": {"user": {"type": "string"}, "number": {"type": "string"},
                                                      "metric": {"type": "string"}, "guess": {"type": "number"},
-                                                     "cut": {"type": "boolean"}},
-                    "required": ["user", "number", "metric", "guess", "cut"]},
+                                                     "cut": {"type": "boolean"}, "tool": {"type": "boolean"}},
+                    "required": ["user", "number", "metric", "guess", "cut", "tool"]},
 }
 _BLANK = {"", "none", "n/a", "na", "unknown", "-", "nobody", "no one"}
 
@@ -211,6 +214,9 @@ def apply(verdict: dict, body: str, pr: str, head: str, title: str, ref: str, ex
     if not named(beneficiary) and nums["value"] > 1:  # no named user and number -> Value 1 at most
         whys = dict(whys, value=whys["value"] + f" (capped at 1 from {nums['value']}: no named user and number)")
         nums = dict(nums, value=1)
+    if beneficiary.get("tool") is True and nums["value"] > 2:  # G, PHIA-2043: a measuring tool caps at Value 2
+        whys = dict(whys, value=whys["value"] + f" (capped at 2 from {nums['value']}: a measuring tool)")
+        nums = dict(nums, value=2)
     research = verdict.get("research") if isinstance(verdict.get("research"), dict) else {}
     research_ok = bool(research.get("ok"))
     pts = points(nums)
@@ -232,7 +238,7 @@ def apply(verdict: dict, body: str, pr: str, head: str, title: str, ref: str, ex
         "plan": plan, "plan_matched": plan_matches(plan, nums) if plan else None,
         "user": str(beneficiary.get("user", "")), "number": str(beneficiary.get("number", "")),
         "metric": str(beneficiary.get("metric") or "").strip(), "guess": _guess(beneficiary.get("guess")),
-        "cut": cut, "pay_at_merge": at_merge, "pay_on_read": on_read,
+        "cut": cut, "tool": beneficiary.get("tool") is True, "pay_at_merge": at_merge, "pay_on_read": on_read,
     }
     return out
 
