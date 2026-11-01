@@ -511,9 +511,9 @@ while :; do
   calibrate_pass() {
     [ -n "${CAL_PROMPT_FILE:-}" ] && [ -s "$CAL_PROMPT_FILE.base" ] && [ "$REVIEW_PROVIDER" = "claude" ] || return 0
     local cal_model="${JUDGE_CALIBRATE_MODEL:-opus}" cal_raw
-    JJ_PROMPT_FILE="$CAL_PROMPT_FILE"; export JJ_PROMPT_FILE
+    JJ_CAL_FILE="$CAL_PROMPT_FILE"; export JJ_CAL_FILE
     # shellcheck disable=SC2016
-    cal_raw=$(account_pool_run timeout "$TIMEOUT_S" sh -c 'exec claude -p "$@" < "$JJ_PROMPT_FILE"' judge-judy \
+    cal_raw=$(account_pool_run timeout "$TIMEOUT_S" sh -c 'exec claude -p "$@" < "$JJ_CAL_FILE"' judge-judy \
       --model "$cal_model" --tools "" --output-format json --json-schema "$VERDICT_SCHEMA" --max-budget-usd "${FLEET_MAX_BUDGET_USD:-5}" 2>>"$LOG") \
       || { log "PR #$PR: calibration re-judge ($cal_model) failed -- skipped"; return 0; }
     printf '%s' "$cal_raw" | python3 "$KIT_DIR/scripts/judge_judy_verdict.py" \
