@@ -116,7 +116,7 @@ CONTEXT="fleet-code-review"
 # schema mismatch is retried internally by the CLI before this script ever sees the output, so
 # what lands in $RAW is either a schema-valid object or nothing parseable at all. No regex over
 # prose left to scrape. See scripts/judge_judy_verdict.py for the parser.
-VERDICT_SCHEMA='{"type":"object","properties":{"verdict":{"type":"string","enum":["approve","block"]},"findings":{"type":"array","items":{"type":"object","properties":{"file":{"type":"string"},"line":{"type":"integer"},"severity":{"type":"string"},"what_breaks":{"type":"string"},"plain":{"type":"string"}},"required":["file","line","severity","what_breaks","plain"]}},"scores":{"type":"object","properties":{"value":{"type":"object","properties":{"score":{"type":"integer","minimum":0,"maximum":3},"why":{"type":"string"}},"required":["score","why"]},"usability":{"type":"object","properties":{"score":{"type":"integer","minimum":0,"maximum":3},"why":{"type":"string"}},"required":["score","why"]},"feasibility":{"type":"object","properties":{"score":{"type":"integer","minimum":0,"maximum":3},"why":{"type":"string"}},"required":["score","why"]},"viability":{"type":"object","properties":{"score":{"type":"integer","minimum":0,"maximum":3},"why":{"type":"string"}},"required":["score","why"]}},"required":["value","usability","feasibility","viability"]},"research":{"type":"object","properties":{"ok":{"type":"boolean"},"why":{"type":"string"}},"required":["ok","why"]},"beneficiary":{"type":"object","properties":{"user":{"type":"string"},"number":{"type":"string"},"metric":{"type":"string"},"guess":{"type":"number"},"baseline":{"type":"string"},"cut":{"type":"boolean"},"tool":{"type":"boolean"}},"required":["user","number","baseline","metric","guess","cut","tool"]}},"required":["verdict","findings","scores","research","beneficiary"]}'
+VERDICT_SCHEMA='{"type":"object","properties":{"verdict":{"type":"string","enum":["approve","block"]},"findings":{"type":"array","items":{"type":"object","properties":{"file":{"type":"string"},"line":{"type":"integer"},"severity":{"type":"string"},"what_breaks":{"type":"string"},"plain":{"type":"string"}},"required":["file","line","severity","what_breaks","plain"]}},"scores":{"type":"object","properties":{"value":{"type":"object","properties":{"score":{"type":"integer","minimum":0,"maximum":3},"why":{"type":"string"}},"required":["score","why"]},"usability":{"type":"object","properties":{"score":{"type":"integer","minimum":0,"maximum":3},"why":{"type":"string"},"visible":{"type":"boolean"}},"required":["score","why","visible"]},"feasibility":{"type":"object","properties":{"score":{"type":"integer","minimum":0,"maximum":3},"why":{"type":"string"}},"required":["score","why"]},"viability":{"type":"object","properties":{"score":{"type":"integer","minimum":0,"maximum":3},"why":{"type":"string"}},"required":["score","why"]}},"required":["value","usability","feasibility","viability"]},"research":{"type":"object","properties":{"ok":{"type":"boolean"},"why":{"type":"string"}},"required":["ok","why"]},"beneficiary":{"type":"object","properties":{"user":{"type":"string"},"number":{"type":"string"},"metric":{"type":"string"},"guess":{"type":"number"},"baseline":{"type":"string"},"cut":{"type":"boolean"},"tool":{"type":"boolean"}},"required":["user","number","baseline","metric","guess","cut","tool"]}},"required":["verdict","findings","scores","research","beneficiary"]}'
 # PHIA-1451: scores + research are the value judge (scripts/value_judge.py owns the same fragment
 # as SCORES_SCHEMA; test_value_judge.py keeps the two equal).
 
@@ -524,6 +524,24 @@ while :; do
   # at every exit point of this iteration instead, plus a final catch-all after the loop.
   cleanup_pass() {
     rm -f "$DIFF_FILE" "$BODY_FILE" "${BODY_FILE}.card" "$OUT_FILE" "$USAGE_FILE"
+    [ -n "${CAL_PROMPT_FILE:-}" ] && rm -f "$CAL_PROMPT_FILE" "$CAL_PROMPT_FILE.base"
+    CAL_PROMPT_FILE=""
+  }
+  # PHIA-1917: the sampled head's same prompt goes to a stronger model once its verdict has
+  # posted. The answer decides nothing: both score sets go to judge-judy-calibration.jsonl and
+  # 'value_judge.py calibration' reads them for the Friday calibration. Claude only; best effort.
+  calibrate_pass() {
+    [ -n "${CAL_PROMPT_FILE:-}" ] && [ -s "$CAL_PROMPT_FILE.base" ] && [ "$REVIEW_PROVIDER" = "claude" ] || return 0
+    local cal_model="${JUDGE_CALIBRATE_MODEL:-opus}" cal_raw
+    JJ_PROMPT_FILE="$CAL_PROMPT_FILE"; export JJ_PROMPT_FILE
+    # shellcheck disable=SC2016
+    cal_raw=$(account_pool_run timeout "$TIMEOUT_S" sh -c 'exec claude -p "$@" < "$JJ_PROMPT_FILE"' judge-judy \
+      --model "$cal_model" --tools "" --output-format json --json-schema "$VERDICT_SCHEMA" --max-budget-usd "${FLEET_MAX_BUDGET_USD:-5}" 2>>"$LOG") \
+      || { log "PR #$PR: calibration re-judge ($cal_model) failed -- skipped"; return 0; }
+    printf '%s' "$cal_raw" | python3 "$KIT_DIR/scripts/judge_judy_verdict.py" \
+      | python3 "$KIT_DIR/scripts/value_judge.py" pair --base "$CAL_PROMPT_FILE.base" --model "$cal_model" \
+      >> "$LOG_DIR/judge-judy-calibration.jsonl" 2>>"$LOG" \
+      && log "PR #$PR head ${HEAD_SHA:0:12}: calibration re-judge by $cal_model logged"
   }
 
   if ! gh pr diff "$PR" > "$DIFF_FILE" 2>/dev/null && ! pr_diff_local "$PR" > "$DIFF_FILE" 2>>"$LOG"; then
@@ -669,6 +687,7 @@ This PR closes an issue it does not finish (closes_gate.py, fk#629). Change the 
   fi
   # The model review runs only when the gate did not already decide; either way the verdict
   # lands in the ONE approve/block handler below (status, comment, unqueue, fix item, report).
+  CAL_PROMPT_FILE=""
   if [ "$GATE_VERDICT" != "block" ]; then
 
   # A re-review used to start from nothing, so each round found something new and nothing
@@ -742,6 +761,11 @@ Answer with a verdict of block only for a correctness defect, plus the four scor
   JJ_PROMPT_FILE=$(mktemp "${TMPDIR:-/tmp}/judge_judy_prompt.XXXXXX")
   printf '%s' "$PROMPT" > "$JJ_PROMPT_FILE"
   export JJ_PROMPT_FILE
+  # PHIA-1917: 1 head in JUDGE_CALIBRATE_EVERY (by sha) is judged again by a stronger model after
+  # the verdict posts (calibrate_pass below); keep the same prompt for it.
+  if python3 "$KIT_DIR/scripts/value_judge.py" sample --head "${HEAD_SHA:-}" 2>/dev/null; then
+    CAL_PROMPT_FILE=$(mktemp "${TMPDIR:-/tmp}/judge_judy_cal.XXXXXX") && cp "$JJ_PROMPT_FILE" "$CAL_PROMPT_FILE"
+  fi
   # shellcheck disable=SC2016  # $JJ_PROMPT_FILE and "$@" expand in the inner shell, on purpose
   RAW=$(account_pool_run timeout "$TIMEOUT_S" sh -c 'exec claude -p "$@" < "$JJ_PROMPT_FILE"' judge-judy \
     --model "$MODEL" --tools "" --output-format json --json-schema "$VERDICT_SCHEMA" --max-budget-usd "${FLEET_MAX_BUDGET_USD:-5}" 2>>"$LOG")
@@ -832,6 +856,7 @@ print("true" if d.get("ok") else "false")' 2>/dev/null)
       printf '%s' "$VJ" | python3 -c 'import json,sys
 d = json.load(sys.stdin).get("ledger")
 if d: print(json.dumps(d))' >> "$LOG_DIR/judge-judy-points.jsonl" 2>>"$LOG" || log "PR #$PR: WARN points ledger write failed"
+      [ -n "$CAL_PROMPT_FILE" ] && printf '%s' "$VJ" | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin).get("ledger") or {}))' > "$CAL_PROMPT_FILE.base" 2>/dev/null
     fi
     SCORES_TEXT=$(printf '%s' "$VERDICT_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("scores_text",""))' 2>/dev/null)
     RAW_VERDICT=$(printf '%s' "$VERDICT_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("verdict",""))' 2>/dev/null)
@@ -1044,6 +1069,7 @@ $FINDINGS" >>"$LOG" 2>&1 \
     report_run "$PR" "$HEAD_SHA" "$USAGE_FILE" "blocked PR #$PR" "head ${HEAD_SHA:0:12}, fleet-code-review: failure, see PR comment" "$SELF_CRITIQUE" "$FINDINGS"
   fi
 
+  calibrate_pass
   cleanup_pass
   [ -n "$EXPLICIT_PR" ] && break
 done
