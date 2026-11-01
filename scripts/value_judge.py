@@ -8,7 +8,12 @@ scored 0-3 with one line of why, plus a research check. The model scores; this s
 so the send-back rule and the points formula are code a test can pin, not prose a model may drift.
 
   points    = value x mean(usability, feasibility, viability)      (0..9)
-  send back = value 0, usability 0, a thin value card, or points < JUDGE_MIN_POINTS (default 1.5)
+  send back = value <= 1, usability 0, a thin value card, or points < JUDGE_MIN_POINTS (default 3)
+
+Paul, 2026-11-01 (calibration): 45 of 51 verdicts scored exactly 2/2/2/2 and 0 were sent back for
+value. The judge now names the user and the user number it expects to move (`beneficiary`); a blank
+user or number caps Value at 1, and Value 1 is a send-back. The bar moved from 1.5 to 3 points, so
+Value 2 needs the other three to average 1.5 or more.
 
 Paul, 2026-10-31 (value gate): the why and the research come from the value card on the task
 (scripts/value_card.py), never from a set section in the PR body -- 10 of 10 sampled vertical
@@ -44,7 +49,8 @@ import time
 from collections import defaultdict
 
 RISKS = ("value", "usability", "feasibility", "viability")
-MIN_POINTS = float(os.environ.get("JUDGE_MIN_POINTS", "1.5"))
+MIN_POINTS = float(os.environ.get("JUDGE_MIN_POINTS", "3"))
+MIN_VALUE = int(os.environ.get("JUDGE_MIN_VALUE", "2"))  # Value below this is a send-back
 CARD_REQUIRED = os.environ.get("JUDGE_CARD_REQUIRED", "0") == "1"
 
 # The schema fragment judge-judy.sh merges into VERDICT_SCHEMA (kept here so one file owns it).
@@ -54,7 +60,16 @@ SCORES_SCHEMA = {
     "scores": {"type": "object", "properties": {r: _RISK for r in RISKS}, "required": list(RISKS)},
     "research": {"type": "object", "properties": {"ok": {"type": "boolean"}, "why": {"type": "string"}},
                  "required": ["ok", "why"]},
+    "beneficiary": {"type": "object", "properties": {"user": {"type": "string"}, "number": {"type": "string"}},
+                    "required": ["user", "number"]},
 }
+_BLANK = {"", "none", "n/a", "na", "unknown", "-", "nobody", "no one"}
+
+
+def named(beneficiary) -> bool:
+    """True when the judge named both a user and the user number this PR should move."""
+    b = beneficiary if isinstance(beneficiary, dict) else {}
+    return all(str(b.get(k, "")).strip().lower().strip(".") not in _BLANK for k in ("user", "number"))
 
 _PLAN_RE = re.compile(
     r"plan[^\n]*?value\D{0,4}([0-3])\D+?usability\D{0,4}([0-3])\D+?feasibility\D{0,4}([0-3])"
@@ -93,6 +108,9 @@ def judge(scores: dict, research_ok: bool, card: dict | None = None, research_wh
     reasons = []
     if scores["value"] == 0:
         reasons.append("Value is 0: no person gets something they came for, saves a step, or loses dead weight.")
+    elif scores["value"] < MIN_VALUE:
+        reasons.append(f"Value is {scores['value']}: no named user and user number this moves enough to ship. "
+                       "Name who gets it and the number it moves (on the task), or fold it into work that does.")
     if scores["usability"] == 0:
         reasons.append("Usability is 0: a person could not use what this changes.")
     if card.get("card") and not research_ok:
@@ -121,11 +139,16 @@ def _scores_of(obj: dict):
     return nums, {r: str(s[r].get("why", "")) for r in RISKS}
 
 
-def scores_text(nums, whys, research, pts, plan, reasons, card=None) -> str:
-    lines = ["| Risk | Score | Why |", "|---|---|---|"]
+def scores_text(nums, whys, research, pts, plan, reasons, card=None, beneficiary=None) -> str:
+    lines = []
+    if beneficiary is not None:
+        lines += [f"**Who gets it:** {beneficiary.get('user') or '(not named)'}. "
+                  f"**Number it moves:** {beneficiary.get('number') or '(not named)'}.", ""]
+    lines += ["| Risk | Score | Why |", "|---|---|---|"]
     lines += [f"| {r.title()} | {nums[r]}/3 | {whys[r]} |" for r in RISKS]
     card = card or {}
-    src = "card" if card.get("card") else (f"card unread: {card['error']}" if card.get("error") else "no card")
+    src = "card" if card.get("card") else (f"card unread: {card['error']}" if card.get("error")
+                                           else "task as card" if card.get("task_text") else "no card")
     lines.append(f"| Research ({src}) | {'yes' if research.get('ok') else 'no'} | {research.get('why', '')} |")
     lines.append("")
     lines.append(f"**Value points: {pts}** (Value x average of the other three).")
@@ -154,6 +177,10 @@ def apply(verdict: dict, body: str, pr: str, head: str, title: str, ref: str, ex
     nums, whys = _scores_of(verdict)
     if nums is None:
         return out
+    beneficiary = verdict.get("beneficiary") if isinstance(verdict.get("beneficiary"), dict) else {}
+    if not named(beneficiary) and nums["value"] > 1:  # no named user and number -> Value 1 at most
+        whys = dict(whys, value=whys["value"] + f" (capped at 1 from {nums['value']}: no named user and number)")
+        nums = dict(nums, value=1)
     research = verdict.get("research") if isinstance(verdict.get("research"), dict) else {}
     research_ok = bool(research.get("ok"))
     pts = points(nums)
@@ -161,7 +188,7 @@ def apply(verdict: dict, body: str, pr: str, head: str, title: str, ref: str, ex
     reasons = [] if exempt else judge(nums, research_ok, card, str(research.get("why", "")))
     correctness = verdict.get("verdict")
     final = "block" if (correctness == "block" or reasons) else "approve"
-    text = scores_text(nums, whys, research, pts, plan, reasons, card)
+    text = scores_text(nums, whys, research, pts, plan, reasons, card, beneficiary)
     out["verdict"] = final
     out["scores_text"] = text
     out["findings_text"] = (verdict.get("findings_text") or "") + ("\n\n" if verdict.get("findings_text") else "") + text
@@ -171,6 +198,7 @@ def apply(verdict: dict, body: str, pr: str, head: str, title: str, ref: str, ex
         "scores": nums, "research_ok": research_ok, "points": pts, "verdict": final,
         "correctness": correctness, "value_reasons": reasons, "exempt": exempt,
         "plan": plan, "plan_matched": plan_matches(plan, nums) if plan else None,
+        "user": str(beneficiary.get("user", "")), "number": str(beneficiary.get("number", "")),
     }
     return out
 

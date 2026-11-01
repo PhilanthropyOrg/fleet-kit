@@ -66,7 +66,7 @@ Answer with a verdict of block only for a correctness defect, plus the four scor
   are cut: 7 days to 10-30, 445 of 683 findings and ~156 of 334 blocks were paperwork with no
   bug a person would meet. The model only scores; `scripts/value_judge.py` decides: points =
   value x mean(other three); send back on value 0, usability 0, no research, or points under
-  `JUDGE_MIN_POINTS` (1.5). Every review appends one row to `judge-judy-points.jsonl`
+  `JUDGE_MIN_POINTS` (3; Value 1 or a blank named user and number is a send-back, PHIA-1451 11-01). Every review appends one row to `judge-judy-points.jsonl`
   (seat = the task's owner on the board, else the branch prefix; task from the title or branch;
   the card's self-score and whether it matched within 1); `value_judge.py summary <ledger> --merged <prs>` gives points per seat per
   day, send-back rate, plan-match share and send-backs that never had a plan. Dependabot pin

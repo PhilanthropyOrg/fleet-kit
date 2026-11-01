@@ -56,8 +56,10 @@ class RetriedAccount(unittest.TestCase):
 import value_judge as vj
 
 
-def _scored(verdict="approve", v=2, u=2, f=2, b=2, research=True, findings=None):
+def _scored(verdict="approve", v=2, u=2, f=2, b=2, research=True, findings=None,
+            who=("a donor reading a 990 report", "report checkouts a week")):
     obj = {"verdict": verdict, "findings": findings or [],
+           "beneficiary": {"user": who[0], "number": who[1]},
            "scores": {r: {"score": n, "why": r + " why"} for r, n in
                       zip(vj.RISKS, (v, u, f, b))},
            "research": {"ok": research, "why": "named Zillow, Candid"}}
@@ -85,10 +87,47 @@ class ValueJudge(unittest.TestCase):
         card = {"task": "PHIA-9", "owner": "jobs", "card": "User: a donor\nBest in class: ?", "plan": ""}
         for kw, word in (({"v": 0}, "Value is 0"), ({"u": 0}, "Usability is 0"),
                          ({"research": False}, "value card on PHIA-9 is thin"),
-                         ({"v": 1, "u": 1, "f": 1, "b": 1}, "Too little value")):
+                         ({"v": 1}, "Value is 1"),
+                         ({"v": 2, "u": 1, "f": 1, "b": 1}, "Too little value")):
             out = vj.apply(_scored(**kw), "", "1", "abc", "t", "g/x", False, card)
             self.assertEqual(out["verdict"], "block", kw)
             self.assertIn(word, out["findings_text"], kw)
+
+    def test_no_named_user_and_number_caps_value_at_1_and_sends_back(self):
+        # Paul 11-01: 45 of 51 verdicts were 2/2/2/2 and 0 went back for value.
+        for who in (("", "checkouts"), ("a donor", "none"), ("n/a", "")):
+            out = vj.apply(_scored(v=3, who=who), "", "1", "h", "t", "g/x", False)
+            self.assertEqual(out["verdict"], "block", who)
+            self.assertEqual(out["ledger"]["scores"]["value"], 1)
+            self.assertIn("capped at 1", out["scores_text"])
+        out = vj.apply(_scored(v=3), "", "1", "h", "t", "g/x", False)
+        self.assertEqual(out["verdict"], "approve")
+        self.assertIn("**Who gets it:** a donor reading a 990 report", out["scores_text"])
+        self.assertEqual(out["ledger"]["number"], "report checkouts a week")
+
+    def test_task_description_stands_in_for_a_missing_card(self):
+        import value_card as vc
+        from unittest import mock
+
+        def _open(req, timeout=None):
+            if "/documents/" in req.full_url:
+                raise vc.urllib.error.HTTPError(req.full_url, 404, "nf", {}, None)
+            return io.StringIO(json.dumps({"title": "Fix the PF report", "description":
+                                           "Donors see 0 gifts.\nSelf-score: Value 3, Usability 2, Feasibility 2, Viability 2"}))
+        with mock.patch.dict(os.environ, {"PAPERCLIP_API_URL": "http://b", "PAPERCLIP_API_KEY": "k"}), \
+                mock.patch.object(vc.urllib.request, "urlopen", _open):
+            out = vc.fetch("PHIA-1")
+        self.assertEqual(out["card"], "")
+        self.assertIn("Donors see 0 gifts", out["task_text"])
+        self.assertNotIn("Value 3", out["task_text"])
+        self.assertIn("Value 3", out["plan"])
+        res = vj.apply(_scored(research=False), "", "1", "h", "t", "g/x", False, out)
+        self.assertEqual(res["verdict"], "approve")  # a missing card is never a block
+        self.assertIn("| Research (task as card) |", res["scores_text"])
+        sh = (Path(__file__).resolve().parents[1] / "members/judge-judy/judge-judy.sh").read_text()
+        self.assertIn(".task_text", sh)
+        for anchor in ("Anchors", "14985", "14835", "what would make it a 3"):
+            self.assertIn(anchor, sh)
 
     def test_no_research_section_is_never_a_send_back(self):
         # Paul 10-31: 10 of 10 vertical PRs had no ## Research; with no card there is no hold.
