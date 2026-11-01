@@ -15,6 +15,12 @@ value. The judge now names the user and the user number it expects to move (`ben
 user or number caps Value at 1, and Value 1 is a send-back. The bar moved from 1.5 to 3 points, so
 Value 2 needs the other three to average 1.5 or more.
 
+PHIA-1918 (pay on the read): half the points are paid at merge, the other half only after the 48-hour
+read (check48.py) shows the named metric moved at least half the guess. A cut is paid in full at merge.
+The judge names `metric` (a kpi_daily key, vertical/metric), `guess` (change per day) and `cut`; the
+ledger carries them with pay_at_merge and pay_on_read (the half still owed). The box's value-points
+payout reads check48 and decides pay_on_read.
+
 Paul, 2026-10-31 (value gate): the why and the research come from the value card on the task
 (scripts/value_card.py), never from a set section in the PR body -- 10 of 10 sampled vertical
 PRs had no `## Research`, so requiring one would be a paperwork block with a new name. A card
@@ -60,8 +66,10 @@ SCORES_SCHEMA = {
     "scores": {"type": "object", "properties": {r: _RISK for r in RISKS}, "required": list(RISKS)},
     "research": {"type": "object", "properties": {"ok": {"type": "boolean"}, "why": {"type": "string"}},
                  "required": ["ok", "why"]},
-    "beneficiary": {"type": "object", "properties": {"user": {"type": "string"}, "number": {"type": "string"}},
-                    "required": ["user", "number"]},
+    "beneficiary": {"type": "object", "properties": {"user": {"type": "string"}, "number": {"type": "string"},
+                                                     "metric": {"type": "string"}, "guess": {"type": "number"},
+                                                     "cut": {"type": "boolean"}},
+                    "required": ["user", "number", "metric", "guess", "cut"]},
 }
 _BLANK = {"", "none", "n/a", "na", "unknown", "-", "nobody", "no one"}
 
@@ -96,6 +104,21 @@ def task_of(title: str, ref: str):
 def points(scores: dict) -> float:
     rest = [scores[r] for r in RISKS[1:]]
     return round(scores["value"] * sum(rest) / len(rest), 2)
+
+
+def _guess(v) -> float:
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def pay_split(pts: float, cut: bool) -> tuple:
+    """(paid at merge, owed until the 48-hour read). A cut is paid in full at merge."""
+    if cut:
+        return pts, 0.0
+    half = round(pts / 2, 2)
+    return half, round(pts - half, 2)
 
 
 def judge(scores: dict, research_ok: bool, card: dict | None = None, research_why: str = "") -> list:
@@ -152,6 +175,13 @@ def scores_text(nums, whys, research, pts, plan, reasons, card=None, beneficiary
     lines.append(f"| Research ({src}) | {'yes' if research.get('ok') else 'no'} | {research.get('why', '')} |")
     lines.append("")
     lines.append(f"**Value points: {pts}** (Value x average of the other three).")
+    if beneficiary is not None:
+        if beneficiary.get("cut") is True:
+            lines.append("A cut: paid in full at merge.")
+        else:
+            m = str(beneficiary.get("metric") or "").strip() or "(no daily metric named)"
+            lines.append(f"Half paid at merge; half after the 48-hour read of {m}, if it moves at least half of "
+                         f"the guess ({_guess(beneficiary.get('guess')):+g} a day).")
     if plan:
         lines.append("Plan self-score: " + ", ".join(f"{r.title()} {plan[r]}" for r in RISKS)
                      + (" -- matches the judge." if plan_matches(plan, nums) else " -- differs from the judge by more than 1."))
@@ -192,6 +222,8 @@ def apply(verdict: dict, body: str, pr: str, head: str, title: str, ref: str, ex
     out["verdict"] = final
     out["scores_text"] = text
     out["findings_text"] = (verdict.get("findings_text") or "") + ("\n\n" if verdict.get("findings_text") else "") + text
+    cut = beneficiary.get("cut") is True
+    at_merge, on_read = pay_split(pts, cut) if final == "approve" else (0.0, 0.0)
     out["ledger"] = {
         "ts": time.time(), "pr": pr, "head": head, "seat": card.get("owner") or seat_of(ref),
         "task": card.get("task") or task_of(title, ref), "card": bool(card.get("card")),
@@ -199,6 +231,8 @@ def apply(verdict: dict, body: str, pr: str, head: str, title: str, ref: str, ex
         "correctness": correctness, "value_reasons": reasons, "exempt": exempt,
         "plan": plan, "plan_matched": plan_matches(plan, nums) if plan else None,
         "user": str(beneficiary.get("user", "")), "number": str(beneficiary.get("number", "")),
+        "metric": str(beneficiary.get("metric") or "").strip(), "guess": _guess(beneficiary.get("guess")),
+        "cut": cut, "pay_at_merge": at_merge, "pay_on_read": on_read,
     }
     return out
 
