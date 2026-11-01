@@ -66,12 +66,14 @@ class CiMinutesMetricTests(unittest.TestCase):
         self.assertIsNone(fleet_metrics.compute("ci_minutes_per_day", [], t("2026-10-08 14:00")))  # read too early
 
     def test_ci_minutes_saves_and_merges_the_cache(self):
-        with mock.patch.object(ci_minutes, "fetch", return_value=[item("2026-10-07", 2000), item("2026-10-07", 400),
-                                                                  item("2026-10-08", 100)]):
+        # A mid-month clock: on the 1st, main() also fetches last month, and this mock would answer twice.
+        mid = mock.patch.object(ci_minutes.time, "time", return_value=calendar.timegm((2026, 10, 9, 12, 0, 0)))
+        with mid, mock.patch.object(ci_minutes, "fetch", return_value=[item("2026-10-07", 2000), item("2026-10-07", 400),
+                                                                       item("2026-10-08", 100)]):
             ci_minutes.main(["ci_minutes.py", "Org"])
         first = json.loads(Path(self.dir.name, "ci_minutes.json").read_text())
         self.assertEqual(first["days"], {"2026-10-07": 2400.0, "2026-10-08": 100.0})
-        with mock.patch.object(ci_minutes, "fetch", return_value=[item("2026-10-08", 300)]):
+        with mid, mock.patch.object(ci_minutes, "fetch", return_value=[item("2026-10-08", 300)]):
             ci_minutes.main(["ci_minutes.py", "Org"])
         second = json.loads(Path(self.dir.name, "ci_minutes.json").read_text())
         self.assertEqual(second["days"], {"2026-10-07": 2400.0, "2026-10-08": 300.0})
