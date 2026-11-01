@@ -11,7 +11,9 @@ Blind score: the self-score line is cut out of the card text the judge sees and 
 separately as `plan`, so value_judge.py can log the gap after the judge has scored.
 
 Usage: value_card.py TASK  (PHIA-123)  ->  JSON on stdout, `{}` when TASK is not a task id.
-  {"task", "owner", "card", "card_updated_at", "plan"}   card is "" when the task has none.
+  {"task", "owner", "card", "card_updated_at", "plan", "task_text"}   card is "" when the task has none.
+  task_text is the task's title and description (self-score cut out): Paul, 2026-11-01, "don't wait
+  for cards" -- with no card the judge treats the task description plus the PR's Why as the card.
   {"task", "error"}   when the board could not be read, so the score table says why, not "no card".
 Reads PAPERCLIP_API_URL and PAPERCLIP_API_KEY (a read-only key) from the environment, and sends
 PAPERCLIP_HOST as the Host header when set (PHIA-1504: lucky's worker reaches the board by IP). Never
@@ -30,6 +32,7 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
 CARD_KEY = os.environ.get("JUDGE_CARD_KEY", "value-card")
+TASK_TEXT_BYTES = int(os.environ.get("JUDGE_TASK_TEXT_BYTES") or 3000)
 TIMEOUT = float(os.environ.get("JUDGE_CARD_TIMEOUT") or 150)
 _SELF_RE = re.compile(r"^[^\n]*\b(self[- ]?score|4[- ]risk|four[- ]risk|plan)\b[^\n]*value\D{0,4}[0-3][^\n]*$",
                       re.IGNORECASE | re.MULTILINE)
@@ -77,9 +80,10 @@ def fetch(task: str) -> dict:
     doc_error = "" if isinstance(doc, dict) or doc_error == "HTTP 404" else doc_error
     body = doc.get("body", "") if isinstance(doc, dict) else ""
     card, plan = blind(body)
+    task_text, task_plan = blind(f"{issue.get('title') or ''}\n{issue.get('description') or ''}".strip())
     out = {"task": task, "owner": owner, "card": card,
            "card_updated_at": doc.get("updatedAt") if isinstance(doc, dict) and body else None,
-           "plan": plan}
+           "plan": plan or task_plan, "task_text": task_text[:TASK_TEXT_BYTES]}
     if doc_error:  # a 404 is a task with no card; anything else is a read that failed
         out["error"] = doc_error
     return out

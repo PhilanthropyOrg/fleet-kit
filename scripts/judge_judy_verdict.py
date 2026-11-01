@@ -98,7 +98,7 @@ def parse(raw: str) -> dict:
     out = {"ok": True, "verdict": verdict, "findings": findings, "findings_text": _findings_text(findings)}
     # PHIA-1451: the four-risk value scores ride along; value_judge.py turns them into the
     # send-back and the points. Optional, so a verdict without them still parses.
-    for k in ("scores", "research"):
+    for k in ("scores", "research", "beneficiary"):
         if isinstance(obj.get(k), dict):
             out[k] = obj[k]
     return out
