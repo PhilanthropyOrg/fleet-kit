@@ -132,6 +132,8 @@ class ValueJudge(unittest.TestCase):
         self.assertEqual(out["verdict"], "approve")
         sh = (Path(__file__).resolve().parents[1] / "members/judge-judy/judge-judy.sh").read_text()
         self.assertIn("measuring tools (G, PHIA-2043)", sh)
+        self.assertIn("Owner-asked cost (G, PHIA-2067 and PHIA-2070)", sh)
+        self.assertIn("platform/ci_usd_per_day", sh)
 
     def test_task_description_stands_in_for_a_missing_card(self):
         import value_card as vc
