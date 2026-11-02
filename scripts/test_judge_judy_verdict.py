@@ -466,5 +466,21 @@ class DarkBoardTest(unittest.TestCase):
         self.assertIn("JUDGE_CARD_TIMEOUT=30 JUDGE_CARD_BUDGET=30 JUDGE_CARD_TRIES=1", _JJ_SRC)
 
 
+class PromptBuildsTest(unittest.TestCase):
+    def test_the_value_prompt_is_one_string_under_set_u(self):
+        # PHIA-2267: #1840 and #1842 put "quoted examples" inside BODY_RULES="...". bash closed the
+        # string there and ran `41` as a command, BODY_RULES was never set, and under set -u every
+        # review pass died before posting a status: the app reviewer was silent twice (PHIA-2276, PHIA-2307).
+        start = _JJ_SRC.index('  BODY_RULES="')
+        end = _JJ_SRC.index('}"\n', start) + 3
+        script = ('set -euo pipefail\nJUDGE_KPI_METRICS=x\nRULES_TEXT="\n--- rules ---"\n'
+                  + _JJ_SRC[start:end] + 'printf %s "$BODY_RULES"\n')
+        out = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=30)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertEqual(out.stderr, "")
+        self.assertIn("Value 2 or 3 needs a named user and a measured baseline", out.stdout)
+        self.assertTrue(out.stdout.endswith("--- rules ---"), out.stdout[-200:])
+
+
 if __name__ == "__main__":
     unittest.main()
