@@ -107,6 +107,12 @@ class PriorityLane(unittest.TestCase):
                      _pr(10, "2026-10-31T00:00:00Z", title="Fix main red after 14725")]
         self.assertEqual(lane(q), [10, 9, 8, 4, 3, 2, 1])
 
+    def test_a_deploy_gate_fix_goes_in_the_first_lane(self):
+        # Paul 11-02: 15206 and 15158 un-red the deploy test gate, but their titles say gate, not red.
+        q = QUEUE + [_pr(11, "2026-10-28T00:00:00Z", title="Bug: deploy gate green: /jobs/all test order-proof"),
+                     _pr(12, "2026-10-27T00:00:00Z", title="Bug: deploy test gate red on 4 tests")]
+        self.assertEqual(lane(q)[:2], [11, 12])
+
     def test_revert_word_mid_title_is_not_a_revert(self):
         q = [_pr(1, "2026-10-30T00:00:00Z", title="Add an undo and revert button to HQ"),
              _pr(2, "2026-10-31T00:00:00Z")]
