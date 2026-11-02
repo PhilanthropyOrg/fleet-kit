@@ -71,8 +71,9 @@ SCORES_SCHEMA = {
                  "required": ["ok", "why"]},
     "beneficiary": {"type": "object", "properties": {"user": {"type": "string"}, "number": {"type": "string"},
                                                      "metric": {"type": "string"}, "guess": {"type": "number"},
+                                                     "baseline": {"type": "string"},
                                                      "cut": {"type": "boolean"}, "tool": {"type": "boolean"}},
-                    "required": ["user", "number", "metric", "guess", "cut", "tool"]},
+                    "required": ["user", "number", "baseline", "metric", "guess", "cut", "tool"]},
 }
 _BLANK = {"", "none", "n/a", "na", "unknown", "-", "nobody", "no one"}
 
@@ -81,6 +82,16 @@ def named(beneficiary) -> bool:
     """True when the judge named both a user and the user number this PR should move."""
     b = beneficiary if isinstance(beneficiary, dict) else {}
     return all(str(b.get(k, "")).strip().lower().strip(".") not in _BLANK for k in ("user", "number"))
+
+def measured(beneficiary) -> bool:
+    """True when the judge gave today's reading of the number (Paul 11-01: Value 2 needs a measured number).
+    A verdict from before the field existed (no baseline key) is not held to it."""
+    b = beneficiary if isinstance(beneficiary, dict) else {}
+    if "baseline" not in b:
+        return True
+    text = str(b.get("baseline") or "").strip()
+    return text.lower().strip(".") not in _BLANK and any(c.isdigit() for c in text)
+
 
 _PLAN_RE = re.compile(
     r"plan[^\n]*?value\D{0,4}([0-3])\D+?usability\D{0,4}([0-3])\D+?feasibility\D{0,4}([0-3])"
@@ -187,12 +198,16 @@ def scores_text(nums, whys, research, pts, plan, reasons, card=None, beneficiary
     lines = []
     if beneficiary is not None:
         lines += [f"**Who gets it:** {beneficiary.get('user') or '(not named)'}. "
-                  f"**Number it moves:** {beneficiary.get('number') or '(not named)'}.", ""]
+                  f"**Number it moves:** {beneficiary.get('number') or '(not named)'}"
+                  + (f" (today: {beneficiary['baseline']})" if str(beneficiary.get("baseline") or "").strip() else "")
+                  + ".", ""]
     lines += ["| Risk | Score | Why |", "|---|---|---|"]
     lines += [f"| {r.title()} | {nums[r]}/3 | {whys[r]} |" for r in RISKS]
     card = card or {}
     src = "card" if card.get("card") else (f"card unread: {card['error']}" if card.get("error")
                                            else "task as card" if card.get("task_text") else "no card")
+    if card.get("read_failed") and card.get("cached_at"):  # PHIA-1451: the board failed; last good read
+        src += f", saved {card['cached_at']}"
     lines.append(f"| Research ({src}) | {'yes' if research.get('ok') else 'no'} | {research.get('why', '')} |")
     lines.append("")
     lines.append(f"**Value points: {pts}** (Value x average of the other three).")
@@ -232,6 +247,9 @@ def apply(verdict: dict, body: str, pr: str, head: str, title: str, ref: str, ex
     if not named(beneficiary) and nums["value"] > 1:  # no named user and number -> Value 1 at most
         whys = dict(whys, value=whys["value"] + f" (capped at 1 from {nums['value']}: no named user and number)")
         nums = dict(nums, value=1)
+    if named(beneficiary) and not measured(beneficiary) and nums["value"] > 1:  # a number with no reading today
+        whys = dict(whys, value=whys["value"] + f" (capped at 1 from {nums['value']}: no measured reading of the number)")
+        nums = dict(nums, value=1)
     if beneficiary.get("tool") is True and nums["value"] > 2:  # G, PHIA-2043: a measuring tool caps at Value 2
         whys = dict(whys, value=whys["value"] + f" (capped at 2 from {nums['value']}: a measuring tool)")
         nums = dict(nums, value=2)
@@ -255,7 +273,7 @@ def apply(verdict: dict, body: str, pr: str, head: str, title: str, ref: str, ex
         "correctness": correctness, "value_reasons": reasons, "exempt": exempt,
         "plan": plan, "plan_matched": plan_matches(plan, nums) if plan else None,
         "user": str(beneficiary.get("user", "")), "number": str(beneficiary.get("number", "")),
-        "metric": str(beneficiary.get("metric") or "").strip(), "guess": _guess(beneficiary.get("guess")),
+        "baseline": str(beneficiary.get("baseline") or "").strip(), "metric": str(beneficiary.get("metric") or "").strip(), "guess": _guess(beneficiary.get("guess")),
         "cut": cut, "tool": beneficiary.get("tool") is True, "pay_at_merge": at_merge, "pay_on_read": on_read,
     }
     return out
