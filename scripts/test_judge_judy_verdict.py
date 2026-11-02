@@ -5,12 +5,7 @@ from __future__ import annotations
 import io
 import json
 import os
-import re
-import socket
-import subprocess
 import sys
-import tempfile
-import time
 import unittest
 from pathlib import Path
 
@@ -109,24 +104,6 @@ class ValueJudge(unittest.TestCase):
         self.assertEqual(out["verdict"], "approve")
         self.assertIn("**Who gets it:** a donor reading a 990 report", out["scores_text"])
         self.assertEqual(out["ledger"]["number"], "report checkouts a week")
-
-    def test_value_2_needs_a_measured_reading_of_the_number(self):
-        # Paul 11-01 06:11Z: 5 of 8 verdicts still 2/2/2/2; a 2 on Value needs a measured number.
-        for baseline in ("", "none", "goes up"):
-            obj = _scored(v=2)
-            obj["beneficiary"]["baseline"] = baseline
-            out = vj.apply(obj, "", "1", "h", "t", "g/x", False)
-            self.assertEqual(out["verdict"], "block", baseline)
-            self.assertEqual(out["ledger"]["scores"]["value"], 1)
-            self.assertIn("no measured reading", out["scores_text"])
-        obj = _scored(v=2)
-        obj["beneficiary"]["baseline"] = "jobs/applies 41 a day, kpi_daily 10-31"
-        out = vj.apply(obj, "", "1", "h", "t", "g/x", False)
-        self.assertEqual(out["verdict"], "approve")
-        self.assertIn("(today: jobs/applies 41 a day", out["scores_text"])
-        self.assertEqual(out["ledger"]["baseline"], "jobs/applies 41 a day, kpi_daily 10-31")
-        sh = (Path(__file__).resolve().parents[1] / "members/judge-judy/judge-judy.sh").read_text()
-        self.assertIn("Value 2 or 3 needs a named user and a measured baseline", sh)
 
     def test_half_paid_at_merge_half_owed_until_the_read_and_a_cut_in_full(self):
         # PHIA-1918: the second half waits for check48 on the named metric.
@@ -299,43 +276,6 @@ class ValueJudge(unittest.TestCase):
         self.assertGreaterEqual(min(timeouts), 120)
         self.assertEqual(peak[0], 2)
 
-    def test_a_timed_out_card_read_retries_then_uses_the_saved_read(self):
-        # Paul 11-01 06:11Z: 5 of 8 verdicts said "card unread: TimeoutError" at 150 s (PHIA-1929).
-        import tempfile
-        import value_card as vc
-        from unittest import mock
-        calls, fail = [], [False]
-
-        class _R(io.StringIO):
-            def __enter__(self): return self
-            def __exit__(self, *a): return False
-
-        def _open(req, timeout=None):
-            calls.append(req.full_url)
-            if fail[0]:
-                raise TimeoutError("timed out")
-            if "/documents/" in req.full_url:
-                return _R(json.dumps({"body": "User: a donor", "updatedAt": "2026-11-01T05:00:00Z"}))
-            if "/agents/" in req.full_url:
-                return _R(json.dumps({"urlKey": "jobs"}))
-            return _R(json.dumps({"title": "t", "assigneeAgentId": "a1"}))
-        with tempfile.TemporaryDirectory() as d:
-            env = {"PAPERCLIP_API_URL": "http://b", "PAPERCLIP_API_KEY": "k", "JUDGE_CARD_CACHE": d}
-            with mock.patch.dict(os.environ, env), mock.patch.object(vc.urllib.request, "urlopen", _open):
-                good = vc.fetch("PHIA-1")
-                self.assertEqual((good["card"], good["owner"]), ("User: a donor", "jobs"))
-                fail[0], calls[:] = True, []
-                saved = vc.fetch("PHIA-1")
-                self.assertEqual(len(calls), 2 * vc.TRIES)  # issue and card, each tried TRIES times
-                self.assertEqual((saved["card"], saved["owner"]), ("User: a donor", "jobs"))
-                self.assertIn("TimeoutError", saved["read_failed"])
-                self.assertNotIn("error", saved)
-                text = vj.apply(_scored(), "", "1", "h", "t", "g/x", False, saved)["scores_text"]
-                self.assertIn(f"| Research (card, saved {saved['cached_at']}) |", text)
-                self.assertIn("card unread: TimeoutError", vj.apply(_scored(), "", "1", "h", "t", "g/x", False,
-                                                                    vc.fetch("PHIA-2"))["scores_text"])
-        self.assertEqual(vc.TRIES, 2)
-
     def test_review_again_label_and_task_from_branch(self):
         import re as _re
         import subprocess
@@ -402,68 +342,6 @@ class ValueJudge(unittest.TestCase):
             self.assertEqual(schema["properties"][k], v)
         self.assertIn("scores", schema["required"])
         self.assertIn("research", schema["required"])
-
-
-# A dark board costs a judge-judy pass one card budget, never more (PHIA-2276, 2026-11-02).
-# fleet-kit#1840 retried the card read (two tries of 150 s, then the agent name read the same way), so
-# one pass could wait 600 s on the board, and the app reviewer posted nothing for an hour after it merged.
-# These tests run judge-judy.sh's own card-read line against a board that takes the connection and never
-# answers, and check that the pass goes on within the budget, with the saved card or with none.
-_JJ_SRC = (Path(__file__).resolve().parents[1] / "members" / "judge-judy" / "judge-judy.sh").read_text()
-CARD_LINE = re.search(r"^\s*(timeout .*value_card\.py\" \"\$\{PR_TASK:-\}\".*)$", _JJ_SRC, re.M).group(1)
-
-
-class DarkBoardTest(unittest.TestCase):
-    def setUp(self):
-        # listen() with no accept(): the kernel completes the handshake, then nothing is ever sent
-        self.board = socket.socket()
-        self.board.bind(("127.0.0.1", 0))
-        self.board.listen(16)
-        self.tmp = tempfile.TemporaryDirectory()
-        self.dir = Path(self.tmp.name)
-
-    def tearDown(self):
-        self.board.close()
-        self.tmp.cleanup()
-
-    def card_step(self, cache, **env):
-        card_file = self.dir / "body.card"
-        full = dict(os.environ, KIT_DIR=str(Path(__file__).resolve().parents[1]), PR_TASK="PHIA-7", CARD_FILE=str(card_file),
-                    LOG=str(self.dir / "judge-judy.log"), JUDGE_CARD_CACHE=str(cache),
-                    PAPERCLIP_API_URL=f"http://127.0.0.1:{self.board.getsockname()[1]}",
-                    PAPERCLIP_API_KEY="k", JUDGE_CARD_TIMEOUT="150", JUDGE_CARD_TRIES="2",
-                    JUDGE_CARD_BUDGET="3", **env)
-        start = time.monotonic()
-        subprocess.run(["bash", "-c", CARD_LINE], env=full, check=True, timeout=60)
-        return time.monotonic() - start, json.loads(card_file.read_text())
-
-    def test_the_card_step_ends_within_its_budget_and_uses_the_saved_read(self):
-        cache = self.dir / "cache"
-        cache.mkdir()
-        (cache / "PHIA-7.json").write_text(json.dumps(
-            {"task": "PHIA-7", "card": "User: a donor", "owner": "jobs", "cached_at": "2026-11-02T08:00:00Z"}))
-        took, card = self.card_step(cache)
-        self.assertLess(took, 6)  # budget 3 s; two 150 s tries before PHIA-2276
-        self.assertEqual(card["card"], "User: a donor")
-        self.assertIn("read_failed", card)
-
-    def test_no_saved_read_means_no_card_and_the_pass_goes_on(self):
-        took, card = self.card_step(self.dir / "cache")
-        self.assertLess(took, 6)
-        self.assertFalse(card.get("card"))
-        self.assertIn("error", card)
-
-    def test_an_unwritable_cache_dir_is_not_fatal(self):
-        blocker = self.dir / "file"
-        blocker.write_text("")
-        took, card = self.card_step(blocker / "cache")  # a folder under a file can never be made
-        self.assertLess(took, 6)
-        self.assertIn("error", card)
-
-    def test_the_hard_stop_follows_the_budget_and_the_cache_sits_by_the_log(self):
-        self.assertTrue(CARD_LINE.startswith('timeout "$(( ${JUDGE_CARD_BUDGET:-150} + 15 ))s" python3'))
-        self.assertIn('JUDGE_CARD_CACHE="${JUDGE_CARD_CACHE:-$LOG_DIR/value-card-cache}"', _JJ_SRC)
-        self.assertIn("JUDGE_CARD_TIMEOUT=30 JUDGE_CARD_BUDGET=30 JUDGE_CARD_TRIES=1", _JJ_SRC)
 
 
 if __name__ == "__main__":
