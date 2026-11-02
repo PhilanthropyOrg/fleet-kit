@@ -411,8 +411,9 @@ class ValueJudge(unittest.TestCase):
         self.assertEqual(out["ledger"]["scores"]["value"], 2)
         self.assertEqual(out["verdict"], "approve")
         sh = (Path(__file__).resolve().parents[1] / "members/judge-judy/judge-judy.sh").read_text()
-        self.assertIn("red-main fix (Operations, PHIA-2214)", sh)
-        self.assertIn("never value 3. Example: app 15155", sh)
+        self.assertIn("red-main fix (Operations, PHIA-2214; Paul 11-02)", sh)
+        self.assertIn("never value 3. Examples: app 15155", sh)
+        self.assertIn("the deploy it unblocks", sh)
 
 
 # A dark board costs a judge-judy pass one card budget, never more (PHIA-2276, 2026-11-02).
