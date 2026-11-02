@@ -81,7 +81,7 @@ class ValueJudge(unittest.TestCase):
         out = vj.apply(_scored(), "", "1", "abc", "t", "jobs/x", False)
         self.assertEqual(out["verdict"], "approve")
         self.assertEqual(out["ledger"]["points"], 4.0)
-        self.assertEqual(out["ledger"]["seat"], "jobs")
+        self.assertEqual(out["ledger"]["seat"], "v-jobs")  # PHIA-2089: one name per seat
 
     def test_each_send_back_rule(self):
         card = {"task": "PHIA-9", "owner": "jobs", "card": "User: a donor\nBest in class: ?", "plan": ""}
@@ -330,7 +330,7 @@ class ValueJudge(unittest.TestCase):
             {"ts": day, "pr": "2", "seat": "g", "verdict": "approve", "points": 6.0, "value_reasons": [], "plan": None},
         ]
         s = vj.summary(rows, merged={"1"}, now=day + 100)
-        self.assertEqual(s["points_per_seat_per_day"], [{"seat": "jobs", "day": "2026-10-26", "points": 4.0}])
+        self.assertEqual(s["points_per_seat_per_day"], [{"seat": "v-jobs", "day": "2026-10-26", "points": 4.0}])
         self.assertEqual(s["sent_back_without_plan"], 1)
         self.assertEqual(s["plan_match_share"], 1.0)
 
