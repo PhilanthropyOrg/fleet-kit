@@ -5,7 +5,7 @@ line, a 'See it:' line, a plain-words opening, or evidence per criterion. 7 days
 import unittest
 from pathlib import Path
 
-SH = (Path(__file__).resolve().parents[1] / "members/judge-judy/judge-judy.sh").read_text()
+SH = (Path(__file__).resolve().parents[1] / "members/judge-judy/judge-judy.sh").read_text() + (Path(__file__).resolve().parents[1] / "members/judge-judy/value-rubric.md").read_text()
 
 
 class PaperworkRulesCut(unittest.TestCase):

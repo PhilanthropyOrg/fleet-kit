@@ -125,7 +125,7 @@ class ValueJudge(unittest.TestCase):
         self.assertEqual(out["verdict"], "approve")
         self.assertIn("(today: jobs/applies 41 a day", out["scores_text"])
         self.assertEqual(out["ledger"]["baseline"], "jobs/applies 41 a day, kpi_daily 10-31")
-        sh = (Path(__file__).resolve().parents[1] / "members/judge-judy/judge-judy.sh").read_text()
+        sh = (Path(__file__).resolve().parents[1] / "members/judge-judy/judge-judy.sh").read_text() + (Path(__file__).resolve().parents[1] / "members/judge-judy/value-rubric.md").read_text()
         self.assertIn("Value 2 or 3 needs a named user and a measured baseline", sh)
 
     def test_half_paid_at_merge_half_owed_until_the_read_and_a_cut_in_full(self):
@@ -153,7 +153,7 @@ class ValueJudge(unittest.TestCase):
         self.assertTrue(out["ledger"]["tool"])
         self.assertIn("capped at 2", out["scores_text"])
         self.assertEqual(out["verdict"], "approve")
-        sh = (Path(__file__).resolve().parents[1] / "members/judge-judy/judge-judy.sh").read_text()
+        sh = (Path(__file__).resolve().parents[1] / "members/judge-judy/judge-judy.sh").read_text() + (Path(__file__).resolve().parents[1] / "members/judge-judy/value-rubric.md").read_text()
         self.assertIn("measuring tools (G, PHIA-2043)", sh)
         self.assertIn("Owner-asked cost (G, PHIA-2067 and PHIA-2070)", sh)
         self.assertIn("platform/ci_usd_per_day", sh)
@@ -177,7 +177,7 @@ class ValueJudge(unittest.TestCase):
         res = vj.apply(_scored(research=False), "", "1", "h", "t", "g/x", False, out)
         self.assertEqual(res["verdict"], "approve")  # a missing card is never a block
         self.assertIn("| Research (task as card) |", res["scores_text"])
-        sh = (Path(__file__).resolve().parents[1] / "members/judge-judy/judge-judy.sh").read_text()
+        sh = (Path(__file__).resolve().parents[1] / "members/judge-judy/judge-judy.sh").read_text() + (Path(__file__).resolve().parents[1] / "members/judge-judy/value-rubric.md").read_text()
         self.assertIn(".task_text", sh)
         for anchor in ("Anchors", "14985", "14835", "what would make it a 3"):
             self.assertIn(anchor, sh)
@@ -265,7 +265,7 @@ class ValueJudge(unittest.TestCase):
         text = vj.apply(_scored(), "", "1", "h", "t", "g/x", False,
                         {"task": "PHIA-1", "error": "HTTP 403"})["scores_text"]
         self.assertIn("| Research (card unread: HTTP 403) |", text)
-        sh = (Path(__file__).resolve().parents[1] / "members/judge-judy/judge-judy.sh").read_text()
+        sh = (Path(__file__).resolve().parents[1] / "members/judge-judy/judge-judy.sh").read_text() + (Path(__file__).resolve().parents[1] / "members/judge-judy/value-rubric.md").read_text()
         self.assertIn("export PAPERCLIP_API_URL PAPERCLIP_API_KEY PAPERCLIP_HOST", sh)
 
     def test_card_read_waits_past_a_slow_board_and_reads_issue_and_card_at_once(self):
@@ -339,7 +339,7 @@ class ValueJudge(unittest.TestCase):
     def test_review_again_label_and_task_from_branch(self):
         import re as _re
         import subprocess
-        sh = (Path(__file__).resolve().parents[1] / "members/judge-judy/judge-judy.sh").read_text()
+        sh = (Path(__file__).resolve().parents[1] / "members/judge-judy/judge-judy.sh").read_text() + (Path(__file__).resolve().parents[1] / "members/judge-judy/value-rubric.md").read_text()
         fn = _re.search(r"^pr_task\(\) \{.*?^\}", sh, _re.S | _re.M).group(0)
         jq = _re.search(r"jq -e --arg n \"\$pr\" --arg l \"\$AGAIN_LABEL\" '([^']+)'", sh).group(1)
         prs = json.dumps([{"number": 7, "title": "Quadrant words", "headRefName": "phia1217-quadrant-words",
@@ -354,7 +354,7 @@ class ValueJudge(unittest.TestCase):
         self.assertIn('labels/${AGAIN_LABEL}', sh)
 
     def test_shell_reads_the_card_and_cuts_paperwork(self):
-        sh = (Path(__file__).resolve().parents[1] / "members/judge-judy/judge-judy.sh").read_text()
+        sh = (Path(__file__).resolve().parents[1] / "members/judge-judy/judge-judy.sh").read_text() + (Path(__file__).resolve().parents[1] / "members/judge-judy/value-rubric.md").read_text()
         self.assertIn('--card "$CARD_FILE"', sh)
         self.assertIn("VALUE CARD", sh)
         self.assertNotIn("should carry '## Why'", sh)
@@ -395,7 +395,7 @@ class ValueJudge(unittest.TestCase):
         self.assertEqual(s["plan_match_share"], 1.0)
 
     def test_shell_schema_carries_the_same_scores_fragment(self):
-        sh = (Path(__file__).resolve().parents[1] / "members/judge-judy/judge-judy.sh").read_text()
+        sh = (Path(__file__).resolve().parents[1] / "members/judge-judy/judge-judy.sh").read_text() + (Path(__file__).resolve().parents[1] / "members/judge-judy/value-rubric.md").read_text()
         line = next(l for l in sh.splitlines() if l.startswith("VERDICT_SCHEMA="))
         schema = json.loads(line.split("=", 1)[1].strip("'"))
         for k, v in vj.SCORES_SCHEMA.items():
@@ -410,7 +410,7 @@ class ValueJudge(unittest.TestCase):
         out = vj.apply(obj, "", "15155", "h", "t", "operations/x", False)
         self.assertEqual(out["ledger"]["scores"]["value"], 2)
         self.assertEqual(out["verdict"], "approve")
-        sh = (Path(__file__).resolve().parents[1] / "members/judge-judy/judge-judy.sh").read_text()
+        sh = (Path(__file__).resolve().parents[1] / "members/judge-judy/judge-judy.sh").read_text() + (Path(__file__).resolve().parents[1] / "members/judge-judy/value-rubric.md").read_text()
         self.assertIn("red-main fix (Operations, PHIA-2214; Paul 11-02)", sh)
         self.assertIn("never value 3. Examples: app 15155", sh)
         self.assertIn("the deploy it unblocks", sh)
@@ -486,11 +486,17 @@ class PromptBuildsTest(unittest.TestCase):
         start = _JJ_SRC.index('  BODY_RULES="')
         end = _JJ_SRC.index('}"\n', start) + 3
         script = ('set -euo pipefail\nJUDGE_KPI_METRICS=x\nRULES_TEXT="\n--- rules ---"\n'
+                  + f'KIT_DIR={Path(__file__).resolve().parents[1]}\n'
                   + _JJ_SRC[start:end] + 'printf %s "$BODY_RULES"\n')
         out = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=30)
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertEqual(out.stderr, "")
         self.assertIn("Value 2 or 3 needs a named user and a measured baseline", out.stdout)
+        # Reif 11-02: the rubric is one file, value-rubric.md, read by this gate and by G; both sections reach the prompt
+        for line in ("- value: will people want it?", "- viability: does it work for the business?", "Anchors (real philanthropy PRs", "A score of 2 is a claim, not a default"):
+            self.assertIn(line, out.stdout)
+        self.assertLess(out.stdout.index("- viability:"), out.stdout.index("First fill beneficiary"))
+        self.assertLess(out.stdout.index("First fill beneficiary"), out.stdout.index("Anchors (real"))
         self.assertTrue(out.stdout.endswith("--- rules ---"), out.stdout[-200:])
 
 
