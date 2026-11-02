@@ -225,6 +225,8 @@ class ValueJudge(unittest.TestCase):
         self.assertIn("platform/ci_usd_per_day", sh)
         self.assertIn("Owner-asked staff work (Automation, PHIA-2064)", sh)
         self.assertIn("never sent to value 1 for adding nothing", sh)
+        self.assertIn("production watch (Automation, PHIA-2064)", sh)
+        self.assertIn("linked Owner-filed issue asks", sh)
 
     def test_value_1_with_a_named_user_says_so(self):
         # PHIA-2064: PR 15084 was told "no named user" under a table naming ID check buyers and 51 of 60.
