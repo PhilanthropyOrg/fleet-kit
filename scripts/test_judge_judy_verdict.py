@@ -176,6 +176,20 @@ class ValueJudge(unittest.TestCase):
         self.assertTrue(out["ledger"]["plan_matched"])
         self.assertTrue(out["ledger"]["card"])
 
+    def test_one_name_per_seat_from_branch_prefix_or_card(self):  # PHIA-2089
+        for ref in ("auto/x", "automation/x", "f-automation/x"):
+            self.assertEqual(vj.seat_of(ref), "f-automation")
+        self.assertEqual(vj.seat_of("jobs/x"), "v-jobs")
+        self.assertEqual(vj.seat_of("ops/x"), "f-operations")
+        self.assertEqual(vj.seat_of("g/x"), "g")
+        self.assertEqual(vj.seat_of("no-slash"), "unknown")
+        out = vj.apply(_scored(), "", "1", "h", "t", "jobs/x", False, {"owner": "Claims", "card": ""})
+        self.assertEqual(out["ledger"]["seat"], "v-claims-and-superpages")
+        rows = [{"ts": 100.0, "pr": "1", "seat": "auto", "verdict": "approve", "points": 2.0},
+                {"ts": 100.0, "pr": "2", "seat": "f-automation", "verdict": "approve", "points": 3.0}]
+        seats = {d["seat"] for d in vj.summary(rows, now=200.0)["points_per_seat_per_day"]}
+        self.assertEqual(seats, {"f-automation"})
+
     def test_value_card_cuts_the_self_score_before_the_judge_sees_it(self):
         import value_card as vc
         card, plan = vc.blind("User: a donor\nNeed: x\n4-risk self-score: Value 3, Usability 2, Feasibility 2, Viability 1\nBest in class: Candid")
