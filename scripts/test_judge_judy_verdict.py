@@ -95,13 +95,20 @@ class ValueJudge(unittest.TestCase):
                          ({"v": 1}, "Value is 1"),
                          ({"v": 2, "u": 1, "f": 1, "b": 1}, "Too little value")):
             out = vj.apply(_scored(**kw), "", "1", "abc", "t", "g/x", False, card)
-            self.assertEqual(out["verdict"], "block", kw)
+            # Reif 11-02 (judge before build): a value rule is a note, never a send-back
+            self.assertEqual(out["verdict"], "approve", kw)
             self.assertIn(word, out["findings_text"], kw)
+            self.assertIn("**Value notes**", out["findings_text"], kw)
+            self.assertEqual(out["ledger"]["value_reasons"], [], kw)
+            # the undo switch puts the old send-back back
+            out = vj.apply(_scored(**kw), "", "1", "abc", "t", "g/x", False, card, value_send_back=True)
+            self.assertEqual(out["verdict"], "block", kw)
+            self.assertIn("**Sent back:**", out["findings_text"], kw)
 
     def test_no_named_user_and_number_caps_value_at_1_and_sends_back(self):
         # Paul 11-01: 45 of 51 verdicts were 2/2/2/2 and 0 went back for value.
         for who in (("", "checkouts"), ("a donor", "none"), ("n/a", "")):
-            out = vj.apply(_scored(v=3, who=who), "", "1", "h", "t", "g/x", False)
+            out = vj.apply(_scored(v=3, who=who), "", "1", "h", "t", "g/x", False, value_send_back=True)
             self.assertEqual(out["verdict"], "block", who)
             self.assertEqual(out["ledger"]["scores"]["value"], 1)
             self.assertIn("capped at 1", out["scores_text"])
@@ -115,7 +122,7 @@ class ValueJudge(unittest.TestCase):
         for baseline in ("", "none", "goes up"):
             obj = _scored(v=2)
             obj["beneficiary"]["baseline"] = baseline
-            out = vj.apply(obj, "", "1", "h", "t", "g/x", False)
+            out = vj.apply(obj, "", "1", "h", "t", "g/x", False, value_send_back=True)
             self.assertEqual(out["verdict"], "block", baseline)
             self.assertEqual(out["ledger"]["scores"]["value"], 1)
             self.assertIn("no measured reading", out["scores_text"])
@@ -143,6 +150,57 @@ class ValueJudge(unittest.TestCase):
         self.assertEqual((back["pay_at_merge"], back["pay_on_read"]), (0.0, 0.0))
         old = vj.apply(_scored(), "", "1", "h", "t", "jobs/x", False)["ledger"]  # verdict with no metric fields
         self.assertEqual((old["metric"], old["guess"], old["pay_at_merge"]), ("", 0.0, 2.0))
+
+    def test_judge_before_build_task_gate(self):
+        # Reif 11-02: a PR passes the task check only when its task carries judge-yes or fast-lane.
+        new = "2026-11-03T10:00:00Z"
+        def card(labels, created=new, **kw):
+            return dict({"task": "PHIA-9", "owner": "v-jobs", "card": "User: x", "plan": "",
+                         "labels": labels, "created_at": created}, **kw)
+        for labels in (["judge-yes"], ["fast-lane"], [{"id": "l1", "name": "judge-yes"}]):
+            out = vj.apply(_scored(), "", "1", "h", "PHIA-9 x", "jobs/x", False, card(labels), gate=True)
+            self.assertEqual(out["verdict"], "approve", labels)
+        out = vj.apply(_scored(), "", "1", "h", "PHIA-9 x", "jobs/x", False, card([]), gate=True)
+        self.assertEqual(out["verdict"], "block")
+        self.assertIn("no Judge YES", out["findings_text"])
+        self.assertEqual(out["ledger"]["approval_reasons"][0][:10], "PHIA-9 has")
+        self.assertEqual((out["ledger"]["pay_at_merge"], out["ledger"]["pay_on_read"]), (0.0, 0.0))
+        # a correctness pass on a low-value PR with an approved task still ships (value is not re-judged)
+        out = vj.apply(_scored(v=1), "", "1", "h", "PHIA-9 x", "jobs/x", False, card(["judge-yes"]), gate=True)
+        self.assertEqual(out["verdict"], "approve")
+        # a correctness block still blocks
+        bad = [{"file": "a.py", "line": 3, "severity": "high", "what_breaks": "x() returns None", "plain": "Sign-in fails."}]
+        out = vj.apply(_scored(verdict="block", findings=bad), "", "1", "h", "PHIA-9 x", "jobs/x", False,
+                       card(["judge-yes"]), gate=True)
+        self.assertEqual(out["verdict"], "block")
+        # tasks from before the cutover are not held to it
+        out = vj.apply(_scored(), "", "1", "h", "PHIA-9 x", "jobs/x", False, card([], "2026-11-01T00:00:00Z"), gate=True)
+        self.assertEqual(out["verdict"], "approve")
+        # no task named at all
+        out = vj.apply(_scored(), "", "1", "h", "fix it", "jobs/x", False, {}, gate=True)
+        self.assertEqual(out["verdict"], "block")
+        self.assertIn("names no task", out["findings_text"])
+        # the PR names a task but the board read failed or timed out ({} from judge-judy): never fatal
+        for c in ({}, {"task": "PHIA-9", "error": "TimeoutError"}, {"task": "PHIA-9", "card": "x"}):
+            out = vj.apply(_scored(), "", "1", "h", "PHIA-9 x", "jobs/x", False, c, gate=True)
+            self.assertEqual(out["verdict"], "approve", c)
+        # dependabot (exempt) and the gate off pass
+        self.assertEqual(vj.apply(_scored(), "", "1", "h", "bump", "dependabot/x", True, {}, gate=True)["verdict"], "approve")
+        self.assertEqual(vj.apply(_scored(), "", "1", "h", "fix it", "jobs/x", False, {}, gate=False)["verdict"], "approve")
+
+    def test_value_card_reads_labels_and_age(self):
+        import value_card as vc
+        from unittest import mock
+
+        def _open(req, timeout=None):
+            if "/documents/" in req.full_url:
+                return io.StringIO(json.dumps({"body": "User: a donor", "updatedAt": "t"}))
+            return io.StringIO(json.dumps({"title": "Pitch", "description": "", "createdAt": "2026-11-03T00:00:00Z",
+                                           "labels": [{"id": "1", "name": "judge-yes"}]}))
+        with mock.patch.dict(os.environ, {"PAPERCLIP_API_URL": "http://b", "PAPERCLIP_API_KEY": "k"}), \
+                mock.patch.object(vc.urllib.request, "urlopen", _open):
+            out = vc.fetch("PHIA-77")
+        self.assertEqual((out["labels"], out["created_at"]), (["judge-yes"], "2026-11-03T00:00:00Z"))
 
     def test_a_measuring_tool_caps_at_value_2(self):
         # G 11-01 (PHIA-2043): tools scored on the visitor number they gate, never Value 3.
@@ -201,9 +259,9 @@ class ValueJudge(unittest.TestCase):
 
     def test_one_name_per_seat_from_branch_prefix_or_card(self):  # PHIA-2089
         for ref in ("auto/x", "automation/x", "f-automation/x"):
-            self.assertEqual(vj.seat_of(ref), "f-automation")
+            self.assertEqual(vj.seat_of(ref), "platform")
         self.assertEqual(vj.seat_of("jobs/x"), "v-jobs")
-        self.assertEqual(vj.seat_of("ops/x"), "f-operations")
+        self.assertEqual(vj.seat_of("ops/x"), "platform")
         self.assertEqual(vj.seat_of("g/x"), "g")
         self.assertEqual(vj.seat_of("no-slash"), "unknown")
         out = vj.apply(_scored(), "", "1", "h", "t", "jobs/x", False, {"owner": "Claims", "card": ""})
@@ -211,7 +269,7 @@ class ValueJudge(unittest.TestCase):
         rows = [{"ts": 100.0, "pr": "1", "seat": "auto", "verdict": "approve", "points": 2.0},
                 {"ts": 100.0, "pr": "2", "seat": "f-automation", "verdict": "approve", "points": 3.0}]
         seats = {d["seat"] for d in vj.summary(rows, now=200.0)["points_per_seat_per_day"]}
-        self.assertEqual(seats, {"f-automation"})
+        self.assertEqual(seats, {"platform"})
 
     def test_value_card_cuts_the_self_score_before_the_judge_sees_it(self):
         import value_card as vc

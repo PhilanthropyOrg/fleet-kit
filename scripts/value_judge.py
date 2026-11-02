@@ -8,7 +8,20 @@ scored 0-3 with one line of why, plus a research check. The model scores; this s
 so the send-back rule and the points formula are code a test can pin, not prose a model may drift.
 
   points    = value x mean(usability, feasibility, viability)      (0..9)
-  send back = value <= 1, usability 0, a thin value card, or points < JUDGE_MIN_POINTS (default 3)
+  send back = a correctness block, or (gate on) the PR links no task the Judge approved and no fast-lane task
+
+Reif, 2026-11-02 (judge before build): value is judged once, on the pitch, BEFORE any code: the Judge seat
+scores the task's value card with value-rubric.md and on YES labels the task `judge-yes` and moves it to
+todo. A PR is no longer sent back on value after CI (134 send-backs in a day, 99 passes, all after the
+work was done). judge-judy keeps scoring the four risks for points (half at merge, half on the 48-hour
+read), but the scores never block. What it checks besides correctness: the PR names its task (PHIA-n in
+the title or branch) and that task carries `judge-yes` or `fast-lane` (a breakage fixed first, judged
+after). Tasks created before JUDGE_APPROVAL_SINCE are not held to it. JUDGE_VALUE_SEND_BACK=1 puts the
+old value send-back rule back (undo); JUDGE_APPROVAL_GATE=0 turns the task check off.
+
+The value rule below (Value <= 1, Usability 0, a thin card, points < JUDGE_MIN_POINTS) now only writes
+"value notes" on the verdict for the seat and the Judge to read; it sends back only when
+JUDGE_VALUE_SEND_BACK=1.
 
 Paul, 2026-11-01 (calibration): 45 of 51 verdicts scored exactly 2/2/2/2 and 0 were sent back for
 value. The judge now names the user and the user number it expects to move (`beneficiary`); a blank
@@ -61,6 +74,10 @@ RISKS = ("value", "usability", "feasibility", "viability")
 MIN_POINTS = float(os.environ.get("JUDGE_MIN_POINTS", "3"))
 MIN_VALUE = int(os.environ.get("JUDGE_MIN_VALUE", "2"))  # Value below this is a send-back
 CARD_REQUIRED = os.environ.get("JUDGE_CARD_REQUIRED", "0") == "1"
+VALUE_SEND_BACK = os.environ.get("JUDGE_VALUE_SEND_BACK", "0") == "1"  # Reif 11-02: off; value is the Judge's, on the pitch
+APPROVAL_GATE = os.environ.get("JUDGE_APPROVAL_GATE", "1") == "1"
+APPROVAL_SINCE = os.environ.get("JUDGE_APPROVAL_SINCE", "2026-11-02T21:00:00Z")  # tasks before the cutover pass
+APPROVAL_LABELS = {"judge-yes", "fast-lane"}
 
 # The schema fragment judge-judy.sh merges into VERDICT_SCHEMA (kept here so one file owns it).
 _RISK = {"type": "object", "properties": {"score": {"type": "integer", "minimum": 0, "maximum": 3},
@@ -107,9 +124,10 @@ def plan_score(body: str):
 
 # Branch prefixes seats have used, to the seat's board urlKey (the card owner), so one seat is
 # one ledger row: 11-01 had f-automation / automation / auto and jobs / v-jobs apart (PHIA-2089).
+# Reif 11-02: Operations and Automation are one seat, Platform (urlKey `platform`); their old names count there.
 SEAT_ALIASES = {
-    "auto": "f-automation", "automation": "f-automation",
-    "ops": "f-operations", "operations": "f-operations",
+    "auto": "platform", "automation": "platform", "f-automation": "platform",
+    "ops": "platform", "operations": "platform", "f-operations": "platform",
     "jobs": "v-jobs", "claims": "v-claims-and-superpages", "superpages": "v-claims-and-superpages",
     "quadrant": "v-quadrant", "record": "v-record-and-search", "search": "v-record-and-search",
     "revenue": "f-revenue", "story": "f-story", "leads": "f-leads", "treasury": "f-treasury",
@@ -181,6 +199,38 @@ def judge(scores: dict, research_ok: bool, card: dict | None = None, research_wh
     return reasons
 
 
+def labels_of(card: dict) -> set:
+    """Label names on the task (value_card.py reads them from the board issue)."""
+    out = set()
+    for l in (card or {}).get("labels") or []:
+        name = l.get("name") if isinstance(l, dict) else l
+        if name:
+            out.add(str(name).strip().lower())
+    return out
+
+
+def approval(card: dict | None, title: str = "", ref: str = "") -> list:
+    """Reasons to send the PR back because it does not link a Judge-approved (or fast-lane) task; empty = fine.
+
+    Never fatal on a slow board: when the PR names a task but its labels could not be read (the read failed or
+    timed out, or a saved read from before labels were kept), it passes."""
+    card = card or {}
+    task = card.get("task") or task_of(title, ref)
+    if not task:
+        return ["This PR names no task. Put the id of the task the Judge approved (PHIA-n) in the title or branch; "
+                "a breakage fixed first names its `fast-lane` task."]
+    if "labels" not in card:
+        return []
+    created = str(card.get("created_at") or "")
+    if created and created < APPROVAL_SINCE:
+        return []
+    if labels_of(card) & APPROVAL_LABELS:
+        return []
+    return [f"{task} has no Judge YES (label `judge-yes`) and is not `fast-lane`. Pitch it first: the value card on "
+            "the task, assigned to the Judge in backlog; build once the Judge moves it to todo for you. "
+            "A breakage (site down, error spike, broken step) takes the fast lane: label the task `fast-lane`."]
+
+
 def _scores_of(obj: dict):
     s = obj.get("scores")
     if not isinstance(s, dict):
@@ -194,7 +244,7 @@ def _scores_of(obj: dict):
     return nums, {r: str(s[r].get("why", "")) for r in RISKS}
 
 
-def scores_text(nums, whys, research, pts, plan, reasons, card=None, beneficiary=None) -> str:
+def scores_text(nums, whys, research, pts, plan, reasons, card=None, beneficiary=None, notes=None) -> str:
     lines = []
     if beneficiary is not None:
         lines += [f"**Who gets it:** {beneficiary.get('user') or '(not named)'}. "
@@ -223,9 +273,13 @@ def scores_text(nums, whys, research, pts, plan, reasons, card=None, beneficiary
                      + (" -- matches the judge." if plan_matches(plan, nums) else " -- differs from the judge by more than 1."))
     else:
         lines.append("No self-score on the value card (scored blind either way).")
+    if notes:
+        lines.append("")
+        lines.append("**Value notes** (for points and the next pitch; the Judge decided value on the pitch, so these never send a PR back):")
+        lines += [f"- {r}" for r in notes]
     if reasons:
         lines.append("")
-        lines.append("**Sent back on value:**")
+        lines.append("**Sent back:**")
         lines += [f"- {r}" for r in reasons]
     return "\n".join(lines)
 
@@ -235,7 +289,7 @@ def plan_matches(plan, nums) -> bool:
 
 
 def apply(verdict: dict, body: str, pr: str, head: str, title: str, ref: str, exempt: bool,
-          card: dict | None = None) -> dict:
+          card: dict | None = None, gate: bool = False, value_send_back: bool | None = None) -> dict:
     card = card if isinstance(card, dict) else {}
     out = dict(verdict)
     if not verdict.get("ok"):
@@ -257,10 +311,16 @@ def apply(verdict: dict, body: str, pr: str, head: str, title: str, ref: str, ex
     research_ok = bool(research.get("ok"))
     pts = points(nums)
     plan = plan_score("plan " + card["plan"]) if card.get("plan") else plan_score(body)
-    reasons = [] if exempt else judge(nums, research_ok, card, str(research.get("why", "")))
+    notes = [] if exempt else judge(nums, research_ok, card, str(research.get("why", "")))
+    send_back = VALUE_SEND_BACK if value_send_back is None else value_send_back
+    reasons = list(notes) if send_back else []
+    if send_back:
+        notes = []
+    gate_reasons = [] if (exempt or not gate) else approval(card, title, ref)
+    reasons += gate_reasons
     correctness = verdict.get("verdict")
     final = "block" if (correctness == "block" or reasons) else "approve"
-    text = scores_text(nums, whys, research, pts, plan, reasons, card, beneficiary)
+    text = scores_text(nums, whys, research, pts, plan, reasons, card, beneficiary, notes)
     out["verdict"] = final
     out["scores_text"] = text
     out["findings_text"] = (verdict.get("findings_text") or "") + ("\n\n" if verdict.get("findings_text") else "") + text
@@ -270,7 +330,8 @@ def apply(verdict: dict, body: str, pr: str, head: str, title: str, ref: str, ex
         "ts": time.time(), "pr": pr, "head": head, "seat": seat_name(card.get("owner")) if card.get("owner") else seat_of(ref),
         "task": card.get("task") or task_of(title, ref), "card": bool(card.get("card")),
         "scores": nums, "research_ok": research_ok, "points": pts, "verdict": final,
-        "correctness": correctness, "value_reasons": reasons, "exempt": exempt,
+        "correctness": correctness, "value_reasons": reasons if send_back else [], "value_notes": notes,
+        "approval_reasons": gate_reasons, "exempt": exempt,
         "plan": plan, "plan_matched": plan_matches(plan, nums) if plan else None,
         "user": str(beneficiary.get("user", "")), "number": str(beneficiary.get("number", "")),
         "baseline": str(beneficiary.get("baseline") or "").strip(), "metric": str(beneficiary.get("metric") or "").strip(), "guess": _guess(beneficiary.get("guess")),
@@ -341,7 +402,8 @@ def main(argv=None) -> int:
                     card = json.load(f)
             except (OSError, json.JSONDecodeError):
                 card = {}
-        json.dump(apply(verdict, body, args.pr, args.head, args.title, args.ref, args.exempt, card), sys.stdout)
+        json.dump(apply(verdict, body, args.pr, args.head, args.title, args.ref, args.exempt, card,
+                        gate=APPROVAL_GATE), sys.stdout)
         return 0
     rows = []
     try:
