@@ -403,6 +403,17 @@ class ValueJudge(unittest.TestCase):
         self.assertIn("scores", schema["required"])
         self.assertIn("research", schema["required"])
 
+    def test_a_red_main_fix_scores_on_the_fixes_it_releases(self):
+        # Operations 11-02 (PHIA-2214): a gate-only fix scored Value 1 twice while main was red.
+        obj = _scored(v=2, u=2, f=2, b=2)
+        obj["beneficiary"].update(metric="990/searches", guess=0, cut=False, tool=True)
+        out = vj.apply(obj, "", "15155", "h", "t", "operations/x", False)
+        self.assertEqual(out["ledger"]["scores"]["value"], 2)
+        self.assertEqual(out["verdict"], "approve")
+        sh = (Path(__file__).resolve().parents[1] / "members/judge-judy/judge-judy.sh").read_text()
+        self.assertIn("red-main fix (Operations, PHIA-2214)", sh)
+        self.assertIn("never value 3. Example: app 15155", sh)
+
 
 # A dark board costs a judge-judy pass one card budget, never more (PHIA-2276, 2026-11-02).
 # fleet-kit#1840 retried the card read (two tries of 150 s, then the agent name read the same way), so
