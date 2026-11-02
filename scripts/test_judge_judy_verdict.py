@@ -81,7 +81,7 @@ class ValueJudge(unittest.TestCase):
         out = vj.apply(_scored(), "", "1", "abc", "t", "jobs/x", False)
         self.assertEqual(out["verdict"], "approve")
         self.assertEqual(out["ledger"]["points"], 4.0)
-        self.assertEqual(out["ledger"]["seat"], "jobs")
+        self.assertEqual(out["ledger"]["seat"], "v-jobs")  # PHIA-2089: one name per seat
 
     def test_each_send_back_rule(self):
         card = {"task": "PHIA-9", "owner": "jobs", "card": "User: a donor\nBest in class: ?", "plan": ""}
@@ -175,6 +175,20 @@ class ValueJudge(unittest.TestCase):
         self.assertEqual(out["ledger"]["task"], "PHIA-1217")
         self.assertTrue(out["ledger"]["plan_matched"])
         self.assertTrue(out["ledger"]["card"])
+
+    def test_one_name_per_seat_from_branch_prefix_or_card(self):  # PHIA-2089
+        for ref in ("auto/x", "automation/x", "f-automation/x"):
+            self.assertEqual(vj.seat_of(ref), "f-automation")
+        self.assertEqual(vj.seat_of("jobs/x"), "v-jobs")
+        self.assertEqual(vj.seat_of("ops/x"), "f-operations")
+        self.assertEqual(vj.seat_of("g/x"), "g")
+        self.assertEqual(vj.seat_of("no-slash"), "unknown")
+        out = vj.apply(_scored(), "", "1", "h", "t", "jobs/x", False, {"owner": "Claims", "card": ""})
+        self.assertEqual(out["ledger"]["seat"], "v-claims-and-superpages")
+        rows = [{"ts": 100.0, "pr": "1", "seat": "auto", "verdict": "approve", "points": 2.0},
+                {"ts": 100.0, "pr": "2", "seat": "f-automation", "verdict": "approve", "points": 3.0}]
+        seats = {d["seat"] for d in vj.summary(rows, now=200.0)["points_per_seat_per_day"]}
+        self.assertEqual(seats, {"f-automation"})
 
     def test_value_card_cuts_the_self_score_before_the_judge_sees_it(self):
         import value_card as vc
@@ -316,7 +330,7 @@ class ValueJudge(unittest.TestCase):
             {"ts": day, "pr": "2", "seat": "g", "verdict": "approve", "points": 6.0, "value_reasons": [], "plan": None},
         ]
         s = vj.summary(rows, merged={"1"}, now=day + 100)
-        self.assertEqual(s["points_per_seat_per_day"], [{"seat": "jobs", "day": "2026-10-26", "points": 4.0}])
+        self.assertEqual(s["points_per_seat_per_day"], [{"seat": "v-jobs", "day": "2026-10-26", "points": 4.0}])
         self.assertEqual(s["sent_back_without_plan"], 1)
         self.assertEqual(s["plan_match_share"], 1.0)
 

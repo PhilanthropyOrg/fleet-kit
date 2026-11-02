@@ -94,9 +94,27 @@ def plan_score(body: str):
     return dict(zip(RISKS, map(int, m.groups()))) if m else None
 
 
+# Branch prefixes seats have used, to the seat's board urlKey (the card owner), so one seat is
+# one ledger row: 11-01 had f-automation / automation / auto and jobs / v-jobs apart (PHIA-2089).
+SEAT_ALIASES = {
+    "auto": "f-automation", "automation": "f-automation",
+    "ops": "f-operations", "operations": "f-operations",
+    "jobs": "v-jobs", "claims": "v-claims-and-superpages", "superpages": "v-claims-and-superpages",
+    "quadrant": "v-quadrant", "record": "v-record-and-search", "search": "v-record-and-search",
+    "revenue": "f-revenue", "story": "f-story", "leads": "f-leads", "treasury": "f-treasury",
+    "paperwork": "f-people-and-paperwork", "people": "f-people-and-paperwork",
+}
+
+
+def seat_name(name: str) -> str:
+    """One name per seat: a known alias becomes the seat's urlKey; anything else is kept as is."""
+    name = (name or "").strip().lower()
+    return SEAT_ALIASES.get(name, name) or "unknown"
+
+
 def seat_of(ref: str) -> str:
     """Seat PR branches are <seat>/<slug> (jobs/..., g/..., story/...); ops/ is Operations."""
-    return ref.split("/", 1)[0] if "/" in (ref or "") else "unknown"
+    return seat_name(ref.split("/", 1)[0]) if "/" in (ref or "") else "unknown"
 
 
 def task_of(title: str, ref: str):
@@ -231,7 +249,7 @@ def apply(verdict: dict, body: str, pr: str, head: str, title: str, ref: str, ex
     cut = beneficiary.get("cut") is True
     at_merge, on_read = pay_split(pts, cut) if final == "approve" else (0.0, 0.0)
     out["ledger"] = {
-        "ts": time.time(), "pr": pr, "head": head, "seat": card.get("owner") or seat_of(ref),
+        "ts": time.time(), "pr": pr, "head": head, "seat": seat_name(card.get("owner")) if card.get("owner") else seat_of(ref),
         "task": card.get("task") or task_of(title, ref), "card": bool(card.get("card")),
         "scores": nums, "research_ok": research_ok, "points": pts, "verdict": final,
         "correctness": correctness, "value_reasons": reasons, "exempt": exempt,
@@ -254,7 +272,7 @@ def summary(rows: list, merged=None, days: int = 7, now=None) -> dict:
         if r["verdict"] != "approve" or (merged is not None and pr not in merged):
             continue
         day = time.strftime("%Y-%m-%d", time.gmtime(r["ts"]))
-        per_day[(r["seat"], day)] += r["points"]
+        per_day[(seat_name(r["seat"]), day)] += r["points"]  # older rows carry the branch prefix
     sent_back = [r for r in rows if r.get("value_reasons")]
     planned = [r for r in rows if r.get("plan")]
     return {
