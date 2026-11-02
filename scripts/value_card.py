@@ -24,6 +24,10 @@ Paul, 11-01 06:11Z: 5 of 8 verdicts still said "card unread: TimeoutError" at 15
 PHIA-1929). So a read that fails is tried once more (JUDGE_CARD_TRIES, default 2), and every good read is
 kept in JUDGE_CARD_CACHE (a folder; judge-judy.sh sets it): when both tries fail, the last good read of
 that task is used and the table says "card, saved <time>", so a slow board no longer costs the card.
+PHIA-2276: the first cut of that retry let one card read run 600 s (two tries of 150 s, then the agent
+name read the same way after them), and the app reviewer went silent for an hour after it merged. Now the
+whole read has one budget, JUDGE_CARD_BUDGET seconds (default JUDGE_CARD_TIMEOUT): each try waits only for
+what is left of it, a retry starts only with 5 s or more left, and the agent name is skipped once it is spent.
 """
 from __future__ import annotations
 
@@ -31,6 +35,7 @@ import json
 import os
 import re
 import sys
+import time
 import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
@@ -40,6 +45,9 @@ CARD_KEY = os.environ.get("JUDGE_CARD_KEY", "value-card")
 TASK_TEXT_BYTES = int(os.environ.get("JUDGE_TASK_TEXT_BYTES") or 3000)
 TIMEOUT = float(os.environ.get("JUDGE_CARD_TIMEOUT") or 150)
 TRIES = max(1, int(os.environ.get("JUDGE_CARD_TRIES") or 2))
+BUDGET = float(os.environ.get("JUDGE_CARD_BUDGET") or TIMEOUT)
+MIN_TRY = 5.0  # seconds: a retry with less than this left is not worth starting
+_deadline = [float("inf")]
 _SELF_RE = re.compile(r"^[^\n]*\b(self[- ]?score|4[- ]risk|four[- ]risk|plan)\b[^\n]*value\D{0,4}[0-3][^\n]*$",
                       re.IGNORECASE | re.MULTILINE)
 
@@ -54,9 +62,12 @@ def blind(card: str) -> tuple[str, str]:
 
 def _get(path: str):
     """(json or None, why it is None: '' on success), tried TRIES times; a 4xx answer is not retried."""
-    why = ""
-    for _ in range(TRIES):
-        data, why = _get_once(path)
+    why = "card read budget spent"
+    for n in range(TRIES):
+        left = _deadline[0] - time.monotonic()
+        if left <= 0 or (n and left < MIN_TRY):
+            break
+        data, why = _get_once(path, min(TIMEOUT, left))
         if not why or why.startswith("HTTP 4") or "not in the judge's environment" in why:
             return data, why
     return None, why
@@ -91,7 +102,7 @@ def _cache_get(name: str) -> dict | None:
         return None
 
 
-def _get_once(path: str):
+def _get_once(path: str, timeout: float = TIMEOUT):
     """(json or None, why it is None: '' on success) -- the why goes to the score table (PHIA-1504)."""
     base, key = os.environ.get("PAPERCLIP_API_URL"), os.environ.get("PAPERCLIP_API_KEY")
     if not base or not key:
@@ -101,7 +112,7 @@ def _get_once(path: str):
         headers["Host"] = os.environ["PAPERCLIP_HOST"]
     req = urllib.request.Request(base.rstrip("/") + path, headers=headers)
     try:
-        with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
             return json.load(r), ""
     except urllib.error.HTTPError as e:
         return None, f"HTTP {e.code}"
@@ -112,6 +123,7 @@ def _get_once(path: str):
 def fetch(task: str) -> dict:
     if not re.fullmatch(r"PHIA-\d+", task or ""):
         return {}
+    _deadline[0] = time.monotonic() + BUDGET
     out = _fetch(task)
     if "error" not in out:
         _cache_put(task, out)
@@ -132,7 +144,7 @@ def _fetch(task: str) -> dict:
         if issue.get("assigneeAgentId"):  # an agent's name never changes: read it once
             aid = issue["assigneeAgentId"]
             owner = (_cache_get(f"agent-{aid}") or {}).get("owner")
-            if not owner:
+            if not owner and time.monotonic() < _deadline[0]:
                 agent, _ = _get(f"/api/agents/{aid}")
                 owner = (agent or {}).get("urlKey") or (agent or {}).get("name")
                 if owner:

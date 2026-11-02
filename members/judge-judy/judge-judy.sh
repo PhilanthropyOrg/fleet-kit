@@ -280,7 +280,7 @@ pick_pr() {
       # the block re-reviews the same head with no new commit and no CI rerun.
       if [ -n "$block_at" ] && { [ -z "$edited_at" ] || [[ ! "$edited_at" > "$block_at" ]]; }; then
         # A short wait here: this check runs once per blocked PR on every pass (PHIA-1504).
-        card_at=$(JUDGE_CARD_TIMEOUT=30 JUDGE_CARD_TRIES=1 python3 "${KIT_DIR:-.}/scripts/value_card.py" "$(pr_task "$pr" "$pr_list_json")" 2>/dev/null \
+        card_at=$(JUDGE_CARD_TIMEOUT=30 JUDGE_CARD_BUDGET=30 JUDGE_CARD_TRIES=1 python3 "${KIT_DIR:-.}/scripts/value_card.py" "$(pr_task "$pr" "$pr_list_json")" 2>/dev/null \
           | jq -r '.card_updated_at // empty' 2>/dev/null)
         [ -n "$card_at" ] && [[ "$card_at" > "$block_at" ]] && edited_at="$card_at"
       fi
@@ -551,7 +551,9 @@ while :; do
   # self-score is cut out by value_card.py and logged against the judge's score afterwards).
   CARD_FILE="${BODY_FILE}.card"
   PR_TASK=$(printf '%s %s' "$(head -1 "$BODY_FILE")" "${HEAD_REF:-}" | grep -oiE 'phia-?[0-9]+' | head -1 | tr -d '-' | sed -E 's/^[pP][hH][iI][aA]/PHIA-/')
-  python3 "$KIT_DIR/scripts/value_card.py" "${PR_TASK:-}" > "$CARD_FILE" 2>>"$LOG" || echo '{}' > "$CARD_FILE"
+  # PHIA-2276: one budget for the whole read, and a hard stop 15 s past it, so a dark board costs
+  # one pass at most JUDGE_CARD_BUDGET seconds and the review goes on (saved card or none).
+  timeout "$(( ${JUDGE_CARD_BUDGET:-150} + 15 ))s" python3 "$KIT_DIR/scripts/value_card.py" "${PR_TASK:-}" > "$CARD_FILE" 2>>"$LOG" || echo '{}' > "$CARD_FILE"
   CARD_TEXT=$(jq -r '.card // empty' "$CARD_FILE" 2>/dev/null | head -c "${MAX_CARD_BYTES:-4000}")
   # Paul 2026-11-01, "don't wait for cards": with no card, the task's own title and description
   # stand in for it (with the PR body's Why, already in the prompt). A missing card is never a block.
