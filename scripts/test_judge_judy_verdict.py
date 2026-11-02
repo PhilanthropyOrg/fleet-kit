@@ -223,6 +223,26 @@ class ValueJudge(unittest.TestCase):
         self.assertIn("measuring tools (G, PHIA-2043)", sh)
         self.assertIn("Owner-asked cost (G, PHIA-2067 and PHIA-2070)", sh)
         self.assertIn("platform/ci_usd_per_day", sh)
+        self.assertIn("Owner-asked staff work (Automation, PHIA-2064)", sh)
+        self.assertIn("never sent to value 1 for adding nothing", sh)
+
+    def test_value_1_with_a_named_user_says_so(self):
+        # PHIA-2064: PR 15084 was told "no named user" under a table naming ID check buyers and 51 of 60.
+        named_out = vj.apply(_scored(v=1, who=("ID check buyers", "51 of 60 finish the photo step")),
+                             "", "15084", "h", "t", "ops/x", False)
+        self.assertEqual(named_out["verdict"], "block")
+        self.assertIn("ID check buyers and 51 of 60 finish the photo step are named", named_out["findings_text"])
+        self.assertNotIn("no named user", named_out["findings_text"])
+        blank = vj.apply(_scored(v=1, who=("", "")), "", "1", "h", "t", "ops/x", False)
+        self.assertIn("no named user", blank["findings_text"])
+
+    def test_owner_asked_staff_work_passes_at_value_2(self):
+        # PHIA-2064: app 15064, the console Analytics fold the Owner asked for in gh 13473.
+        obj = _scored(v=2, u=2, f=2, b=3, who=("the Owner (gh 13473)", "clicks to reach a console number"))
+        obj["beneficiary"].update(metric="", guess=0, cut=False, tool=True)
+        out = vj.apply(obj, "", "15064", "h", "t", "ops/x", False)
+        self.assertEqual(out["verdict"], "approve")
+        self.assertEqual(out["ledger"]["scores"]["value"], 2)
 
     def test_task_description_stands_in_for_a_missing_card(self):
         import value_card as vc
