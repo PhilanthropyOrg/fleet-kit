@@ -226,6 +226,7 @@ class ValueJudge(unittest.TestCase):
         self.assertIn("Owner-asked staff work (Automation, PHIA-2064)", sh)
         self.assertIn("never sent to value 1 for adding nothing", sh)
         self.assertIn("production watch (Automation, PHIA-2064)", sh)
+        self.assertIn("a fix that stops false pages", sh)
         self.assertIn("linked Owner-filed issue asks", sh)
 
     def test_value_1_with_a_named_user_says_so(self):
