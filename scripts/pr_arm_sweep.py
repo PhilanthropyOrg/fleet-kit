@@ -372,9 +372,8 @@ def pick_launch_jump(prs: list[dict], required: list[str], queue: dict | None, l
         return None, f"launch spec {LAUNCH_SPEC} is {spec_status or 'unknown'}: rule off"
     if line_red:
         return None, "main or the queue is red: the fix goes first"
-    # A pending fix:main-red PR holds launch jumps only. A ci-cost fix is a fix too, and the main-red fix jumps only
-    # on a red line, which returned above (11-03 noon: green, unqueued #15391 held every jump for an hour).
-    fixes = [p.get("number") for p in prs if FIX_LABEL in _label_names(p.get("labels"))]
+    # A pending fix:main-red PR holds nothing on a green line: it jumps only on a red line, which returned above
+    # (11-03: green, unqueued #15391 held every launch jump from 11:38 AM; #15377, PHIA-2621, sat 33rd).
     if queue is None:
         return None, "branch has no merge queue"
     since = (now - last_jump) / 60.0
@@ -386,7 +385,7 @@ def pick_launch_jump(prs: list[dict], required: list[str], queue: dict | None, l
         return "launch task", sorted(linked_tasks(pr) & launch) if launch_on else []
     for pr in sorted(prs, key=lambda p: (wanted(p)[0] != "ci-cost fix", p.get("number") or 0)):
         kind, tasks = wanted(pr)
-        if not tasks or (fixes and kind == "launch task"):
+        if not tasks:
             continue
         if (pr.get("state") or "OPEN").upper() != "OPEN" or pr.get("isDraft"):
             continue
@@ -402,8 +401,6 @@ def pick_launch_jump(prs: list[dict], required: list[str], queue: dict | None, l
         if dequeued is not None and dequeued(pr.get("number")):
             continue  # a human took it out of the queue: no jump puts it back
         return pr, f"{kind} {tasks[0]} ({'queued #%d' % where if where else 'not queued'}), green and reviewed"
-    if fixes:
-        return None, f"a {FIX_LABEL} PR is pending (#{fixes[0]}): the fix goes first"
     return None, "no green, reviewed launch or ci-cost PR outside the top 3"
 
 

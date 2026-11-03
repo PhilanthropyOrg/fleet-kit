@@ -459,10 +459,10 @@ def test_launch_jump_limits():
     assert _pick([_launch_pr()], last=NOW_TS - 31 * 60)[0] is not None
 
 
-def test_main_red_and_pending_fix_win_over_launch():
+def test_main_red_wins_over_launch_a_green_pending_fix_does_not():
     assert "red" in _pick([_launch_pr()], red=True)[1]
-    pr, why = _pick([_launch_pr(), _fix(15400)])                    # an open fix:main-red PR
-    assert pr is None and "#15400" in why, why
+    pr, why = _pick([_launch_pr(), _fix(15400)])                    # a green line: an open fix:main-red PR
+    assert pr and pr["number"] == 15319, why                        # holds nothing (it is not jumping either)
 
 
 # CI cost (desk 11-03): CI money red at $53/day; the queue-speed fix #15370 (PHIA-2616, judge-yes) sat 37th.
@@ -494,9 +494,7 @@ def test_ci_cost_jump_guards():
     assert _pick_cost([_cost_pr()], queue={15370: 3})[0] is None                    # already top 3
     assert _pick_cost([_cost_pr()], last=NOW_TS - 10 * 60)[0] is None               # shares the 30m gap
     assert "red" in _pick_cost([_cost_pr()], red=True)[1]                           # main red: the fix first
-    pr, why = _pick_cost([_launch_pr(), _fix(15391)])                               # a green fix:main-red PR
-    assert pr is None and "#15391" in why, why                                       # holds launch...
-    pr, why = _pick_cost([_cost_pr(), _fix(15391)])                                  # ...not a ci-cost fix
+    pr, why = _pick_cost([_cost_pr(), _fix(15391)])                                 # a green fix:main-red PR
     assert pr and pr["number"] == 15370, why
 
 
