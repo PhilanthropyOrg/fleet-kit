@@ -12,6 +12,7 @@ import sys
 import tempfile
 import time
 import unittest
+import unittest.mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -90,16 +91,22 @@ class ValueJudge(unittest.TestCase):
 
     def test_each_send_back_rule(self):
         card = {"task": "PHIA-9", "owner": "jobs", "card": "User: a donor\nBest in class: ?", "plan": ""}
-        for kw, word in (({"v": 0}, "Value is 0"), ({"u": 0}, "Usability is 0"),
-                         ({"research": False}, "value card on PHIA-9 is thin"),
-                         ({"v": 1}, "Value is 1"),
+        for kw, word in (({"u": 0}, "Usability is 0"),
                          ({"v": 2, "u": 1, "f": 1, "b": 1}, "Too little value")):
             out = vj.apply(_scored(**kw), "", "1", "abc", "t", "g/x", False, card)
-            # Reif 11-02 (judge before build): a value rule is a note, never a send-back
+            # Reif 11-02 (judge before build): a value rule above the floor is a note, never a send-back
             self.assertEqual(out["verdict"], "approve", kw)
             self.assertIn(word, out["findings_text"], kw)
             self.assertIn("**Value notes**", out["findings_text"], kw)
             self.assertEqual(out["ledger"]["value_reasons"], [], kw)
+        for kw in ({"v": 0}, {"v": 1}, {"research": False}):  # below the floor: blocks (Paul 11-02)
+            out = vj.apply(_scored(**kw), "", "1", "abc", "t", "g/x", False, card)
+            self.assertEqual(out["verdict"], "block", kw)
+            self.assertIn("Value floor", out["findings_text"], kw)
+        for kw, word in (({"v": 0}, "Value is 0"), ({"u": 0}, "Usability is 0"),
+                         ({"research": False}, "value card on PHIA-9 is thin"),
+                         ({"v": 1}, "Value is 1"),
+                         ({"v": 2, "u": 1, "f": 1, "b": 1}, "Too little value")):
             # the undo switch puts the old send-back back
             out = vj.apply(_scored(**kw), "", "1", "abc", "t", "g/x", False, card, value_send_back=True)
             self.assertEqual(out["verdict"], "block", kw)
@@ -232,21 +239,76 @@ class ValueJudge(unittest.TestCase):
         self.assertIn("Donors see 0 gifts", out["task_text"])
         self.assertNotIn("Value 3", out["task_text"])
         self.assertIn("Value 3", out["plan"])
-        res = vj.apply(_scored(research=False), "", "1", "h", "t", "g/x", False, out)
-        self.assertEqual(res["verdict"], "approve")  # a missing card is never a block
+        res = vj.apply(_scored(), "", "1", "h", "t", "g/x", False, out)
+        self.assertEqual(res["verdict"], "approve")  # a missing card is never a block on its own
         self.assertIn("| Research (task as card) |", res["scores_text"])
+        res = vj.apply(_scored(research=False), "", "1", "h", "t", "g/x", False, out)
+        self.assertEqual(res["verdict"], "block")  # but no research is under the value floor (Paul 11-02)
         sh = (Path(__file__).resolve().parents[1] / "members/judge-judy/judge-judy.sh").read_text() + (Path(__file__).resolve().parents[1] / "members/judge-judy/value-rubric.md").read_text()
         self.assertIn(".task_text", sh)
         for anchor in ("Anchors", "14985", "14835", "what would make it a 3"):
             self.assertIn(anchor, sh)
 
-    def test_no_research_section_is_never_a_send_back(self):
-        # Paul 10-31: 10 of 10 vertical PRs had no ## Research; with no card there is no hold.
-        out = vj.apply(_scored(research=False), "## Why\nx", "1", "h", "t", "g/x", False)
+    def test_no_research_section_in_the_body_is_not_what_counts(self):
+        # Paul 10-31: 10 of 10 vertical PRs had no ## Research; research is judged from the card, not the body.
+        out = vj.apply(_scored(research=True), "## Why\nx", "1", "h", "t", "g/x", False)
         self.assertEqual(out["verdict"], "approve")
-        out = vj.apply(_scored(research=False), "", "1", "h", "t", "g/x", False,
+        out = vj.apply(_scored(research=False), "## Research\nlots", "1", "h", "t", "g/x", False,
                        {"task": "PHIA-9", "owner": "g", "card": "", "plan": ""})
-        self.assertEqual(out["verdict"], "approve")
+        self.assertEqual(out["verdict"], "block")
+
+    def test_value_floor_fails_a_1_of_3_card_with_no_research(self):
+        # Paul 11-02 (Paperclip 2): #15261 passed with Value 1/3 and no research. The real card, as judged.
+        obj = _scored(v=1, u=2, f=2, b=2, research=False,
+                      who=("A donor or researcher reading an org's insider dealings", "990/profile_views"))
+        obj["research"]["why"] = "The task card has no Best in class line and no Data reading."
+        card = {"task": "PHIA-2317", "owner": "platform", "card": "", "plan": "",
+                "task_text": "one-shot box cron runs the Schedule L backfill", "labels": [],
+                "created_at": "2026-11-02T10:00:00Z"}
+        out = vj.apply(obj, "", "15261", "7d4e507", "PHIA-2317: one-shot box cron", "phia2317-x", False, card,
+                       gate=True)
+        self.assertEqual(out["verdict"], "block")  # the model said PASS on correctness; the floor overrules it
+        self.assertEqual(len(out["ledger"]["floor_reasons"]), 2)
+        self.assertIn("Value is 1/3, the floor is 2", out["findings_text"])
+        self.assertIn("no research on PHIA-2317", out["findings_text"])
+        self.assertEqual(out["ledger"]["pay_at_merge"], 0.0)
+        self.assertEqual(out["scores_text"].count("Value is 1"), 1)  # said once, by the floor
+        # a 2+ card with research clears it on the same task
+        ok = vj.apply(_scored(v=2, research=True), "", "15261", "h", "PHIA-2317: x", "phia2317-x", False, card, gate=True)
+        self.assertEqual((ok["verdict"], ok["ledger"]["floor_reasons"]), ("approve", []))
+        # the floor holds whether or not the model blocked; judge-yes / fast-lane tasks were floored on the pitch
+        for labels in (["judge-yes"], ["fast-lane"]):
+            out = vj.apply(obj, "", "15261", "h", "PHIA-2317: x", "phia2317-x", False, dict(card, labels=labels), gate=True)
+            self.assertEqual(out["verdict"], "approve", labels)
+        # exempt (dependabot) and the undo switch pass
+        self.assertEqual(vj.apply(obj, "", "1", "h", "bump", "dependabot/x", True, card)["verdict"], "approve")
+        self.assertEqual(vj.apply(obj, "", "1", "h", "t", "x/y", False, card, value_floor=False)["verdict"], "approve")
+
+    def test_flat_judge_is_flagged(self):
+        # Paul 11-02: in one hour 5 of 8 reviews scored exactly 2/2/2/2.
+        def row(pr, s, ts, **kw):
+            return dict({"pr": str(pr), "ts": ts, "scores": dict(zip(vj.RISKS, s)), "exempt": False}, **kw)
+        flat8 = [row(i, (2, 2, 2, 2), i) for i in range(5)] + [row(10 + i, (1, 2, 2, 3), 10 + i) for i in range(3)]
+        got = vj.flat(flat8, window=8, share=0.6)
+        self.assertTrue(got["flat"])
+        self.assertEqual((got["scores"], got["count"], got["reviews"]), ("2/2/2/2", 5, 8))
+        spread = [row(i, (i % 4, 2, (i + 1) % 4, 3), i) for i in range(8)]
+        self.assertFalse(vj.flat(spread, window=8, share=0.6)["flat"])
+        # too few reviews to say; a re-review of one PR counts once; exempt rows are left out
+        self.assertFalse(vj.flat(flat8[:4], window=8)["flat"])
+        rereview = [row(1, (2, 2, 2, 2), t) for t in range(8)]
+        self.assertFalse(vj.flat(rereview, window=8)["flat"])
+        self.assertFalse(vj.flat([dict(r, exempt=True) for r in flat8], window=8)["flat"])
+        # the CLI reads the ledger file
+        with tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False) as f:
+            f.write("\n".join(json.dumps(r) for r in flat8) + "\n")
+        try:
+            buf = io.StringIO()
+            with unittest.mock.patch.object(sys, "stdout", buf):
+                self.assertEqual(vj.main(["flat", f.name]), 0)
+            self.assertTrue(json.loads(buf.getvalue())["flat"])
+        finally:
+            os.unlink(f.name)
 
     def test_card_owner_is_the_seat_and_its_self_score_is_logged_blind(self):
         card = {"task": "PHIA-1217", "owner": "atlas", "card": "User: x",

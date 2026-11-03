@@ -81,6 +81,12 @@ Answer with a verdict of block only for a correctness defect, plus the four scor
   after). Tasks created before `JUDGE_APPROVAL_SINCE` (2026-11-02T21:00Z) pass. The four-risk scores still set
   points (half at merge, half on the 48-hour read). Undo: `JUDGE_VALUE_SEND_BACK=1` puts the value send-back
   back; `JUDGE_APPROVAL_GATE=0` turns the task check off. The rule below is now "value notes" only.
+- **Value floor and flat-judge flag (Paul 2026-11-02, Paperclip 2).** #15261 passed with Value 1/3 and no
+  research, on a task from before the cutover that no Judge had seen. `value_judge.floor()` blocks a PR whose
+  Value is under `JUDGE_MIN_VALUE` (2) or whose research is no, whatever the correctness verdict, unless its task
+  carries `judge-yes` (floored on the pitch) or `fast-lane`. Undo: `JUDGE_VALUE_FLOOR=0`. `value_judge.py flat
+  <ledger>` flags a judge whose last 8 PRs share one score set 5 or more times (11-02: 5 of 8 were 2/2/2/2); the
+  box's judge_flat_watch files one task to the Judge seat when it fires.
 - **The value gate reads the card, not the PR body (Paul, 2026-10-31).** 10 of 10 sampled
   vertical PRs had no `## Research` section, so "no section, send back" would have been a
   paperwork block under a new name. `scripts/value_card.py` reads the task document `value-card`
