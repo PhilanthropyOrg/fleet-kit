@@ -579,14 +579,14 @@ while :; do
   FILES_BUDGET=$(( MAX_DIFF_BYTES - $(wc -c < "$DIFF_FILE") ))
   [ "$FILES_BUDGET" -gt "${JUDGE_FILES_BYTES:-150000}" ] && FILES_BUDGET=${JUDGE_FILES_BYTES:-150000}
   if [ "$FILES_BUDGET" -gt 0 ] && timeout 60s git fetch -q origin "+refs/pull/$PR/head:refs/fleet-review/files-$PR" 2>>"$LOG"; then
-    python3 "$(dirname "$0")/head_files.py" "$HEAD_SHA" "$FILES_BUDGET" < "$DIFF_FILE" > "${DIFF_FILE}.files" 2>>"$LOG" || : > "${DIFF_FILE}.files"
+    python3 "$KIT_DIR/members/judge-judy/head_files.py" "$HEAD_SHA" "$FILES_BUDGET" < "$DIFF_FILE" > "${DIFF_FILE}.files" 2>>"$LOG" || : > "${DIFF_FILE}.files"
     git update-ref -d "refs/fleet-review/files-$PR" 2>/dev/null
   fi
   TRUNC_NOTE=""
   # A diff over the limit first folds whole-file deletions to one line each (name kept), so a
   # cleanup PR does not spend the whole budget on text that is going away (philanthropy gh#11182).
   if [ "$(wc -c < "$DIFF_FILE")" -gt "$MAX_DIFF_BYTES" ]; then
-    python3 "$(dirname "$0")/fold_deleted_files.py" < "$DIFF_FILE" > "${DIFF_FILE}.f" 2>>"$LOG" && [ -s "${DIFF_FILE}.f" ] && mv "${DIFF_FILE}.f" "$DIFF_FILE"
+    python3 "$KIT_DIR/members/judge-judy/fold_deleted_files.py" < "$DIFF_FILE" > "${DIFF_FILE}.f" 2>>"$LOG" && [ -s "${DIFF_FILE}.f" ] && mv "${DIFF_FILE}.f" "$DIFF_FILE"
     rm -f "${DIFF_FILE}.f"
   fi
   if [ "$(wc -c < "$DIFF_FILE")" -gt "$MAX_DIFF_BYTES" ]; then
