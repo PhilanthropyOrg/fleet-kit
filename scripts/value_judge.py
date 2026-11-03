@@ -259,12 +259,20 @@ def judge(scores: dict, research_ok: bool, card: dict | None = None, research_wh
     return reasons
 
 
-def floor(scores: dict, research_ok: bool, research_why: str = "", task: str = "the task") -> list:
+def floor(scores: dict, research_ok: bool, research_why: str = "", task: str = "the task",
+          beneficiary: dict | None = None) -> list:
     """Reasons the PR fails the value floor; empty means it clears it. Not a note: these block the PR."""
     reasons = []
-    if scores["value"] < MIN_VALUE:
-        reasons.append(f"Value floor: Value is {scores['value']}/3, the floor is {MIN_VALUE}. Name on {task} who gets it "
-                       "and the number it moves, with today's reading; the judge reads it again with no new commit.")
+    if scores["value"] < MIN_VALUE and beneficiary is not None and named(beneficiary):
+        # PHIA-2064: "no named user" read as a lie when the table above names both (PR 15084, 15099, box 262).
+        reasons.append(f"Value floor: Value is {scores['value']}/3, the floor is {MIN_VALUE}. "
+                       f"{beneficiary['user']} and {beneficiary['number']} are named, but the judge expects too small "
+                       f"a move to ship. Show on {task} how much it moves, or fold it into work that moves it more; "
+                       "the judge reads it again with no new commit.")
+    elif scores["value"] < MIN_VALUE:
+        reasons.append(f"Value floor: Value is {scores['value']}/3, the floor is {MIN_VALUE}: no named user and number. "
+                       f"Name on {task} who gets it and the number it moves, with today's reading; the judge reads it "
+                       "again with no new commit.")
     if not research_ok:
         reasons.append(f"Value floor: no research on {task} ({research_why or 'none found'}). Add Best in class "
                        "(who does it best, link, how we match or beat it) and the Data line to the card; the judge "
@@ -423,7 +431,8 @@ def apply(verdict: dict, body: str, pr: str, head: str, title: str, ref: str, ex
     floor_on = VALUE_FLOOR if value_floor is None else value_floor
     # A task the Judge said YES to was floored on its pitch (value-rubric.md); fast-lane is judged after the fix.
     floor_reasons = [] if (exempt or not floor_on or labels_of(card) & APPROVAL_LABELS) else floor(
-        nums, research_ok, str(research.get("why", "")), card.get("task") or task_of(title, ref) or "the task")
+        nums, research_ok, str(research.get("why", "")), card.get("task") or task_of(title, ref) or "the task",
+        beneficiary)
     if floor_reasons:  # the floor says it; drop the notes and send-backs that say the same thing softer
         same = ("Value is", "The value card on", "Too little value to ship")
         notes = [n for n in notes if not n.startswith(same)]
