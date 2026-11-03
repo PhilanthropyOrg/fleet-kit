@@ -592,6 +592,37 @@ class DarkBoardTest(unittest.TestCase):
         self.assertLess(took, 6)
         self.assertIn("error", card)
 
+    def card_wait(self, card, head="h1", waits="2"):
+        # PHIA-2409: judge-judy.sh's own card_read_wait, run on a card file; True = no verdict this pass
+        (self.dir / "c.json").write_text(json.dumps(card))
+        fn = _JJ_SRC[_JJ_SRC.index("card_read_wait() {"):_JJ_SRC.index("\npost_status() {")]
+        script = f'set -u\nAPPROVED_DIR={self.dir}/approved\n{fn}\ncard_read_wait 7 {head} {self.dir}/c.json\n'
+        return subprocess.run(["bash", "-c", script], env=dict(os.environ, JUDGE_CARD_WAITS=waits), timeout=30, check=False).returncode == 0
+
+    def test_a_timed_out_read_with_no_saved_card_waits_instead_of_scoring_blind(self):
+        timed_out = {"task": "PHIA-7", "error": "TimeoutError", "task_text": "t"}
+        self.assertTrue(self.card_wait(timed_out))
+        self.assertTrue(self.card_wait(timed_out))
+        self.assertFalse(self.card_wait(timed_out))  # 3rd pass on one head, cap 2: the review goes on
+        self.assertTrue(self.card_wait(timed_out, head="h2"))  # a new head waits afresh
+        self.assertTrue(self.card_wait({"task": "PHIA-7", "error": "card read hard stop"}, head="h3"))
+        for card in ({}, {"task": "PHIA-7", "card": "x"}, {"task": "PHIA-7", "card": "", "task_text": "t"},
+                     {"task": "PHIA-7", "card": "x", "error": "TimeoutError", "read_failed": "TimeoutError"},
+                     {"task": "PHIA-7", "error": "HTTP 403"},
+                     {"task": "PHIA-7", "error": "PAPERCLIP_API_URL or PAPERCLIP_API_KEY not in the judge's environment"}):
+            self.assertFalse(self.card_wait(card, head="h4"), card)
+
+    def test_the_card_step_waits_before_the_prompt_is_built(self):
+        self.assertLess(_JJ_SRC.index('if card_read_wait "$PR" "$HEAD_SHA" "$CARD_FILE"'), _JJ_SRC.index("  CARD_TEXT=$(jq"))
+        # the card read killed or crashed (no value_card.py under KIT_DIR) is a read that failed, not "no card"
+        card_file = self.dir / "body.card"
+        subprocess.run(["bash", "-c", CARD_LINE], check=True, timeout=30, env=dict(
+            os.environ, KIT_DIR=str(self.dir), PR_TASK="PHIA-7", CARD_FILE=str(card_file), LOG=str(self.dir / "log")))
+        self.assertEqual(json.loads(card_file.read_text()), {"task": "PHIA-7", "error": "card read hard stop"})
+        subprocess.run(["bash", "-c", CARD_LINE], check=True, timeout=30, env=dict(
+            os.environ, KIT_DIR=str(self.dir), PR_TASK="", CARD_FILE=str(card_file), LOG=str(self.dir / "log")))
+        self.assertEqual(json.loads(card_file.read_text()), {})
+
     def test_the_hard_stop_follows_the_budget_and_the_cache_sits_by_the_log(self):
         self.assertTrue(CARD_LINE.startswith('timeout "$(( ${JUDGE_CARD_BUDGET:-150} + 15 ))s" python3'))
         self.assertIn('JUDGE_CARD_CACHE="${JUDGE_CARD_CACHE:-$LOG_DIR/value-card-cache}"', _JJ_SRC)
