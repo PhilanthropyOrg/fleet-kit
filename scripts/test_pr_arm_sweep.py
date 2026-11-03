@@ -182,6 +182,32 @@ def test_malformed_created_at_does_not_crash_the_sweep():
     assert decision is False and "0m old" in why, why
 
 
+
+def test_red_main_arms_only_the_fix():
+    """Paperclip 2 #4: while main's deploy gate is red, a green PR is held; the fix-labeled one arms."""
+    plain, fix = _pr(30), _pr(31, labels=("fix:main-red",))
+    decision, why = pr_arm_sweep.should_arm(plain, REQUIRED, NOW_TS, main_is_red=True)
+    assert decision is False and "main is red" in why, why
+    assert pr_arm_sweep.should_arm(fix, REQUIRED, NOW_TS, main_is_red=True)[0] is True
+    assert pr_arm_sweep.sweep([plain, fix], REQUIRED, NOW_TS, main_is_red=True)["arm"] == [31]
+    assert pr_arm_sweep.sweep([plain, fix], REQUIRED, NOW_TS)["arm"] == [30, 31]
+
+
+def test_main_is_red_reads_the_open_red_item_not_a_rehearsal():
+    red = {"title": "the-fixer: main's deploy test gate is red at 5f64cf4404"}
+    assert pr_arm_sweep.is_main_red([red]) is True
+    assert pr_arm_sweep.is_main_red([{"title": red["title"] + " (rehearsal)"}]) is False
+    assert pr_arm_sweep.is_main_red([]) is False
+
+
+def test_an_unreadable_red_state_holds_nothing():
+    real = pr_arm_sweep._gh
+    pr_arm_sweep._gh = lambda args, repo: (_ for _ in ()).throw(RuntimeError("gh down"))
+    try:
+        assert pr_arm_sweep.main_red("o/r") is False
+    finally:
+        pr_arm_sweep._gh = real
+
 for _name, _fn in sorted((n, f) for n, f in list(globals().items()) if n.startswith("test_")):
     check(_name, _fn)
 
