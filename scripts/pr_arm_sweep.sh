@@ -63,6 +63,17 @@ for e in d.get("enqueue", []):
     print(("armed but never queued -- enqueued #%s at position %s" % (e["number"], e["position"]))
           if "position" in e else ("armed but never queued -- ENQUEUE #%s FAILED: %s" % (e["number"], e.get("error", "?"))))' 2>/dev/null \
     | while IFS= read -r line; do log "$repo: $line"; done
+  # Red main: an armed PR that is not the fix is disarmed, or GitHub queues it onto the red main
+  # (pr_arm_sweep.py; same rule as philanthropy's main_red_hold.py --apply). A push re-arms nothing
+  # by itself: the next sweep arms it once main is green.
+  disarm="$(printf '%s' "$out" | python3 -c 'import sys,json; print(" ".join(str(n) for n in json.load(sys.stdin).get("disarm", [])))' 2>/dev/null)"
+  for pr in $disarm; do
+    if dis_err="$(gh pr merge "$pr" --disable-auto -R "$repo" 2>&1 >/dev/null)"; then
+      log "$repo: main is red -- disarmed #$pr (not the fix)"
+    else
+      log "$repo: main is red -- DISARM #$pr FAILED: ${dis_err:0:200}"
+    fi
+  done
   arm="$(printf '%s' "$out" | python3 -c 'import sys,json; print(" ".join(str(n) for n in json.load(sys.stdin)["arm"]))' 2>/dev/null)"
   if [ -z "${arm// /}" ]; then
     log "$repo: nothing to arm"

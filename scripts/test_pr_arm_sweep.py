@@ -556,6 +556,152 @@ def test_sweep_does_not_rearm_a_pr_already_in_the_merge_queue():
     assert out["arm"] == [] and out["skipped"][0]["why"] == "already in the merge queue", out
 
 
+
+# Desk 11-03: philanthropy's own arm workflow (auto-merge-open-prs.yml, ~700 billed min a day) goes
+# away and this sweep becomes the one armer, so it must hold everything that workflow held.
+def _prod(number=15350, **kw):
+    pr = _fix(number, labels=kw.pop("labels", ()), **kw)
+    return pr
+
+
+def test_app_workflow_hold_labels_hold_arm_and_enqueue():
+    for label in ("needs:design-review", "ci:batch-red"):
+        decision, why = pr_arm_sweep.should_arm(_prod(labels=(label,)), PROD_REQUIRED, NOW_TS)
+        assert decision is False and label in why, (label, why)
+        held = _armed()
+        held["labels"].append({"name": label})
+        assert pr_arm_sweep.should_enqueue(held, PROD_REQUIRED, LIVE_QUEUE, NOW_TS)[0] is False, label
+
+
+def test_skipped_hq_crawl_gate_still_arms_but_all_skipped_does_not():
+    """11-03 9:15 dry run: 14 green PRs unarmed because hq-crawl-gate is SKIPPED (GitHub: passed)."""
+    decision, why = pr_arm_sweep.should_arm(_prod(), PROD_REQUIRED, NOW_TS)
+    assert decision is True, why
+    draft_run = _prod()
+    for c in draft_run["statusCheckRollup"]:
+        if c.get("name"):
+            c["conclusion"] = "SKIPPED"
+    decision, why = pr_arm_sweep.should_arm(draft_run, PROD_REQUIRED, NOW_TS)
+    assert decision is False and "all skipped" in why, why
+
+
+def test_green_head_arms_before_its_required_review_but_never_after_a_block():
+    """The app workflow armed on green CI; GitHub queues once the required review passes."""
+    for review in (None, "PENDING"):
+        decision, why = pr_arm_sweep.should_arm(_prod(review=review), PROD_REQUIRED, NOW_TS)
+        assert decision is True, (review, why)
+    decision, why = pr_arm_sweep.should_arm(_prod(review="FAILURE"), PROD_REQUIRED, NOW_TS)
+    assert decision is False and "blocked" in why, why
+    # still nothing else may be pending
+    decision, why = pr_arm_sweep.should_arm(_prod(review=None, test="IN_PROGRESS"), PROD_REQUIRED, NOW_TS)
+    assert decision is False and "'test'" in why, why
+
+
+def _ev(event, actor=None):
+    return {"event": event, "actor": {"login": actor} if actor else None}
+
+
+# philanthropy #15093 on 11-03: queue bot threw it out, a human (reif-y token) took it out at 13:19.
+DEQUEUED = [_ev("committed"), _ev("added_to_merge_queue", "reif-y"),
+            _ev("removed_from_merge_queue", "github-merge-queue[bot]"),
+            _ev("committed"), _ev("removed_from_merge_queue", "reif-y")]
+
+
+def test_human_dequeue_holds_until_the_next_push():
+    assert pr_arm_sweep.held_by_manual_dequeue(DEQUEUED) is True
+    assert pr_arm_sweep.held_by_manual_dequeue(DEQUEUED + [_ev("committed")]) is False
+    assert pr_arm_sweep.held_by_manual_dequeue(DEQUEUED + [_ev("head_ref_force_pushed", "x")]) is False
+    bot_only = [_ev("added_to_merge_queue", "reif-y"),
+                _ev("removed_from_merge_queue", "github-merge-queue[bot]"),
+                _ev("removed_from_merge_queue", "github-actions[bot]")]
+    assert pr_arm_sweep.held_by_manual_dequeue(bot_only) is False
+    # a bot re-adding it is the bug this guards, not consent
+    assert pr_arm_sweep.held_by_manual_dequeue(DEQUEUED + [_ev("added_to_merge_queue", "github-actions[bot]")]) is True
+
+
+def test_sweep_never_arms_enqueues_or_jumps_a_human_dequeued_pr():
+    asked = []
+
+    def dequeued(n):
+        asked.append(n)
+        return n in (15093, 15310, 15303)
+    prs = [_prod(15093), _armed(15310), _fix(15303), _prod(15351), _prod(15352, draft=True)]
+    out = pr_arm_sweep.sweep(prs, PROD_REQUIRED, NOW_TS, queue=LIVE_QUEUE, main_is_red=True,
+                             files_of=lambda n: [], dequeued=dequeued)
+    assert out["arm"] == [] and out["enqueue"] == [] and out["jump"] == [], out
+    why = {s["number"]: s["why"] for s in out["skipped"]}
+    assert "human took it out" in why[15303], why
+    green = pr_arm_sweep.sweep(prs, PROD_REQUIRED, NOW_TS, queue=LIVE_QUEUE, dequeued=dequeued)
+    assert green["arm"] == [15351] and green["enqueue"] == [], green
+    assert "human took it out" in {s["number"]: s["why"] for s in green["skipped"]}[15093]
+    assert 15352 not in asked, asked  # a draft needs no timeline read
+
+
+def test_launch_jump_skips_a_human_dequeued_pr():
+    pr, why = pr_arm_sweep.pick_launch_jump([_launch_pr()], PROD_REQUIRED, LQ, LAUNCH, "blocked",
+                                            False, 0.0, NOW_TS, {}, lambda n: True)
+    assert pr is None, why
+
+
+# main_red_hold.py: the fix is the labelled PR OR one that changes a test the red item names.
+RED_ITEM = {"title": "the-fixer: main's deploy test gate is red at 5f64cf4404",
+            "body": "FAILED tests/test_help_howtos_scout.py::test_x - assert 1\nERROR tests/test_b.py"}
+
+
+def test_red_main_fix_is_the_label_or_a_pr_that_changes_a_failing_test():
+    failing = pr_arm_sweep.failing_tests([RED_ITEM])
+    assert failing == {"tests/test_help_howtos_scout.py", "tests/test_b.py"}, failing
+    files = {15360: ["tests/test_help_howtos_scout.py", "src/x.py"], 15361: ["src/y.py"]}
+    out = pr_arm_sweep.sweep([_prod(15360), _prod(15361)], PROD_REQUIRED, NOW_TS, main_is_red=True,
+                             queue={}, failing=failing, files_of=files.get)
+    assert out["arm"] == [15360], out
+    assert "main is red" in {s["number"]: s["why"] for s in out["skipped"]}[15361]
+
+
+def test_red_main_disarms_every_armed_pr_that_is_not_the_fix():
+    plain, fix, queued = _armed(15370), _armed(15371), _armed(15290)
+    fix["labels"].append({"name": "fix:main-red"})
+    out = pr_arm_sweep.sweep([plain, fix, queued], PROD_REQUIRED, NOW_TS, main_is_red=True,
+                             queue=LIVE_QUEUE, failing=set(), files_of=lambda n: [])
+    assert out["disarm"] == [15370], out  # the fix keeps its arm; a queued PR has none to drop
+    assert pr_arm_sweep.sweep([plain], PROD_REQUIRED, NOW_TS, queue=LIVE_QUEUE)["disarm"] == []
+
+
+def test_red_items_keeps_the_body_and_drops_rehearsals():
+    real = pr_arm_sweep._gh
+    seen = []
+    pr_arm_sweep._gh = lambda args, repo: (seen.append(args), [RED_ITEM, {"title": RED_ITEM["title"] + " (rehearsal)"}])[1]
+    try:
+        assert pr_arm_sweep.red_items("o/r") == [RED_ITEM]
+        assert "title,body" in seen[0], seen
+    finally:
+        pr_arm_sweep._gh = real
+
+
+def test_sweep_shell_disarms_with_repo_outside_a_checkout():
+    import os, shutil, subprocess, tempfile
+    src = Path(__file__).resolve().parent
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        kit = tmp / "kit" / "scripts"
+        kit.mkdir(parents=True)
+        for f in ("pr_arm_sweep.sh", "merge_arm.sh"):
+            shutil.copy(src / f, kit / f)
+        (kit / "pr_arm_sweep.py").write_text('print(\'{"arm": [], "disarm": [7]}\')\n')
+        bindir = tmp / "bin"
+        bindir.mkdir()
+        (bindir / "gh").write_text('#!/usr/bin/env bash\necho "$*" >> "$GH_LOG"\n')
+        (bindir / "gh").chmod(0o755)
+        work = tmp / "nogit"
+        work.mkdir()
+        env = dict(os.environ, PATH=f"{bindir}:{os.environ['PATH']}", GH_LOG=str(tmp / "gh.log"),
+                   FLEET_PR_ARM_REPOS="o/r", GIT_CEILING_DIRECTORIES=str(tmp))
+        out = subprocess.run(["bash", str(kit / "pr_arm_sweep.sh")], cwd=work, env=env,
+                             capture_output=True, text=True, timeout=60).stdout
+        assert "disarmed #7" in out, out
+        assert "pr merge 7 --disable-auto -R o/r" in (tmp / "gh.log").read_text()
+
+
 for _name, _fn in sorted((n, f) for n, f in list(globals().items()) if n.startswith("test_")):
     check(_name, _fn)
 

@@ -60,13 +60,26 @@ MIN_AGE_MIN = 30.0
 # Labels that mean a human (or a charter) parked this on purpose. `fleet:needs-human-op` is the
 # fleet's existing name for "no agent can resolve this" (see scripts/test_needs_human_op.py);
 # the other two are the conventional GitHub spellings a human reaches for by hand.
-HOLD_LABELS = frozenset({"fleet:needs-human-op", "do-not-merge", "fleet:hold"})
+HOLD_LABELS = frozenset({"fleet:needs-human-op", "do-not-merge", "fleet:hold",
+                         # The product repo's own arm workflow (philanthropy
+                         # auto-merge-open-prs.yml) held these two; this sweep is now the one
+                         # armer there (desk 11-03), so it holds them too. `needs:design-review`
+                         # is a human parking a UI PR (gh#3703); `ci:batch-red` is the queue
+                         # self-heal's circuit breaker (gh#6374: 194 red batches in a week).
+                         "needs:design-review", "ci:batch-red"})
 # Red main stops the line (Paperclip 2 change #4, philanthropy PHIA-2420): while the product repo
 # has an open "main's deploy test gate is red" item (its deploy.yml files it, and closes it on the
 # next green gate), only the fix arms. The product repo's own sweep disarms the rest
 # (scripts/ci/main_red_hold.py); without this, this cron re-armed them within 20 minutes.
 RED_MAIN_PREFIX = "the-fixer: main's deploy test gate is red at "
 FIX_LABEL = "fix:main-red"
+# The red item names its failing tests ("FAILED tests/test_x.py::..."). A PR that changes one of
+# them is the fix too, labelled or not (philanthropy scripts/ci/main_red_hold.py, same rule).
+_FAILING = re.compile(r"(?:FAILED|ERROR)\s+(tests/[^\s:]+\.py)")
+# A check GitHub counts as passed. SKIPPED alone is not "CI ran green": a draft's run skips
+# every job (2026-09-29), so arming or a jump also needs one required check that really SUCCEEDED.
+_PASSED = ("SUCCESS", "SKIPPED", "NEUTRAL")
+REVIEW_CHECK = "fleet-code-review"
 
 
 def _age_minutes(created_at: str, now: float) -> float:
@@ -139,19 +152,26 @@ def should_arm(pr: dict, required: list[str], now: float | None = None,
         # No required check means auto-merge would merge on nothing at all. That is a repo
         # configuration a human should see, not a thing to arm into.
         return False, "branch has no required checks -- arming would merge ungated"
+    ran_green = False
     for context in required:
         state = _check_state(pr, context)
+        if context == REVIEW_CHECK and state != "SUCCESS":
+            # Not reviewed yet (a BLOCK returned above). Arm now: the review is a required check,
+            # so GitHub queues the PR only once it passes -- what the product repo's own arm
+            # workflow did, so a review landing between sweeps waits on nothing.
+            continue
         if state is None:
             return False, f"required check {context!r} has not reported"
-        if state != "SUCCESS":
+        if state not in _PASSED:
             return False, f"required check {context!r} is {state}"
+        ran_green = ran_green or (state == "SUCCESS" and context != REVIEW_CHECK)
+    # 2026-11-03: `hq-crawl-gate` is SKIPPED on every PR that does not touch HQ, and GitHub counts
+    # a skipped required check as passed -- requiring SUCCESS left 14 green PRs unarmed. But a run
+    # where every CI check skipped (a draft's) is not green.
+    if not ran_green:
+        return False, "no required CI check ran green on the head (all skipped)"
     return True, f"green on {', '.join(required)} and unarmed for {age:.0f}m"
 
-
-# A check GitHub counts as passed. SKIPPED alone is not "CI ran green": a draft's run skips
-# every job (2026-09-29), so a jump also needs one required check that really SUCCEEDED.
-_PASSED = ("SUCCESS", "SKIPPED", "NEUTRAL")
-REVIEW_CHECK = "fleet-code-review"
 
 
 def _not_green_and_reviewed(pr: dict, required: list[str]) -> str | None:
@@ -336,7 +356,8 @@ def queue_failed_prs(repo: str, limit: int = 50, api=None) -> dict[int, float]:
 
 def pick_launch_jump(prs: list[dict], required: list[str], queue: dict | None, launch: set[str],
                      spec_status: str | None, line_red: bool, last_jump: float,
-                     now: float, queue_failed: dict | None = None) -> tuple[dict | None, str]:
+                     now: float, queue_failed: dict | None = None,
+                     dequeued=None) -> tuple[dict | None, str]:
     """Pure: the one PR to jump for launch now, or None and why not. Main red always wins."""
     if not spec_status or spec_status in SPEC_CLOSED:
         return None, f"launch spec {LAUNCH_SPEC} is {spec_status or 'unknown'}: rule off"
@@ -365,43 +386,89 @@ def pick_launch_jump(prs: list[dict], required: list[str], queue: dict | None, l
             continue  # the queue failed this head and threw it out: a jump only fails it again
         if _not_green_and_reviewed(pr, required):
             continue
+        if dequeued is not None and dequeued(pr.get("number")):
+            continue  # a human took it out of the queue: no jump puts it back
         return pr, f"launch task {tasks[0]} ({'queued #%d' % where if where else 'not queued'}), green and reviewed"
     return None, "no green, reviewed launch PR outside the top 3"
+
+
+def failing_tests(items) -> set[str]:
+    """Pure: the test files the open red items name as failing."""
+    return {m for i in items or [] for m in _FAILING.findall(i.get("body") or "")}
+
+
+def is_fix(pr: dict, failing: set | None, files_of=None) -> bool:
+    """The fix for a red main: labelled FIX_LABEL, or it changes a test the red item names.
+    `files_of(number)` -> the PR's changed paths; called only when the label is missing."""
+    if FIX_LABEL in _label_names(pr.get("labels")):
+        return True
+    return bool(failing and files_of and failing & set(files_of(pr.get("number")) or ()))
+
+
+# A human who took a PR OUT of the merge queue is holding it (philanthropy gh#6834: re-arming put
+# #6802/#6827 back in line four times with blocking findings open). The queue's own churn is a bot.
+QUEUE_BOTS = frozenset({"github-actions[bot]", "github-merge-queue[bot]"})
+
+
+def held_by_manual_dequeue(events) -> bool:
+    """Pure: the PR timeline (oldest first) says a human dequeued it and nothing was pushed since.
+    Same rule as philanthropy scripts/ci/dequeue_intent.py: a non-bot removal holds, a push frees."""
+    held = False
+    for ev in events or []:
+        name = ev.get("event")
+        if name == "removed_from_merge_queue":
+            actor = ev.get("actor")
+            login = actor.get("login") if isinstance(actor, dict) else actor
+            if (login or "") not in QUEUE_BOTS:
+                held = True
+        elif name in ("head_ref_force_pushed", "committed"):
+            held = False
+    return held
 
 
 def sweep(prs: list[dict], required: list[str], now: float | None = None,
           min_age_min: float = MIN_AGE_MIN, main_is_red: bool = False,
           queue: dict | None = None, queue_is_red: bool = False,
-          queue_failed: dict | None = None) -> dict:
-    arm, skip, jump, enqueue = [], [], [], []
+          queue_failed: dict | None = None, failing: set | None = None,
+          files_of=None, dequeued=None) -> dict:
+    """`dequeued(number)` -> True when a human dequeue still holds the PR; asked only of a PR the
+    sweep would otherwise arm, jump or enqueue (one timeline read each)."""
+    arm, skip, jump, enqueue, disarm = [], [], [], [], []
     for pr in prs:
+        n = pr.get("number")
+        queued = (queue or {}).get(n) is not None
+        # Red main stops the line (philanthropy main_red_hold.py): every PR that is not the fix is
+        # held, and an armed one is disarmed, or GitHub queues it onto the red main anyway.
+        held_red = main_is_red and not is_fix(pr, failing, files_of)
+        if held_red and pr.get("autoMergeRequest") and not queued:
+            disarm.append(n)
         # 2026-11-03: the fixed arm step re-armed #15093 and #15000, heads the queue had already
         # failed and thrown out. Back in line, each fails again and reds the groups behind it.
         # Same verdict pick_launch_jump honours: a failed group of its own after its head's
         # checks finished means this head needs a new push, not another arm, jump or enqueue.
-        if ((queue or {}).get(pr.get("number")) is None
-                and (queue_failed or {}).get(pr.get("number"), 0.0) > head_checked_at(pr)):
-            skip.append({"number": pr.get("number"),
+        if not queued and (queue_failed or {}).get(n, 0.0) > head_checked_at(pr):
+            skip.append({"number": n,
                          "why": "the merge queue failed this head: push a fix before it re-enters"})
             continue
-        ok, why = should_arm(pr, required, now, min_age_min, main_is_red)
-        if ok and (queue or {}).get(pr.get("number")) is not None:
+        ok, why = should_arm(pr, required, now, min_age_min, held_red)
+        if ok and queued:
             # 2026-11-03: a queued PR has no autoMergeRequest, so every run "armed" the same 15
             # queued PRs again (a no-op API call each). In the queue is already armed.
             ok, why = False, "already in the merge queue"
-        (arm if ok else skip).append({"number": pr.get("number"), "why": why})
         # A red queue moves the fix up; it does not hold the other PRs' arming (main red does).
-        go, jwhy = should_jump(pr, required, main_is_red or queue_is_red, queue)
-        if go:
-            jump.append({"number": pr.get("number"), "id": pr.get("id"),
-                         "head": pr.get("headRefOid"), "why": jwhy})
+        go_j, jwhy = should_jump(pr, required, main_is_red or queue_is_red, queue)
+        go_e, ewhy = (False, "") if go_j else should_enqueue(pr, required, queue, now, held_red)
+        if (ok or go_j or go_e) and dequeued is not None and dequeued(n):
+            skip.append({"number": n, "why": "a human took it out of the merge queue and nothing "
+                                             "was pushed since"})
             continue
-        go, ewhy = should_enqueue(pr, required, queue, now, main_is_red)
-        if go:
-            enqueue.append({"number": pr.get("number"), "id": pr.get("id"),
-                            "head": pr.get("headRefOid"), "why": ewhy})
+        (arm if ok else skip).append({"number": n, "why": why})
+        if go_j:
+            jump.append({"number": n, "id": pr.get("id"), "head": pr.get("headRefOid"), "why": jwhy})
+        elif go_e:
+            enqueue.append({"number": n, "id": pr.get("id"), "head": pr.get("headRefOid"), "why": ewhy})
     return {"arm": [a["number"] for a in arm], "armed_why": arm, "skipped": skip, "jump": jump,
-            "enqueue": enqueue}
+            "enqueue": enqueue, "disarm": disarm}
 
 
 def _gh(args: list[str], repo: str) -> object:
@@ -430,13 +497,50 @@ def is_main_red(issues) -> bool:
                and not (i.get("title") or "").endswith("(rehearsal)") for i in issues or [])
 
 
-def main_red(repo: str) -> bool:
-    """Fails open: a read error is "not known red", so a broken read never wedges every merge."""
+def red_items(repo: str) -> list[dict]:
+    """The open red-gate items (title + body). Fails open: a read error is [] ("not known red"),
+    so a broken read never wedges every merge."""
     try:
-        return is_main_red(_gh(["issue", "list", "--state", "open", "--limit", "50", "--search",
-                                f'"{RED_MAIN_PREFIX.strip()}" in:title', "--json", "title"], repo))
+        got = _gh(["issue", "list", "--state", "open", "--limit", "50", "--search",
+                   f'"{RED_MAIN_PREFIX.strip()}" in:title', "--json", "title,body"], repo)
     except (RuntimeError, ValueError, OSError, subprocess.SubprocessError):
-        return False
+        return []
+    return [i for i in got or [] if is_main_red([i])]
+
+
+def main_red(repo: str) -> bool:
+    return bool(red_items(repo))
+
+
+def pr_files(repo: str, number: int) -> list[str]:
+    """The PR's changed paths; [] on a read error (then only the label makes it the fix)."""
+    try:
+        got = _gh(["pr", "view", str(number), "--json", "files"], repo)
+        return [f.get("path") for f in (got or {}).get("files") or []]
+    except (RuntimeError, ValueError, OSError, subprocess.SubprocessError):
+        return []
+
+
+def dequeue_held(repo: str, number: int) -> bool:
+    """True when a human dequeue still holds the PR. Fails CLOSED (philanthropy gh#6834): an
+    unreadable timeline is held, since re-arming a PR a human pulled costs more than one sweep."""
+    try:
+        out = subprocess.run(["gh", "api", "--paginate",
+                              f"repos/{repo}/issues/{number}/timeline?per_page=100"],
+                             capture_output=True, text=True, timeout=120)
+        if out.returncode != 0:
+            return True
+        events, dec, i, txt = [], json.JSONDecoder(), 0, out.stdout
+        while i < len(txt):
+            while i < len(txt) and txt[i] in " \t\r\n":
+                i += 1
+            if i >= len(txt):
+                break
+            page, i = dec.raw_decode(txt, i)
+            events.extend(page)
+        return held_by_manual_dequeue(events)
+    except (ValueError, OSError, subprocess.SubprocessError):
+        return True
 
 
 def _api(path: str) -> dict:
@@ -559,9 +663,11 @@ def main(argv=None) -> int:
     except (RuntimeError, ValueError) as exc:
         print(f"pr_arm_sweep: {exc}", file=sys.stderr)
         return 1
-    red = main_red(a.repo)
+    items = red_items(a.repo)
+    red = bool(items)
     if red:
-        print(f"pr_arm_sweep: {a.repo} main is red; only PRs labeled {FIX_LABEL} arm", file=sys.stderr)
+        print(f"pr_arm_sweep: {a.repo} main is red; only the fix arms ({FIX_LABEL}, or it changes a "
+              f"failing test); armed others are disarmed", file=sys.stderr)
     required = required_contexts(a.repo, a.branch)
     qred = queue_red_checks(merge_group_failures(a.repo), required) if not red else []
     if qred:
@@ -569,8 +675,16 @@ def main(argv=None) -> int:
               f"a green, reviewed {FIX_LABEL} PR jumps", file=sys.stderr)
     queue = queue_positions(a.repo, a.branch)
     qfailed = queue_failed_prs(a.repo)
+    held: dict[int, bool] = {}
+
+    def dequeued(n: int) -> bool:
+        if n not in held:
+            held[n] = dequeue_held(a.repo, n)
+        return held[n]
     result = sweep(prs, required, min_age_min=a.min_age_min,
-                   main_is_red=red, queue=queue, queue_is_red=bool(qred), queue_failed=qfailed)
+                   main_is_red=red, queue=queue, queue_is_red=bool(qred), queue_failed=qfailed,
+                   failing=failing_tests(items), files_of=lambda n: pr_files(a.repo, n),
+                   dequeued=dequeued)
     if a.apply_jumps:
         for j in result["jump"]:
             try:
@@ -580,7 +694,7 @@ def main(argv=None) -> int:
     launch, spec, lwhy = read_launch(LAUNCH_FILE, time.time())
     pick, pwhy = (None, lwhy) if lwhy != "ok" else pick_launch_jump(
         prs, required, queue, launch, spec, bool(red or qred), last_launch_jump(LAUNCH_LOG), time.time(),
-        qfailed)
+        qfailed, dequeued)
     result["launch_jump"] = {"why": pwhy}
     if pick:
         result["launch_jump"].update(number=pick.get("number"), id=pick.get("id"), head=pick.get("headRefOid"))
