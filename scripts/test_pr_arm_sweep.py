@@ -312,6 +312,50 @@ def test_queue_positions_reads_the_queue_and_none_without_one():
     none = {"data": {"repository": {"mergeQueue": None}}}
     assert pr_arm_sweep.queue_positions("o/r", "main", gql=lambda q, **v: none) is None
 
+# Red QUEUE, green main (philanthropy 2026-11-03 3 AM): every full merge-group run failed `test` on
+# one CI-gate test since #15272; the fix #15318 carries fix:main-red. Newest group first.
+QUEUE_RED = [{"test"}, {"lint"}, {"test"}]
+
+
+def test_a_check_failing_two_of_three_merge_groups_makes_the_queue_red():
+    assert pr_arm_sweep.queue_red_checks(QUEUE_RED, PROD_REQUIRED) == ["test"]
+    # one PR's own failure (a lone lint, a lone test) is not the queue's red
+    assert pr_arm_sweep.queue_red_checks([{"lint"}, {"test"}, set()], PROD_REQUIRED) == []
+    # a red that is not a required check, or older than the last three groups, does not count
+    assert pr_arm_sweep.queue_red_checks([{"pip-audit"}, {"pip-audit"}], PROD_REQUIRED) == []
+    assert pr_arm_sweep.queue_red_checks([set(), set(), {"test"}, {"test"}], PROD_REQUIRED) == []
+
+
+def test_red_queue_jumps_the_fix_but_holds_no_other_arm():
+    plain = _pr(15290, checks=[(c, "SUCCESS") for c in PROD_REQUIRED])
+    out = pr_arm_sweep.sweep([plain, _fix(15318)], PROD_REQUIRED, NOW_TS, queue_is_red=True,
+                             queue={15289: 1, 15290: 8, 15318: 16})
+    assert [j["number"] for j in out["jump"]] == [15318], out["jump"]
+    assert out["arm"] == [15290], out  # a red queue is not a red main: other PRs still arm
+    green = pr_arm_sweep.sweep([_fix(15318)], PROD_REQUIRED, NOW_TS, queue={15318: 16})
+    assert green["jump"] == []
+
+
+def test_merge_group_failures_reads_failed_jobs_per_group_newest_first():
+    runs = {"workflow_runs": [
+        {"id": 5, "head_sha": "e", "conclusion": "failure"},
+        {"id": 4, "head_sha": "d", "conclusion": "failure"},
+        {"id": 3, "head_sha": "c", "conclusion": "success"},
+        {"id": 2, "head_sha": "b", "conclusion": "failure"}]}
+    jobs = {5: [{"name": "test", "conclusion": "failure"}, {"name": "lint", "conclusion": "success"}],
+            4: [{"name": "lint", "conclusion": "failure"}]}
+    seen = []
+
+    def api(path):
+        seen.append(path)
+        if path.endswith("per_page=100"):
+            return {"jobs": jobs[int(path.split("/runs/")[1].split("/")[0])]}
+        return runs
+    assert pr_arm_sweep.merge_group_failures("o/r", api=api) == [{"test"}, {"lint"}, set()]
+    assert not any("/runs/2/" in s for s in seen), seen  # never reads past the last three groups
+    boom = lambda path: (_ for _ in ()).throw(RuntimeError("gh down"))  # noqa: E731
+    assert pr_arm_sweep.merge_group_failures("o/r", api=boom) == []
+
 for _name, _fn in sorted((n, f) for n, f in list(globals().items()) if n.startswith("test_")):
     check(_name, _fn)
 

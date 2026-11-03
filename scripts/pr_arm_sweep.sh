@@ -47,13 +47,13 @@ for repo in $REPOS; do
   [ -n "$repo" ] || continue
   out="$(python3 "$KIT/scripts/pr_arm_sweep.py" --repo "$repo" --apply-jumps)" || {
     log "$repo: pr_arm_sweep.py failed: ${out:0:200}"; continue; }
-  # Red main: the green, reviewed fix:main-red PR was put first in the merge queue (pr_arm_sweep.py
+  # Red main or red queue: the green, reviewed fix:main-red PR was put first in the merge queue (pr_arm_sweep.py
   # should_jump). One line per jump, with the error when GitHub refused it.
   printf '%s' "$out" | python3 -c 'import sys,json
 for j in json.load(sys.stdin).get("jump", []):
     print(("jumped #%s to queue position %s" % (j["number"], j["position"])) if "position" in j
           else ("JUMP #%s FAILED: %s" % (j["number"], j.get("error", "?"))))' 2>/dev/null \
-    | while IFS= read -r line; do log "$repo: main is red -- $line"; done
+    | while IFS= read -r line; do log "$repo: main or queue is red -- $line"; done
   arm="$(printf '%s' "$out" | python3 -c 'import sys,json; print(" ".join(str(n) for n in json.load(sys.stdin)["arm"]))' 2>/dev/null)"
   if [ -z "${arm// /}" ]; then
     log "$repo: nothing to arm"
