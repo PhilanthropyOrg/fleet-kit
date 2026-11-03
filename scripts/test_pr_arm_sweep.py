@@ -357,6 +357,55 @@ def test_merge_group_failures_reads_failed_jobs_per_group_newest_first():
     boom = lambda path: (_ for _ in ()).throw(RuntimeError("gh down"))  # noqa: E731
     assert pr_arm_sweep.merge_group_failures("o/r", api=boom) == []
 
+# Armed, green, reviewed, never queued (philanthropy 2026-11-03 3:30 AM: #15310 armed by
+# github-actions after the arm PAT was rejected; GitHub never queued it, nor #15306/#15322/#15099).
+def _armed(number=15310, *, armed_min_ago=35, **kw):
+    pr = _fix(number, labels=("bug",), **kw)
+    at = (NOW - timedelta(minutes=armed_min_ago)).isoformat().replace("+00:00", "Z")
+    pr["autoMergeRequest"] = {"enabledAt": at, "enabledBy": {"login": "app/github-actions"}}
+    return pr
+
+
+LIVE_QUEUE = {15289: 1, 15290: 8}
+
+
+def test_armed_green_reviewed_pr_the_queue_never_took_is_enqueued():
+    go, why = pr_arm_sweep.should_enqueue(_armed(), PROD_REQUIRED, LIVE_QUEUE, NOW_TS)
+    assert go is True, why
+    out = pr_arm_sweep.sweep([_armed()], PROD_REQUIRED, NOW_TS, queue=LIVE_QUEUE)
+    assert [(e["number"], e["head"]) for e in out["enqueue"]] == [(15310, "2de6f07")], out
+    assert out["jump"] == [] and out["arm"] == [], out  # enqueued at the back, never jumped
+
+
+def test_enqueue_never_takes_a_pr_that_is_not_ready_or_already_queued():
+    cases = {
+        "queued": (_armed(15290), LIVE_QUEUE),
+        "unarmed": (_fix(15311, labels=()), LIVE_QUEUE),
+        "red test": (_armed(test="FAILURE"), LIVE_QUEUE),
+        "no review": (_armed(review=None), LIVE_QUEUE),
+        "just armed": (_armed(armed_min_ago=3), LIVE_QUEUE),
+        "draft": (_armed(draft=True), LIVE_QUEUE),
+        "no queue": (_armed(), None),
+    }
+    for name, (pr, q) in cases.items():
+        go, why = pr_arm_sweep.should_enqueue(pr, PROD_REQUIRED, q, NOW_TS)
+        assert go is False, (name, why)
+    held = _armed()
+    held["labels"].append({"name": "do-not-merge"})
+    assert pr_arm_sweep.should_enqueue(held, PROD_REQUIRED, LIVE_QUEUE, NOW_TS)[0] is False
+    assert pr_arm_sweep.should_enqueue(_armed(), PROD_REQUIRED, LIVE_QUEUE, NOW_TS,
+                                       main_is_red=True)[0] is False
+
+
+def test_enqueue_at_back_pins_the_head_and_never_jumps():
+    seen = []
+
+    def gql(query, **v):
+        seen.append((query, v))
+        return {"data": {"enqueuePullRequest": {"mergeQueueEntry": {"position": 16}}}}
+    assert pr_arm_sweep.enqueue_at_back("PR_15310", "87755fe", gql=gql) == 16
+    assert "jump" not in seen[0][0] and seen[0][1] == {"id": "PR_15310", "head": "87755fe"}, seen
+
 for _name, _fn in sorted((n, f) for n, f in list(globals().items()) if n.startswith("test_")):
     check(_name, _fn)
 

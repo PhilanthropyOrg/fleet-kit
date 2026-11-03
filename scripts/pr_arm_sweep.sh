@@ -45,15 +45,19 @@ fi
 
 for repo in $REPOS; do
   [ -n "$repo" ] || continue
-  out="$(python3 "$KIT/scripts/pr_arm_sweep.py" --repo "$repo" --apply-jumps)" || {
+  out="$(python3 "$KIT/scripts/pr_arm_sweep.py" --repo "$repo" --apply-jumps --apply-enqueues)" || {
     log "$repo: pr_arm_sweep.py failed: ${out:0:200}"; continue; }
   # Red main or red queue: the green, reviewed fix:main-red PR was put first in the merge queue (pr_arm_sweep.py
   # should_jump). One line per jump, with the error when GitHub refused it.
   printf '%s' "$out" | python3 -c 'import sys,json
-for j in json.load(sys.stdin).get("jump", []):
-    print(("jumped #%s to queue position %s" % (j["number"], j["position"])) if "position" in j
-          else ("JUMP #%s FAILED: %s" % (j["number"], j.get("error", "?"))))' 2>/dev/null \
-    | while IFS= read -r line; do log "$repo: main or queue is red -- $line"; done
+d = json.load(sys.stdin)
+for j in d.get("jump", []):
+    print(("main or queue is red -- jumped #%s to queue position %s" % (j["number"], j["position"]))
+          if "position" in j else ("main or queue is red -- JUMP #%s FAILED: %s" % (j["number"], j.get("error", "?"))))
+for e in d.get("enqueue", []):
+    print(("armed but never queued -- enqueued #%s at position %s" % (e["number"], e["position"]))
+          if "position" in e else ("armed but never queued -- ENQUEUE #%s FAILED: %s" % (e["number"], e.get("error", "?"))))' 2>/dev/null \
+    | while IFS= read -r line; do log "$repo: $line"; done
   arm="$(printf '%s' "$out" | python3 -c 'import sys,json; print(" ".join(str(n) for n in json.load(sys.stdin)["arm"]))' 2>/dev/null)"
   if [ -z "${arm// /}" ]; then
     log "$repo: nothing to arm"
