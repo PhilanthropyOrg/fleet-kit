@@ -37,6 +37,10 @@ Value 2 needs the other three to average 1.5 or more.
 G, 2026-11-01 (PHIA-2043): a measuring tool -- a PR that changes no page but makes points or the gate follow
 one visitor number measured today -- is scored on that number, Value 2 at most (`beneficiary.tool`, capped here).
 
+Automation, 2026-11-02 (PHIA-2064): staff-screen work the Owner asked for in a linked gh issue or task scores Value 2
+with the Owner as the user (prompt anchor, `beneficiary.tool`, so the same cap). A Value 1 send-back with a named user
+and number says so, instead of "no named user" under a table that names both.
+
 PHIA-1918 (pay on the read): half the points are paid at merge, the other half only after the 48-hour
 read (check48.py) shows the named metric moved at least half the guess. A cut is paid in full at merge.
 The judge names `metric` (a kpi_daily key, vertical/metric), `guess` (change per day) and `cut`; the
@@ -222,7 +226,7 @@ def sampled(head: str, every: int = CALIBRATE_EVERY) -> bool:
 
 
 def judge(scores: dict, research_ok: bool, card: dict | None = None, research_why: str = "",
-          visible: bool = True) -> list:
+          visible: bool = True, beneficiary: dict | None = None) -> list:
     """Reasons to send the PR back; empty means it passes on value.
 
     Research is judged from the task's value card. No card -> no research send-back (unless
@@ -232,6 +236,11 @@ def judge(scores: dict, research_ok: bool, card: dict | None = None, research_wh
     reasons = []
     if scores["value"] == 0:
         reasons.append("Value is 0: no person gets something they came for, saves a step, or loses dead weight.")
+    elif scores["value"] < MIN_VALUE and beneficiary is not None and named(beneficiary):
+        # PHIA-2064: "no named user" read as a lie when the table above names both (PR 15084, 15099, box 262).
+        reasons.append(f"Value is {scores['value']}: {beneficiary['user']} and {beneficiary['number']} are named, "
+                       "but the judge expects too small a move to ship (see the Value line above). "
+                       "Fold it into work that moves that number more, or show on the task how much it moves.")
     elif scores["value"] < MIN_VALUE:
         reasons.append(f"Value is {scores['value']}: no named user and user number this moves enough to ship. "
                        "Name who gets it and the number it moves (on the task), or fold it into work that does.")
@@ -250,12 +259,20 @@ def judge(scores: dict, research_ok: bool, card: dict | None = None, research_wh
     return reasons
 
 
-def floor(scores: dict, research_ok: bool, research_why: str = "", task: str = "the task") -> list:
+def floor(scores: dict, research_ok: bool, research_why: str = "", task: str = "the task",
+          beneficiary: dict | None = None) -> list:
     """Reasons the PR fails the value floor; empty means it clears it. Not a note: these block the PR."""
     reasons = []
-    if scores["value"] < MIN_VALUE:
-        reasons.append(f"Value floor: Value is {scores['value']}/3, the floor is {MIN_VALUE}. Name on {task} who gets it "
-                       "and the number it moves, with today's reading; the judge reads it again with no new commit.")
+    if scores["value"] < MIN_VALUE and beneficiary is not None and named(beneficiary):
+        # PHIA-2064: "no named user" read as a lie when the table above names both (PR 15084, 15099, box 262).
+        reasons.append(f"Value floor: Value is {scores['value']}/3, the floor is {MIN_VALUE}. "
+                       f"{beneficiary['user']} and {beneficiary['number']} are named, but the judge expects too small "
+                       f"a move to ship. Show on {task} how much it moves, or fold it into work that moves it more; "
+                       "the judge reads it again with no new commit.")
+    elif scores["value"] < MIN_VALUE:
+        reasons.append(f"Value floor: Value is {scores['value']}/3, the floor is {MIN_VALUE}: no named user and number. "
+                       f"Name on {task} who gets it and the number it moves, with today's reading; the judge reads it "
+                       "again with no new commit.")
     if not research_ok:
         reasons.append(f"Value floor: no research on {task} ({research_why or 'none found'}). Add Best in class "
                        "(who does it best, link, how we match or beat it) and the Data line to the card; the judge "
@@ -406,7 +423,7 @@ def apply(verdict: dict, body: str, pr: str, head: str, title: str, ref: str, ex
     visible = not invisible(verdict, nums)
     pts = points(nums, visible)
     plan = plan_score("plan " + card["plan"]) if card.get("plan") else plan_score(body)
-    notes = [] if exempt else judge(nums, research_ok, card, str(research.get("why", "")), visible)
+    notes = [] if exempt else judge(nums, research_ok, card, str(research.get("why", "")), visible, beneficiary)
     send_back = VALUE_SEND_BACK if value_send_back is None else value_send_back
     reasons = list(notes) if send_back else []
     if send_back:
@@ -414,7 +431,8 @@ def apply(verdict: dict, body: str, pr: str, head: str, title: str, ref: str, ex
     floor_on = VALUE_FLOOR if value_floor is None else value_floor
     # A task the Judge said YES to was floored on its pitch (value-rubric.md); fast-lane is judged after the fix.
     floor_reasons = [] if (exempt or not floor_on or labels_of(card) & APPROVAL_LABELS) else floor(
-        nums, research_ok, str(research.get("why", "")), card.get("task") or task_of(title, ref) or "the task")
+        nums, research_ok, str(research.get("why", "")), card.get("task") or task_of(title, ref) or "the task",
+        beneficiary)
     if floor_reasons:  # the floor says it; drop the notes and send-backs that say the same thing softer
         same = ("Value is", "The value card on", "Too little value to ship")
         notes = [n for n in notes if not n.startswith(same)]
