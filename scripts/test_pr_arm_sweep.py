@@ -298,6 +298,26 @@ def test_jump_requeues_a_fix_that_kept_its_place():
     assert [c[0] for c in fake.calls] == ["enqueue", "dequeue", "enqueue"], fake.calls
 
 
+def test_jump_trusts_the_queue_over_a_stale_mutation_answer():
+    # 11-03 11:07 AM: "#15343 FAILED: re-enqueued with jump but queue position is 35"; it merged at 11:19.
+    class Stale(_FakeGql):
+        def __call__(self, query, **v):
+            out = super().__call__(query, **v)
+            if "dequeuePullRequest" not in query:
+                out["data"]["enqueuePullRequest"]["mergeQueueEntry"]["position"] = 35
+            return out
+    sec, pr_arm_sweep.RECHECK_SEC = pr_arm_sweep.RECHECK_SEC, 0
+    try:
+        assert pr_arm_sweep.jump_to_front("PR_15343", "2de6f07", gql=Stale(35), recheck=lambda: 1) == 1
+        try:
+            pr_arm_sweep.jump_to_front("PR_15343", "2de6f07", gql=Stale(35), recheck=lambda: 35)
+            raise AssertionError("a jump the queue itself shows at 35 is a failure")
+        except RuntimeError as e:
+            assert "35" in str(e)
+    finally:
+        pr_arm_sweep.RECHECK_SEC = sec
+
+
 def test_jump_of_an_unqueued_fix_is_one_enqueue():
     fake = _FakeGql(queued_at=None)
     assert pr_arm_sweep.jump_to_front("PR_15303", "2de6f07", gql=fake) == 1
@@ -445,6 +465,37 @@ def test_main_red_and_pending_fix_win_over_launch():
     assert pr is None and "#15400" in why, why
 
 
+# CI cost (desk 11-03): CI money red at $53/day; the queue-speed fix #15370 (PHIA-2616, judge-yes) sat 37th.
+def _cost_pr(number=15370, *, task="PHIA-2616", labels=("bug", "fix:ci-cost"), **kw):
+    pr = _fix(number, labels=labels, **kw)
+    pr["title"], pr["headRefName"] = f"{task}: merge queue runs 3 shards of a capped pick", "ci/queue-shard-cap"
+    return pr
+
+
+def _pick_cost(prs, *, spec="blocked", judge_yes=frozenset({"PHIA-2616"}), queue=None, last=0.0, red=False):
+    q = {**LQ, 15370: 37} if queue is None else queue
+    return pr_arm_sweep.pick_launch_jump(prs, PROD_REQUIRED, q, LAUNCH, spec, red, last, NOW_TS,
+                                         judge_yes=set(judge_yes))
+
+
+def test_ci_cost_fix_with_judge_yes_jumps_before_launch():
+    pr, why = _pick_cost([_launch_pr(), _cost_pr()])
+    assert pr and pr["number"] == 15370 and "ci-cost fix PHIA-2616 (queued #37)" in why, why
+    pr, why = _pick_cost([_cost_pr()], spec="done")            # launch over: the cost rule still runs
+    assert pr and pr["number"] == 15370, why
+
+
+def test_ci_cost_jump_guards():
+    assert _pick_cost([_cost_pr()], judge_yes=set())[0] is None                    # task not judge-yes
+    assert _pick_cost([_cost_pr(task="PHIA-9")])[0] is None                         # another task
+    assert _pick_cost([_cost_pr(labels=("bug",))])[0] is None                       # no fix:ci-cost label
+    assert _pick_cost([_cost_pr(test="FAILURE")])[0] is None                        # not green
+    assert _pick_cost([_cost_pr(review=None)])[0] is None                           # not reviewed
+    assert _pick_cost([_cost_pr()], queue={15370: 3})[0] is None                    # already top 3
+    assert _pick_cost([_cost_pr()], last=NOW_TS - 10 * 60)[0] is None               # shares the 30m gap
+    assert "red" in _pick_cost([_cost_pr()], red=True)[1]                           # main red: the fix first
+
+
 def test_launch_rule_is_off_once_the_spec_closes():
     for spec in ("done", "cancelled", None):
         pr, why = _pick([_launch_pr()], spec=spec)
@@ -456,8 +507,12 @@ def test_launch_file_read_and_jump_log():
     import tempfile
     with tempfile.TemporaryDirectory() as d:
         f = Path(d) / "launch_tasks.json"
-        f.write_text(_json.dumps({"at": NOW_TS - 60, "launch": ["PHIA-2495"], "specs": {"PHIA-2501": "blocked"}}))
+        f.write_text(_json.dumps({"at": NOW_TS - 60, "launch": ["PHIA-2495"], "specs": {"PHIA-2501": "blocked"},
+                                  "judge_yes": ["PHIA-2616"]}))
         assert pr_arm_sweep.read_launch(str(f), NOW_TS) == ({"PHIA-2495"}, "blocked", "ok")
+        jy = set()
+        pr_arm_sweep.read_launch(str(f), NOW_TS, jy)
+        assert jy == {"PHIA-2616"}
         assert pr_arm_sweep.read_launch(str(f), NOW_TS + 3600)[2] == "launch file is stale"
         assert pr_arm_sweep.read_launch(str(Path(d) / "none"), NOW_TS)[0] == set()
         log = Path(d) / "launch_jumps.jsonl"

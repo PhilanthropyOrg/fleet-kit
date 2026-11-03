@@ -290,6 +290,10 @@ LAUNCH_LOG = os.environ.get("FLEET_LAUNCH_JUMP_LOG", "/var/log/fleet-kit/launch_
 LAUNCH_FILE_MAX_AGE_MIN = 30.0
 LAUNCH_GAP_MIN = 30.0  # at most one launch jump per this many minutes
 LAUNCH_TOP = 3         # a PR already this close to the front is not jumped
+# CI-cost fixes (desk 11-03: CI money red, $53/day; the queue-speed fix #15370 sat 37th) jump the same way and
+# share the gap. The label alone is not enough: the PR's PHIA task must carry `judge-yes`, which the same
+# launch_labels file lists (its "judge_yes" key), so nobody can buy a jump with a label.
+COST_LABEL = "fix:ci-cost"
 _TASK = re.compile(r"(?<![A-Za-z0-9])PHIA-([0-9]{1,6})(?![0-9])", re.I)
 
 
@@ -299,14 +303,17 @@ def linked_tasks(pr: dict) -> set[str]:
     return {f"PHIA-{n}" for n in _TASK.findall(text)}
 
 
-def read_launch(path: str, now: float) -> tuple[set[str], str | None, str]:
-    """(launch tasks, launch spec status, why). Missing, unreadable or stale reads as no launch."""
+def read_launch(path: str, now: float, judge_yes: set | None = None) -> tuple[set[str], str | None, str]:
+    """(launch tasks, launch spec status, why). Missing, unreadable or stale reads as no launch.
+    A `judge_yes` set passed in is filled with the file's judge-yes tasks (the CI-cost jump's guard)."""
     try:
         d = json.loads(Path(path).read_text())
     except (OSError, ValueError):
         return set(), None, f"no launch file at {path}"
     if (now - float(d.get("at") or 0)) / 60.0 > LAUNCH_FILE_MAX_AGE_MIN:
         return set(), None, "launch file is stale"
+    if judge_yes is not None:
+        judge_yes.update(d.get("judge_yes") or [])
     return set(d.get("launch") or []), (d.get("specs") or {}).get(LAUNCH_SPEC), "ok"
 
 
@@ -357,9 +364,11 @@ def queue_failed_prs(repo: str, limit: int = 50, api=None) -> dict[int, float]:
 def pick_launch_jump(prs: list[dict], required: list[str], queue: dict | None, launch: set[str],
                      spec_status: str | None, line_red: bool, last_jump: float,
                      now: float, queue_failed: dict | None = None,
-                     dequeued=None) -> tuple[dict | None, str]:
-    """Pure: the one PR to jump for launch now, or None and why not. Main red always wins."""
-    if not spec_status or spec_status in SPEC_CLOSED:
+                     dequeued=None, judge_yes: set | None = None) -> tuple[dict | None, str]:
+    """Pure: the one PR to jump for launch or CI cost now, or None and why not. Main red always wins.
+    A COST_LABEL PR whose task is in `judge_yes` goes before launch PRs: it makes every later merge cheaper."""
+    launch_on = bool(spec_status) and spec_status not in SPEC_CLOSED
+    if not launch_on and not judge_yes:
         return None, f"launch spec {LAUNCH_SPEC} is {spec_status or 'unknown'}: rule off"
     if line_red:
         return None, "main or the queue is red: the fix goes first"
@@ -371,8 +380,12 @@ def pick_launch_jump(prs: list[dict], required: list[str], queue: dict | None, l
     since = (now - last_jump) / 60.0
     if since < LAUNCH_GAP_MIN:
         return None, f"last launch jump {since:.0f}m ago (< {LAUNCH_GAP_MIN:.0f}m)"
-    for pr in sorted(prs, key=lambda p: p.get("number") or 0):
-        tasks = sorted(linked_tasks(pr) & launch)
+    def wanted(pr):
+        if COST_LABEL in _label_names(pr.get("labels")) and linked_tasks(pr) & (judge_yes or set()):
+            return "ci-cost fix", sorted(linked_tasks(pr) & judge_yes)
+        return "launch task", sorted(linked_tasks(pr) & launch) if launch_on else []
+    for pr in sorted(prs, key=lambda p: (wanted(p)[0] != "ci-cost fix", p.get("number") or 0)):
+        kind, tasks = wanted(pr)
         if not tasks:
             continue
         if (pr.get("state") or "OPEN").upper() != "OPEN" or pr.get("isDraft"):
@@ -388,8 +401,8 @@ def pick_launch_jump(prs: list[dict], required: list[str], queue: dict | None, l
             continue
         if dequeued is not None and dequeued(pr.get("number")):
             continue  # a human took it out of the queue: no jump puts it back
-        return pr, f"launch task {tasks[0]} ({'queued #%d' % where if where else 'not queued'}), green and reviewed"
-    return None, "no green, reviewed launch PR outside the top 3"
+        return pr, f"{kind} {tasks[0]} ({'queued #%d' % where if where else 'not queued'}), green and reviewed"
+    return None, "no green, reviewed launch or ci-cost PR outside the top 3"
 
 
 def failing_tests(items) -> set[str]:
@@ -628,10 +641,11 @@ def enqueue_at_back(pr_id: str, head: str, gql=_graphql) -> int | None:
             .get("mergeQueueEntry") or {}).get("position")
 
 
+RECHECK_SEC = 8
 _DEQUEUE = "mutation($id:ID!){dequeuePullRequest(input:{id:$id}){clientMutationId}}"
 
 
-def jump_to_front(pr_id: str, head: str, gql=_graphql) -> int:
+def jump_to_front(pr_id: str, head: str, gql=_graphql, recheck=None) -> int:
     """Enqueue with jump, pinned to the green head. A PR already in the queue keeps its place on a
     plain enqueue, so when the answer is not position 1 it is dequeued and enqueued again with jump.
     Returns the new position; raises RuntimeError when it could not be put first."""
@@ -647,6 +661,11 @@ def jump_to_front(pr_id: str, head: str, gql=_graphql) -> int:
         return 1
     gql(_DEQUEUE, id=pr_id)
     pos = enqueue()
+    if pos != 1 and recheck is not None:
+        # 11-03: every jump answered its OLD place (#15343 "position is 35", merged 12 minutes later):
+        # the mutation's answer is stale. The queue itself, read a moment later, is the truth.
+        time.sleep(RECHECK_SEC)
+        pos = recheck() or pos
     if pos != 1:
         raise RuntimeError(f"re-enqueued with jump but queue position is {pos}")
     return pos
@@ -692,23 +711,26 @@ def main(argv=None) -> int:
                    main_is_red=red, queue=queue, queue_is_red=bool(qred), queue_failed=qfailed,
                    failing=failing_tests(items), files_of=lambda n: pr_files(a.repo, n),
                    dequeued=dequeued)
+    def at(n):  # re-read one PR's queue position (the mutation's own answer can be stale)
+        return lambda: (queue_positions(a.repo, a.branch) or {}).get(n)
     if a.apply_jumps:
         for j in result["jump"]:
             try:
-                j["position"] = jump_to_front(j["id"], j["head"])
+                j["position"] = jump_to_front(j["id"], j["head"], recheck=at(j["number"]))
             except (RuntimeError, ValueError, OSError, subprocess.SubprocessError) as exc:
                 j["error"] = str(exc)[:300]
-    launch, spec, lwhy = read_launch(LAUNCH_FILE, time.time())
+    judge_yes: set[str] = set()
+    launch, spec, lwhy = read_launch(LAUNCH_FILE, time.time(), judge_yes)
     pick, pwhy = (None, lwhy) if lwhy != "ok" else pick_launch_jump(
         prs, required, queue, launch, spec, bool(red or qred), last_launch_jump(LAUNCH_LOG), time.time(),
-        qfailed, dequeued)
+        qfailed, dequeued, judge_yes)
     result["launch_jump"] = {"why": pwhy}
     if pick:
         result["launch_jump"].update(number=pick.get("number"), id=pick.get("id"), head=pick.get("headRefOid"))
     if pick and a.apply_jumps:
         lj = result["launch_jump"]
         try:
-            lj["position"] = jump_to_front(pick["id"], pick["headRefOid"])
+            lj["position"] = jump_to_front(pick["id"], pick["headRefOid"], recheck=at(pick.get("number")))
         except (RuntimeError, ValueError, OSError, subprocess.SubprocessError) as exc:
             lj["error"] = str(exc)[:300]
         # Log every attempt, not only a confirmed position 1: on 11-03 GitHub answered a stale
