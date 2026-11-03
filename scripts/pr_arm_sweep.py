@@ -299,9 +299,44 @@ def last_launch_jump(path: str) -> float:
         return 0.0
 
 
+def _ts(iso: str | None) -> float:
+    try:
+        return datetime.fromisoformat((iso or "").replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return 0.0
+
+
+def head_checked_at(pr: dict) -> float:
+    """Unix time the PR's current head last finished a check (0 when none has)."""
+    return max((_ts(c.get("completedAt")) for c in pr.get("statusCheckRollup") or []), default=0.0)
+
+
+# A launch PR the queue already threw out (philanthropy 2026-11-03 7:47 AM: #15337 failed `lint` in
+# its own merge group at 7:07, the queue removed it at 7:20, and the 7:47 sweep jumped the same head
+# to the front again; it failed again and turned the 4 groups behind it red). A failed group of its
+# own after its head's checks finished is the queue's verdict on that head: do not jump it again.
+_QUEUE_REF = re.compile(r"^gh-readonly-queue/[^/]+/pr-([0-9]+)-")
+
+
+def queue_failed_prs(repo: str, limit: int = 50, api=None) -> dict[int, float]:
+    """{PR number: unix time of its newest failed merge group}; {} on a read error."""
+    api = api or _api
+    try:
+        runs = api(f"repos/{repo}/actions/runs?event=merge_group&status=completed&per_page={limit}")
+        out: dict[int, float] = {}
+        for r in runs.get("workflow_runs") or []:
+            m = _QUEUE_REF.match(r.get("head_branch") or "")
+            if m and r.get("conclusion") == "failure":
+                n = int(m.group(1))
+                out[n] = max(out.get(n, 0.0), _ts(r.get("created_at")))
+        return out
+    except (RuntimeError, ValueError, KeyError, OSError, subprocess.SubprocessError):
+        return {}
+
+
 def pick_launch_jump(prs: list[dict], required: list[str], queue: dict | None, launch: set[str],
                      spec_status: str | None, line_red: bool, last_jump: float,
-                     now: float) -> tuple[dict | None, str]:
+                     now: float, queue_failed: dict | None = None) -> tuple[dict | None, str]:
     """Pure: the one PR to jump for launch now, or None and why not. Main red always wins."""
     if not spec_status or spec_status in SPEC_CLOSED:
         return None, f"launch spec {LAUNCH_SPEC} is {spec_status or 'unknown'}: rule off"
@@ -326,6 +361,8 @@ def pick_launch_jump(prs: list[dict], required: list[str], queue: dict | None, l
         where = queue.get(pr.get("number"))
         if where is not None and where <= LAUNCH_TOP:
             continue
+        if where is None and (queue_failed or {}).get(pr.get("number"), 0.0) > head_checked_at(pr):
+            continue  # the queue failed this head and threw it out: a jump only fails it again
         if _not_green_and_reviewed(pr, required):
             continue
         return pr, f"launch task {tasks[0]} ({'queued #%d' % where if where else 'not queued'}), green and reviewed"
@@ -527,7 +564,8 @@ def main(argv=None) -> int:
                 j["error"] = str(exc)[:300]
     launch, spec, lwhy = read_launch(LAUNCH_FILE, time.time())
     pick, pwhy = (None, lwhy) if lwhy != "ok" else pick_launch_jump(
-        prs, required, queue, launch, spec, bool(red or qred), last_launch_jump(LAUNCH_LOG), time.time())
+        prs, required, queue, launch, spec, bool(red or qred), last_launch_jump(LAUNCH_LOG), time.time(),
+        queue_failed_prs(a.repo))
     result["launch_jump"] = {"why": pwhy}
     if pick:
         result["launch_jump"].update(number=pick.get("number"), id=pick.get("id"), head=pick.get("headRefOid"))
@@ -535,11 +573,16 @@ def main(argv=None) -> int:
         lj = result["launch_jump"]
         try:
             lj["position"] = jump_to_front(pick["id"], pick["headRefOid"])
+        except (RuntimeError, ValueError, OSError, subprocess.SubprocessError) as exc:
+            lj["error"] = str(exc)[:300]
+        # Log every attempt, not only a confirmed position 1: on 11-03 GitHub answered a stale
+        # position after the jump had landed, nothing was logged, and the 30-minute gap never held.
+        try:
             with open(LAUNCH_LOG, "a") as f:
                 f.write(json.dumps({"ts": time.time(), "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                                     "pr": pick.get("number"), "reason": pwhy}) + "\n")
-        except (RuntimeError, ValueError, OSError, subprocess.SubprocessError) as exc:
-            lj["error"] = str(exc)[:300]
+        except OSError as exc:
+            lj["log_error"] = str(exc)[:300]
     if pick:  # a launch jump already put it in the queue
         result["enqueue"] = [e for e in result["enqueue"] if e["number"] != pick.get("number")]
     if a.apply_enqueues:
