@@ -615,6 +615,10 @@ def test_human_dequeue_holds_until_the_next_push():
                 _ev("removed_from_merge_queue", "github-merge-queue[bot]"),
                 _ev("removed_from_merge_queue", "github-actions[bot]")]
     assert pr_arm_sweep.held_by_manual_dequeue(bot_only) is False
+    # 11-03 10:07: the sweep's own fix jump is a dequeue + re-add under reif-y, not a human hold
+    jump = [_ev("added_to_merge_queue", "reif-y"), _ev("removed_from_merge_queue", "reif-y"),
+            _ev("added_to_merge_queue", "reif-y")]
+    assert pr_arm_sweep.held_by_manual_dequeue(jump) is False
     # a bot re-adding it is the bug this guards, not consent
     assert pr_arm_sweep.held_by_manual_dequeue(DEQUEUED + [_ev("added_to_merge_queue", "github-actions[bot]")]) is True
 

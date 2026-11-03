@@ -412,15 +412,22 @@ QUEUE_BOTS = frozenset({"github-actions[bot]", "github-merge-queue[bot]"})
 
 def held_by_manual_dequeue(events) -> bool:
     """Pure: the PR timeline (oldest first) says a human dequeued it and nothing was pushed since.
-    Same rule as philanthropy scripts/ci/dequeue_intent.py: a non-bot removal holds, a push frees."""
+    Same rule as philanthropy scripts/ci/dequeue_intent.py: a non-bot removal holds, a push frees.
+    One addition: a non-bot RE-ADD frees too. This sweep's own fix jump dequeues and re-enqueues
+    under the shared token (11-03 10:07: #15355), which is not a human parking it; and nothing of
+    ours re-adds a held PR (arm and enqueue skip it), so a non-bot add is someone putting it back.
+    A bot add (auto-merge armed with GITHUB_TOKEN) still frees nothing."""
     held = False
     for ev in events or []:
         name = ev.get("event")
+        actor = ev.get("actor")
+        login = (actor.get("login") if isinstance(actor, dict) else actor) or ""
         if name == "removed_from_merge_queue":
-            actor = ev.get("actor")
-            login = actor.get("login") if isinstance(actor, dict) else actor
-            if (login or "") not in QUEUE_BOTS:
+            if login not in QUEUE_BOTS:
                 held = True
+        elif name == "added_to_merge_queue":
+            if login not in QUEUE_BOTS:
+                held = False
         elif name in ("head_ref_force_pushed", "committed"):
             held = False
     return held
