@@ -329,7 +329,7 @@ def test_a_check_failing_two_of_three_merge_groups_makes_the_queue_red():
 def test_red_queue_jumps_the_fix_but_holds_no_other_arm():
     plain = _pr(15290, checks=[(c, "SUCCESS") for c in PROD_REQUIRED])
     out = pr_arm_sweep.sweep([plain, _fix(15318)], PROD_REQUIRED, NOW_TS, queue_is_red=True,
-                             queue={15289: 1, 15290: 8, 15318: 16})
+                             queue={15289: 1, 15318: 16})  # 15290 not queued yet
     assert [j["number"] for j in out["jump"]] == [15318], out["jump"]
     assert out["arm"] == [15290], out  # a red queue is not a red main: other PRs still arm
     green = pr_arm_sweep.sweep([_fix(15318)], PROD_REQUIRED, NOW_TS, queue={15318: 16})
@@ -545,7 +545,15 @@ def test_sweep_never_rearms_or_enqueues_a_head_the_queue_failed():
     assert "failed this head" in out["skipped"][0]["why"], out
     stale = {15093: NOW_TS - 5 * 3600}                               # failed before this head's checks
     assert pr_arm_sweep.sweep([pr], REQUIRED, NOW_TS, queue={}, queue_failed=stale)["arm"] == [15093]
-    assert pr_arm_sweep.sweep([pr], REQUIRED, NOW_TS, queue={15093: 3}, queue_failed=failed)["arm"] == [15093]
+    queued = pr_arm_sweep.sweep([pr], REQUIRED, NOW_TS, queue={15093: 3}, queue_failed=failed)
+    assert queued["skipped"][0]["why"] == "already in the merge queue", queued  # a PR ahead may have failed it
+
+
+def test_sweep_does_not_rearm_a_pr_already_in_the_merge_queue():
+    pr = _pr(15302, age_h=3.0)                                       # green, no autoMergeRequest
+    assert pr_arm_sweep.sweep([pr], REQUIRED, NOW_TS, queue={})["arm"] == [15302]
+    out = pr_arm_sweep.sweep([pr], REQUIRED, NOW_TS, queue={15302: 3})
+    assert out["arm"] == [] and out["skipped"][0]["why"] == "already in the merge queue", out
 
 
 for _name, _fn in sorted((n, f) for n, f in list(globals().items()) if n.startswith("test_")):
