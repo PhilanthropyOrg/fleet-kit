@@ -465,6 +465,38 @@ def test_launch_file_read_and_jump_log():
         log.write_text(_json.dumps({"ts": 5.0, "pr": 1}) + "\n" + _json.dumps({"ts": 9.0, "pr": 2}) + "\n")
         assert pr_arm_sweep.last_launch_jump(str(log)) == 9.0
 
+# 2026-11-03 7:47 AM: #15337 (PHIA-2492, launch) failed `lint` in its own merge group at 7:07, the
+# queue threw it out at 7:20, and the sweep jumped the same head to the front again.
+def test_launch_never_rejumps_a_head_the_queue_failed_and_threw_out():
+    failed = {15319: NOW_TS - 40 * 60}                                  # its own group failed 40m ago
+    pr, why = _pick_failed([_launch_pr()], {15290: 1}, failed)          # not in the queue any more
+    assert pr is None, why
+    assert _pick_failed([_launch_pr()], LQ, failed)[0] is not None      # still queued: a PR ahead failed it
+    old = {15319: NOW_TS - 30 * 3600}                                  # the head checks finished 26h ago
+    assert _pick_failed([_launch_pr()], {15290: 1}, old)[0] is not None  # failed before this head's checks
+
+
+def _pick_failed(prs, queue, failed):
+    return pr_arm_sweep.pick_launch_jump(prs, PROD_REQUIRED, queue, LAUNCH, "blocked", False, 0.0, NOW_TS,
+                                         failed)
+
+
+def test_queue_failed_prs_reads_each_prs_own_failed_group():
+    runs = {"workflow_runs": [
+        {"head_branch": "gh-readonly-queue/main/pr-15337-107f3120", "conclusion": "failure",
+         "created_at": "2026-11-03T13:47:54Z"},
+        {"head_branch": "gh-readonly-queue/main/pr-15337-a52ebfce", "conclusion": "failure",
+         "created_at": "2026-11-03T13:07:39Z"},
+        {"head_branch": "gh-readonly-queue/main/pr-15313-2cd4bed3", "conclusion": "success",
+         "created_at": "2026-11-03T13:33:12Z"},
+        {"head_branch": "gh-readonly-queue/main/pr-15000-107f3120", "conclusion": "cancelled",
+         "created_at": "2026-11-03T13:20:50Z"}]}
+    got = pr_arm_sweep.queue_failed_prs("o/r", api=lambda path: runs)
+    assert got == {15337: datetime(2026, 11, 3, 13, 47, 54, tzinfo=timezone.utc).timestamp()}, got
+    boom = lambda path: (_ for _ in ()).throw(RuntimeError("gh down"))  # noqa: E731
+    assert pr_arm_sweep.queue_failed_prs("o/r", api=boom) == {}
+
+
 for _name, _fn in sorted((n, f) for n, f in list(globals().items()) if n.startswith("test_")):
     check(_name, _fn)
 
