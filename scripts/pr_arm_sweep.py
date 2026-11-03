@@ -163,7 +163,7 @@ def should_jump(pr: dict, required: list[str], main_is_red: bool,
     `queue` maps PR number -> queue position (1 = front); None means the branch has no queue.
     """
     if not main_is_red:
-        return False, "main is not red"
+        return False, "main is not red and the queue is not red"
     if FIX_LABEL not in _label_names(pr.get("labels")):
         return False, f"not the fix (label {FIX_LABEL})"
     if queue is None:
@@ -187,17 +187,37 @@ def should_jump(pr: dict, required: list[str], main_is_red: bool,
     if not any(s == "SUCCESS" for c, s in states.items() if c != REVIEW_CHECK):
         return False, "no required CI check ran green on the head (all skipped)"
     where = queue.get(pr.get("number"))
-    return True, f"main is red and this is the green, reviewed fix ({'queued #%d' % where if where else 'not queued'})"
+    return True, f"the line is red and this is the green, reviewed fix ({'queued #%d' % where if where else 'not queued'})"
+
+
+# A red QUEUE stops the line too (philanthropy 2026-11-03 3 AM: main green, but every full
+# merge-group run failed `test` on one CI-gate test since #15272, so nothing landed and each entry
+# cost ~52 minutes). A required check that failed in QUEUE_RED_FAILS of the last QUEUE_RED_RUNS
+# finished merge groups is the queue's own red; one PR's own failure is a single run, not two.
+QUEUE_RED_RUNS = 3
+QUEUE_RED_FAILS = 2
+
+
+def queue_red_checks(groups: list[set], required: list[str], runs: int = QUEUE_RED_RUNS,
+                     fails: int = QUEUE_RED_FAILS) -> list[str]:
+    """Pure: required checks that failed in `fails`+ of the newest `runs` finished merge groups.
+
+    `groups` is newest first, one set of FAILED job names per merge-group head sha. The review
+    is a PR status, never a merge-group job, so it can not make the queue red."""
+    recent = groups[:runs]
+    return [c for c in required if c != REVIEW_CHECK
+            and sum(1 for g in recent if c in g) >= fails]
 
 
 def sweep(prs: list[dict], required: list[str], now: float | None = None,
           min_age_min: float = MIN_AGE_MIN, main_is_red: bool = False,
-          queue: dict | None = None) -> dict:
+          queue: dict | None = None, queue_is_red: bool = False) -> dict:
     arm, skip, jump = [], [], []
     for pr in prs:
         ok, why = should_arm(pr, required, now, min_age_min, main_is_red)
         (arm if ok else skip).append({"number": pr.get("number"), "why": why})
-        go, jwhy = should_jump(pr, required, main_is_red, queue)
+        # A red queue moves the fix up; it does not hold the other PRs' arming (main red does).
+        go, jwhy = should_jump(pr, required, main_is_red or queue_is_red, queue)
         if go:
             jump.append({"number": pr.get("number"), "id": pr.get("id"),
                          "head": pr.get("headRefOid"), "why": jwhy})
@@ -237,6 +257,36 @@ def main_red(repo: str) -> bool:
                                 f'"{RED_MAIN_PREFIX.strip()}" in:title', "--json", "title"], repo))
     except (RuntimeError, ValueError, OSError, subprocess.SubprocessError):
         return False
+
+
+def _api(path: str) -> dict:
+    out = subprocess.run(["gh", "api", path], capture_output=True, text=True, timeout=120)
+    if out.returncode != 0:
+        raise RuntimeError(f"gh api {path} failed: {out.stderr.strip()[:300]}")
+    return json.loads(out.stdout or "{}")
+
+
+def merge_group_failures(repo: str, limit: int = 20, api=None) -> list[set]:
+    """Newest first: the failed job names of each finished merge-group head. [] on a read error,
+    so a broken read never reads as a red queue."""
+    api = api or _api
+    try:
+        runs = api(f"repos/{repo}/actions/runs?event=merge_group&status=completed"
+                    f"&per_page={limit}")["workflow_runs"]
+        order, failed = [], {}
+        for r in runs or []:
+            sha = r.get("head_sha")
+            if sha not in failed:
+                if len(order) == QUEUE_RED_RUNS:
+                    break
+                order.append(sha)
+                failed[sha] = set()
+            if r.get("conclusion") == "failure":
+                jobs = api(f"repos/{repo}/actions/runs/{r['id']}/jobs?per_page=100")["jobs"]
+                failed[sha] |= {j.get("name") for j in jobs or [] if j.get("conclusion") == "failure"}
+        return [failed[s] for s in order]
+    except (RuntimeError, ValueError, KeyError, OSError, subprocess.SubprocessError):
+        return []
 
 
 def collect(repo: str, limit: int = 100) -> list[dict]:
@@ -316,9 +366,14 @@ def main(argv=None) -> int:
     red = main_red(a.repo)
     if red:
         print(f"pr_arm_sweep: {a.repo} main is red; only PRs labeled {FIX_LABEL} arm", file=sys.stderr)
-    queue = queue_positions(a.repo, a.branch) if red else None
-    result = sweep(prs, required_contexts(a.repo, a.branch), min_age_min=a.min_age_min,
-                   main_is_red=red, queue=queue)
+    required = required_contexts(a.repo, a.branch)
+    qred = queue_red_checks(merge_group_failures(a.repo), required) if not red else []
+    if qred:
+        print(f"pr_arm_sweep: {a.repo} merge queue is red on {', '.join(qred)}; "
+              f"a green, reviewed {FIX_LABEL} PR jumps", file=sys.stderr)
+    queue = queue_positions(a.repo, a.branch) if (red or qred) else None
+    result = sweep(prs, required, min_age_min=a.min_age_min,
+                   main_is_red=red, queue=queue, queue_is_red=bool(qred))
     if a.apply_jumps:
         for j in result["jump"]:
             try:
