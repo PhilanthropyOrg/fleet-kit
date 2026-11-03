@@ -168,6 +168,26 @@ unqueue_pr() { # <pr>
   log "PR #$1: auto-merge disarmed (blocked)"
 }
 
+# PHIA-2409 (Paul 11-02): 3 of 10 verdicts said "card unread: TimeoutError" after the PHIA-2267 retry,
+# and each was scored blind and sent back on value. When the board failed and there is no saved read,
+# the pass posts no verdict, so pick_pr takes the head again next pass. 0 = wait. An answer that will
+# not change (HTTP 4xx, no key) never waits, and after JUDGE_CARD_WAITS passes on one head the review
+# goes on, so a dark board cannot hold a required check forever.
+card_read_wait() { # <pr> <head> <card file>
+  local err n=0 f="$APPROVED_DIR/pr-$1.cardwait"
+  err=$(jq -r 'if .read_failed then empty else .error // empty end' "$3" 2>/dev/null)
+  case "$err" in
+    ""|"HTTP 4"*|*"not in the judge's environment"*) rm -f "$f"; return 1 ;;
+  esac
+  [ "$(sed -n 1p "$f" 2>/dev/null)" = "$2" ] && n=$(sed -n 2p "$f" 2>/dev/null)
+  n=$(( ${n:-0} + 1 ))
+  if [ "$n" -gt "${JUDGE_CARD_WAITS:-6}" ]; then rm -f "$f"; return 1; fi
+  mkdir -p "$APPROVED_DIR" 2>/dev/null
+  printf '%s\n%s\n' "$2" "$n" > "$f" 2>/dev/null || true
+  CARD_WAIT_N=$n CARD_WAIT_ERR=$err
+  return 0
+}
+
 post_status() { # <sha> <state> <description>
   timeout 25s gh api -X POST "repos/${REPO_SLUG}/statuses/$1" \
     -f state="$2" -f context="$CONTEXT" -f description="${3:0:139}" >/dev/null 2>&1
@@ -553,7 +573,15 @@ while :; do
   PR_TASK=$(printf '%s %s' "$(head -1 "$BODY_FILE")" "${HEAD_REF:-}" | grep -oiE 'phia-?[0-9]+' | head -1 | tr -d '-' | sed -E 's/^[pP][hH][iI][aA]/PHIA-/')
   # PHIA-2276: one budget for the whole read, and a hard stop 15 s past it, so a dark board costs
   # one pass at most JUDGE_CARD_BUDGET seconds and the review goes on (saved card or none).
-  timeout "$(( ${JUDGE_CARD_BUDGET:-150} + 15 ))s" python3 "$KIT_DIR/scripts/value_card.py" "${PR_TASK:-}" > "$CARD_FILE" 2>>"$LOG" || echo '{}' > "$CARD_FILE"
+  timeout "$(( ${JUDGE_CARD_BUDGET:-150} + 15 ))s" python3 "$KIT_DIR/scripts/value_card.py" "${PR_TASK:-}" > "$CARD_FILE" 2>>"$LOG" || { [ -n "${PR_TASK:-}" ] && jq -cn --arg t "$PR_TASK" '{task: $t, error: "card read hard stop"}' > "$CARD_FILE" || echo '{}' > "$CARD_FILE"; }
+  # PHIA-2409: a card read that timed out with no saved read is a retry, never a blind score.
+  if card_read_wait "$PR" "$HEAD_SHA" "$CARD_FILE"; then
+    log "PR #$PR head ${HEAD_SHA:0:12}: value card unread ($CARD_WAIT_ERR), wait $CARD_WAIT_N of ${JUDGE_CARD_WAITS:-6} -- no verdict, retry next pass"
+    SKIPPED_THIS_TICK="$SKIPPED_THIS_TICK $PR"
+    cleanup_pass
+    [ -n "$EXPLICIT_PR" ] && break
+    continue
+  fi
   CARD_TEXT=$(jq -r '.card // empty' "$CARD_FILE" 2>/dev/null | head -c "${MAX_CARD_BYTES:-4000}")
   # Paul 2026-11-01, "don't wait for cards": with no card, the task's own title and description
   # stand in for it (with the PR body's Why, already in the prompt). A missing card is never a block.
