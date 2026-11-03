@@ -72,7 +72,13 @@ class HeadFiles(unittest.TestCase):
 
 class Wiring(unittest.TestCase):
     def test_review_fetches_head_files(self):
-        self.assertIn('head_files.py" "$HEAD_SHA" "$FILES_BUDGET" < "$DIFF_FILE"', SRC)
+        self.assertIn('python3 "$KIT_DIR/members/judge-judy/head_files.py" "$HEAD_SHA"', SRC)
+
+    def test_helpers_do_not_resolve_against_the_repo_dir(self):
+        # Lane 1 runs `bash members/judge-judy/judge-judy.sh` (a relative $0) and then cd's to
+        # $REPO, so "$(dirname "$0")/x.py" became /repo/members/judge-judy/x.py: not found.
+        after_cd = SRC.split('cd "$REPO"', 1)[1]
+        self.assertNotIn('python3 "$(dirname "$0")/', after_cd)
 
     def test_prompt_carries_the_files_after_the_diff(self):
         prompt = re.search(r'\nPROMPT="(.*?)\n  # --output-format json', SRC, re.S).group(1)
