@@ -275,6 +275,9 @@ def merge_group_failures(repo: str, limit: int = 20, api=None) -> list[set]:
                     f"&per_page={limit}")["workflow_runs"]
         order, failed = [], {}
         for r in runs or []:
+            # A cancelled group (a jump, or a rebuild after the queue changed) proves nothing.
+            if r.get("conclusion") not in ("failure", "success"):
+                continue
             sha = r.get("head_sha")
             if sha not in failed:
                 if len(order) == QUEUE_RED_RUNS:

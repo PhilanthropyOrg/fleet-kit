@@ -339,6 +339,7 @@ def test_red_queue_jumps_the_fix_but_holds_no_other_arm():
 def test_merge_group_failures_reads_failed_jobs_per_group_newest_first():
     runs = {"workflow_runs": [
         {"id": 5, "head_sha": "e", "conclusion": "failure"},
+        {"id": 6, "head_sha": "x", "conclusion": "cancelled"},  # 2026-11-03: rebuilds cancel
         {"id": 4, "head_sha": "d", "conclusion": "failure"},
         {"id": 3, "head_sha": "c", "conclusion": "success"},
         {"id": 2, "head_sha": "b", "conclusion": "failure"}]}
