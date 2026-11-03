@@ -21,7 +21,9 @@ old value send-back rule back (undo); JUDGE_APPROVAL_GATE=0 turns the task check
 
 The value rule below (Value <= 1, Usability 0, a thin card, points < JUDGE_MIN_POINTS) now only writes
 "value notes" on the verdict for the seat and the Judge to read; it sends back only when
-JUDGE_VALUE_SEND_BACK=1.
+JUDGE_VALUE_SEND_BACK=1. One part of it is a hard floor again (Paul 11-02, after #15261 passed with Value 1/3
+and no research): Value below JUDGE_MIN_VALUE, or no research, blocks the PR unless its task carries judge-yes
+or fast-lane (floor(); JUDGE_VALUE_FLOOR=0 turns it off). flat() flags a judge that gives most cards the same scores.
 
 Paul, 2026-11-01 (calibration): 45 of 51 verdicts scored exactly 2/2/2/2 and 0 were sent back for
 value. The judge now names the user and the user number it expects to move (`beneficiary`); a blank
@@ -56,6 +58,9 @@ Usage:
   value_judge.py apply --body BODY_FILE --pr N --head SHA --title T --ref BRANCH [--exempt] [--card CARD_JSON]
       stdin: judge_judy_verdict.py's output. stdout: the same object with verdict, findings_text
       and a `ledger` row folded in. Exit 0 always; an unscored verdict passes through unchanged.
+  value_judge.py flat LEDGER [--window 8] [--share 0.6]
+      {"flat": bool, "scores": "2/2/2/2", "count", "reviews", "window", "prs"}: is the judge giving most cards the
+      same four scores? The box's judge_flat_watch files one task to the Judge seat when it is.
   value_judge.py summary LEDGER [--merged N,N,...] [--days 7]
       points per seat per day from the ledger (latest review of each PR; only merged PRs count
       when --merged is given), plus send-back rate, plan-match share and planless send-backs.
@@ -64,6 +69,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import re
 import sys
@@ -78,6 +84,15 @@ VALUE_SEND_BACK = os.environ.get("JUDGE_VALUE_SEND_BACK", "0") == "1"  # Reif 11
 APPROVAL_GATE = os.environ.get("JUDGE_APPROVAL_GATE", "1") == "1"
 APPROVAL_SINCE = os.environ.get("JUDGE_APPROVAL_SINCE", "2026-11-02T21:00:00Z")  # tasks before the cutover pass
 APPROVAL_LABELS = {"judge-yes", "fast-lane"}
+# Paul 11-02 (Paperclip 2, value gate): #15261 passed with Value 1/3 and no research because value only wrote notes.
+# The floor is a rule, not a note: Value below MIN_VALUE, or research not done, blocks the PR whatever the model's
+# correctness verdict, unless the task carries judge-yes (floored on its pitch) or fast-lane (a breakage fixed first,
+# judged after). So a PR on a task nobody judged, or whose labels could not be read, meets it. JUDGE_VALUE_FLOOR=0 undoes it.
+VALUE_FLOOR = os.environ.get("JUDGE_VALUE_FLOOR", "1") == "1"
+# A judge that hands most cards the same four scores is not judging (Paul 11-01: 45 of 51 were 2/2/2/2; 11-02: 5 of
+# the last 8). flat() flags it when one score set covers FLAT_SHARE or more of the last FLAT_WINDOW PRs reviewed.
+FLAT_WINDOW = int(os.environ.get("JUDGE_FLAT_WINDOW", "8"))
+FLAT_SHARE = float(os.environ.get("JUDGE_FLAT_SHARE", "0.6"))
 
 # The schema fragment judge-judy.sh merges into VERDICT_SCHEMA (kept here so one file owns it).
 _RISK = {"type": "object", "properties": {"score": {"type": "integer", "minimum": 0, "maximum": 3},
@@ -199,6 +214,41 @@ def judge(scores: dict, research_ok: bool, card: dict | None = None, research_wh
     return reasons
 
 
+def floor(scores: dict, research_ok: bool, research_why: str = "", task: str = "the task") -> list:
+    """Reasons the PR fails the value floor; empty means it clears it. Not a note: these block the PR."""
+    reasons = []
+    if scores["value"] < MIN_VALUE:
+        reasons.append(f"Value floor: Value is {scores['value']}/3, the floor is {MIN_VALUE}. Name on {task} who gets it "
+                       "and the number it moves, with today's reading; the judge reads it again with no new commit.")
+    if not research_ok:
+        reasons.append(f"Value floor: no research on {task} ({research_why or 'none found'}). Add Best in class "
+                       "(who does it best, link, how we match or beat it) and the Data line to the card; the judge "
+                       "reads it again with no new commit.")
+    return reasons
+
+
+def flat(rows: list, window: int = FLAT_WINDOW, share: float = FLAT_SHARE) -> dict:
+    """Is the judge handing every card the same scores? Reads the newest review of each of the last `window` PRs
+    (exempt reviews and rows with no scores left out). Flat when one score set covers `share` of them or more."""
+    latest = {}
+    for r in sorted(rows, key=lambda r: r.get("ts", 0)):
+        s = r.get("scores")
+        if r.get("exempt") or not isinstance(s, dict) or not all(k in s for k in RISKS):
+            continue
+        latest.pop(str(r.get("pr")), None)  # re-insert: dict order is then the PR's newest review
+        latest[str(r.get("pr"))] = tuple(int(s[k]) for k in RISKS)
+    last = list(latest.items())[-window:]
+    if not last:
+        return {"flat": False, "reviews": 0, "window": window}
+    counts = defaultdict(list)
+    for pr, t in last:
+        counts[t].append(pr)
+    top, prs = max(counts.items(), key=lambda kv: len(kv[1]))
+    need = max(2, math.ceil(share * window - 1e-9))  # 0.6 of 8 -> 5
+    return {"flat": len(last) >= window and len(prs) >= need, "scores": "/".join(map(str, top)),
+            "count": len(prs), "reviews": len(last), "window": window, "prs": prs}
+
+
 def labels_of(card: dict) -> set:
     """Label names on the task (value_card.py reads them from the board issue)."""
     out = set()
@@ -289,7 +339,8 @@ def plan_matches(plan, nums) -> bool:
 
 
 def apply(verdict: dict, body: str, pr: str, head: str, title: str, ref: str, exempt: bool,
-          card: dict | None = None, gate: bool = False, value_send_back: bool | None = None) -> dict:
+          card: dict | None = None, gate: bool = False, value_send_back: bool | None = None,
+          value_floor: bool | None = None) -> dict:
     card = card if isinstance(card, dict) else {}
     out = dict(verdict)
     if not verdict.get("ok"):
@@ -316,6 +367,15 @@ def apply(verdict: dict, body: str, pr: str, head: str, title: str, ref: str, ex
     reasons = list(notes) if send_back else []
     if send_back:
         notes = []
+    floor_on = VALUE_FLOOR if value_floor is None else value_floor
+    # A task the Judge said YES to was floored on its pitch (value-rubric.md); fast-lane is judged after the fix.
+    floor_reasons = [] if (exempt or not floor_on or labels_of(card) & APPROVAL_LABELS) else floor(
+        nums, research_ok, str(research.get("why", "")), card.get("task") or task_of(title, ref) or "the task")
+    if floor_reasons:  # the floor says it; drop the notes and send-backs that say the same thing softer
+        same = ("Value is", "The value card on")
+        notes = [n for n in notes if not n.startswith(same)]
+        reasons = [r for r in reasons if not r.startswith(same)]
+    reasons += floor_reasons
     gate_reasons = [] if (exempt or not gate) else approval(card, title, ref)
     reasons += gate_reasons
     correctness = verdict.get("verdict")
@@ -331,7 +391,7 @@ def apply(verdict: dict, body: str, pr: str, head: str, title: str, ref: str, ex
         "task": card.get("task") or task_of(title, ref), "card": bool(card.get("card")),
         "scores": nums, "research_ok": research_ok, "points": pts, "verdict": final,
         "correctness": correctness, "value_reasons": reasons if send_back else [], "value_notes": notes,
-        "approval_reasons": gate_reasons, "exempt": exempt,
+        "approval_reasons": gate_reasons, "floor_reasons": floor_reasons, "exempt": exempt,
         "plan": plan, "plan_matched": plan_matches(plan, nums) if plan else None,
         "user": str(beneficiary.get("user", "")), "number": str(beneficiary.get("number", "")),
         "baseline": str(beneficiary.get("baseline") or "").strip(), "metric": str(beneficiary.get("metric") or "").strip(), "guess": _guess(beneficiary.get("guess")),
@@ -381,6 +441,10 @@ def main(argv=None) -> int:
     s.add_argument("--merged", default=None)
     s.add_argument("--days", type=int, default=7)
     sub.add_parser("schema")
+    fl = sub.add_parser("flat")
+    fl.add_argument("ledger")
+    fl.add_argument("--window", type=int, default=FLAT_WINDOW)
+    fl.add_argument("--share", type=float, default=FLAT_SHARE)
     args = ap.parse_args(argv)
     if args.cmd == "schema":
         json.dump(SCORES_SCHEMA, sys.stdout)
@@ -411,6 +475,10 @@ def main(argv=None) -> int:
             rows = [json.loads(line) for line in f if line.strip()]
     except OSError:
         pass
+    if args.cmd == "flat":
+        json.dump(flat(rows, args.window, args.share), sys.stdout)
+        print()
+        return 0
     merged = set(args.merged.split(",")) if args.merged else None
     json.dump(summary(rows, merged, args.days), sys.stdout, indent=2)
     print()
