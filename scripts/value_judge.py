@@ -24,6 +24,9 @@ The value rule below (Value <= 1, Usability 0, a thin card, points < JUDGE_MIN_P
 JUDGE_VALUE_SEND_BACK=1. One part of it is a hard floor again (Paul 11-02, after #15261 passed with Value 1/3
 and no research): Value below JUDGE_MIN_VALUE, or no research, blocks the PR unless its task carries judge-yes
 or fast-lane (floor(); JUDGE_VALUE_FLOOR=0 turns it off). flat() flags a judge that gives most cards the same scores.
+Points under JUDGE_MIN_POINTS are part of the floor too (Paul 11-02 9 PM: #15268 passed at 2.67 points, the bar
+3.0, written only as a note, and merged): fleet-code-review is a required check, so the block holds on every
+merge path.
 
 Paul, 2026-11-01 (calibration): 45 of 51 verdicts scored exactly 2/2/2/2 and 0 were sent back for
 value. The judge now names the user and the user number it expects to move (`beneficiary`); a blank
@@ -224,6 +227,11 @@ def floor(scores: dict, research_ok: bool, research_why: str = "", task: str = "
         reasons.append(f"Value floor: no research on {task} ({research_why or 'none found'}). Add Best in class "
                        "(who does it best, link, how we match or beat it) and the Data line to the card; the judge "
                        "reads it again with no new commit.")
+    p = points(scores)
+    if not reasons and p < MIN_POINTS:
+        reasons.append(f"Value floor: {p} points, the bar is {MIN_POINTS} (Value x the average of the other three). "
+                       f"Make it worth more on {task}, or fold it into work that is; the judge reads it again with no "
+                       "new commit.")
     return reasons
 
 
@@ -372,7 +380,7 @@ def apply(verdict: dict, body: str, pr: str, head: str, title: str, ref: str, ex
     floor_reasons = [] if (exempt or not floor_on or labels_of(card) & APPROVAL_LABELS) else floor(
         nums, research_ok, str(research.get("why", "")), card.get("task") or task_of(title, ref) or "the task")
     if floor_reasons:  # the floor says it; drop the notes and send-backs that say the same thing softer
-        same = ("Value is", "The value card on")
+        same = ("Value is", "The value card on", "Too little value to ship")
         notes = [n for n in notes if not n.startswith(same)]
         reasons = [r for r in reasons if not r.startswith(same)]
     reasons += floor_reasons
