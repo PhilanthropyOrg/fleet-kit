@@ -208,6 +208,110 @@ def test_an_unreadable_red_state_holds_nothing():
     finally:
         pr_arm_sweep._gh = real
 
+# Red main, the fix queued 13th behind PRs that each run against the red base (philanthropy
+# 2026-11-03, #15303). The shapes are that day's: required test/test-postgres/lint/hq-crawl-gate/
+# fleet-code-review, hq-crawl-gate SKIPPED, the review a commit status.
+PROD_REQUIRED = ["test", "test-postgres", "lint", "hq-crawl-gate", "fleet-code-review"]
+
+
+def _fix(number=15303, *, labels=("bug", "fix:main-red"), review="SUCCESS", test="SUCCESS",
+         draft=False):
+    pr = _pr(number, labels=labels, draft=draft,
+             checks=(("test", test), ("test-postgres", "SUCCESS"), ("lint", "SUCCESS"),
+                     ("hq-crawl-gate", "SKIPPED")))
+    if review:
+        pr["statusCheckRollup"].append({"context": "fleet-code-review", "state": review})
+    pr["id"], pr["headRefOid"] = f"PR_{number}", "2de6f07"
+    return pr
+
+
+QUEUE = {15295: 1, 15290: 10, 15303: 13}
+
+
+def test_red_main_jumps_the_green_reviewed_fix_to_the_front():
+    go, why = pr_arm_sweep.should_jump(_fix(), PROD_REQUIRED, True, QUEUE)
+    assert go is True, why
+    out = pr_arm_sweep.sweep([_fix(15290, labels=()), _fix()], PROD_REQUIRED, NOW_TS,
+                             main_is_red=True, queue=QUEUE)
+    assert [j["number"] for j in out["jump"]] == [15303], out["jump"]
+    assert out["jump"][0]["head"] == "2de6f07" and out["jump"][0]["id"] == "PR_15303"
+
+
+def test_green_main_jumps_nothing():
+    assert pr_arm_sweep.should_jump(_fix(), PROD_REQUIRED, False, QUEUE)[0] is False
+    assert pr_arm_sweep.sweep([_fix()], PROD_REQUIRED, NOW_TS, queue=QUEUE)["jump"] == []
+
+
+def test_only_the_fix_label_jumps():
+    go, why = pr_arm_sweep.should_jump(_fix(15290, labels=("bug",)), PROD_REQUIRED, True, QUEUE)
+    assert go is False and "not the fix" in why, why
+
+
+def test_fix_with_red_or_pending_ci_does_not_jump():
+    for state in ("FAILURE", "IN_PROGRESS"):
+        go, why = pr_arm_sweep.should_jump(_fix(test=state), PROD_REQUIRED, True, QUEUE)
+        assert go is False and "'test'" in why, (state, why)
+
+
+def test_fix_without_a_passed_review_does_not_jump():
+    for review in (None, "PENDING", "FAILURE"):
+        go, why = pr_arm_sweep.should_jump(_fix(review=review), PROD_REQUIRED, True, QUEUE)
+        assert go is False, (review, why)
+
+
+def test_all_skipped_ci_is_not_green():
+    pr = _fix()
+    for c in pr["statusCheckRollup"]:
+        if c.get("name"):
+            c["conclusion"] = "SKIPPED"
+    go, why = pr_arm_sweep.should_jump(pr, PROD_REQUIRED, True, QUEUE)
+    assert go is False and "all skipped" in why, why
+
+
+def test_fix_already_first_or_no_queue_or_draft_does_not_jump():
+    assert pr_arm_sweep.should_jump(_fix(), PROD_REQUIRED, True, {15303: 1})[0] is False
+    assert pr_arm_sweep.should_jump(_fix(), PROD_REQUIRED, True, None)[0] is False
+    assert pr_arm_sweep.should_jump(_fix(draft=True), PROD_REQUIRED, True, QUEUE)[0] is False
+    # not in the queue at all is fine: enqueue with jump puts it first
+    assert pr_arm_sweep.should_jump(_fix(), PROD_REQUIRED, True, {15295: 1})[0] is True
+
+
+class _FakeGql:
+    """Records mutations; an enqueue of a PR already queued answers with its old position."""
+    def __init__(self, queued_at):
+        self.queued_at, self.calls = queued_at, []
+
+    def __call__(self, query, **v):
+        self.calls.append(("dequeue" if "dequeuePullRequest" in query else "enqueue", v))
+        if "dequeuePullRequest" in query:
+            self.queued_at = None
+            return {"data": {"dequeuePullRequest": {}}}
+        assert "jump:true" in query and v.get("head") == "2de6f07", (query, v)
+        pos = self.queued_at or 1
+        self.queued_at = pos
+        return {"data": {"enqueuePullRequest": {"mergeQueueEntry": {"position": pos}}}}
+
+
+def test_jump_requeues_a_fix_that_kept_its_place():
+    fake = _FakeGql(queued_at=13)
+    assert pr_arm_sweep.jump_to_front("PR_15303", "2de6f07", gql=fake) == 1
+    assert [c[0] for c in fake.calls] == ["enqueue", "dequeue", "enqueue"], fake.calls
+
+
+def test_jump_of_an_unqueued_fix_is_one_enqueue():
+    fake = _FakeGql(queued_at=None)
+    assert pr_arm_sweep.jump_to_front("PR_15303", "2de6f07", gql=fake) == 1
+    assert [c[0] for c in fake.calls] == ["enqueue"], fake.calls
+
+
+def test_queue_positions_reads_the_queue_and_none_without_one():
+    data = {"data": {"repository": {"mergeQueue": {"entries": {"nodes": [
+        {"position": 1, "pullRequest": {"number": 15295}},
+        {"position": 13, "pullRequest": {"number": 15303}}]}}}}}
+    assert pr_arm_sweep.queue_positions("o/r", "main", gql=lambda q, **v: data) == {15295: 1, 15303: 13}
+    none = {"data": {"repository": {"mergeQueue": None}}}
+    assert pr_arm_sweep.queue_positions("o/r", "main", gql=lambda q, **v: none) is None
+
 for _name, _fn in sorted((n, f) for n, f in list(globals().items()) if n.startswith("test_")):
     check(_name, _fn)
 
