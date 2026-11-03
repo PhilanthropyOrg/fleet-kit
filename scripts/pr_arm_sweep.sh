@@ -59,6 +59,9 @@ if "position" in lj:
     print("launch jump -- #%s to queue position %s: %s" % (lj["number"], lj["position"], lj["why"]))
 elif "error" in lj:
     print("launch jump -- #%s FAILED: %s" % (lj["number"], lj["error"]))
+held = [s for s in d.get("skipped", []) if s.get("why", "").startswith(("a human took it out", "hold label", "main is red"))]
+if held:  # the holds the app arm workflow had (fleet-kit#1867): one line, so the log proves them
+    print("held -- " + ", ".join("#%s (%s)" % (s["number"], "human dequeue" if s["why"].startswith("a human") else "main is red" if s["why"].startswith("main is red") else s["why"]) for s in held))
 for e in d.get("enqueue", []):
     print(("armed but never queued -- enqueued #%s at position %s" % (e["number"], e["position"]))
           if "position" in e else ("armed but never queued -- ENQUEUE #%s FAILED: %s" % (e["number"], e.get("error", "?"))))' 2>/dev/null \

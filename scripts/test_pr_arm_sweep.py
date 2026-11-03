@@ -687,7 +687,10 @@ def test_sweep_shell_disarms_with_repo_outside_a_checkout():
         kit.mkdir(parents=True)
         for f in ("pr_arm_sweep.sh", "merge_arm.sh"):
             shutil.copy(src / f, kit / f)
-        (kit / "pr_arm_sweep.py").write_text('print(\'{"arm": [], "disarm": [7]}\')\n')
+        (kit / "pr_arm_sweep.py").write_text(
+            'import json; print(json.dumps({"arm": [], "disarm": [7], "skipped": ['
+            '{"number": 8, "why": "a human took it out of the merge queue and nothing was pushed since"},'
+            '{"number": 9, "why": "hold label needs:design-review"}, {"number": 10, "why": "draft"}]}))\n')
         bindir = tmp / "bin"
         bindir.mkdir()
         (bindir / "gh").write_text('#!/usr/bin/env bash\necho "$*" >> "$GH_LOG"\n')
@@ -699,6 +702,7 @@ def test_sweep_shell_disarms_with_repo_outside_a_checkout():
         out = subprocess.run(["bash", str(kit / "pr_arm_sweep.sh")], cwd=work, env=env,
                              capture_output=True, text=True, timeout=60).stdout
         assert "disarmed #7" in out, out
+        assert "held -- #8 (human dequeue), #9 (hold label needs:design-review)" in out, out
         assert "pr merge 7 --disable-auto -R o/r" in (tmp / "gh.log").read_text()
 
 
