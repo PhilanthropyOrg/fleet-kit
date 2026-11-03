@@ -91,15 +91,15 @@ class ValueJudge(unittest.TestCase):
 
     def test_each_send_back_rule(self):
         card = {"task": "PHIA-9", "owner": "jobs", "card": "User: a donor\nBest in class: ?", "plan": ""}
-        for kw, word in (({"u": 0}, "Usability is 0"),
-                         ({"v": 2, "u": 1, "f": 1, "b": 1}, "Too little value")):
+        for kw, word in (({"v": 3, "u": 0, "f": 3, "b": 3}, "Usability is 0"),):
             out = vj.apply(_scored(**kw), "", "1", "abc", "t", "g/x", False, card)
             # Reif 11-02 (judge before build): a value rule above the floor is a note, never a send-back
             self.assertEqual(out["verdict"], "approve", kw)
             self.assertIn(word, out["findings_text"], kw)
             self.assertIn("**Value notes**", out["findings_text"], kw)
             self.assertEqual(out["ledger"]["value_reasons"], [], kw)
-        for kw in ({"v": 0}, {"v": 1}, {"research": False}):  # below the floor: blocks (Paul 11-02)
+        # below the floor: blocks (Paul 11-02); points under the bar joined the floor at 9 PM
+        for kw in ({"v": 0}, {"v": 1}, {"research": False}, {"v": 2, "u": 1, "f": 1, "b": 1}, {"u": 0}):
             out = vj.apply(_scored(**kw), "", "1", "abc", "t", "g/x", False, card)
             self.assertEqual(out["verdict"], "block", kw)
             self.assertIn("Value floor", out["findings_text"], kw)
@@ -293,6 +293,24 @@ class ValueJudge(unittest.TestCase):
         # exempt (dependabot) and the undo switch pass
         self.assertEqual(vj.apply(obj, "", "1", "h", "bump", "dependabot/x", True, card)["verdict"], "approve")
         self.assertEqual(vj.apply(obj, "", "1", "h", "t", "x/y", False, card, value_floor=False)["verdict"], "approve")
+
+    def test_value_floor_blocks_points_under_the_bar(self):
+        # Paul 11-02 9 PM: a PR scored Value 2, Usability 2, Feasibility 1, Viability 1 (2.67 points, the bar 3.0)
+        # with research passed review, because under-bar was only a note, and merged. The floor blocks it now.
+        obj = _scored(v=2, u=2, f=1, b=1, research=True,
+                      who=("An org owner whose claim is approved but not yet verified", "orgs opening a verify step a day"))
+        card = {"task": "PHIA-1442", "owner": "claims", "card": "", "plan": "", "labels": []}
+        out = vj.apply(obj, "", "15268", "eb45489", "Bug: Get verified on Activity", "phia1442-x", False, card)
+        self.assertEqual(out["verdict"], "block")
+        self.assertEqual(len(out["ledger"]["floor_reasons"]), 1)
+        self.assertIn("2.67 points, the bar is 3.0", out["ledger"]["floor_reasons"][0])
+        self.assertNotIn("Too little value to ship", out["scores_text"])  # said once, by the floor
+        # at the bar it passes; the undo switch and a fast-lane task pass as before
+        ok = vj.apply(_scored(v=2, u=2, f=2, b=1, research=True), "", "15268", "h", "t", "x", False, card)
+        self.assertEqual((ok["verdict"], ok["ledger"]["floor_reasons"]), ("approve", []))
+        self.assertEqual(vj.apply(obj, "", "1", "h", "t", "x", False, card, value_floor=False)["verdict"], "approve")
+        self.assertEqual(vj.apply(obj, "", "1", "h", "t", "x", False, dict(card, labels=["fast-lane"]))["verdict"],
+                         "approve")
 
     def test_flat_judge_is_flagged(self):
         # Paul 11-02: in one hour 5 of 8 reviews scored exactly 2/2/2/2.
