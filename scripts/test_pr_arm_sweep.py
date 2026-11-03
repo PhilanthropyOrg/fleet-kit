@@ -406,6 +406,65 @@ def test_enqueue_at_back_pins_the_head_and_never_jumps():
     assert pr_arm_sweep.enqueue_at_back("PR_15310", "87755fe", gql=gql) == 16
     assert "jump" not in seen[0][0] and seen[0][1] == {"id": "PR_15310", "head": "87755fe"}, seen
 
+# Launch day (desk 11-03): #15319 (PHIA-2495, launch) green and reviewed, 26th of 30.
+def _launch_pr(number=15319, *, branch="jobs/phia-2495-signup-in-post", **kw):
+    pr = _fix(number, labels=(), **kw)
+    pr["title"], pr["headRefName"] = "Bug: PHIA-2495 sign up inside the post-a-job flow", branch
+    return pr
+
+
+LAUNCH = {"PHIA-2495", "PHIA-2362"}
+LQ = {15299: 1, 15000: 2, 15296: 3, 15290: 4, 15319: 26}
+
+
+def _pick(prs, *, queue=LQ, spec="blocked", red=False, last=0.0):
+    return pr_arm_sweep.pick_launch_jump(prs, PROD_REQUIRED, queue, LAUNCH, spec, red, last, NOW_TS)
+
+
+def test_launch_pr_jumps_once_green_and_reviewed():
+    pr, why = _pick([_fix(15290, labels=()), _launch_pr()])
+    assert pr and pr["number"] == 15319 and "PHIA-2495" in why, why
+    assert pr_arm_sweep.linked_tasks(_launch_pr(branch="x")) == {"PHIA-2495"}
+    assert pr_arm_sweep.linked_tasks({"title": "t", "headRefName": "jobs/phia-2495-x"}) == {"PHIA-2495"}
+
+
+def test_launch_jump_limits():
+    assert _pick([_launch_pr(review=None)])[0] is None             # not reviewed
+    assert _pick([_launch_pr(test="FAILURE")])[0] is None          # not green
+    assert _pick([_launch_pr(15290)], queue={15290: 3})[0] is None  # already top 3
+    no_label = _launch_pr()
+    no_label["title"], no_label["headRefName"] = "Bug: PHIA-9 other", "b"
+    assert _pick([no_label])[0] is None                            # task not labelled launch
+    assert _pick([_launch_pr()], last=NOW_TS - 10 * 60)[0] is None  # one per 30 minutes
+    assert _pick([_launch_pr()], last=NOW_TS - 31 * 60)[0] is not None
+
+
+def test_main_red_and_pending_fix_win_over_launch():
+    assert "red" in _pick([_launch_pr()], red=True)[1]
+    pr, why = _pick([_launch_pr(), _fix(15400)])                    # an open fix:main-red PR
+    assert pr is None and "#15400" in why, why
+
+
+def test_launch_rule_is_off_once_the_spec_closes():
+    for spec in ("done", "cancelled", None):
+        pr, why = _pick([_launch_pr()], spec=spec)
+        assert pr is None and "rule off" in why, (spec, why)
+
+
+def test_launch_file_read_and_jump_log():
+    import json as _json
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        f = Path(d) / "launch_tasks.json"
+        f.write_text(_json.dumps({"at": NOW_TS - 60, "launch": ["PHIA-2495"], "specs": {"PHIA-2501": "blocked"}}))
+        assert pr_arm_sweep.read_launch(str(f), NOW_TS) == ({"PHIA-2495"}, "blocked", "ok")
+        assert pr_arm_sweep.read_launch(str(f), NOW_TS + 3600)[2] == "launch file is stale"
+        assert pr_arm_sweep.read_launch(str(Path(d) / "none"), NOW_TS)[0] == set()
+        log = Path(d) / "launch_jumps.jsonl"
+        assert pr_arm_sweep.last_launch_jump(str(log)) == 0.0
+        log.write_text(_json.dumps({"ts": 5.0, "pr": 1}) + "\n" + _json.dumps({"ts": 9.0, "pr": 2}) + "\n")
+        assert pr_arm_sweep.last_launch_jump(str(log)) == 9.0
+
 for _name, _fn in sorted((n, f) for n, f in list(globals().items()) if n.startswith("test_")):
     check(_name, _fn)
 
