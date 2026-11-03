@@ -44,10 +44,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import re
 import subprocess
 import sys
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 
 # A pass that opened a PR 30 minutes ago may still be inside its own step 9. Below this age the
 # sweep leaves the PR alone rather than racing the author to it: arming is idempotent, but a
@@ -256,6 +259,79 @@ def queue_red_checks(groups: list[set], required: list[str], runs: int = QUEUE_R
             and sum(1 for g in recent if c in g) >= fails]
 
 
+# Launch day (desk 11-03): a green, reviewed PR whose PHIA task carries `launch` jumps the queue, so the
+# launch work lands before the launch mail (#15319, PHIA-2495, sat 26th of 30). Launch-only: the rule
+# is off once the launch spec is done or cancelled. The label is read from a file the box's
+# launch_labels cron writes every 10 minutes (this container can not read Paperclip's database).
+LAUNCH_SPEC = "PHIA-2501"
+SPEC_CLOSED = ("done", "cancelled")
+LAUNCH_FILE = os.environ.get("FLEET_LAUNCH_FILE", "/var/log/fleet-kit/launch_tasks.json")
+LAUNCH_LOG = os.environ.get("FLEET_LAUNCH_JUMP_LOG", "/var/log/fleet-kit/launch_jumps.jsonl")
+LAUNCH_FILE_MAX_AGE_MIN = 30.0
+LAUNCH_GAP_MIN = 30.0  # at most one launch jump per this many minutes
+LAUNCH_TOP = 3         # a PR already this close to the front is not jumped
+_TASK = re.compile(r"(?<![A-Za-z0-9])PHIA-([0-9]{1,6})(?![0-9])", re.I)
+
+
+def linked_tasks(pr: dict) -> set[str]:
+    """The PHIA tasks a PR names in its title or branch (PHIA-2495, jobs/phia-2495-...)."""
+    text = f"{pr.get('title') or ''} {pr.get('headRefName') or ''}"
+    return {f"PHIA-{n}" for n in _TASK.findall(text)}
+
+
+def read_launch(path: str, now: float) -> tuple[set[str], str | None, str]:
+    """(launch tasks, launch spec status, why). Missing, unreadable or stale reads as no launch."""
+    try:
+        d = json.loads(Path(path).read_text())
+    except (OSError, ValueError):
+        return set(), None, f"no launch file at {path}"
+    if (now - float(d.get("at") or 0)) / 60.0 > LAUNCH_FILE_MAX_AGE_MIN:
+        return set(), None, "launch file is stale"
+    return set(d.get("launch") or []), (d.get("specs") or {}).get(LAUNCH_SPEC), "ok"
+
+
+def last_launch_jump(path: str) -> float:
+    """Unix time of the last launch jump in the log, 0 when there is none."""
+    try:
+        lines = [ln for ln in Path(path).read_text().splitlines() if ln.strip()]
+        return float(json.loads(lines[-1]).get("ts") or 0) if lines else 0.0
+    except (OSError, ValueError, AttributeError):
+        return 0.0
+
+
+def pick_launch_jump(prs: list[dict], required: list[str], queue: dict | None, launch: set[str],
+                     spec_status: str | None, line_red: bool, last_jump: float,
+                     now: float) -> tuple[dict | None, str]:
+    """Pure: the one PR to jump for launch now, or None and why not. Main red always wins."""
+    if not spec_status or spec_status in SPEC_CLOSED:
+        return None, f"launch spec {LAUNCH_SPEC} is {spec_status or 'unknown'}: rule off"
+    if line_red:
+        return None, "main or the queue is red: the fix goes first"
+    fixes = [p.get("number") for p in prs if FIX_LABEL in _label_names(p.get("labels"))]
+    if fixes:
+        return None, f"a {FIX_LABEL} PR is pending (#{fixes[0]}): the fix goes first"
+    if queue is None:
+        return None, "branch has no merge queue"
+    since = (now - last_jump) / 60.0
+    if since < LAUNCH_GAP_MIN:
+        return None, f"last launch jump {since:.0f}m ago (< {LAUNCH_GAP_MIN:.0f}m)"
+    for pr in sorted(prs, key=lambda p: p.get("number") or 0):
+        tasks = sorted(linked_tasks(pr) & launch)
+        if not tasks:
+            continue
+        if (pr.get("state") or "OPEN").upper() != "OPEN" or pr.get("isDraft"):
+            continue
+        if (pr.get("mergeable") or "").upper() == "CONFLICTING" or not pr.get("id") or not pr.get("headRefOid"):
+            continue
+        where = queue.get(pr.get("number"))
+        if where is not None and where <= LAUNCH_TOP:
+            continue
+        if _not_green_and_reviewed(pr, required):
+            continue
+        return pr, f"launch task {tasks[0]} ({'queued #%d' % where if where else 'not queued'}), green and reviewed"
+    return None, "no green, reviewed launch PR outside the top 3"
+
+
 def sweep(prs: list[dict], required: list[str], now: float | None = None,
           min_age_min: float = MIN_AGE_MIN, main_is_red: bool = False,
           queue: dict | None = None, queue_is_red: bool = False) -> dict:
@@ -347,7 +423,7 @@ def merge_group_failures(repo: str, limit: int = 20, api=None) -> list[set]:
 
 def collect(repo: str, limit: int = 100) -> list[dict]:
     return _gh(["pr", "list", "--state", "open", "--limit", str(limit), "--json",
-                "number,id,headRefOid,isDraft,createdAt,autoMergeRequest,labels,mergeable,state,"
+                "number,id,title,headRefName,headRefOid,isDraft,createdAt,autoMergeRequest,labels,mergeable,state,"
                 "statusCheckRollup"], repo)
 
 
@@ -449,6 +525,23 @@ def main(argv=None) -> int:
                 j["position"] = jump_to_front(j["id"], j["head"])
             except (RuntimeError, ValueError, OSError, subprocess.SubprocessError) as exc:
                 j["error"] = str(exc)[:300]
+    launch, spec, lwhy = read_launch(LAUNCH_FILE, time.time())
+    pick, pwhy = (None, lwhy) if lwhy != "ok" else pick_launch_jump(
+        prs, required, queue, launch, spec, bool(red or qred), last_launch_jump(LAUNCH_LOG), time.time())
+    result["launch_jump"] = {"why": pwhy}
+    if pick:
+        result["launch_jump"].update(number=pick.get("number"), id=pick.get("id"), head=pick.get("headRefOid"))
+    if pick and a.apply_jumps:
+        lj = result["launch_jump"]
+        try:
+            lj["position"] = jump_to_front(pick["id"], pick["headRefOid"])
+            with open(LAUNCH_LOG, "a") as f:
+                f.write(json.dumps({"ts": time.time(), "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                                    "pr": pick.get("number"), "reason": pwhy}) + "\n")
+        except (RuntimeError, ValueError, OSError, subprocess.SubprocessError) as exc:
+            lj["error"] = str(exc)[:300]
+    if pick:  # a launch jump already put it in the queue
+        result["enqueue"] = [e for e in result["enqueue"] if e["number"] != pick.get("number")]
     if a.apply_enqueues:
         for e in result["enqueue"]:
             try:

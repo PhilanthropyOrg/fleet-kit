@@ -54,6 +54,11 @@ d = json.load(sys.stdin)
 for j in d.get("jump", []):
     print(("main or queue is red -- jumped #%s to queue position %s" % (j["number"], j["position"]))
           if "position" in j else ("main or queue is red -- JUMP #%s FAILED: %s" % (j["number"], j.get("error", "?"))))
+lj = d.get("launch_jump") or {}
+if "position" in lj:
+    print("launch jump -- #%s to queue position %s: %s" % (lj["number"], lj["position"], lj["why"]))
+elif "error" in lj:
+    print("launch jump -- #%s FAILED: %s" % (lj["number"], lj["error"]))
 for e in d.get("enqueue", []):
     print(("armed but never queued -- enqueued #%s at position %s" % (e["number"], e["position"]))
           if "position" in e else ("armed but never queued -- ENQUEUE #%s FAILED: %s" % (e["number"], e.get("error", "?"))))' 2>/dev/null \
