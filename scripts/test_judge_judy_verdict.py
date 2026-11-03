@@ -554,9 +554,10 @@ class ValueJudge(unittest.TestCase):
         self.assertEqual(seen["ledger"]["points"], 6.0)
         self.assertTrue(seen["ledger"]["usability_visible"])
         self.assertIn("| Usability | 2/3 |", seen["scores_text"])
-        # visible false never hides a marked-down usability: a 0 still sends back
-        low = vj.apply(_scored(u=0, visible=False), "", "1", "h", "t", "g/x", False)
+        # visible false never hides a marked-down usability: a 0 still counts and is still named
+        low = vj.apply(_scored(u=0, visible=False), "", "1", "h", "t", "g/x", False, value_send_back=True)
         self.assertEqual(low["verdict"], "block")
+        self.assertIn("Usability is 0", low["findings_text"])
         self.assertTrue(low["ledger"]["usability_visible"])
         # an older verdict with no visible field reads as visible
         old = _scored()
@@ -594,7 +595,8 @@ class ValueJudge(unittest.TestCase):
         self.assertIn('value_judge.py" sample --head "${HEAD_SHA:-}"', sh)
         self.assertIn("judge-judy-calibration.jsonl", sh)
         self.assertIn('${JUDGE_CALIBRATE_MODEL:-opus}', sh)
-        self.assertIn("usability.visible", sh)
+        rubric = (Path(__file__).resolve().parents[1] / "members/judge-judy/value-rubric.md").read_text()
+        self.assertIn("usability.visible", rubric)
         loop_end = sh.rindex("  calibrate_pass\n  cleanup_pass\n")
         self.assertGreater(loop_end, sh.index('post_status "$HEAD_SHA" "success" "Code review passed'))
 
