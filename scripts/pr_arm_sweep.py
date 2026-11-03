@@ -58,6 +58,12 @@ MIN_AGE_MIN = 30.0
 # fleet's existing name for "no agent can resolve this" (see scripts/test_needs_human_op.py);
 # the other two are the conventional GitHub spellings a human reaches for by hand.
 HOLD_LABELS = frozenset({"fleet:needs-human-op", "do-not-merge", "fleet:hold"})
+# Red main stops the line (Paperclip 2 change #4, philanthropy PHIA-2420): while the product repo
+# has an open "main's deploy test gate is red" item (its deploy.yml files it, and closes it on the
+# next green gate), only the fix arms. The product repo's own sweep disarms the rest
+# (scripts/ci/main_red_hold.py); without this, this cron re-armed them within 20 minutes.
+RED_MAIN_PREFIX = "the-fixer: main's deploy test gate is red at "
+FIX_LABEL = "fix:main-red"
 
 
 def _age_minutes(created_at: str, now: float) -> float:
@@ -97,7 +103,7 @@ def _check_state(pr: dict, context: str) -> str | None:
 
 
 def should_arm(pr: dict, required: list[str], now: float | None = None,
-               min_age_min: float = MIN_AGE_MIN) -> tuple[bool, str]:
+               min_age_min: float = MIN_AGE_MIN, main_is_red: bool = False) -> tuple[bool, str]:
     """Pure: is this PR green, unarmed, and safe to arm? Returns (decision, reason).
 
     `required` is the branch's own required-check contexts, read from branch protection -- not
@@ -113,6 +119,8 @@ def should_arm(pr: dict, required: list[str], now: float | None = None,
     held = _label_names(pr.get("labels")) & HOLD_LABELS
     if held:
         return False, f"hold label {sorted(held)[0]}"
+    if main_is_red and FIX_LABEL not in _label_names(pr.get("labels")):
+        return False, f"main is red: only the fix arms (label {FIX_LABEL})"
     if (pr.get("mergeable") or "").upper() == "CONFLICTING":
         return False, "conflicting -- needs a rebase, not an arm"
     # A head judge-judy BLOCKed (or gave up on) is never armed: fleet-code-review is not a
@@ -138,10 +146,10 @@ def should_arm(pr: dict, required: list[str], now: float | None = None,
 
 
 def sweep(prs: list[dict], required: list[str], now: float | None = None,
-          min_age_min: float = MIN_AGE_MIN) -> dict:
+          min_age_min: float = MIN_AGE_MIN, main_is_red: bool = False) -> dict:
     arm, skip = [], []
     for pr in prs:
-        ok, why = should_arm(pr, required, now, min_age_min)
+        ok, why = should_arm(pr, required, now, min_age_min, main_is_red)
         (arm if ok else skip).append({"number": pr.get("number"), "why": why})
     return {"arm": [a["number"] for a in arm], "armed_why": arm, "skipped": skip}
 
@@ -166,6 +174,21 @@ def required_contexts(repo: str, branch: str) -> list[str]:
         return []
 
 
+def is_main_red(issues) -> bool:
+    """Pure: does any open item say main's deploy test gate is red? (rehearsals are not red)"""
+    return any((i.get("title") or "").startswith(RED_MAIN_PREFIX)
+               and not (i.get("title") or "").endswith("(rehearsal)") for i in issues or [])
+
+
+def main_red(repo: str) -> bool:
+    """Fails open: a read error is "not known red", so a broken read never wedges every merge."""
+    try:
+        return is_main_red(_gh(["issue", "list", "--state", "open", "--limit", "50", "--search",
+                                f'"{RED_MAIN_PREFIX.strip()}" in:title', "--json", "title"], repo))
+    except (RuntimeError, ValueError, OSError, subprocess.SubprocessError):
+        return False
+
+
 def collect(repo: str, limit: int = 100) -> list[dict]:
     return _gh(["pr", "list", "--state", "open", "--limit", str(limit), "--json",
                 "number,isDraft,createdAt,autoMergeRequest,labels,mergeable,state,"
@@ -186,7 +209,11 @@ def main(argv=None) -> int:
     except (RuntimeError, ValueError) as exc:
         print(f"pr_arm_sweep: {exc}", file=sys.stderr)
         return 1
-    result = sweep(prs, required_contexts(a.repo, a.branch), min_age_min=a.min_age_min)
+    red = main_red(a.repo)
+    if red:
+        print(f"pr_arm_sweep: {a.repo} main is red; only PRs labeled {FIX_LABEL} arm", file=sys.stderr)
+    result = sweep(prs, required_contexts(a.repo, a.branch), min_age_min=a.min_age_min,
+                   main_is_red=red)
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
 
