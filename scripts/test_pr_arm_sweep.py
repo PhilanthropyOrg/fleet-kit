@@ -494,6 +494,10 @@ def test_ci_cost_jump_guards():
     assert _pick_cost([_cost_pr()], queue={15370: 3})[0] is None                    # already top 3
     assert _pick_cost([_cost_pr()], last=NOW_TS - 10 * 60)[0] is None               # shares the 30m gap
     assert "red" in _pick_cost([_cost_pr()], red=True)[1]                           # main red: the fix first
+    pr, why = _pick_cost([_launch_pr(), _fix(15391)])                               # a green fix:main-red PR
+    assert pr is None and "#15391" in why, why                                       # holds launch...
+    pr, why = _pick_cost([_cost_pr(), _fix(15391)])                                  # ...not a ci-cost fix
+    assert pr and pr["number"] == 15370, why
 
 
 def test_launch_rule_is_off_once_the_spec_closes():
