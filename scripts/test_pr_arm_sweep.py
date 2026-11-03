@@ -497,6 +497,45 @@ def test_queue_failed_prs_reads_each_prs_own_failed_group():
     assert pr_arm_sweep.queue_failed_prs("o/r", api=boom) == {}
 
 
+# 2026-11-03: on lucky the cron runs pr_arm_sweep.sh outside any git checkout. It called
+# arm_pr_auto_merge without the repo, so gh had no -R and fell back to the cwd's git remote:
+# "fatal: not a git repository" on every arm since 10-28 (251 failed arms). Run the real shell
+# from a non-git dir with a fake gh that, like the real one, needs -R there.
+def test_sweep_shell_arms_with_repo_outside_a_checkout():
+    import os, shutil, subprocess, tempfile
+    src = Path(__file__).resolve().parent
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        kit = tmp / "kit" / "scripts"
+        kit.mkdir(parents=True)
+        for f in ("pr_arm_sweep.sh", "merge_arm.sh"):
+            shutil.copy(src / f, kit / f)
+        (kit / "pr_arm_sweep.py").write_text('print(\'{"arm": [42]}\')\n')
+        bindir = tmp / "bin"
+        bindir.mkdir()
+        gh = bindir / "gh"
+        gh.write_text("""#!/usr/bin/env bash
+echo "$*" >> "$GH_LOG"
+case "$*" in
+  "pr view"*title,body*) echo false ;;
+  "pr view"*headRefOid*) echo abc123 ;;
+  api*statuses*) echo success ;;
+  "pr merge"*) [[ " $* " == *" -R "* ]] && exit 0; echo "fatal: not a git repository" >&2; exit 1 ;;
+  "repo view"*) echo "fatal: not a git repository" >&2; exit 1 ;;
+esac
+""")
+        gh.chmod(0o755)
+        work = tmp / "nogit"
+        work.mkdir()
+        env = dict(os.environ, PATH=f"{bindir}:{os.environ['PATH']}", GH_LOG=str(tmp / "gh.log"),
+                   FLEET_PR_ARM_REPOS="o/r", GIT_CEILING_DIRECTORIES=str(tmp))
+        out = subprocess.run(["bash", str(kit / "pr_arm_sweep.sh")], cwd=work, env=env,
+                             capture_output=True, text=True, timeout=60).stdout
+        assert "o/r: armed auto-merge on #42" in out, out
+        merges = [l for l in (tmp / "gh.log").read_text().splitlines() if l.startswith("pr merge")]
+        assert merges and all("-R o/r" in l for l in merges), merges
+
+
 for _name, _fn in sorted((n, f) for n, f in list(globals().items()) if n.startswith("test_")):
     check(_name, _fn)
 

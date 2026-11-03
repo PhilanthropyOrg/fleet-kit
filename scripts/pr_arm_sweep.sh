@@ -72,7 +72,7 @@ for e in d.get("enqueue", []):
     # merge_arm.sh picks the strategy flag: a bare --auto on a merge-queue branch, --squash on a
     # plain one. CHECK THE EXIT CODE -- worktree_builder.sh's own comment records what happens
     # when a failed arm is logged as a successful one (the PR simply never merges, silently).
-    if arm_err="$(arm_pr_auto_merge "$pr")"; then
+    if arm_err="$(arm_pr_auto_merge "$pr" "$repo")"; then
       log "$repo: armed auto-merge on #$pr"
     else
       log "$repo: ARMING #$pr FAILED -- it will not merge on green: ${arm_err:-unknown error}"
