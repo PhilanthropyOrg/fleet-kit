@@ -273,6 +273,16 @@ class ValueJudge(unittest.TestCase):
         self.assertIn("no research on PHIA-2317", out["findings_text"])
         self.assertEqual(out["ledger"]["pay_at_merge"], 0.0)
         self.assertEqual(out["scores_text"].count("Value is 1"), 1)  # said once, by the floor
+        # Value 1 with research still fails: either one alone is under the floor (#15264, Value 1/3 with
+        # research, passed at 01:01 UTC 11-02 before the floor was live)
+        v1 = _scored(v=1, u=2, f=2, b=2, research=True,
+                     who=("A donor or researcher checking federal funding on a free 990 report",
+                          "search clicks on the free 990 pages"))
+        out = vj.apply(v1, "", "15264", "015c4f8", "PHIA-1331 Bug: one federal total a year", "x", False,
+                       dict(card, task="PHIA-1331"))
+        self.assertEqual(out["verdict"], "block")
+        self.assertEqual(len(out["ledger"]["floor_reasons"]), 1)
+        self.assertIn("Value is 1/3, the floor is 2", out["ledger"]["floor_reasons"][0])
         # a 2+ card with research clears it on the same task
         ok = vj.apply(_scored(v=2, research=True), "", "15261", "h", "PHIA-2317: x", "phia2317-x", False, card, gate=True)
         self.assertEqual((ok["verdict"], ok["ledger"]["floor_reasons"]), ("approve", []))
