@@ -80,6 +80,14 @@ class Wiring(unittest.TestCase):
         self.assertLess(prompt.index('$(cat "$DIFF_FILE")'), prompt.index('${DIFF_FILE}.files'))
         self.assertIn("You have no tools and no shell", prompt)
 
+    def test_rubric_never_asks_a_tool_less_review_to_open_files(self):
+        # 665d914 told the judge "Confirm it (open the file, run the one test)"; it has no tools,
+        # so 23 of 66 reviews after it wrote "could not open" and scored Feasibility 1.
+        rubric = (HERE / "value-rubric.md").read_text()
+        self.assertNotIn("open the file", rubric)
+        self.assertNotIn("run the one test", rubric)
+        self.assertIn("no shell", rubric)
+
 
 if __name__ == "__main__":
     unittest.main()
