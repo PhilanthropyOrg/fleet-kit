@@ -108,6 +108,10 @@ APPROVAL_LABELS = {"judge-yes", "fast-lane"}
 # correctness verdict, unless the task carries judge-yes (floored on its pitch) or fast-lane (a breakage fixed first,
 # judged after). So a PR on a task nobody judged, or whose labels could not be read, meets it. JUDGE_VALUE_FLOOR=0 undoes it.
 VALUE_FLOOR = os.environ.get("JUDGE_VALUE_FLOOR", "1") == "1"
+# Reif 11-03: "reuse technology we built, so that 2 customers makes the service better". Viability 1 is a second copy of
+# something we have (an org search, typeahead, org lookup, card frame, mail sender): sent back even on a judge-yes task,
+# since the pitch never saw the code. JUDGE_REUSE_SEND_BACK=0 undoes it.
+REUSE_SEND_BACK = os.environ.get("JUDGE_REUSE_SEND_BACK", "1") == "1"
 # A judge that hands most cards the same four scores is not judging (Paul 11-01: 45 of 51 were 2/2/2/2; 11-02: 5 of
 # the last 8). flat() flags it when one score set covers FLAT_SHARE or more of the last FLAT_WINDOW PRs reviewed.
 FLAT_WINDOW = int(os.environ.get("JUDGE_FLAT_WINDOW", "8"))
@@ -438,6 +442,9 @@ def apply(verdict: dict, body: str, pr: str, head: str, title: str, ref: str, ex
         notes = [n for n in notes if not n.startswith(same)]
         reasons = [r for r in reasons if not r.startswith(same)]
     reasons += floor_reasons
+    if REUSE_SEND_BACK and not exempt and nums["viability"] == 1:
+        reasons.append(f"Reuse: Viability is 1/3, a second copy of something we built. {whys['viability']} "
+                       "Call the existing one, and change it in place for every app if it needs a change.")
     gate_reasons = [] if (exempt or not gate) else approval(card, title, ref)
     reasons += gate_reasons
     correctness = verdict.get("verdict")

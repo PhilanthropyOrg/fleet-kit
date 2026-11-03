@@ -145,7 +145,7 @@ class ValueJudge(unittest.TestCase):
 
     def test_half_paid_at_merge_half_owed_until_the_read_and_a_cut_in_full(self):
         # PHIA-1918: the second half waits for check48 on the named metric.
-        obj = _scored(v=3, u=3, f=2, b=1)
+        obj = _scored(v=3, u=2, f=2, b=2)
         obj["beneficiary"].update(metric="jobs/applies", guess=4, cut=False)
         led = vj.apply(obj, "", "1", "h", "t", "jobs/x", False)["ledger"]
         self.assertEqual((led["points"], led["pay_at_merge"], led["pay_on_read"]), (6.0, 3.0, 3.0))
@@ -321,7 +321,7 @@ class ValueJudge(unittest.TestCase):
     def test_value_floor_blocks_points_under_the_bar(self):
         # Paul 11-02 9 PM: a PR scored Value 2, Usability 2, Feasibility 1, Viability 1 (2.67 points, the bar 3.0)
         # with research passed review, because under-bar was only a note, and merged. The floor blocks it now.
-        obj = _scored(v=2, u=2, f=1, b=1, research=True,
+        obj = _scored(v=2, u=1, f=1, b=2, research=True,  # same 2.67 points; Viability 1 is now the reuse send-back
                       who=("An org owner whose claim is approved but not yet verified", "orgs opening a verify step a day"))
         card = {"task": "PHIA-1442", "owner": "claims", "card": "", "plan": "", "labels": []}
         out = vj.apply(obj, "", "15268", "eb45489", "Bug: Get verified on Activity", "phia1442-x", False, card)
@@ -330,11 +330,31 @@ class ValueJudge(unittest.TestCase):
         self.assertIn("2.67 points, the bar is 3.0", out["ledger"]["floor_reasons"][0])
         self.assertNotIn("Too little value to ship", out["scores_text"])  # said once, by the floor
         # at the bar it passes; the undo switch and a fast-lane task pass as before
-        ok = vj.apply(_scored(v=2, u=2, f=2, b=1, research=True), "", "15268", "h", "t", "x", False, card)
+        ok = vj.apply(_scored(v=2, u=2, f=1, b=2, research=True), "", "15268", "h", "t", "x", False, card)
         self.assertEqual((ok["verdict"], ok["ledger"]["floor_reasons"]), ("approve", []))
         self.assertEqual(vj.apply(obj, "", "1", "h", "t", "x", False, card, value_floor=False)["verdict"], "approve")
         self.assertEqual(vj.apply(obj, "", "1", "h", "t", "x", False, dict(card, labels=["fast-lane"]))["verdict"],
                          "approve")
+
+    def test_a_second_copy_is_sent_back_even_on_a_judge_yes_task(self):
+        # Reif 11-03: "reuse technology we built, so that 2 customers makes the service better". A diff that adds a
+        # new org search next to /990/api/suggest scores Viability 1, and that sends it back, naming the one to call.
+        obj = _scored(v=3, u=2, f=2, b=1, research=True,
+                      who=("a nonprofit posting a job", "jobs posted a day"))
+        obj["scores"]["viability"]["why"] = ("Adds a second org search at /jobs/api/org-search beside "
+                                             "/990/api/suggest; call /990/api/suggest instead.")
+        card = {"task": "PHIA-9", "owner": "v-jobs", "card": "", "plan": "", "labels": ["judge-yes"]}
+        out = vj.apply(obj, "", "1", "h", "PHIA-9: org picker on Post a job", "jobs/x", False, card, gate=True)
+        self.assertEqual(out["verdict"], "block")  # the model approved; a judge-yes pitch never saw the code
+        self.assertIn("/990/api/suggest", out["findings_text"])
+        self.assertEqual(out["ledger"]["pay_at_merge"], 0.0)
+        # calling the existing one passes; dependabot and the undo switch pass
+        self.assertEqual(vj.apply(_scored(v=3, b=2), "", "1", "h", "PHIA-9: x", "jobs/x", False, card, gate=True)["verdict"],
+                         "approve")
+        self.assertEqual(vj.apply(obj, "", "1", "h", "bump", "dependabot/x", True, card)["verdict"], "approve")
+        with unittest.mock.patch.object(vj, "REUSE_SEND_BACK", False, create=True):
+            self.assertEqual(vj.apply(obj, "", "1", "h", "PHIA-9: x", "jobs/x", False, card, gate=True)["verdict"],
+                             "approve")
 
     def test_flat_judge_is_flagged(self):
         # Paul 11-02: in one hour 5 of 8 reviews scored exactly 2/2/2/2.
