@@ -23,7 +23,7 @@ The value rule below (Value <= 1, Usability 0, a thin card, points < JUDGE_MIN_P
 "value notes" on the verdict for the seat and the Judge to read; it sends back only when
 JUDGE_VALUE_SEND_BACK=1. One part of it is a hard floor again (Paul 11-02, after #15261 passed with Value 1/3
 and no research): Value below JUDGE_MIN_VALUE, or no research, blocks the PR unless its task carries judge-yes
-or fast-lane (floor(); JUDGE_VALUE_FLOOR=0 turns it off). flat() flags a judge that gives most cards the same scores.
+or fast-lane (floor(); off since PHIA-2414, JUDGE_VALUE_FLOOR=1 turns it on). flat() flags a judge that gives most cards the same scores.
 
 Paul, 2026-11-01 (calibration): 45 of 51 verdicts scored exactly 2/2/2/2 and 0 were sent back for
 value. The judge now names the user and the user number it expects to move (`beneficiary`); a blank
@@ -87,8 +87,11 @@ APPROVAL_LABELS = {"judge-yes", "fast-lane"}
 # Paul 11-02 (Paperclip 2, value gate): #15261 passed with Value 1/3 and no research because value only wrote notes.
 # The floor is a rule, not a note: Value below MIN_VALUE, or research not done, blocks the PR whatever the model's
 # correctness verdict, unless the task carries judge-yes (floored on its pitch) or fast-lane (a breakage fixed first,
-# judged after). So a PR on a task nobody judged, or whose labels could not be read, meets it. JUDGE_VALUE_FLOOR=0 undoes it.
-VALUE_FLOOR = os.environ.get("JUDGE_VALUE_FLOOR", "1") == "1"
+# judged after). So a PR on a task nobody judged, or whose labels could not be read, meets it.
+# PHIA-2414 (11-03): off by default. A task after the cutover with no judge-yes already fails the approval gate, so the
+# floor only ever blocked tasks from before it, which the 11-02 build shape passes ("judge-judy no longer sends PRs
+# back on value"); 137 of 195 reviews in a day sat under it. JUDGE_VALUE_FLOOR=1 puts it back.
+VALUE_FLOOR = os.environ.get("JUDGE_VALUE_FLOOR", "0") == "1"
 # A judge that hands most cards the same four scores is not judging (Paul 11-01: 45 of 51 were 2/2/2/2; 11-02: 5 of
 # the last 8). flat() flags it when one score set covers FLAT_SHARE or more of the last FLAT_WINDOW PRs reviewed.
 FLAT_WINDOW = int(os.environ.get("JUDGE_FLAT_WINDOW", "8"))

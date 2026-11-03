@@ -99,8 +99,9 @@ class ValueJudge(unittest.TestCase):
             self.assertIn(word, out["findings_text"], kw)
             self.assertIn("**Value notes**", out["findings_text"], kw)
             self.assertEqual(out["ledger"]["value_reasons"], [], kw)
-        for kw in ({"v": 0}, {"v": 1}, {"research": False}):  # below the floor: blocks (Paul 11-02)
-            out = vj.apply(_scored(**kw), "", "1", "abc", "t", "g/x", False, card)
+        for kw in ({"v": 0}, {"v": 1}, {"research": False}):  # below the floor: blocks when it is on (Paul 11-02)
+            self.assertEqual(vj.apply(_scored(**kw), "", "1", "abc", "t", "g/x", False, card)["verdict"], "approve", kw)  # PHIA-2414: off by default
+            out = vj.apply(_scored(**kw), "", "1", "abc", "t", "g/x", False, card, value_floor=True)
             self.assertEqual(out["verdict"], "block", kw)
             self.assertIn("Value floor", out["findings_text"], kw)
         for kw, word in (({"v": 0}, "Value is 0"), ({"u": 0}, "Usability is 0"),
@@ -242,8 +243,8 @@ class ValueJudge(unittest.TestCase):
         res = vj.apply(_scored(), "", "1", "h", "t", "g/x", False, out)
         self.assertEqual(res["verdict"], "approve")  # a missing card is never a block on its own
         self.assertIn("| Research (task as card) |", res["scores_text"])
-        res = vj.apply(_scored(research=False), "", "1", "h", "t", "g/x", False, out)
-        self.assertEqual(res["verdict"], "block")  # but no research is under the value floor (Paul 11-02)
+        res = vj.apply(_scored(research=False), "", "1", "h", "t", "g/x", False, out, value_floor=True)
+        self.assertEqual(res["verdict"], "block")  # but no research is under the value floor, when on (Paul 11-02)
         sh = (Path(__file__).resolve().parents[1] / "members/judge-judy/judge-judy.sh").read_text() + (Path(__file__).resolve().parents[1] / "members/judge-judy/value-rubric.md").read_text()
         self.assertIn(".task_text", sh)
         for anchor in ("Anchors", "14985", "14835", "what would make it a 3"):
@@ -254,7 +255,7 @@ class ValueJudge(unittest.TestCase):
         out = vj.apply(_scored(research=True), "## Why\nx", "1", "h", "t", "g/x", False)
         self.assertEqual(out["verdict"], "approve")
         out = vj.apply(_scored(research=False), "## Research\nlots", "1", "h", "t", "g/x", False,
-                       {"task": "PHIA-9", "owner": "g", "card": "", "plan": ""})
+                       {"task": "PHIA-9", "owner": "g", "card": "", "plan": ""}, value_floor=True)
         self.assertEqual(out["verdict"], "block")
 
     def test_value_floor_fails_a_1_of_3_card_with_no_research(self):
@@ -266,7 +267,7 @@ class ValueJudge(unittest.TestCase):
                 "task_text": "one-shot box cron runs the Schedule L backfill", "labels": [],
                 "created_at": "2026-11-02T10:00:00Z"}
         out = vj.apply(obj, "", "15261", "7d4e507", "PHIA-2317: one-shot box cron", "phia2317-x", False, card,
-                       gate=True)
+                       gate=True, value_floor=True)
         self.assertEqual(out["verdict"], "block")  # the model said PASS on correctness; the floor overrules it
         self.assertEqual(len(out["ledger"]["floor_reasons"]), 2)
         self.assertIn("Value is 1/3, the floor is 2", out["findings_text"])
@@ -274,15 +275,21 @@ class ValueJudge(unittest.TestCase):
         self.assertEqual(out["ledger"]["pay_at_merge"], 0.0)
         self.assertEqual(out["scores_text"].count("Value is 1"), 1)  # said once, by the floor
         # a 2+ card with research clears it on the same task
-        ok = vj.apply(_scored(v=2, research=True), "", "15261", "h", "PHIA-2317: x", "phia2317-x", False, card, gate=True)
+        ok = vj.apply(_scored(v=2, research=True), "", "15261", "h", "PHIA-2317: x", "phia2317-x", False, card, gate=True,
+                      value_floor=True)
         self.assertEqual((ok["verdict"], ok["ledger"]["floor_reasons"]), ("approve", []))
         # the floor holds whether or not the model blocked; judge-yes / fast-lane tasks were floored on the pitch
         for labels in (["judge-yes"], ["fast-lane"]):
-            out = vj.apply(obj, "", "15261", "h", "PHIA-2317: x", "phia2317-x", False, dict(card, labels=labels), gate=True)
+            out = vj.apply(obj, "", "15261", "h", "PHIA-2317: x", "phia2317-x", False, dict(card, labels=labels), gate=True,
+                           value_floor=True)
             self.assertEqual(out["verdict"], "approve", labels)
         # exempt (dependabot) and the undo switch pass
-        self.assertEqual(vj.apply(obj, "", "1", "h", "bump", "dependabot/x", True, card)["verdict"], "approve")
+        self.assertEqual(vj.apply(obj, "", "1", "h", "bump", "dependabot/x", True, card, value_floor=True)["verdict"], "approve")
         self.assertEqual(vj.apply(obj, "", "1", "h", "t", "x/y", False, card, value_floor=False)["verdict"], "approve")
+        # PHIA-2414: off by default -- a pre-cutover task passes the approval gate and Value 1 is a note (#15208, #15222)
+        out = vj.apply(obj, "", "15222", "c878dfa", "PHIA-1995: terms", "phia1995-terms", False, card, gate=True)
+        self.assertEqual((out["verdict"], out["ledger"]["floor_reasons"]), ("approve", []))
+        self.assertIn("**Value notes**", out["findings_text"])
 
     def test_flat_judge_is_flagged(self):
         # Paul 11-02: in one hour 5 of 8 reviews scored exactly 2/2/2/2.

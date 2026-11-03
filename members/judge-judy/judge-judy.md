@@ -84,7 +84,10 @@ Answer with a verdict of block only for a correctness defect, plus the four scor
 - **Value floor and flat-judge flag (Paul 2026-11-02, Paperclip 2).** #15261 passed with Value 1/3 and no
   research, on a task from before the cutover that no Judge had seen. `value_judge.floor()` blocks a PR whose
   Value is under `JUDGE_MIN_VALUE` (2) or whose research is no, whatever the correctness verdict, unless its task
-  carries `judge-yes` (floored on the pitch) or `fast-lane`. Undo: `JUDGE_VALUE_FLOOR=0`. `value_judge.py flat
+  carries `judge-yes` (floored on the pitch) or `fast-lane`. Off by default since PHIA-2414 (11-03): a task after
+  the cutover with no `judge-yes` already fails the approval gate, so the floor only blocked pre-cutover tasks, which
+  the build shape passes (#15208 and #15222 sat on Value 1 with green CI and no bug). `JUDGE_VALUE_FLOOR=1` turns it
+  back on; with it off the floor's reasons are value notes. `value_judge.py flat
   <ledger>` flags a judge whose last 8 PRs share one score set 5 or more times (11-02: 5 of 8 were 2/2/2/2); the
   box's judge_flat_watch files one task to the Judge seat when it fires.
 - **The value gate reads the card, not the PR body (Paul, 2026-10-31).** 10 of 10 sampled
