@@ -545,7 +545,15 @@ def test_sweep_never_rearms_or_enqueues_a_head_the_queue_failed():
     assert "failed this head" in out["skipped"][0]["why"], out
     stale = {15093: NOW_TS - 5 * 3600}                               # failed before this head's checks
     assert pr_arm_sweep.sweep([pr], REQUIRED, NOW_TS, queue={}, queue_failed=stale)["arm"] == [15093]
-    assert pr_arm_sweep.sweep([pr], REQUIRED, NOW_TS, queue={15093: 3}, queue_failed=failed)["arm"] == [15093]
+    queued = pr_arm_sweep.sweep([pr], REQUIRED, NOW_TS, queue={15093: 3}, queue_failed=failed)
+    assert queued["skipped"][0]["why"] == "already in the merge queue", queued  # a PR ahead may have failed it
+
+
+def test_sweep_does_not_rearm_a_pr_already_in_the_merge_queue():
+    pr = _pr(15302, age_h=3.0)                                       # green, no autoMergeRequest
+    assert pr_arm_sweep.sweep([pr], REQUIRED, NOW_TS, queue={})["arm"] == [15302]
+    out = pr_arm_sweep.sweep([pr], REQUIRED, NOW_TS, queue={15302: 3})
+    assert out["arm"] == [] and out["skipped"][0]["why"] == "already in the merge queue", out
 
 
 for _name, _fn in sorted((n, f) for n, f in list(globals().items()) if n.startswith("test_")):

@@ -385,6 +385,10 @@ def sweep(prs: list[dict], required: list[str], now: float | None = None,
                          "why": "the merge queue failed this head: push a fix before it re-enters"})
             continue
         ok, why = should_arm(pr, required, now, min_age_min, main_is_red)
+        if ok and (queue or {}).get(pr.get("number")) is not None:
+            # 2026-11-03: a queued PR has no autoMergeRequest, so every run "armed" the same 15
+            # queued PRs again (a no-op API call each). In the queue is already armed.
+            ok, why = False, "already in the merge queue"
         (arm if ok else skip).append({"number": pr.get("number"), "why": why})
         # A red queue moves the fix up; it does not hold the other PRs' arming (main red does).
         go, jwhy = should_jump(pr, required, main_is_red or queue_is_red, queue)
