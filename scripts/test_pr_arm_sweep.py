@@ -536,6 +536,18 @@ esac
         assert merges and all("-R o/r" in l for l in merges), merges
 
 
+# 2026-11-03 8:47 AM: the fixed arm step re-armed #15093 and #15000, heads the queue had failed.
+def test_sweep_never_rearms_or_enqueues_a_head_the_queue_failed():
+    pr = _pr(15093, age_h=2.0)                                       # head checks done 2h ago
+    failed = {15093: NOW_TS - 30 * 60}                               # own queue group failed 30m ago
+    out = pr_arm_sweep.sweep([pr], REQUIRED, NOW_TS, queue={}, queue_failed=failed)
+    assert out["arm"] == [] and out["enqueue"] == [] and out["jump"] == [], out
+    assert "failed this head" in out["skipped"][0]["why"], out
+    stale = {15093: NOW_TS - 5 * 3600}                               # failed before this head's checks
+    assert pr_arm_sweep.sweep([pr], REQUIRED, NOW_TS, queue={}, queue_failed=stale)["arm"] == [15093]
+    assert pr_arm_sweep.sweep([pr], REQUIRED, NOW_TS, queue={15093: 3}, queue_failed=failed)["arm"] == [15093]
+
+
 for _name, _fn in sorted((n, f) for n, f in list(globals().items()) if n.startswith("test_")):
     check(_name, _fn)
 
