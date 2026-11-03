@@ -329,7 +329,7 @@ def test_a_check_failing_two_of_three_merge_groups_makes_the_queue_red():
 def test_red_queue_jumps_the_fix_but_holds_no_other_arm():
     plain = _pr(15290, checks=[(c, "SUCCESS") for c in PROD_REQUIRED])
     out = pr_arm_sweep.sweep([plain, _fix(15318)], PROD_REQUIRED, NOW_TS, queue_is_red=True,
-                             queue={15289: 1, 15290: 8, 15318: 16})
+                             queue={15289: 1, 15318: 16})  # 15290 not queued yet
     assert [j["number"] for j in out["jump"]] == [15318], out["jump"]
     assert out["arm"] == [15290], out  # a red queue is not a red main: other PRs still arm
     green = pr_arm_sweep.sweep([_fix(15318)], PROD_REQUIRED, NOW_TS, queue={15318: 16})
