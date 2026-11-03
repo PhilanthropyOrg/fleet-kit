@@ -145,13 +145,63 @@ def should_arm(pr: dict, required: list[str], now: float | None = None,
     return True, f"green on {', '.join(required)} and unarmed for {age:.0f}m"
 
 
+# A check GitHub counts as passed. SKIPPED alone is not "CI ran green": a draft's run skips
+# every job (2026-09-29), so a jump also needs one required check that really SUCCEEDED.
+_PASSED = ("SUCCESS", "SKIPPED", "NEUTRAL")
+REVIEW_CHECK = "fleet-code-review"
+
+
+def should_jump(pr: dict, required: list[str], main_is_red: bool,
+                queue: dict | None) -> tuple[bool, str]:
+    """Pure: should this PR jump to the FRONT of the merge queue? Returns (decision, reason).
+
+    The stop-the-line rule's other half (philanthropy 2026-11-03: the fix #15303 sat 13th in a
+    one-at-a-time queue behind 12 PRs that each ran against the red main, launch #15290 10th).
+    Holding the rest does not move the fix up; only a jump does. So while main is red, the PR
+    labeled FIX_LABEL jumps when its current head is green on every required check and its
+    code review passed. Never any other PR, and never on a red, pending or unreviewed head.
+    `queue` maps PR number -> queue position (1 = front); None means the branch has no queue.
+    """
+    if not main_is_red:
+        return False, "main is not red"
+    if FIX_LABEL not in _label_names(pr.get("labels")):
+        return False, f"not the fix (label {FIX_LABEL})"
+    if queue is None:
+        return False, "branch has no merge queue"
+    if (pr.get("state") or "OPEN").upper() != "OPEN" or pr.get("isDraft"):
+        return False, "not an open, ready PR"
+    if (pr.get("mergeable") or "").upper() == "CONFLICTING":
+        return False, "conflicting -- needs a rebase, not a jump"
+    if not pr.get("id") or not pr.get("headRefOid"):
+        return False, "no PR id or head sha to pin the jump to"
+    if queue.get(pr.get("number")) == 1:
+        return False, "already first in the merge queue"
+    if not required:
+        return False, "branch has no required checks"
+    states = {c: _check_state(pr, c) for c in required}
+    for context, state in states.items():
+        if state not in _PASSED:
+            return False, f"required check {context!r} is {state or 'not reported'} on the head"
+    if _check_state(pr, REVIEW_CHECK) != "SUCCESS":
+        return False, f"code review ({REVIEW_CHECK}) has not passed on the head"
+    if not any(s == "SUCCESS" for c, s in states.items() if c != REVIEW_CHECK):
+        return False, "no required CI check ran green on the head (all skipped)"
+    where = queue.get(pr.get("number"))
+    return True, f"main is red and this is the green, reviewed fix ({'queued #%d' % where if where else 'not queued'})"
+
+
 def sweep(prs: list[dict], required: list[str], now: float | None = None,
-          min_age_min: float = MIN_AGE_MIN, main_is_red: bool = False) -> dict:
-    arm, skip = [], []
+          min_age_min: float = MIN_AGE_MIN, main_is_red: bool = False,
+          queue: dict | None = None) -> dict:
+    arm, skip, jump = [], [], []
     for pr in prs:
         ok, why = should_arm(pr, required, now, min_age_min, main_is_red)
         (arm if ok else skip).append({"number": pr.get("number"), "why": why})
-    return {"arm": [a["number"] for a in arm], "armed_why": arm, "skipped": skip}
+        go, jwhy = should_jump(pr, required, main_is_red, queue)
+        if go:
+            jump.append({"number": pr.get("number"), "id": pr.get("id"),
+                         "head": pr.get("headRefOid"), "why": jwhy})
+    return {"arm": [a["number"] for a in arm], "armed_why": arm, "skipped": skip, "jump": jump}
 
 
 def _gh(args: list[str], repo: str) -> object:
@@ -191,8 +241,60 @@ def main_red(repo: str) -> bool:
 
 def collect(repo: str, limit: int = 100) -> list[dict]:
     return _gh(["pr", "list", "--state", "open", "--limit", str(limit), "--json",
-                "number,isDraft,createdAt,autoMergeRequest,labels,mergeable,state,"
+                "number,id,headRefOid,isDraft,createdAt,autoMergeRequest,labels,mergeable,state,"
                 "statusCheckRollup"], repo)
+
+
+def _graphql(query: str, **variables) -> dict:
+    args = ["gh", "api", "graphql", "-f", f"query={query}"]
+    for k, v in variables.items():
+        args += ["-f", f"{k}={v}"]
+    out = subprocess.run(args, capture_output=True, text=True, timeout=120)
+    if out.returncode != 0:
+        raise RuntimeError(f"graphql failed: {(out.stderr or out.stdout).strip()[:300]}")
+    return json.loads(out.stdout or "{}")
+
+
+def queue_positions(repo: str, branch: str, gql=_graphql) -> dict | None:
+    """{PR number: position} for the branch's merge queue; None when it has none or the read fails."""
+    owner, name = repo.split("/", 1)
+    try:
+        data = gql("query($o:String!,$n:String!,$b:String!){repository(owner:$o,name:$n){"
+                   "mergeQueue(branch:$b){entries(first:100){nodes{position pullRequest{number}}}}}}",
+                   o=owner, n=name, b=branch)
+        mq = ((data.get("data") or {}).get("repository") or {}).get("mergeQueue")
+    except (RuntimeError, ValueError, OSError, subprocess.SubprocessError):
+        return None
+    if mq is None:
+        return None
+    return {e["pullRequest"]["number"]: e["position"]
+            for e in (mq.get("entries") or {}).get("nodes") or [] if e.get("pullRequest")}
+
+
+_ENQUEUE = ("mutation($id:ID!,$head:GitObjectID!){enqueuePullRequest(input:{pullRequestId:$id,"
+            "jump:true,expectedHeadOid:$head}){mergeQueueEntry{position}}}")
+_DEQUEUE = "mutation($id:ID!){dequeuePullRequest(input:{id:$id}){clientMutationId}}"
+
+
+def jump_to_front(pr_id: str, head: str, gql=_graphql) -> int:
+    """Enqueue with jump, pinned to the green head. A PR already in the queue keeps its place on a
+    plain enqueue, so when the answer is not position 1 it is dequeued and enqueued again with jump.
+    Returns the new position; raises RuntimeError when it could not be put first."""
+    def enqueue():
+        d = gql(_ENQUEUE, id=pr_id, head=head)
+        return (((d.get("data") or {}).get("enqueuePullRequest") or {})
+                .get("mergeQueueEntry") or {}).get("position")
+    try:
+        pos = enqueue()
+    except RuntimeError:
+        pos = None
+    if pos == 1:
+        return 1
+    gql(_DEQUEUE, id=pr_id)
+    pos = enqueue()
+    if pos != 1:
+        raise RuntimeError(f"re-enqueued with jump but queue position is {pos}")
+    return pos
 
 
 def main(argv=None) -> int:
@@ -203,6 +305,8 @@ def main(argv=None) -> int:
     ap.add_argument("--branch", default="main")
     ap.add_argument("--min-age-min", type=float, default=MIN_AGE_MIN)
     ap.add_argument("--limit", type=int, default=100)
+    ap.add_argument("--apply-jumps", action="store_true",
+                    help="put each PR in `jump` (main red, the green reviewed fix) first in the queue")
     a = ap.parse_args(argv)
     try:
         prs = collect(a.repo, a.limit)
@@ -212,8 +316,15 @@ def main(argv=None) -> int:
     red = main_red(a.repo)
     if red:
         print(f"pr_arm_sweep: {a.repo} main is red; only PRs labeled {FIX_LABEL} arm", file=sys.stderr)
+    queue = queue_positions(a.repo, a.branch) if red else None
     result = sweep(prs, required_contexts(a.repo, a.branch), min_age_min=a.min_age_min,
-                   main_is_red=red)
+                   main_is_red=red, queue=queue)
+    if a.apply_jumps:
+        for j in result["jump"]:
+            try:
+                j["position"] = jump_to_front(j["id"], j["head"])
+            except (RuntimeError, ValueError, OSError, subprocess.SubprocessError) as exc:
+                j["error"] = str(exc)[:300]
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
 
