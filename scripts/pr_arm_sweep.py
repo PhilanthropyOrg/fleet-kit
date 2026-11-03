@@ -371,9 +371,19 @@ def pick_launch_jump(prs: list[dict], required: list[str], queue: dict | None, l
 
 def sweep(prs: list[dict], required: list[str], now: float | None = None,
           min_age_min: float = MIN_AGE_MIN, main_is_red: bool = False,
-          queue: dict | None = None, queue_is_red: bool = False) -> dict:
+          queue: dict | None = None, queue_is_red: bool = False,
+          queue_failed: dict | None = None) -> dict:
     arm, skip, jump, enqueue = [], [], [], []
     for pr in prs:
+        # 2026-11-03: the fixed arm step re-armed #15093 and #15000, heads the queue had already
+        # failed and thrown out. Back in line, each fails again and reds the groups behind it.
+        # Same verdict pick_launch_jump honours: a failed group of its own after its head's
+        # checks finished means this head needs a new push, not another arm, jump or enqueue.
+        if ((queue or {}).get(pr.get("number")) is None
+                and (queue_failed or {}).get(pr.get("number"), 0.0) > head_checked_at(pr)):
+            skip.append({"number": pr.get("number"),
+                         "why": "the merge queue failed this head: push a fix before it re-enters"})
+            continue
         ok, why = should_arm(pr, required, now, min_age_min, main_is_red)
         (arm if ok else skip).append({"number": pr.get("number"), "why": why})
         # A red queue moves the fix up; it does not hold the other PRs' arming (main red does).
@@ -554,8 +564,9 @@ def main(argv=None) -> int:
         print(f"pr_arm_sweep: {a.repo} merge queue is red on {', '.join(qred)}; "
               f"a green, reviewed {FIX_LABEL} PR jumps", file=sys.stderr)
     queue = queue_positions(a.repo, a.branch)
+    qfailed = queue_failed_prs(a.repo)
     result = sweep(prs, required, min_age_min=a.min_age_min,
-                   main_is_red=red, queue=queue, queue_is_red=bool(qred))
+                   main_is_red=red, queue=queue, queue_is_red=bool(qred), queue_failed=qfailed)
     if a.apply_jumps:
         for j in result["jump"]:
             try:
@@ -565,7 +576,7 @@ def main(argv=None) -> int:
     launch, spec, lwhy = read_launch(LAUNCH_FILE, time.time())
     pick, pwhy = (None, lwhy) if lwhy != "ok" else pick_launch_jump(
         prs, required, queue, launch, spec, bool(red or qred), last_launch_jump(LAUNCH_LOG), time.time(),
-        queue_failed_prs(a.repo))
+        qfailed)
     result["launch_jump"] = {"why": pwhy}
     if pick:
         result["launch_jump"].update(number=pick.get("number"), id=pick.get("id"), head=pick.get("headRefOid"))
