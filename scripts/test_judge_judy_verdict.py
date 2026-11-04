@@ -204,11 +204,18 @@ class ValueJudge(unittest.TestCase):
             if "/documents/" in req.full_url:
                 return io.StringIO(json.dumps({"body": "User: a donor", "updatedAt": "t"}))
             return io.StringIO(json.dumps({"title": "Pitch", "description": "", "createdAt": "2026-11-03T00:00:00Z",
+                                           "createdByUserId": "u1", "createdByAgentId": None,
                                            "labels": [{"id": "1", "name": "judge-yes"}]}))
         with mock.patch.dict(os.environ, {"PAPERCLIP_API_URL": "http://b", "PAPERCLIP_API_KEY": "k"}), \
                 mock.patch.object(vc.urllib.request, "urlopen", _open):
             out = vc.fetch("PHIA-77")
         self.assertEqual((out["labels"], out["created_at"]), (["judge-yes"], "2026-11-03T00:00:00Z"))
+        # PHIA-2780: the judge is told who filed the task, so an Owner-filed task is not scored "like 14824".
+        self.assertEqual(out["filed_by"], "owner")
+        sh = (Path(__file__).resolve().parents[1] / "members/judge-judy/judge-judy.sh").read_text()
+        self.assertIn("Task facts on", sh)
+        self.assertIn('.filed_by == "owner"', sh)
+        self.assertIn("${TASK_FACTS:-", sh)
 
     def test_a_measuring_tool_caps_at_value_2(self):
         # G 11-01 (PHIA-2043): tools scored on the visitor number they gate, never Value 3.
@@ -228,6 +235,10 @@ class ValueJudge(unittest.TestCase):
         self.assertIn("production watch (Automation, PHIA-2064)", sh)
         self.assertIn("a fix that stops false pages", sh)
         self.assertIn("linked Owner-filed issue asks", sh)
+        # PHIA-2780: the anchors the 11-04 flat set (1/2/2/2 on 5 of 8) misread.
+        self.assertIn("database load (the Judge, PHIA-2780)", sh)
+        self.assertIn("14824 is the anchor only when Who gets it and Number it moves are both empty", sh)
+        self.assertIn("a red-main fix is never 14824", sh)
 
     def test_value_1_with_a_named_user_says_so(self):
         # PHIA-2064: PR 15084 was told "no named user" under a table naming ID check buyers and 51 of 60.

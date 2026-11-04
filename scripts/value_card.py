@@ -11,7 +11,10 @@ Blind score: the self-score line is cut out of the card text the judge sees and 
 separately as `plan`, so value_judge.py can log the gap after the judge has scored.
 
 Usage: value_card.py TASK  (PHIA-123)  ->  JSON on stdout, `{}` when TASK is not a task id.
-  {"task", "owner", "card", "card_updated_at", "plan", "task_text", "labels", "created_at"}   card is "" when the task has none.
+  {"task", "owner", "card", "card_updated_at", "plan", "task_text", "labels", "created_at", "filed_by"}   card is "" when the task has none.
+  filed_by is "owner" when a person filed the task on the board, "seat" when an agent did, "" when unknown
+  (PHIA-2780: the anchors price an Owner-filed task and a `judge-yes` or `fast-lane` label at value 2, so the
+  judge must be told which the task is; without it, staff and server PRs sat at value 1 "like 14824").
   task_text is the task's title and description (self-score cut out): Paul, 2026-11-01, "don't wait
   for cards" -- with no card the judge treats the task description plus the PR's Why as the card.
   {"task", "error"}   when the board could not be read, so the score table says why, not "no card".
@@ -160,7 +163,8 @@ def _fetch(task: str) -> dict:
     out = {"task": task, "owner": owner, "card": card,
            "card_updated_at": doc.get("updatedAt") if isinstance(doc, dict) and body else None,
            "plan": plan or task_plan, "task_text": task_text[:TASK_TEXT_BYTES],
-           "labels": [l for l in labels if l], "created_at": issue.get("createdAt")}
+           "labels": [l for l in labels if l], "created_at": issue.get("createdAt"),
+           "filed_by": "owner" if issue.get("createdByUserId") else ("seat" if issue.get("createdByAgentId") else "")}
     if doc_error:  # a 404 is a task with no card; anything else is a read that failed
         out["error"] = doc_error
     return out
