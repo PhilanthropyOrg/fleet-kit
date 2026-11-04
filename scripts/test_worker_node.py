@@ -361,6 +361,40 @@ esac
         self.assertEqual(len(builds), 2, "the second tick found the lock still held by the container")
 
 
+
+class NodeSyncMissingLogin(unittest.TestCase):
+    """lucky 2026-11-03 23:20: FLEET_ACCOUNTS named a login folder the host did not have; podman run
+    --replace removed the worker, then failed on the mount, so there was no worker for 22 minutes."""
+
+    def test_missing_login_folder_is_skipped_not_fatal(self):
+        d = Path(tempfile.mkdtemp())
+        (d / "bin").mkdir()
+        _sh(d / "bin" / "git", 'case "$1" in rev-parse) echo new1 ;; esac\n')
+        _sh(d / "bin" / "podman", f"""echo "$@" >> {d}/podman_calls
+case "$1" in
+  inspect) case "$*" in *fleet.sha*) echo old ;; *Running*) echo false ;; esac ;;
+  run) for a in "$@"; do case "$a" in *:/root/.claude-*) [ -d "${{a%%:*}}" ] || {{ echo "Error: statfs ${{a%%:*}}" >&2; exit 125; }} ;; esac; done ;;
+esac
+""")
+        inst = HERE.parent / "instances" / "t-login"
+        self.addCleanup(lambda: subprocess.run(["rm", "-rf", str(inst)]))
+        inst.mkdir(parents=True, exist_ok=True)
+        (inst / "fleet.env").write_text('FLEET_REPO_URL=x\nFLEET_ACCOUNTS="tgp gone"\n')
+        (d / ".claude-tgp").mkdir()
+        (d / ".config" / "fleet-kit").mkdir(parents=True)
+        (d / ".config" / "fleet-kit" / "gh_token").write_text("t")
+        (d / "node.env").write_text("FLEET_NODE_INSTANCE=t-login\nFLEET_NODE_CONTAINER=w\n")
+        env = dict(os.environ, PATH=f"{d / 'bin'}:{os.environ['PATH']}", FLEET_NODE_ENV=str(d / "node.env"),
+                   TMPDIR=str(d), HOME=str(d))
+        r = subprocess.run(["bash", str(HERE / "node_sync.sh")], env=env, capture_output=True, text=True,
+                           timeout=30)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("now on new1", r.stdout + r.stderr)
+        self.assertIn(".claude-gone missing", r.stdout + r.stderr)
+        run = [c for c in (d / "podman_calls").read_text().splitlines() if c.startswith("run")][0]
+        self.assertIn("/root/.claude-tgp", run)
+        self.assertNotIn(".claude-gone", run)
+
 class HubSideLiveness(unittest.TestCase):
     def test_stale_claims_sees_a_node_run_as_live(self):
         import stale_claims

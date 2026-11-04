@@ -46,8 +46,15 @@ podman build -q --build-arg DEPLOY_SHA="$want" -t "$IMAGE" . >/dev/null || { ech
 
 set -a; . "$INSTANCE_DIR/fleet.env"; set +a
 mounts=()
+# A login folder missing on this host is skipped with a warning, never fatal: `podman run --replace` below
+# removes the running worker first, so one missing folder used to leave no worker at all (lucky 11-03 23:20:
+# FLEET_ACCOUNTS named philanthropy, ~/.claude-philanthropy did not exist, reviewer + PR sweep down 22 min).
 for acct in ${FLEET_ACCOUNTS:-primary}; do
-  mounts+=(-v "$HOME/.claude-$acct:/root/.claude-$acct")
+  if [ -d "$HOME/.claude-$acct" ]; then
+    mounts+=(-v "$HOME/.claude-$acct:/root/.claude-$acct")
+  else
+    echo "$(ts) [node_sync] WARN login folder $HOME/.claude-$acct missing: not mounted" >&2
+  fi
 done
 mkdir -p "$INSTANCE_DIR/repo" "$INSTANCE_DIR/logs"
 # -e GH_TOKEN with no value: podman copies it from this environment, so it is never in argv.
