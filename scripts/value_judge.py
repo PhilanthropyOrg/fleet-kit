@@ -384,7 +384,7 @@ def scores_text(nums, whys, research, pts, plan, reasons, card=None, beneficiary
                          f"the guess ({_guess(beneficiary.get('guess')):+g} a day).")
     if plan:
         lines.append("Plan self-score: " + ", ".join(f"{r.title()} {plan[r]}" for r in RISKS)
-                     + (" -- matches the judge." if plan_matches(plan, nums) else " -- differs from the judge by more than 1."))
+                     + (" -- within 1 of the judge on every risk." if plan_matches(plan, nums) else " -- differs from the judge by more than 1."))
     else:
         lines.append("No self-score on the value card (scored blind either way).")
     if notes:
