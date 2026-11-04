@@ -333,30 +333,45 @@ def _ts(iso: str | None) -> float:
         return 0.0
 
 
-def head_checked_at(pr: dict) -> float:
-    """Unix time the PR's current head last finished a check (0 when none has)."""
-    return max((_ts(c.get("completedAt")) for c in pr.get("statusCheckRollup") or []), default=0.0)
-
-
 # A launch PR the queue already threw out (philanthropy 2026-11-03 7:47 AM: #15337 failed `lint` in
 # its own merge group at 7:07, the queue removed it at 7:20, and the 7:47 sweep jumped the same head
 # to the front again; it failed again and turned the 4 groups behind it red). A failed group of its
 # own after its head's checks finished is the queue's verdict on that head: do not jump it again.
-_QUEUE_REF = re.compile(r"^gh-readonly-queue/[^/]+/pr-([0-9]+)-")
+# 11-03 5:28 PM: that verdict was read from the last 50 merge-group runs, so #15364's 2:36 PM failure
+# (run 51) was forgotten and the sweep jumped the same head again. The PR's own timeline keeps it:
+# the queue removed it for failed_checks and nothing was pushed since. Same shape as
+# held_by_manual_dequeue: a failed removal holds, a push (new commit or force-push) frees.
+_QUEUE_FAILED = ("query($o:String!,$n:String!){repository(owner:$o,name:$n){pullRequests(states:OPEN,"
+                 "first:100,orderBy:{field:UPDATED_AT,direction:DESC}){nodes{number timelineItems(last:50,"
+                 "itemTypes:[REMOVED_FROM_MERGE_QUEUE_EVENT,PULL_REQUEST_COMMIT,HEAD_REF_FORCE_PUSHED_EVENT])"
+                 "{nodes{__typename ... on RemovedFromMergeQueueEvent{createdAt reason}}}}}}}")
 
 
-def queue_failed_prs(repo: str, limit: int = 50, api=None) -> dict[int, float]:
-    """{PR number: unix time of its newest failed merge group}; {} on a read error."""
-    api = api or _api
+def queue_failed_heads(nodes) -> dict[int, float]:
+    """Pure: {PR number: unix time the queue removed its current head for failed checks}, for each PR
+    (GraphQL node, timeline oldest first) the queue failed with nothing pushed since."""
+    out: dict[int, float] = {}
+    for pr in nodes or []:
+        failed = 0.0
+        for ev in ((pr or {}).get("timelineItems") or {}).get("nodes") or []:
+            kind = ev.get("__typename")
+            if kind == "RemovedFromMergeQueueEvent":
+                if (ev.get("reason") or "").lower() == "failed_checks":
+                    failed = _ts(ev.get("createdAt"))
+            elif kind in ("PullRequestCommit", "HeadRefForcePushedEvent"):
+                failed = 0.0
+        if failed and (pr or {}).get("number"):
+            out[pr["number"]] = failed
+    return out
+
+
+def queue_failed_prs(repo: str, gql=None) -> dict[int, float]:
+    """queue_failed_heads for the repo's open PRs; {} on a read error."""
+    owner, name = repo.split("/", 1)
     try:
-        runs = api(f"repos/{repo}/actions/runs?event=merge_group&status=completed&per_page={limit}")
-        out: dict[int, float] = {}
-        for r in runs.get("workflow_runs") or []:
-            m = _QUEUE_REF.match(r.get("head_branch") or "")
-            if m and r.get("conclusion") == "failure":
-                n = int(m.group(1))
-                out[n] = max(out.get(n, 0.0), _ts(r.get("created_at")))
-        return out
+        data = (gql or _graphql)(_QUEUE_FAILED, o=owner, n=name)
+        return queue_failed_heads((((data.get("data") or {}).get("repository") or {})
+                                   .get("pullRequests") or {}).get("nodes"))
     except (RuntimeError, ValueError, KeyError, OSError, subprocess.SubprocessError):
         return {}
 
@@ -394,7 +409,7 @@ def pick_launch_jump(prs: list[dict], required: list[str], queue: dict | None, l
         where = queue.get(pr.get("number"))
         if where is not None and where <= LAUNCH_TOP:
             continue
-        if where is None and (queue_failed or {}).get(pr.get("number"), 0.0) > head_checked_at(pr):
+        if where is None and pr.get("number") in (queue_failed or {}):
             continue  # the queue failed this head and threw it out: a jump only fails it again
         if _not_green_and_reviewed(pr, required):
             continue
@@ -463,9 +478,9 @@ def sweep(prs: list[dict], required: list[str], now: float | None = None,
             disarm.append(n)
         # 2026-11-03: the fixed arm step re-armed #15093 and #15000, heads the queue had already
         # failed and thrown out. Back in line, each fails again and reds the groups behind it.
-        # Same verdict pick_launch_jump honours: a failed group of its own after its head's
-        # checks finished means this head needs a new push, not another arm, jump or enqueue.
-        if not queued and (queue_failed or {}).get(n, 0.0) > head_checked_at(pr):
+        # Same verdict pick_launch_jump honours: the queue failed this head and nothing was pushed
+        # since (queue_failed_heads), so it needs a new push, not another arm, jump or enqueue.
+        if not queued and n in (queue_failed or {}):
             skip.append({"number": n,
                          "why": "the merge queue failed this head: push a fix before it re-enters"})
             continue
