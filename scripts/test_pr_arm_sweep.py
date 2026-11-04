@@ -529,29 +529,12 @@ def test_launch_never_rejumps_a_head_the_queue_failed_and_threw_out():
     pr, why = _pick_failed([_launch_pr()], {15290: 1}, failed)          # not in the queue any more
     assert pr is None, why
     assert _pick_failed([_launch_pr()], LQ, failed)[0] is not None      # still queued: a PR ahead failed it
-    old = {15319: NOW_TS - 30 * 3600}                                  # the head checks finished 26h ago
-    assert _pick_failed([_launch_pr()], {15290: 1}, old)[0] is not None  # failed before this head's checks
+    assert _pick_failed([_launch_pr()], {15290: 1}, {})[0] is not None  # pushed since: not in queue_failed
 
 
 def _pick_failed(prs, queue, failed):
     return pr_arm_sweep.pick_launch_jump(prs, PROD_REQUIRED, queue, LAUNCH, "blocked", False, 0.0, NOW_TS,
                                          failed)
-
-
-def test_queue_failed_prs_reads_each_prs_own_failed_group():
-    runs = {"workflow_runs": [
-        {"head_branch": "gh-readonly-queue/main/pr-15337-107f3120", "conclusion": "failure",
-         "created_at": "2026-11-03T13:47:54Z"},
-        {"head_branch": "gh-readonly-queue/main/pr-15337-a52ebfce", "conclusion": "failure",
-         "created_at": "2026-11-03T13:07:39Z"},
-        {"head_branch": "gh-readonly-queue/main/pr-15313-2cd4bed3", "conclusion": "success",
-         "created_at": "2026-11-03T13:33:12Z"},
-        {"head_branch": "gh-readonly-queue/main/pr-15000-107f3120", "conclusion": "cancelled",
-         "created_at": "2026-11-03T13:20:50Z"}]}
-    got = pr_arm_sweep.queue_failed_prs("o/r", api=lambda path: runs)
-    assert got == {15337: datetime(2026, 11, 3, 13, 47, 54, tzinfo=timezone.utc).timestamp()}, got
-    boom = lambda path: (_ for _ in ()).throw(RuntimeError("gh down"))  # noqa: E731
-    assert pr_arm_sweep.queue_failed_prs("o/r", api=boom) == {}
 
 
 # 2026-11-03: on lucky the cron runs pr_arm_sweep.sh outside any git checkout. It called
@@ -600,10 +583,60 @@ def test_sweep_never_rearms_or_enqueues_a_head_the_queue_failed():
     out = pr_arm_sweep.sweep([pr], REQUIRED, NOW_TS, queue={}, queue_failed=failed)
     assert out["arm"] == [] and out["enqueue"] == [] and out["jump"] == [], out
     assert "failed this head" in out["skipped"][0]["why"], out
-    stale = {15093: NOW_TS - 5 * 3600}                               # failed before this head's checks
-    assert pr_arm_sweep.sweep([pr], REQUIRED, NOW_TS, queue={}, queue_failed=stale)["arm"] == [15093]
+    assert pr_arm_sweep.sweep([pr], REQUIRED, NOW_TS, queue={}, queue_failed={})["arm"] == [15093]  # pushed since
     queued = pr_arm_sweep.sweep([pr], REQUIRED, NOW_TS, queue={15093: 3}, queue_failed=failed)
     assert queued["skipped"][0]["why"] == "already in the merge queue", queued  # a PR ahead may have failed it
+
+
+# 2026-11-03 5:28 PM Central: the sweep jumped #15364 (fix:main-red, head 506ddc7) back to the front.
+# The queue had failed that head at 2:36 PM, but its failed group was the 51st merge-group run back
+# and the old read kept only 50, so the failure was forgotten; it failed again 5 minutes later. And a
+# check that re-runs on the same head (a label re-runs `skip`) made "checks finished after the
+# failure" true without any new code. The PR's own timeline is the record: a failed_checks removal
+# holds until a push.
+def _tl(*events):
+    nodes = []
+    for kind, at, *rest in events:
+        if kind == "removed":
+            nodes.append({"__typename": "RemovedFromMergeQueueEvent", "createdAt": at, "reason": rest[0]})
+        elif kind == "commit":
+            nodes.append({"__typename": "PullRequestCommit", "commit": {"committedDate": at}})
+        elif kind == "force":
+            nodes.append({"__typename": "HeadRefForcePushedEvent", "createdAt": at})
+    return {"timelineItems": {"nodes": nodes}}
+
+
+def test_queue_failed_heads_holds_a_failed_head_until_a_push():
+    real_15364 = dict(_tl(("commit", "2026-11-03T15:00:58Z"),
+                          ("removed", "2026-11-03T19:20:54Z", "failed_checks"),
+                          ("removed", "2026-11-03T20:28:44Z", "manual"),
+                          ("removed", "2026-11-03T20:36:41Z", "failed_checks")), number=15364)
+    pushed = dict(_tl(("removed", "2026-11-03T19:20:54Z", "failed_checks"),
+                      ("commit", "2026-11-03T21:00:00Z")), number=15400)
+    rebased = dict(_tl(("removed", "2026-11-03T19:20:54Z", "failed_checks"),
+                       ("force", "2026-11-03T21:00:00Z")), number=15401)
+    merged_only = dict(_tl(("removed", "2026-11-03T19:20:54Z", "merged")), number=15402)
+    got = pr_arm_sweep.queue_failed_heads([real_15364, pushed, rebased, merged_only, None])
+    assert got == {15364: datetime(2026, 11, 3, 20, 36, 41, tzinfo=timezone.utc).timestamp()}, got
+    page = {"data": {"repository": {"pullRequests": {"nodes": [real_15364, pushed]}}}}
+    assert set(pr_arm_sweep.queue_failed_prs("o/r", gql=lambda q, **v: page)) == {15364}
+    boom = lambda q, **v: (_ for _ in ()).throw(RuntimeError("gh down"))  # noqa: E731
+    assert pr_arm_sweep.queue_failed_prs("o/r", gql=boom) == {}
+
+
+def test_a_queue_failed_head_never_reenters_even_after_a_check_reran():
+    fix = _fix(15364)
+    fix["statusCheckRollup"].append({"name": "skip", "status": "COMPLETED", "conclusion": "SKIPPED",
+                                     "completedAt": "2026-09-12T21:50:00Z"})  # re-ran after the failure
+    failed = {15364: NOW_TS - 30 * 60}                                       # queue failed it 30m ago
+    out = pr_arm_sweep.sweep([fix], PROD_REQUIRED, NOW_TS, main_is_red=True, queue={15290: 1},
+                             queue_failed=failed)
+    assert out["jump"] == [] and out["enqueue"] == [] and out["arm"] == [], out
+    assert "failed this head" in out["skipped"][0]["why"], out
+    launch = _launch_pr()
+    launch["statusCheckRollup"].append({"name": "skip", "status": "COMPLETED", "conclusion": "SKIPPED",
+                                        "completedAt": "2026-09-12T21:50:00Z"})
+    assert _pick_failed([launch], {15290: 1}, {launch["number"]: NOW_TS - 30 * 60})[0] is None
 
 
 def test_sweep_does_not_rearm_a_pr_already_in_the_merge_queue():
