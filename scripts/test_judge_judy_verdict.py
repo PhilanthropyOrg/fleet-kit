@@ -44,6 +44,29 @@ class PlainFinding(unittest.TestCase):
         self.assertTrue(jv.parse(_envelope({"verdict": "approve", "findings": []}))["ok"])
 
 
+class NamedMetric(unittest.TestCase):
+    """PHIA-2915: with --need-metric, a verdict that is not a cut names a daily metric and a guess."""
+
+    def _b(self, **kw):
+        b = {"user": "job seekers", "number": "applies", "baseline": "41 a day", "metric": "jobs/applies",
+             "guess": 3, "cut": False, "tool": False}
+        return _envelope({"verdict": "approve", "findings": [], "beneficiary": {**b, **kw}})
+
+    def test_not_a_cut_with_no_metric_or_guess_is_refused(self):
+        for kw in ({"metric": ""}, {"metric": "none"}, {"guess": 0}, {"guess": None}):
+            r = jv.parse(self._b(**kw), need_metric=True)
+            self.assertFalse(r["ok"], kw)
+            self.assertTrue(r["reason"].startswith(jv.NO_METRIC), r)
+
+    def test_a_cut_with_none_passes_and_a_named_metric_passes(self):
+        self.assertTrue(jv.parse(self._b(metric="", guess=0, cut=True), need_metric=True)["ok"])
+        self.assertTrue(jv.parse(self._b(), need_metric=True)["ok"])
+
+    def test_the_check_is_off_without_the_flag(self):
+        """The calibration re-judge and the re-asked answer are read without it, so they are never refused."""
+        self.assertTrue(jv.parse(self._b(metric=""))["ok"])
+
+
 class RetriedAccount(unittest.TestCase):
     """The pool's 429 envelope, then the second account's real answer, on one stdout."""
 

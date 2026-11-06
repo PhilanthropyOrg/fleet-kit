@@ -638,7 +638,7 @@ $(head -c "${JUDGE_RULES_BYTES:-10000}" "$f")"
   done
   BODY_RULES="Then score VALUE for points. The Judge seat already said yes to this task's pitch before any code (Reif 11-02), so your scores set points only and never send the PR back, except Viability 1, a second copy of something we built, which does. Use your own judgment and what you know of best practice, not a checklist. Score each of Marty Cagan's four big risks 0-3 (0 none, 1 weak, 2 solid, 3 best in class) with one line of why a smart person outside software can read:
 $(sed -n '/^## The four risks$/,/^## Anchors$/p' "$KIT_DIR/members/judge-judy/value-rubric.md" | sed -e '1d' -e '$d' -e '/^$/d')
-First fill beneficiary: user is the person outside this company who gets something (a donor, a job seeker, an org owner, a report buyer, a visitor on a phone), and number is the user number you expect this PR to move (report checkouts, claims, jobs applied to, pages that answer, seconds to first screen). Seats and reviewers are not users; the Owner is, when the anchors below say so (Owner-asked work, Owner-asked cost), and so are the visitors a red-main fix, a production probe or a database fix serves, and a judge-yes card's User: name the user the anchor names, never 'none' because the screen is staff-only or the change is on the server. If you cannot name both from the diff, the task facts, the task and the PR Why, leave them empty and score value 1 at most. Then baseline: today's measured reading of that number, with where it was read (for example: jobs/applies 41 a day, kpi_daily 10-31; 44-85 report 5xx per 15 min; 378 lines cut), copied from the value card's Data line, the task or the PR Why, or counted from the diff for a cut. Never invent one; leave it empty when none of them gives a reading. Value 2 or 3 needs a named user and a measured baseline: a number with no reading today is a guess, and it scores value 1 (Paul, 11-01). Then metric: the daily count that number is read from, one of ${JUDGE_KPI_METRICS:-990/compares 990/exports 990/profile_views 990/search_clicks 990/searches claims/claim_cta_impressions claims/claims_created claims/claims_verified claims/verify_prompts giving/gifts_created jobs/applies jobs/job_views jobs/post_steps mail/mails_sent network/feedback network/logins network/posts site/human_visits platform/ci_usd_per_day platform/fix_pr_wait_hours}, or empty when none of them counts it. guess: how much that metric should change per day once this is live (from the value card's Guess when it has one; negative when the metric should fall; 0 when you cannot say). cut: true only when the PR mostly removes code, a page, a step or a job and adds nothing new. tool: true only when the PR changes no page and scores value on the visitor number it gates (the measuring-tools anchor). Half the points are paid at merge and half after the 48-hour read of metric, only if it moved at least half the guess; a cut is paid in full at merge.
+First fill beneficiary: user is the person outside this company who gets something (a donor, a job seeker, an org owner, a report buyer, a visitor on a phone), and number is the user number you expect this PR to move (report checkouts, claims, jobs applied to, pages that answer, seconds to first screen). Seats and reviewers are not users; the Owner is, when the anchors below say so (Owner-asked work, Owner-asked cost), and so are the visitors a red-main fix, a production probe or a database fix serves, and a judge-yes card's User: name the user the anchor names, never 'none' because the screen is staff-only or the change is on the server. If you cannot name both from the diff, the task facts, the task and the PR Why, leave them empty and score value 1 at most. Then baseline: today's measured reading of that number, with where it was read (for example: jobs/applies 41 a day, kpi_daily 10-31; 44-85 report 5xx per 15 min; 378 lines cut), copied from the value card's Data line, the task or the PR Why, or counted from the diff for a cut. Never invent one; leave it empty when none of them gives a reading. Value 2 or 3 needs a named user and a measured baseline: a number with no reading today is a guess, and it scores value 1 (Paul, 11-01). Then metric: the daily count that number is read from, one of ${JUDGE_KPI_METRICS:-990/compares 990/exports 990/profile_views 990/search_clicks 990/searches claims/claim_cta_impressions claims/claims_created claims/claims_verified claims/verify_prompts giving/gifts_created jobs/applies jobs/job_views jobs/post_steps mail/mails_sent network/feedback network/logins network/posts site/human_visits platform/ci_usd_per_day platform/fix_pr_wait_hours}; empty only for a cut (the metric and guess anchor). guess: how much that metric should change per day once this is live (from the value card's Guess when it has one; negative when the metric should fall; never 0 on a PR that is not a cut). cut: true only when the PR mostly removes code, a page, a step or a job and adds nothing new. tool: true only when the PR changes no page and scores value on the visitor number it gates (the measuring-tools anchor). Half the points are paid at merge and half after the 48-hour read of metric, only if it moved at least half the guess; a cut is paid in full at merge.
 $(sed -n '/^## Anchors$/,$p' "$KIT_DIR/members/judge-judy/value-rubric.md" | sed -e '1d' -e '/^$/d')
 Research and the why come from the task's VALUE CARD below (User, Need, Data, Guess, Best in class), not from any section of the PR body; with no card, the task description and the PR body Why are the card; a PR body needs no set sections. Set research.ok true only if the card's Best in class names who does this best, with a source (a link or a named product), and says how this matches or beats them; why says what was named or missing, in words the seat can fix by editing the card. A bug fix or a cut needs only two lines on its card. With no card, set research.ok from what you know and say so. Never block for missing paperwork (no screenshot, no 'See it:' line, no section) and never block for low value: scores set points only. Your verdict is for correctness only.${RULES_TEXT:+
 
@@ -652,6 +652,20 @@ Design rules (from the repo, context). When usability is low because of a UI rul
   # Owner decision 2026-10-27: PRs from the Paperclip seats (head branch ops/*) ship on their
   # own. Block only for real harm; paperwork, plain language, See it, screenshots, design walk,
   # style and low/medium polish become non-blocking notes (verdict approve, notes in findings).
+  # PHIA-2915: a verdict that is not a cut must name a metric and a guess. The first answer without
+  # them is refused (judge_judy_verdict.py --need-metric) and asked once more next pass, with this
+  # line; the second answer is taken as it is, so a missing metric never holds a PR.
+  METRIC_ASK_FILE="$STRIKE_DIR/pr-${PR}-${HEAD_SHA}.nometric"
+  NEED_METRIC=""
+  if [ -z "$VALUE_EXEMPT" ]; then
+    if [ -f "$METRIC_ASK_FILE" ]; then
+      BODY_RULES="$BODY_RULES
+Your last answer at this head named no metric or guess, and this PR is not a cut. Name the one daily metric from the list that the user number feeds and a guess that is not 0, or set cut true if the PR mostly removes something."
+    else
+      NEED_METRIC="--need-metric"
+    fi
+  fi
+
   if [[ "${HEAD_REF:-}" == ops/* ]]; then
     BODY_RULES="$BODY_RULES
 
@@ -861,7 +875,7 @@ Answer with a verdict of block only for a correctness defect, plus the four scor
   # `structured_output`, falls back to a second json.loads of `.result`, and validates the
   # verdict/findings shape itself (including "block with zero findings", gh#3170) rather than
   # trusting a future CLI build blindly.
-  VERDICT_JSON=$(printf '%s' "$RAW" | python3 "$KIT_DIR/scripts/judge_judy_verdict.py")
+  VERDICT_JSON=$(printf '%s' "$RAW" | python3 "$KIT_DIR/scripts/judge_judy_verdict.py" $NEED_METRIC)
   PARSE_OK=$(printf '%s' "$VERDICT_JSON" | python3 -c 'import json,sys
 try: d = json.load(sys.stdin)
 except Exception: d = {}
@@ -893,6 +907,15 @@ if d: print(json.dumps(d))' >> "$LOG_DIR/judge-judy-points.jsonl" 2>>"$LOG" || l
     PARSE_REASON=$(printf '%s' "$VERDICT_JSON" | python3 -c 'import json,sys
 try: print(json.load(sys.stdin).get("reason","verdict output was not valid JSON"))
 except Exception: print("verdict output was not valid JSON")' 2>/dev/null)
+    if [ -n "$NEED_METRIC" ] && [ "${PARSE_REASON#no metric}" != "$PARSE_REASON" ]; then
+      # Not a strike: the answer was well formed, only the metric is missing. Ask once more next pass.
+      mkdir -p "$STRIKE_DIR" && : > "$METRIC_ASK_FILE"
+      log "PR #$PR head ${HEAD_SHA:0:12}: $PARSE_REASON -- asked once more next pass"
+      SKIPPED_THIS_TICK="$SKIPPED_THIS_TICK $PR"
+      cleanup_pass
+      [ -n "$EXPLICIT_PR" ] && break
+      continue
+    fi
     N=$(( $(cat "$STRIKE_FILE" 2>/dev/null || echo 0) + 1 ))
     echo "$N" > "$STRIKE_FILE"
     # gh#221: a strike used to leave no artifact -- $OUT_FILE is a mktemp'd file cleaned up by
@@ -970,7 +993,7 @@ $ERR_VISION_LINK"
     continue
   fi
   PRIOR_STRIKES=$(cat "$STRIKE_FILE" 2>/dev/null || echo 0)
-  rm -f "$STRIKE_FILE" "$STRIKE_DIR/pr-${PR}-${HEAD_SHA}".strike*.raw
+  rm -f "$STRIKE_FILE" "$STRIKE_DIR/pr-${PR}-${HEAD_SHA}".strike*.raw "$METRIC_ASK_FILE"
   SELF_CRITIQUE="none -- clean single-pass verdict"
   [ "${PRIOR_STRIKES:-0}" -gt 0 ] && SELF_CRITIQUE="needed $PRIOR_STRIKES parse-strike(s) at this head before producing a schema-valid verdict (see gh#221, gh#806) -- not a finding about the diff, a format miss on my own output"
 
