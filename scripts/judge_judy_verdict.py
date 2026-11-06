@@ -17,6 +17,9 @@ fall back to a second `json.loads` of `result` for a CLI build that only sets th
 Usage: `claude -p ... --output-format json --json-schema "$SCHEMA" | python3 judge_judy_verdict.py`
 Exit 0, `{"ok": true, "verdict": "approve"|"block", "findings": [...], "findings_text": "..."}`
   on stdout, when the object validates.
+`--need-metric` (PHIA-2915): a verdict that is not a cut must name a daily metric (vertical/metric) and a guess
+  that is not 0, or it is refused with a reason that starts "no metric"; judge-judy.sh asks once more, then takes
+  the second answer as it is.
 Exit 1, `{"ok": false, "reason": "<what was wrong>"}` on stdout on any failure -- the outer
   envelope wasn't JSON, neither structured_output nor a parseable result was present, or the
   object failed the verdict's own shape checks. judge-judy.sh treats exit 1 as a schema-parse
@@ -25,12 +28,25 @@ Exit 1, `{"ok": false, "reason": "<what was wrong>"}` on stdout on any failure -
 from __future__ import annotations
 
 import json
+import math
 import sys
 
 VALID_VERDICTS = ("approve", "block")
 # "plain": Reif, 2026-09-12 -- every finding carries one or two sentences a smart person
 # outside software can read, next to the technical what_breaks. persona_law.md §13.
 REQUIRED_FINDING_KEYS = ("file", "line", "severity", "what_breaks", "plain")
+NO_METRIC = "no metric"  # judge-judy.sh keys the one re-ask on this reason prefix
+
+
+def metric_missing(beneficiary) -> bool:
+    """PHIA-2915: a PR that is not a cut names the daily metric it should move and a guess, so the 48-hour
+    read can judge it. A cut keeps metric none; a verdict with no beneficiary block (older schema) is not held."""
+    if not isinstance(beneficiary, dict) or beneficiary.get("cut") is True:
+        return False
+    metric = str(beneficiary.get("metric") or "").strip()
+    guess = beneficiary.get("guess")
+    ok_guess = isinstance(guess, (int, float)) and not isinstance(guess, bool) and math.isfinite(guess) and guess != 0
+    return "/" not in metric or not ok_guess
 
 
 def _findings_text(findings: list) -> str:
@@ -56,7 +72,7 @@ def _last_envelope(raw: str):
     return last
 
 
-def parse(raw: str) -> dict:
+def parse(raw: str, need_metric: bool = False) -> dict:
     try:
         envelope = _last_envelope(raw)
     except json.JSONDecodeError as e:
@@ -95,6 +111,10 @@ def parse(raw: str) -> dict:
     if verdict == "block" and not findings:
         return {"ok": False, "reason": "verdict=block with an empty findings list -- nothing a human can act on"}
 
+    if need_metric and metric_missing(obj.get("beneficiary")):
+        return {"ok": False, "reason": f"{NO_METRIC} or guess on a PR that is not a cut: name one daily metric "
+                                       "(vertical/metric) and a guess that is not 0, or set cut true (PHIA-2915)"}
+
     out = {"ok": True, "verdict": verdict, "findings": findings, "findings_text": _findings_text(findings)}
     # PHIA-1451: the four-risk value scores ride along; value_judge.py turns them into the
     # send-back and the points. Optional, so a verdict without them still parses.
@@ -105,8 +125,9 @@ def parse(raw: str) -> dict:
 
 
 def main(argv=None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
     raw = sys.stdin.read()
-    out = parse(raw)
+    out = parse(raw, need_metric="--need-metric" in argv)
     json.dump(out, sys.stdout)
     return 0 if out.get("ok") else 1
 
