@@ -182,6 +182,25 @@ class ValueJudge(unittest.TestCase):
         old = vj.apply(_scored(), "", "1", "h", "t", "jobs/x", False)["ledger"]  # verdict with no metric fields
         self.assertEqual((old["metric"], old["guess"], old["pay_at_merge"]), ("", 0.0, 2.0))
 
+    def test_awaiting_yes_skips_pr_before_judge_yes(self):
+        # PHIA-3384: one verdict per PR. A PR whose task has no judge-yes yet gets no review at all
+        # (no BLOCK post, no model call); the Judge's YES comes first.
+        new = "2026-11-03T10:00:00Z"
+        card = {"task": "PHIA-9", "labels": [], "created_at": new}
+        self.assertTrue(vj.awaiting_yes(card, "PHIA-9 x", "jobs/x"))
+        for labels in (["judge-yes"], ["fast-lane"], [{"id": "l1", "name": "judge-yes"}]):
+            self.assertFalse(vj.awaiting_yes(dict(card, labels=labels), "PHIA-9 x", "jobs/x"), labels)
+        self.assertFalse(vj.awaiting_yes({"task": "PHIA-9", "error": "board down"}, "PHIA-9 x", "jobs/x"))  # labels unread
+        self.assertFalse(vj.awaiting_yes(dict(card, created_at="2026-10-01T00:00:00Z"), "PHIA-9 x", "jobs/x"))
+        self.assertFalse(vj.awaiting_yes({}, "no task here", "jobs/x"))  # naming no task is still a block
+        card_file = Path(tempfile.mkdtemp()) / "card.json"
+        card_file.write_text(json.dumps(card))
+        run = lambda: subprocess.run([sys.executable, str(Path(vj.__file__)), "awaiting-yes", "--card", str(card_file),
+                                      "--title", "PHIA-9 x", "--ref", "jobs/x"], capture_output=True).returncode
+        self.assertEqual(run(), 0)
+        card_file.write_text(json.dumps(dict(card, labels=["judge-yes"])))
+        self.assertEqual(run(), 1)
+
     def test_judge_before_build_task_gate(self):
         # Reif 11-02: a PR passes the task check only when its task carries judge-yes or fast-lane.
         new = "2026-11-03T10:00:00Z"

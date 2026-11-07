@@ -343,6 +343,21 @@ def approval(card: dict | None, title: str = "", ref: str = "") -> list:
             "A breakage (site down, error spike, broken step) takes the fast lane: label the task `fast-lane`."]
 
 
+def awaiting_yes(card: dict | None, title: str = "", ref: str = "") -> bool:
+    """True when the PR names a task that has no Judge YES yet (PHIA-3384): the reviewer leaves it alone.
+
+    One verdict per PR: the Judge scores value on the pitch before code, the code review runs after. Before the
+    YES there is nothing for it to say but a BLOCK that the YES then undoes, so it posts nothing and spends no
+    model call. A PR naming no task, an unread label list, and a task from before the cutover are not waiting."""
+    card = card or {}
+    if not (card.get("task") or task_of(title, ref)) or "labels" not in card:
+        return False
+    created = str(card.get("created_at") or "")
+    if created and created < APPROVAL_SINCE:
+        return False
+    return not (labels_of(card) & APPROVAL_LABELS)
+
+
 def _scores_of(obj: dict):
     s = obj.get("scores")
     if not isinstance(s, dict):
@@ -548,6 +563,10 @@ def main(argv=None) -> int:
     s.add_argument("--merged", default=None)
     s.add_argument("--days", type=int, default=7)
     sub.add_parser("schema")
+    aw = sub.add_parser("awaiting-yes")
+    aw.add_argument("--card", required=True)
+    aw.add_argument("--title", default="")
+    aw.add_argument("--ref", default="")
     fl = sub.add_parser("flat")
     fl.add_argument("ledger")
     fl.add_argument("--window", type=int, default=FLAT_WINDOW)
@@ -564,6 +583,12 @@ def main(argv=None) -> int:
     if args.cmd == "schema":
         json.dump(SCORES_SCHEMA, sys.stdout)
         return 0
+    if args.cmd == "awaiting-yes":  # exit 0: leave the PR alone until its task has judge-yes
+        try:
+            card = json.load(open(args.card))
+        except (OSError, ValueError):
+            return 1
+        return 0 if APPROVAL_GATE and awaiting_yes(card, args.title, args.ref) else 1
     if args.cmd == "sample":
         return 0 if sampled(args.head) else 1
     if args.cmd == "pair":

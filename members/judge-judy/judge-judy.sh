@@ -612,6 +612,15 @@ while :; do
     [ -n "$EXPLICIT_PR" ] && break
     continue
   fi
+  # PHIA-3384: one verdict per PR. Until the task has the Judge's YES (`judge-yes` or `fast-lane`) this review
+  # stays silent: no BLOCK post, no model call. The PR is looked at again on a later pass, once the YES lands.
+  if python3 "$KIT_DIR/scripts/value_judge.py" awaiting-yes --card "$CARD_FILE" --title "$(head -1 "$BODY_FILE")" --ref "${HEAD_REF:-}" 2>>"$LOG"; then
+    log "PR #$PR head ${HEAD_SHA:0:12}: ${PR_TASK:-task} has no Judge YES yet -- no verdict, no model call, retry next pass"
+    SKIPPED_THIS_TICK="$SKIPPED_THIS_TICK $PR"
+    cleanup_pass
+    [ -n "$EXPLICIT_PR" ] && break
+    continue
+  fi
   CARD_TEXT=$(jq -r '.card // empty' "$CARD_FILE" 2>/dev/null | head -c "${MAX_CARD_BYTES:-4000}")
   # Paul 2026-11-01, "don't wait for cards": with no card, the task's own title and description
   # stand in for it (with the PR body's Why, already in the prompt). A missing card is never a block.
