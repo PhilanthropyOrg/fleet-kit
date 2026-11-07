@@ -330,6 +330,81 @@ case "$*" in *fleet.sha*) echo abc123 ;; *Running*) echo true ;; esac
         self.assertFalse(any(" build " in c or " run " in c for c in calls), "same sha + running: no-op")
 
 
+class NodeSyncAppCheckout(unittest.TestCase):
+    """lucky 2026-11-07: the worker's /repo (the app checkout, a bind mount) was 31 commits behind
+    origin/main. A worker schedules no cron, so nothing ran entrypoint's gitpull line on it; node_sync
+    kept only the kit's own checkout fresh. Each tick now fast-forwards /repo inside the worker, but only
+    on main with no tracked change and no minion running: a seat's branch or edit is never moved."""
+
+    def setUp(self):
+        self.d = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: subprocess.run(["rm", "-rf", str(self.d)]))
+        self.repo = self.d / "repo"
+        self._git("init", "-q", "--bare", "-b", "main", "origin.git", cwd=self.d)
+        for name in ("repo", "other"):
+            self._git("clone", "-q", "origin.git", name, cwd=self.d)
+            self._git("config", "user.email", "t@t", cwd=self.d / name)
+            self._git("config", "user.name", "t", cwd=self.d / name)
+        self._git("commit", "-q", "--allow-empty", "-m", "one", cwd=self.repo)
+        self._git("push", "-q", "origin", "main", cwd=self.repo)
+        self.old = self._head()
+        self._git("pull", "-q", "origin", "main", cwd=self.d / "other")
+        self._git("commit", "-q", "--allow-empty", "-m", "two", cwd=self.d / "other")
+        self._git("push", "-q", "origin", "main", cwd=self.d / "other")
+
+    def _git(self, *args: str, cwd: Path) -> str:
+        return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
+
+    def _head(self) -> str:
+        return self._git("rev-parse", "HEAD", cwd=self.repo)
+
+    def _tick(self, minion_running: bool = False) -> str:
+        """One node_sync tick: same kit sha, worker running. The fake podman runs the in-worker
+        script on the host with the real git, with /repo pointed at the test checkout."""
+        d = self.d
+        (d / "bin").mkdir(exist_ok=True)
+        _sh(d / "bin" / "git", 'case "$1" in rev-parse) echo abc123 ;; esac\n')
+        _sh(d / "bin" / "podman", f"""case "$*" in
+  *fleet.sha*) echo abc123 ;;
+  *Running*) echo true ;;
+  *pgrep*) exit {0 if minion_running else 1} ;;
+  *"bash -c"*) echo exec >> {d}/execs; script="${{@: -1}}"
+    PATH="{os.environ['PATH']}" exec bash -c "${{script//\\/repo/{self.repo}}}" ;;
+esac
+""")
+        (d / "node.env").write_text("FLEET_NODE_INSTANCE=x\nFLEET_NODE_CONTAINER=w\n")
+        env = dict(os.environ, PATH=f"{d / 'bin'}:{os.environ['PATH']}", FLEET_NODE_ENV=str(d / "node.env"),
+                   TMPDIR=str(d))
+        r = subprocess.run(["bash", str(HERE / "node_sync.sh")], env=env, capture_output=True, text=True,
+                           timeout=60)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        return r.stdout + r.stderr
+
+    def test_main_and_clean_fast_forwards(self):
+        out = self._tick()
+        self.assertNotEqual(self._head(), self.old)
+        self.assertEqual(self._head(), self._git("rev-parse", "origin/main", cwd=self.repo))
+        self.assertIn("/repo fast-forwarded", out)
+        self.assertEqual(self._tick(), "", "already current: nothing reaches the log")
+
+    def test_a_seat_branch_is_never_moved_or_switched(self):
+        self._git("checkout", "-q", "-b", "seat/work", cwd=self.repo)
+        self._tick()
+        self.assertEqual(self._head(), self.old)
+        self.assertEqual(self._git("branch", "--show-current", cwd=self.repo), "seat/work")
+
+    def test_a_tracked_edit_is_left_alone(self):
+        (self.repo / "f").write_text("x")
+        self._git("add", "f", cwd=self.repo)
+        self._tick()
+        self.assertEqual(self._head(), self.old)
+
+    def test_busy_worker_leaves_the_app_checkout_alone(self):
+        self._tick(minion_running=True)
+        self.assertEqual(self._head(), self.old)
+        self.assertFalse((self.d / "execs").exists())
+
+
 class NodeSyncLock(unittest.TestCase):
     """lucky 2026-09-29: conmon inherited node_sync's lock fd, so every later tick found the
     lock held and exited silently; the worker never updated again."""

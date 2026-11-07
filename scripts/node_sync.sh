@@ -33,9 +33,36 @@ git fetch -q origin main || { echo "$(ts) [node_sync] fetch failed -- keeping cu
 want="$(git rev-parse origin/main)"
 have="$(podman inspect -f '{{index .Config.Labels "fleet.sha"}}' "$CONTAINER" 2>/dev/null || true)"
 running="$(podman inspect -f '{{.State.Running}}' "$CONTAINER" 2>/dev/null || true)"
+
+minion_busy() {
+  podman exec "$CONTAINER" pgrep -f "run_member.sh minion|repo clone" >/dev/null 2>&1
+}
+
+# The app checkout (/repo, a bind mount) has no puller of its own: a worker schedules no cron, so entrypoint's
+# gitpull line never runs here, and on lucky 11-07 /repo was 31 commits behind origin/main. Each tick
+# fast-forwards it inside the worker, where gh's credential helper is. Fast-forward only, and only when /repo
+# is on main with no tracked change: a seat's branch or edit is never moved, and no branch is ever switched
+# (git_pull_guard.sh's self-heal would). timeout: a held lock or a slow fetch never stalls this tick.
+APP_CHECKOUT_FF='cd /repo || exit 0
+[ "$(git branch --show-current)" = main ] || exit 0
+[ -z "$(git status --porcelain --untracked-files=no)" ] || exit 0
+before="$(git rev-parse HEAD)"
+git fetch -q origin main && git merge -q --ff-only origin/main || exit 1
+after="$(git rev-parse HEAD)"
+[ "$before" = "$after" ] || echo "fast-forwarded ${before:0:9} -> ${after:0:9}"'
+sync_app_checkout() {
+  [ "$running" = "true" ] || return 0
+  minion_busy && return 0
+  local out
+  out="$(timeout 120 podman exec "$CONTAINER" bash -c "$APP_CHECKOUT_FF" 2>&1)" \
+    || { echo "$(ts) [node_sync] /repo fast-forward failed: $out" >&2; return 0; }
+  [ -z "$out" ] || echo "$(ts) [node_sync] /repo $out"
+}
+sync_app_checkout
+
 [ "$want" = "$have" ] && [ "$running" = "true" ] && exit 0
 
-if [ "$running" = "true" ] && podman exec "$CONTAINER" pgrep -f "run_member.sh minion|repo clone" >/dev/null 2>&1; then
+if [ "$running" = "true" ] && minion_busy; then
   echo "$(ts) [node_sync] ${have:0:7} -> ${want:0:7} waiting: a minion (or the first-boot clone) is running"
   exit 0
 fi
