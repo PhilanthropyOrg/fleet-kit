@@ -11,7 +11,9 @@ Blind score: the self-score line is cut out of the card text the judge sees and 
 separately as `plan`, so value_judge.py can log the gap after the judge has scored.
 
 Usage: value_card.py TASK  (PHIA-123)  ->  JSON on stdout, `{}` when TASK is not a task id.
-  {"task", "owner", "card", "card_updated_at", "plan", "task_text", "labels", "created_at", "filed_by"}   card is "" when the task has none.
+  {"task", "owner", "card", "card_updated_at", "yes_at", "plan", "task_text", "labels", "created_at", "filed_by"}   card is "" when the task has none.
+  yes_at is when the task got its `judge-yes` or `fast-lane` label, or null: that YES changes no commit, no body and no card, so
+  judge-judy.sh compares it with the block time too (11-06, PR 15768 kept its block after the YES).
   filed_by is "owner" when a person filed the task on the board, "seat" when an agent did, "" when unknown
   (PHIA-2780: the anchors price an Owner-filed task and a `judge-yes` or `fast-lane` label at value 2, so the
   judge must be told which the task is; without it, staff and server PRs sat at value 1 "like 14824").
@@ -49,6 +51,7 @@ TASK_TEXT_BYTES = int(os.environ.get("JUDGE_TASK_TEXT_BYTES") or 3000)
 TIMEOUT = float(os.environ.get("JUDGE_CARD_TIMEOUT") or 150)
 TRIES = max(1, int(os.environ.get("JUDGE_CARD_TRIES") or 2))
 BUDGET = float(os.environ.get("JUDGE_CARD_BUDGET") or TIMEOUT)
+YES_LABELS = {"judge-yes", "fast-lane"}
 MIN_TRY = 5.0  # seconds: a retry with less than this left is not worth starting
 _deadline = [float("inf")]
 _SELF_RE = re.compile(r"^[^\n]*\b(self[- ]?score|4[- ]risk|four[- ]risk|plan)\b[^\n]*value\D{0,4}[0-3][^\n]*$",
@@ -123,6 +126,17 @@ def _get_once(path: str, timeout: float = TIMEOUT):
         return None, type(e).__name__ + (f": {getattr(e, 'reason', '')}" if getattr(e, "reason", "") else "")
 
 
+def yes_at(labels: list, rows: list) -> str | None:
+    """When the task's Judge YES (or fast-lane) label last went on; None when it has none."""
+    ids = {l.get("id") for l in labels if isinstance(l, dict) and l.get("name") in YES_LABELS}
+    times = []
+    for row in rows if ids else []:
+        change = ((row.get("details") or {}).get("changes") or {}).get("labelIds") or {}
+        if ids & (set(change.get("to") or []) - set(change.get("from") or [])):
+            times.append(row.get("createdAt") or "")
+    return max(times, default="") or None
+
+
 def fetch(task: str) -> dict:
     if not re.fullmatch(r"PHIA-\d+", task or ""):
         return {}
@@ -160,8 +174,10 @@ def _fetch(task: str) -> dict:
     # Reif 11-02: the Judge approves a pitch by labelling its task `judge-yes` (or the seat marks a breakage
     # `fast-lane`); value_judge.py reads the label names and the task's age.
     labels = [l.get("name") if isinstance(l, dict) else l for l in (issue.get("labels") or [])]
+    rows, _ = _get(f"/api/issues/{task}/activity") if YES_LABELS & set(labels) else (None, "")
     out = {"task": task, "owner": owner, "card": card,
            "card_updated_at": doc.get("updatedAt") if isinstance(doc, dict) and body else None,
+           "yes_at": yes_at(issue.get("labels") or [], rows if isinstance(rows, list) else []),
            "plan": plan or task_plan, "task_text": task_text[:TASK_TEXT_BYTES],
            "labels": [l for l in labels if l], "created_at": issue.get("createdAt"),
            "filed_by": "owner" if issue.get("createdByUserId") else ("seat" if issue.get("createdByAgentId") else "")}

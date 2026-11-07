@@ -579,6 +579,42 @@ class ValueJudge(unittest.TestCase):
         self.assertIn("Paperwork findings from that round no longer apply", sh)
         self.assertIn('labels/${AGAIN_LABEL}', sh)
 
+    def test_a_judge_yes_after_the_block_rereviews_the_same_head_with_no_label(self):
+        """11-06, PR 15768: the Judge said YES on PHIA-3148 six minutes after a value block. The YES changes no
+        commit, no body and no card, so the head kept its block until someone pushed or added review:again."""
+        import re as _re
+        import subprocess
+        from unittest import mock
+        import value_card as vc
+        yes, other = {"id": "L1", "name": "judge-yes"}, {"id": "L2", "name": "ops"}
+        rows = [{"action": "issue.updated", "createdAt": "2026-11-06T23:15:01Z", "details": {"changes": {"status": {"to": "done"}}}},
+                {"action": "issue.updated", "createdAt": "2026-11-06T23:08:42Z", "details": {"changes": {"labelIds": {"from": [], "to": ["L1"]}}}},
+                {"action": "issue.updated", "createdAt": "2026-11-06T22:00:00Z", "details": {"changes": {"labelIds": {"from": [], "to": ["L2"]}}}}]
+        self.assertEqual(vc.yes_at([yes, other], rows), "2026-11-06T23:08:42Z")
+        self.assertIsNone(vc.yes_at([other], rows), "only a YES counts, and a task with none needs no read")
+        self.assertIsNone(vc.yes_at([yes], [{"details": None}, {}]), "a row of another shape is not a YES")
+        reads = []
+
+        def get(path):
+            reads.append(path)
+            if path.endswith("/activity"):
+                return rows, ""
+            if "/documents/" in path:
+                return None, "HTTP 404"
+            return {"title": "t", "labels": [yes]}, ""
+        with mock.patch.object(vc, "_get", get):
+            self.assertEqual(vc.fetch("PHIA-3148")["yes_at"], "2026-11-06T23:08:42Z")
+            reads.clear()
+        no_yes = lambda path: (None, "HTTP 404") if "/documents/" in path else ({"title": "t", "labels": [other]}, "")
+        with mock.patch.object(vc, "_get", no_yes):
+            self.assertIsNone(vc.fetch("PHIA-3148")["yes_at"])
+        sh = (Path(__file__).resolve().parents[1] / "members/judge-judy/judge-judy.sh").read_text()
+        jq = _re.search(r"card_at=.*?\n\s*\| jq -r '([^']+)'", sh, _re.S).group(1)
+        newest = lambda card: subprocess.run(["jq", "-r", jq], input=json.dumps(card), capture_output=True, text=True).stdout.strip()
+        self.assertEqual(newest({"card_updated_at": "2026-11-06T20:00:00Z", "yes_at": "2026-11-06T23:08:42Z"}), "2026-11-06T23:08:42Z")
+        self.assertEqual(newest({"card_updated_at": "2026-11-06T23:09:00Z", "yes_at": "2026-11-06T23:08:42Z"}), "2026-11-06T23:09:00Z")
+        self.assertEqual(newest({"card_updated_at": None, "yes_at": None}), "")
+
     def test_shell_reads_the_card_and_cuts_paperwork(self):
         sh = (Path(__file__).resolve().parents[1] / "members/judge-judy/judge-judy.sh").read_text() + (Path(__file__).resolve().parents[1] / "members/judge-judy/value-rubric.md").read_text()
         self.assertIn('--card "$CARD_FILE"', sh)
