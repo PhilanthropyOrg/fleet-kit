@@ -394,6 +394,7 @@ esac
         run = [c for c in (d / "podman_calls").read_text().splitlines() if c.startswith("run")][0]
         self.assertIn("/root/.claude-tgp", run)
         self.assertNotIn(".claude-gone", run)
+        self.assertIn("--init", run.split(), "PHIA-3235: a reaper as PID 1, or finished passes stay as zombies")
 
 class HubSideLiveness(unittest.TestCase):
     def test_stale_claims_sees_a_node_run_as_live(self):
