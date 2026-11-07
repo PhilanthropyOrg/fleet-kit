@@ -57,8 +57,9 @@ for acct in ${FLEET_ACCOUNTS:-primary}; do
   fi
 done
 mkdir -p "$INSTANCE_DIR/repo" "$INSTANCE_DIR/logs"
+# --init (PHIA-3235): PID 1 is then a reaper, so finished passes do not stay as zombies (84 seen under `sleep infinity`).
 # -e GH_TOKEN with no value: podman copies it from this environment, so it is never in argv.
-GH_TOKEN="$(cat "$HOME/.config/fleet-kit/gh_token")" podman run -d --replace --name "$CONTAINER" \
+GH_TOKEN="$(cat "$HOME/.config/fleet-kit/gh_token")" podman run -d --replace --init --name "$CONTAINER" \
   --label "fleet.sha=$want" \
   -e GH_TOKEN \
   -e FLEET_NODE_ROLE=worker \
