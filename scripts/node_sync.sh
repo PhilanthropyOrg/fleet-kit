@@ -33,9 +33,28 @@ git fetch -q origin main || { echo "$(ts) [node_sync] fetch failed -- keeping cu
 want="$(git rev-parse origin/main)"
 have="$(podman inspect -f '{{index .Config.Labels "fleet.sha"}}' "$CONTAINER" 2>/dev/null || true)"
 running="$(podman inspect -f '{{.State.Running}}' "$CONTAINER" 2>/dev/null || true)"
+
+minion_busy() {
+  podman exec "$CONTAINER" pgrep -f "run_member.sh minion|repo clone" >/dev/null 2>&1
+}
+
+# The app checkout (/repo, a bind mount) has no puller of its own: a worker schedules no cron, so entrypoint's
+# gitpull line never runs here, and on lucky 11-07 /repo was 31 commits behind origin/main. Each tick runs the
+# kit's guard on it inside the worker, where gh's credential helper is, never under a running minion.
+# The guard says "already up to date" every tick; only a real change reaches the log.
+sync_app_checkout() {
+  [ "$running" = "true" ] || return 0
+  minion_busy && return 0
+  local out
+  out="$(podman exec "$CONTAINER" bash /fleet-kit/scripts/git_pull_guard.sh /repo 2>&1)" \
+    || { echo "$(ts) [node_sync] /repo sync failed: $out" >&2; return 0; }
+  case "$out" in *"already up to date"*) ;; *) echo "$(ts) [node_sync] /repo: $out" ;; esac
+}
+sync_app_checkout
+
 [ "$want" = "$have" ] && [ "$running" = "true" ] && exit 0
 
-if [ "$running" = "true" ] && podman exec "$CONTAINER" pgrep -f "run_member.sh minion|repo clone" >/dev/null 2>&1; then
+if [ "$running" = "true" ] && minion_busy; then
   echo "$(ts) [node_sync] ${have:0:7} -> ${want:0:7} waiting: a minion (or the first-boot clone) is running"
   exit 0
 fi

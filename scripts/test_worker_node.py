@@ -330,6 +330,44 @@ case "$*" in *fleet.sha*) echo abc123 ;; *Running*) echo true ;; esac
         self.assertFalse(any(" build " in c or " run " in c for c in calls), "same sha + running: no-op")
 
 
+class NodeSyncAppCheckout(unittest.TestCase):
+    """lucky 2026-11-07: the worker's /repo (the app checkout, a bind mount) was 31 commits behind
+    origin/main. A worker schedules no cron, so nothing ran entrypoint's git_pull_guard on it; node_sync
+    kept only the kit's own checkout fresh. Each tick now runs the guard on /repo inside the worker,
+    unless a minion is running there."""
+
+    def _tick(self, minion_running: bool) -> list[str]:
+        d = Path(tempfile.mkdtemp())
+        (d / "bin").mkdir()
+        _sh(d / "bin" / "git", 'case "$1" in rev-parse) echo abc123 ;; esac\n')
+        busy = 0 if minion_running else 1
+        _sh(d / "bin" / "podman", f"""echo "$@" >> {d}/podman_calls
+case "$*" in
+  *fleet.sha*) echo abc123 ;;
+  *Running*) echo true ;;
+  *pgrep*) exit {busy} ;;
+  *git_pull_guard.sh*) echo "git_pull_guard: fast-forwarded old -> new" ;;
+esac
+""")
+        (d / "node.env").write_text("FLEET_NODE_INSTANCE=x\nFLEET_NODE_CONTAINER=w\n")
+        env = dict(os.environ, PATH=f"{d / 'bin'}:{os.environ['PATH']}", FLEET_NODE_ENV=str(d / "node.env"),
+                   TMPDIR=str(d))
+        r = subprocess.run(["bash", str(HERE / "node_sync.sh")], env=env, capture_output=True, text=True,
+                           timeout=30)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.output = r.stdout + r.stderr
+        return (d / "podman_calls").read_text().splitlines()
+
+    def test_idle_worker_fast_forwards_the_app_checkout(self):
+        calls = self._tick(minion_running=False)
+        self.assertIn("exec w bash /fleet-kit/scripts/git_pull_guard.sh /repo", calls)
+        self.assertIn("fast-forwarded old -> new", self.output)
+
+    def test_busy_worker_leaves_the_app_checkout_alone(self):
+        calls = self._tick(minion_running=True)
+        self.assertFalse(any("git_pull_guard.sh" in c for c in calls), calls)
+
+
 class NodeSyncLock(unittest.TestCase):
     """lucky 2026-09-29: conmon inherited node_sync's lock fd, so every later tick found the
     lock held and exited silently; the worker never updated again."""
