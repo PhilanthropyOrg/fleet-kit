@@ -298,14 +298,16 @@ pick_pr() {
         -q '.data.repository.pullRequest.lastEditedAt // empty' 2>/dev/null)
       # PHIA-1451: a thin value card is fixed on the task, not in the PR -- a card edited after
       # the block re-reviews the same head with no new commit and no CI rerun.
+      # 11-06: so does the Judge's YES on the task, with no review:again label. PR 15768's block was the value
+      # floor, and the YES six minutes later changed no commit, no body and no card, so the block stayed.
       if [ -n "$block_at" ] && { [ -z "$edited_at" ] || [[ ! "$edited_at" > "$block_at" ]]; }; then
         # A short wait here: this check runs once per blocked PR on every pass (PHIA-1504).
         card_at=$(JUDGE_CARD_TIMEOUT=30 JUDGE_CARD_BUDGET=30 JUDGE_CARD_TRIES=1 python3 "${KIT_DIR:-.}/scripts/value_card.py" "$(pr_task "$pr" "$pr_list_json")" 2>/dev/null \
-          | jq -r '.card_updated_at // empty' 2>/dev/null)
+          | jq -r '[.card_updated_at, .yes_at] | map(select(.)) | max // empty' 2>/dev/null)
         [ -n "$card_at" ] && [[ "$card_at" > "$block_at" ]] && edited_at="$card_at"
       fi
       if [ -z "$edited_at" ] || [[ ! "$edited_at" > "$block_at" ]]; then continue; fi
-      log "PR #$pr head ${head:0:12}: body or value card edited $edited_at, after the block at $block_at -- re-reviewing"
+      log "PR #$pr head ${head:0:12}: body, value card or Judge YES changed $edited_at, after the block at $block_at -- re-reviewing"
     fi
     if [ -n "$REQUIRED_CHECKS" ]; then
       # Reviewing a dead head is pure spend: skip if any named required check is red at this head.
