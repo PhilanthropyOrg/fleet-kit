@@ -208,6 +208,11 @@ done
 # Draft PRs are excluded (a draft is explicitly "not ready"), and so is anything already armed
 # -- re-arming is a no-op API call, but skipping it keeps the log honest about what changed.
 ARMED=0
+# PHIA-3374 (2026-11-07): the queue throws out a head on failed_checks and that turns auto-merge off, so
+# this loop re-armed the same head ~5 min into the next tick and GitHub queued it again (#15789, #15791,
+# #15885 twice each in a day, no new commit). pr_arm_sweep.py already holds those heads (queue_failed_prs);
+# read the same verdict here, once a tick. A read error yields nothing held, as in the sweep.
+QUEUE_FAILED=" $(python3 "$KIT_DIR/scripts/pr_arm_sweep.py" --repo "$REPO_SLUG" --queue-failed 2>/dev/null) "
 for pr in $(gh pr list --state open --json number,isDraft,autoMergeRequest \
               -q '.[] | select(.isDraft|not) | select(.autoMergeRequest==null) | .number' 2>/dev/null); do
   # fk#1197: the `ci:batch-red` hold (fleet-kit#1113) went with the product repo's merge queue
@@ -218,6 +223,10 @@ for pr in $(gh pr list --state open --json number,isDraft,autoMergeRequest \
   # same as "failure" -- judge-judy.sh itself already disarms via unqueue_pr the moment it
   # posts state=error, but this guard existed to stop a LATER re-arm from undoing that, and it
   # used to only recognize "failure", so an errored head could still slip back through here.
+  case "$QUEUE_FAILED" in *" $pr "*)
+    log "PR #$pr: not armed -- the merge queue failed this head and nothing was pushed since (PHIA-3374)"
+    continue ;;
+  esac
   head=$(gh pr view "$pr" --json headRefOid -q '.headRefOid' 2>/dev/null)
   verdict=$(timeout 25s gh api "repos/${REPO_SLUG}/statuses/${head}" --jq '[.[] | select(.context=="fleet-code-review")][0].state' 2>/dev/null || true)
   if [ "$verdict" = "failure" ] || [ "$verdict" = "error" ]; then

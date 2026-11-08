@@ -697,7 +697,13 @@ def main(argv=None) -> int:
                     help="enqueue each PR in `enqueue` (armed, green, reviewed, never queued)")
     ap.add_argument("--apply-jumps", action="store_true",
                     help="put each PR in `jump` (main red, the green reviewed fix) first in the queue")
+    ap.add_argument("--queue-failed", action="store_true",
+                    help="print only the open PRs the merge queue failed with nothing pushed since, space-separated")
     a = ap.parse_args(argv)
+    if a.queue_failed:
+        # For the other arm paths (auto_update_branch.sh): one read of the same verdict this sweep honours.
+        print(" ".join(str(n) for n in sorted(queue_failed_prs(a.repo))))
+        return 0
     try:
         prs = collect(a.repo, a.limit)
     except (RuntimeError, ValueError) as exc:

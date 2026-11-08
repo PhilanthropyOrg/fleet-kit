@@ -624,6 +624,28 @@ def test_queue_failed_heads_holds_a_failed_head_until_a_push():
     assert pr_arm_sweep.queue_failed_prs("o/r", gql=boom) == {}
 
 
+def test_queue_failed_flag_prints_the_held_heads_for_the_other_arm_paths():
+    # PHIA-3374: auto_update_branch.sh re-armed #15791/#15885 after the queue failed them, no new commit.
+    # It reads this flag: the same verdict, numbers only, and no PR list read or arm of its own.
+    import contextlib
+    import io
+    real_qf, real_collect = pr_arm_sweep.queue_failed_prs, pr_arm_sweep.collect
+    pr_arm_sweep.queue_failed_prs = lambda repo, gql=None: {15885: 1.0, 15791: 2.0}
+    pr_arm_sweep.collect = lambda *a, **k: (_ for _ in ()).throw(AssertionError("read the PR list"))
+    try:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = pr_arm_sweep.main(["--repo", "o/r", "--queue-failed"])
+        assert rc == 0 and buf.getvalue().strip() == "15791 15885", (rc, buf.getvalue())
+        pr_arm_sweep.queue_failed_prs = lambda repo, gql=None: {}
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            pr_arm_sweep.main(["--repo", "o/r", "--queue-failed"])
+        assert buf.getvalue().strip() == "", buf.getvalue()  # a read error holds nothing, as in the sweep
+    finally:
+        pr_arm_sweep.queue_failed_prs, pr_arm_sweep.collect = real_qf, real_collect
+
+
 def test_a_queue_failed_head_never_reenters_even_after_a_check_reran():
     fix = _fix(15364)
     fix["statusCheckRollup"].append({"name": "skip", "status": "COMPLETED", "conclusion": "SKIPPED",
