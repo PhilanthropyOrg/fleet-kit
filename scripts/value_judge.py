@@ -102,7 +102,11 @@ CARD_REQUIRED = os.environ.get("JUDGE_CARD_REQUIRED", "0") == "1"
 VALUE_SEND_BACK = os.environ.get("JUDGE_VALUE_SEND_BACK", "0") == "1"  # Reif 11-02: off; value is the Judge's, on the pitch
 APPROVAL_GATE = os.environ.get("JUDGE_APPROVAL_GATE", "1") == "1"
 APPROVAL_SINCE = os.environ.get("JUDGE_APPROVAL_SINCE", "2026-11-02T21:00:00Z")  # tasks before the cutover pass
-APPROVAL_LABELS = {"judge-yes", "fast-lane"}
+# Reif 11-09: "if I am running an agent directly we need to be able to merge" (named `hack-solo`). A task Reif runs through an agent
+# of his own, outside Paperclip's pitch and Judge process, carries `hack-solo`. It clears the task check and the value floor like
+# `fast-lane` does, with none of the breakage meaning and none of fast-lane's pull onto a seat. The correctness review still runs.
+HACK_SOLO = "hack-solo"
+APPROVAL_LABELS = {"judge-yes", "fast-lane", HACK_SOLO}
 # Paul 11-02 (Paperclip 2, value gate): #15261 passed with Value 1/3 and no research because value only wrote notes.
 # The floor is a rule, not a note: Value below MIN_VALUE, or research not done, blocks the PR whatever the model's
 # correctness verdict, unless the task carries judge-yes (floored on its pitch) or fast-lane (a breakage fixed first,
@@ -338,9 +342,10 @@ def approval(card: dict | None, title: str = "", ref: str = "") -> list:
         return []
     if labels_of(card) & APPROVAL_LABELS:
         return []
-    return [f"{task} has no Judge YES (label `judge-yes`) and is not `fast-lane`. Pitch it first: the value card on "
+    return [f"{task} has no Judge YES (label `judge-yes`) and is not `fast-lane` or `hack-solo`. Pitch it first: the value card on "
             "the task, assigned to the Judge in backlog; build once the Judge moves it to todo for you. "
-            "A breakage (site down, error spike, broken step) takes the fast lane: label the task `fast-lane`."]
+            "A breakage (site down, error spike, broken step) takes the fast lane: label the task `fast-lane`. "
+            "Work Reif runs directly with an agent of his own takes `hack-solo`."]
 
 
 def _scores_of(obj: dict):
