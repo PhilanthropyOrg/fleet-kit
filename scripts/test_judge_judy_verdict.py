@@ -188,12 +188,17 @@ class ValueJudge(unittest.TestCase):
         def card(labels, created=new, **kw):
             return dict({"task": "PHIA-9", "owner": "v-jobs", "card": "User: x", "plan": "",
                          "labels": labels, "created_at": created}, **kw)
-        for labels in (["judge-yes"], ["fast-lane"], [{"id": "l1", "name": "judge-yes"}]):
+        for labels in (["judge-yes"], ["fast-lane"], ["hack-solo"], [{"id": "l1", "name": "judge-yes"}, ]):
             out = vj.apply(_scored(), "", "1", "h", "PHIA-9 x", "jobs/x", False, card(labels), gate=True)
             self.assertEqual(out["verdict"], "approve", labels)
         out = vj.apply(_scored(), "", "1", "h", "PHIA-9 x", "jobs/x", False, card([]), gate=True)
         self.assertEqual(out["verdict"], "block")
         self.assertIn("no Judge YES", out["findings_text"])
+        # Reif 11-09 (hack-solo): the block names the lane, and a correctness block still blocks a hack-solo task
+        self.assertIn("hack-solo", out["findings_text"])
+        self.assertEqual(vj.HACK_SOLO, "hack-solo")
+        bad = _scored(); bad["verdict"] = "block"
+        self.assertEqual(vj.apply(bad, "", "1", "h", "PHIA-9 x", "jobs/x", False, card(["hack-solo"]), gate=True)["verdict"], "block")
         self.assertEqual(out["ledger"]["approval_reasons"][0][:10], "PHIA-9 has")
         self.assertEqual((out["ledger"]["pay_at_merge"], out["ledger"]["pay_on_read"]), (0.0, 0.0))
         # a correctness pass on a low-value PR with an approved task still ships (value is not re-judged)
@@ -345,7 +350,7 @@ class ValueJudge(unittest.TestCase):
         ok = vj.apply(_scored(v=2, research=True), "", "15261", "h", "PHIA-2317: x", "phia2317-x", False, card, gate=True)
         self.assertEqual((ok["verdict"], ok["ledger"]["floor_reasons"]), ("approve", []))
         # the floor holds whether or not the model blocked; judge-yes / fast-lane tasks were floored on the pitch
-        for labels in (["judge-yes"], ["fast-lane"]):
+        for labels in (["judge-yes"], ["fast-lane"], ["hack-solo"]):
             out = vj.apply(obj, "", "15261", "h", "PHIA-2317: x", "phia2317-x", False, dict(card, labels=labels), gate=True)
             self.assertEqual(out["verdict"], "approve", labels)
         # exempt (dependabot) and the undo switch pass
