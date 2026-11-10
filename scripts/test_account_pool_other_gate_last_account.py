@@ -7,6 +7,9 @@ failed this call" and the fleet built nothing for 95 minutes.
 
 'other' means "we do not know why this failed" -- not "out of quota". Converting
 *unknown* into *exhausted* spends a whole week of headroom on one bad minute.
+
+PHIA-3803 (below): the same rule for an 'unauthenticated' read, and a transcript that merely quotes a 401
+is not a login failure.
 """
 import os
 import subprocess
@@ -92,6 +95,67 @@ class OtherGateLastAccountTest(unittest.TestCase):
         out, state = note_other_failure(self.log_dir, "solo", "solo", [], times=3)
         self.assertNotIn("solo", state, state)
         self.assertIn("NOT gating", out, out)
+
+
+def classify(text, rc=1):
+    script = f'. "{POOL}"\n_account_pool_classify_failure "$1" "$2"\n'
+    return subprocess.run(["bash", "-c", script, "x", text, str(rc)], capture_output=True,
+                          text=True).stdout.strip()
+
+
+def note_unauth(log_dir, account, accounts, state_lines):
+    state = os.path.join(log_dir, "account-pool-exhausted.state")
+    with open(state, "w") as fh:
+        fh.write("".join(state_lines))
+    log = os.path.join(log_dir, "account-pool.log")
+    env = dict(os.environ, FLEET_LOG_DIR=log_dir, FLEET_ACCOUNTS=accounts, ACCOUNT_POOL_LOG_FILE=log)
+    env.pop("FLEET_MAXX_URL", None)
+    subprocess.run(["bash", "-c", f'. "{POOL}"\n_account_pool_note_unauthenticated "{account}"\n'],
+                   capture_output=True, text=True, env=env)
+    logged = open(log).read() if os.path.exists(log) else ""
+    return logged, open(state).read()
+
+
+class UnauthLastAccountTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.future = int(time.time()) + 3600
+
+    def test_the_last_usable_account_is_not_gated(self):
+        out, state = note_unauth(
+            self.tmp.name, "philanthropy", "philanthropy gmail tgp",
+            [f"gmail {self.future} exhausted\n", f"tgp {self.future} exhausted\n"])
+        self.assertNotIn("philanthropy", state, state)
+        self.assertIn("NOT gating", out, out)
+
+    def test_a_single_account_pool_still_gates_for_readiness(self):
+        """gh#134: a logged-out sole account must read gated so readiness shows the outage."""
+        out, state = note_unauth(self.tmp.name, "acct", "acct", [])
+        self.assertIn("unauthenticated", state, state)
+
+    def test_it_still_gates_when_another_account_is_free(self):
+        out, state = note_unauth(
+            self.tmp.name, "philanthropy", "philanthropy gmail tgp",
+            [f"gmail {self.future} exhausted\n"])
+        self.assertIn("philanthropy", state, state)
+        self.assertIn("unauthenticated", state, state)
+
+
+class ClassifyTest(unittest.TestCase):
+    def test_a_long_transcript_that_quotes_a_401_is_other(self):
+        work = "reviewed the diff, ran the tests\n" * 40
+        self.assertEqual(classify(work + "curl returned HTTP 401 Unauthorized\nfinal: done\n"), "other")
+
+    def test_a_real_login_failure_is_still_unauthenticated(self):
+        self.assertEqual(classify("Invalid API key · Please run /login"), "unauthenticated")
+        self.assertEqual(classify("Not logged in · Please run /login"), "unauthenticated")
+        self.assertEqual(classify('API Error: 401 {"error":{"type":"authentication_error"}}'),
+                         "unauthenticated")
+
+    def test_a_login_failure_after_a_long_preamble_is_still_found(self):
+        self.assertEqual(classify('{"type":"system"}\n' * 80 + "Not logged in · Please run /login"),
+                         "unauthenticated")
 
 
 if __name__ == "__main__":
