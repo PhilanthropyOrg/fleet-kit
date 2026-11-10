@@ -167,6 +167,17 @@ _account_pool_mark_exhausted() {
 # on a human; short enough to self-correct within a work day even if nobody is paged.
 _account_pool_note_unauthenticated() {
   local account="$1" epoch
+  # PHIA-3803: like 'other' (fk#1146), an unauthenticated verdict must never take the LAST usable
+  # account out of the pool. 11-09 18:16 CST philanthropy was the only login with headroom
+  # (gmail and tgp at 100% of the week); one 'unauthenticated' read gated it for an hour, every
+  # pass logged "ALL accounts failed" (rc=3) and judge-judy posted no verdict for 40 minutes.
+  # A login that is really gone fails fast and free ($0, one line) on the next tick, and
+  # account_health_check.sh still pages on time since the last success; a gate on the only
+  # account only turns that into an hour of certain failure.
+  if ! _account_pool_other_account_usable "$account"; then
+    _account_pool_log "account=$account unauthenticated, but every other account is gated -- NOT gating (PHIA-3803: keeping the last account in rotation; if the login is really gone, a human must re-auth)"
+    return 0
+  fi
   epoch=$(( $(date +%s) + 3600 ))
   mkdir -p "$(dirname "$ACCOUNT_POOL_STATE_FILE")" 2>/dev/null
   grep -v "^${account} " "$ACCOUNT_POOL_STATE_FILE" 2>/dev/null > "${ACCOUNT_POOL_STATE_FILE}.tmp" || true
@@ -551,7 +562,17 @@ _account_pool_classify_failure() {
   if grep -qiE "ECONNRESET|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|connection (dropped|error|refused)|no response from api|temporary failure in name resolution|could not resolve host|getaddrinfo" <<<"$out"; then
     echo "network"; return
   fi
-  if grep -qiE "not logged in|please (log|sign) in|invalid api key|unauthorized|token (has been )?revoked|\b401\b" <<<"$out"; then
+  # PHIA-3803 (11-09 18:16-19:16 CST): this match ran over the member's WHOLE transcript, so a
+  # pass that did real work and merely QUOTED a 401 / "Unauthorized" (a curl, a gh error, a test
+  # name, a PR about auth) and then exited non-zero gated the one working login for an hour --
+  # the same self-gating the "rate limit" removal above fixed for the exhausted branch. A real
+  # login failure is the CLI's last words and short. So: the strong login phrases count only in
+  # the tail of the output (where the CLI's own error lands), and the weak ones (a bare 401 or
+  # "unauthorized") only when the whole output is a short one-liner, i.e. no work was done.
+  local tail_out
+  tail_out=$(tail -c 1500 <<<"$out")
+  if grep -qiE "not logged in|please (log|sign) in|please run /login|invalid api key|oauth token (has )?(expired|been revoked)|token (has been )?revoked|authentication_error" <<<"$tail_out" \
+     || { [ "${#out}" -le 600 ] && grep -qiE "unauthorized|\b401\b" <<<"$out"; }; then
     echo "unauthenticated"; return
   fi
   echo "other"
@@ -824,6 +845,8 @@ account_pool_run() {
     fi
     reason=$(_account_pool_classify_failure "$(cat "$capture")" "$rc" "$auth_kind")
     _account_pool_log "account=$account command failed rc=$rc reason=$reason"
+    # PHIA-3803: say WHICH words made it 'unauthenticated', so a wrong gate can be traced to its text.
+    [ "$reason" = "unauthenticated" ] && _account_pool_log "account=$account unauthenticated on: $(grep -iE 'not logged in|please (log|sign) in|please run /login|invalid api key|oauth token|revoked|authentication_error|unauthorized|\b401\b' "$capture" | tail -1 | cut -c1-200)"
     export ACCOUNT_POOL_LAST_REASON="$reason"
     [ -n "${ACCOUNT_POOL_REASON_FILE:-}" ] && printf '%s\n' "$reason" > "$ACCOUNT_POOL_REASON_FILE" 2>/dev/null
     # fk#1752: a network failure gates nothing and is not retried on the next account (the
