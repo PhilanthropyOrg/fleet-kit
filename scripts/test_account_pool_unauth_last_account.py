@@ -46,6 +46,11 @@ class UnauthLastAccountTest(unittest.TestCase):
         self.assertNotIn("philanthropy", state, state)
         self.assertIn("NOT gating", out, out)
 
+    def test_a_single_account_pool_still_gates_for_readiness(self):
+        """gh#134: a logged-out sole account must read gated so readiness shows the outage."""
+        out, state = note_unauth(self.tmp.name, "acct", "acct", [])
+        self.assertIn("unauthenticated", state, state)
+
     def test_it_still_gates_when_another_account_is_free(self):
         out, state = note_unauth(
             self.tmp.name, "philanthropy", "philanthropy gmail tgp",

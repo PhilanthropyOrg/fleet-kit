@@ -174,7 +174,9 @@ _account_pool_note_unauthenticated() {
   # A login that is really gone fails fast and free ($0, one line) on the next tick, and
   # account_health_check.sh still pages on time since the last success; a gate on the only
   # account only turns that into an hour of certain failure.
-  if ! _account_pool_other_account_usable "$account"; then
+  # Only in a pool with a second account: a single-account pool keeps the gh#134 contract (a logged-out
+  # sole account reads gated, so account_readiness.sh shows the outage).
+  if [ "$(wc -w <<<"${ACCOUNT_POOL_ORDER:-}")" -gt 1 ] && ! _account_pool_other_account_usable "$account"; then
     _account_pool_log "account=$account unauthenticated, but every other account is gated -- NOT gating (PHIA-3803: keeping the last account in rotation; if the login is really gone, a human must re-auth)"
     return 0
   fi
