@@ -45,7 +45,7 @@ fi
 
 for repo in $REPOS; do
   [ -n "$repo" ] || continue
-  out="$(python3 "$KIT/scripts/pr_arm_sweep.py" --repo "$repo" --apply-jumps --apply-enqueues --apply-dequeues)" || {
+  out="$(python3 "$KIT/scripts/pr_arm_sweep.py" --repo "$repo" --apply-jumps --apply-enqueues --apply-dequeues --apply-revives)" || {
     log "$repo: pr_arm_sweep.py failed: ${out:0:200}"; continue; }
   # Red main or red queue: the green, reviewed fix:main-red PR was put first in the merge queue (pr_arm_sweep.py
   # should_jump). One line per jump, with the error when GitHub refused it.
@@ -65,6 +65,20 @@ if held:  # the holds the app arm workflow had (fleet-kit#1867): one line, so th
 for q in d.get("dequeue", []):
     print(("queue failed this head %s times, nothing pushed -- took #%s out of the queue" % (q["failures"], q["number"]))
           if q.get("dequeued") else ("queue failed this head %s times -- DEQUEUE #%s FAILED: %s" % (q["failures"], q["number"], q.get("error", "?"))))
+for r in d.get("revive", []):  # PHIA-4110: the queue dropped it for a failure or a conflict; brought back, no human step
+    a, n = r.get("action"), r["number"]
+    if r.get("updated"):
+        print("dropped from the queue -- pushed main into #%s (CI starts; enqueued once the checks pass)" % n)
+    elif a == "fixer":
+        print("dropped from the queue and conflicts with main -- #%s: fixer item %s, author seat told" % (n, r.get("issue") or r.get("error", "already filed")))
+    elif a == "explain":
+        print("queue failed #%s %s times -- red test named: %s" % (n, r.get("failures"), ", ".join(r.get("named") or []) or r.get("error", "none readable")))
+    elif "position" in r:
+        print("dropped from the queue -- re-enqueued #%s at position %s" % (n, r["position"]))
+    elif a == "enqueue":
+        print("dropped from the queue -- ENQUEUE #%s not yet: %s (retried next pass)" % (n, r.get("error", "?")))
+    elif r.get("error"):
+        print("dropped from the queue -- %s #%s FAILED: %s" % (a, n, r["error"]))
 for e in d.get("enqueue", []):
     print(("armed but never queued -- enqueued #%s at position %s" % (e["number"], e["position"]))
           if "position" in e else ("armed but never queued -- ENQUEUE #%s FAILED: %s" % (e["number"], e.get("error", "?"))))' 2>/dev/null \

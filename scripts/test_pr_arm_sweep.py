@@ -603,6 +603,8 @@ def _tl(*events):
             nodes.append({"__typename": "PullRequestCommit", "commit": {"committedDate": at}})
         elif kind == "force":
             nodes.append({"__typename": "HeadRefForcePushedEvent", "createdAt": at})
+        elif kind == "added":
+            nodes.append({"__typename": "AddedToMergeQueueEvent", "createdAt": at})
     return {"timelineItems": {"nodes": nodes}}
 
 
@@ -837,7 +839,8 @@ def test_sweep_shell_disarms_with_repo_outside_a_checkout():
         (kit / "pr_arm_sweep.py").write_text(
             'import json; print(json.dumps({"arm": [], "disarm": [7], "skipped": ['
             '{"number": 8, "why": "a human took it out of the merge queue and nothing was pushed since"},'
-            '{"number": 9, "why": "hold label needs:design-review"}, {"number": 10, "why": "draft"}]}))\n')
+            '{"number": 9, "why": "hold label needs:design-review"}, {"number": 10, "why": "draft"}],'
+            '"revive": [{"number": 16340, "action": "enqueue", "position": 4}, {"number": 5, "action": "enqueue", "error": "x"}]}))\n')
         bindir = tmp / "bin"
         bindir.mkdir()
         (bindir / "gh").write_text('#!/usr/bin/env bash\necho "$*" >> "$GH_LOG"\n')
@@ -851,6 +854,176 @@ def test_sweep_shell_disarms_with_repo_outside_a_checkout():
         assert "disarmed #7" in out, out
         assert "held -- #8 (human dequeue), #9 (hold label needs:design-review)" in out, out
         assert "pr merge 7 --disable-auto -R o/r" in (tmp / "gh.log").read_text()
+        assert "re-enqueued #16340 at position 4" in out and "ENQUEUE #5 not yet" in out, out
+
+
+# PHIA-4110 (philanthropy 11-10 to 11-11): PR 16340 (the new HQ sidebar, approved) stayed out of main 17 hours; the queue
+# dropped it for failed_checks and merge_conflict and nothing brought it back, a human re-merged main and re-queued it
+# each time. Replay: dropped for a conflict, main merged clean, checks green: it re-enters with no human step.
+REV_REQUIRED = ["test", "lint", "fleet-code-review"]
+
+
+def _rev_pr(number=16340, *, mergeable="MERGEABLE", checks=(("test", "SUCCESS"), ("lint", "SUCCESS"),
+            ("fleet-code-review", "SUCCESS")), head="aaa111", draft=False, labels=(), branch="hq-rail-reth"):
+    pr = _pr(number, age_h=17.0, draft=draft, labels=labels, mergeable=mergeable, checks=checks)
+    pr.update(id=f"PR_{number}", headRefOid=head, headRefName=branch)
+    return pr
+
+
+def _rev_tl(*events, number=16340):
+    return dict(_tl(*events), number=number, author={"login": "reif-y"})
+
+
+def test_queue_history_reads_the_last_removal_and_what_came_after():
+    conflict = _rev_tl(("commit", "2026-11-11T12:21:13Z"), ("removed", "2026-11-11T14:42:07Z", "merge_conflict"))
+    h = pr_arm_sweep.queue_history([conflict])
+    assert h[16340]["reason"] == "merge_conflict" and h[16340]["pushed"] is False and h[16340]["fails"] == 0, h
+    pushed = _rev_tl(("removed", "2026-11-11T13:23:58Z", "failed_checks"), ("commit", "2026-11-11T14:59:12Z"))
+    assert pr_arm_sweep.queue_history([pushed])[16340] == dict(
+        reason="failed_checks", at=pr_arm_sweep._ts("2026-11-11T13:23:58Z"), pushed=True, fails=0, author="reif-y")
+    readded = _rev_tl(("removed", "2026-11-11T13:23:58Z", "failed_checks"), ("added", "2026-11-11T13:27:08Z"))
+    assert pr_arm_sweep.queue_history([readded]) == {}, "in the queue again: nothing to revive"
+    twice = _rev_tl(("removed", "2026-11-11T04:11:10Z", "failed_checks"), ("removed", "2026-11-11T04:29:03Z", "failed_checks"))
+    assert pr_arm_sweep.queue_history([twice])[16340]["fails"] == 2
+
+
+def test_16340_dropped_for_a_conflict_re_enters_with_no_human_step():
+    hist = pr_arm_sweep.queue_history([_rev_tl(("commit", "2026-11-11T12:21:13Z"),
+                                               ("removed", "2026-11-11T14:42:07Z", "merge_conflict"))])
+    state: dict = {}
+    calls = []
+    fake_issue = lambda repo, n, branch, author, head: calls.append(("issue", n)) or "#77"  # noqa: E731
+    fake_comment = lambda repo, n, body: calls.append(("comment", n, body))  # noqa: E731
+    saved = pr_arm_sweep.revive_state_save
+    pr_arm_sweep.revive_state_save = lambda st, path=None: None
+    try:
+        # 1. it conflicts with main: one fixer item and one comment to the author seat, then never again
+        out = pr_arm_sweep.sweep([_rev_pr(mergeable="CONFLICTING")], REV_REQUIRED, NOW_TS, queue={}, revive_hist=hist,
+                                 revive_state=state)
+        assert [r["action"] for r in out["revive"]] == ["fixer"], out
+        pr_arm_sweep.apply_revives("o/r", out["revive"], state, issue=fake_issue, comment=fake_comment)
+        assert [c[0] for c in calls] == ["issue", "comment"] and "conflicts with main" in calls[1][2], calls
+        again = pr_arm_sweep.sweep([_rev_pr(mergeable="CONFLICTING")], REV_REQUIRED, NOW_TS, queue={}, revive_hist=hist,
+                                   revive_state=state)
+        assert again["revive"] == [] and "already reported" in again["revive_wait"][0]["why"], again
+        # 2. main is merged in clean (a new head): checks still running, so it waits, and nothing is filed
+        hist2 = pr_arm_sweep.queue_history([_rev_tl(("removed", "2026-11-11T14:42:07Z", "merge_conflict"),
+                                                    ("commit", "2026-11-11T14:59:12Z"))])
+        pending = _rev_pr(head="bbb222", checks=(("test", "IN_PROGRESS"), ("lint", "SUCCESS"), ("fleet-code-review", "SUCCESS")))
+        wait = pr_arm_sweep.sweep([pending], REV_REQUIRED, NOW_TS, queue={}, revive_hist=hist2, revive_state=state)
+        assert wait["revive"] == [] and "test" in wait["revive_wait"][0]["why"], wait
+        # 3. the checks pass: it is enqueued at the back, pinned to the green head, with no human step
+        green = pr_arm_sweep.sweep([_rev_pr(head="bbb222")], REV_REQUIRED, NOW_TS, queue={}, revive_hist=hist2,
+                                   revive_state=state)
+        assert [(r["action"], r["head"]) for r in green["revive"]] == [("enqueue", "bbb222")], green
+        assert green["enqueue"] == [] and green["arm"] == [], "one owner per PR"
+        gql = lambda q, **v: {"data": {"enqueuePullRequest": {"mergeQueueEntry": {"position": 4}}}}  # noqa: E731
+        pr_arm_sweep.apply_revives("o/r", green["revive"], state, gql=gql)
+        assert green["revive"][0]["position"] == 4, green
+        # the enqueue fails until the checks finish: recorded, retried next pass
+        boom = lambda q, **v: (_ for _ in ()).throw(RuntimeError("checks not finished"))  # noqa: E731
+        pr_arm_sweep.apply_revives("o/r", green["revive"], state, gql=boom)
+        assert "checks not finished" in green["revive"][0]["error"]
+    finally:
+        pr_arm_sweep.revive_state_save = saved
+
+
+def test_revive_pushes_main_into_a_clean_head_under_a_daily_cap():
+    hist = pr_arm_sweep.queue_history([_rev_tl(("removed", "2026-11-11T14:42:07Z", "merge_conflict"))])
+    pr = _rev_pr()
+    out = pr_arm_sweep.sweep([pr], REV_REQUIRED, NOW_TS, queue={}, revive_hist=hist, behind=lambda p: 3)
+    assert [r["action"] for r in out["revive"]] == ["update"], out
+    state, pushed = {}, []
+    saved = pr_arm_sweep.revive_state_save
+    pr_arm_sweep.revive_state_save = lambda st, path=None: None
+    try:
+        pr_arm_sweep.apply_revives("o/r", out["revive"], state, now=NOW_TS,
+                                   update=lambda repo, n, head: pushed.append((n, head)) or (True, ""))
+        assert pushed == [(16340, "aaa111")] and state["16340"]["updates"] == [NOW_TS], (pushed, state)
+        # a conflict found at push time is the conflict path, filed once
+        calls = []
+        pr_arm_sweep.apply_revives("o/r", [dict(out["revive"][0])], {}, now=NOW_TS,
+                                   update=lambda repo, n, head: (False, "merge conflict between base and head"),
+                                   issue=lambda *a: "#9", comment=lambda repo, n, body: calls.append(body))
+        assert calls and "conflicts with main" in calls[0], calls
+    finally:
+        pr_arm_sweep.revive_state_save = saved
+    # cap: three pushes in 24 h, then it goes on to the enqueue instead of chasing main
+    capped = {"16340": {"updates": [NOW_TS - 60, NOW_TS - 120, NOW_TS - 180]}}
+    out = pr_arm_sweep.sweep([pr], REV_REQUIRED, NOW_TS, queue={}, revive_hist=hist, revive_state=capped,
+                             behind=lambda p: 3)
+    assert [r["action"] for r in out["revive"]] == ["enqueue"], out
+
+
+def test_revive_names_the_test_the_queue_failed_twice():
+    hist = pr_arm_sweep.queue_history([_rev_tl(("commit", "2026-11-10T23:19:06Z"),
+                                               ("removed", "2026-11-11T12:37:47Z", "failed_checks"),
+                                               ("removed", "2026-11-11T13:23:58Z", "failed_checks"))])
+    out = pr_arm_sweep.sweep([_rev_pr()], REV_REQUIRED, NOW_TS, queue={}, revive_hist=hist, behind=lambda p: 5)
+    assert [r["action"] for r in out["revive"]] == ["explain"], out  # twice: only a fix helps, main is not merged again
+    runs = {"workflow_runs": [
+        {"id": 2, "head_sha": "g2", "head_branch": "gh-readonly-queue/main/pr-16340-g2", "conclusion": "failure"},
+        {"id": 9, "head_sha": "x9", "head_branch": "gh-readonly-queue/main/pr-16341-x9", "conclusion": "failure"},
+        {"id": 1, "head_sha": "g1", "head_branch": "gh-readonly-queue/main/pr-16340-g1", "conclusion": "failure"}]}
+    jobs = {2: {"jobs": [{"id": 22, "name": "test", "conclusion": "failure"}, {"id": 23, "name": "lint", "conclusion": "success"}]},
+            1: {"jobs": [{"id": 11, "name": "test", "conclusion": "failure"}]}}
+    logs = {22: "FAILED tests/test_hq_crawl.py::test_rail_rows - AssertionError\nFAILED tests/test_other.py::test_b - x",
+            11: "FAILED tests/test_hq_crawl.py::test_rail_rows - AssertionError"}
+
+    def api(path):
+        if "/jobs" in path:
+            return jobs[int(path.split("/runs/")[1].split("/")[0])]
+        return runs
+    groups = pr_arm_sweep.merge_group_reds("o/r", 16340, api=api, log_of=lambda repo, jid: logs[jid])
+    assert len(groups) == 2 and pr_arm_sweep.common_red(groups) == {"tests/test_hq_crawl.py::test_rail_rows"}, groups
+    note = pr_arm_sweep.explain_note(2, groups)
+    assert "`tests/test_hq_crawl.py::test_rail_rows`" in note and "the same red each time" in note, note
+    posted, state = [], {}
+    saved = pr_arm_sweep.revive_state_save
+    pr_arm_sweep.revive_state_save = lambda st, path=None: None
+    try:
+        pr_arm_sweep.apply_revives("o/r", out["revive"], state, comment=lambda repo, n, body: posted.append(body),
+                                   reds=lambda repo, n: groups)
+    finally:
+        pr_arm_sweep.revive_state_save = saved
+    assert len(posted) == 1 and out["revive"][0]["named"] == ["tests/test_hq_crawl.py::test_rail_rows"], (posted, out)
+    again = pr_arm_sweep.sweep([_rev_pr()], REV_REQUIRED, NOW_TS, queue={}, revive_hist=hist, revive_state=state)
+    assert again["revive"] == [], "named once per head"
+    # a read error never names a test and never raises
+    assert pr_arm_sweep.merge_group_reds("o/r", 16340, api=lambda p: (_ for _ in ()).throw(RuntimeError("x"))) == []
+    assert "could not be read" in pr_arm_sweep.explain_note(2, [])
+
+
+def test_revive_leaves_drafts_human_dequeues_holds_and_blocked_heads_alone():
+    conflict = _rev_tl(("removed", "2026-11-11T14:42:07Z", "merge_conflict"))
+    manual = _rev_tl(("removed", "2026-11-11T14:42:07Z", "manual"))
+    once = _rev_tl(("removed", "2026-11-11T14:42:07Z", "failed_checks"))
+    hist, mhist, ohist = (pr_arm_sweep.queue_history([x]) for x in (conflict, manual, once))
+    def acts(pr, h=hist, **kw):
+        return [r["action"] for r in pr_arm_sweep.sweep([pr], REV_REQUIRED, NOW_TS, queue={}, revive_hist=h, **kw)["revive"]]
+    assert acts(_rev_pr()) == ["enqueue"]
+    assert acts(_rev_pr(draft=True)) == []
+    assert acts(_rev_pr(labels=["do-not-merge"])) == []
+    assert acts(_rev_pr(), mhist) == [], "a manual (human) dequeue is held"
+    assert acts(_rev_pr(), dequeued=lambda n: True) == [], "a human dequeue on the timeline holds"
+    assert acts(_rev_pr(checks=(("test", "SUCCESS"), ("lint", "SUCCESS"), ("fleet-code-review", "FAILURE")))) == []
+    assert acts(_rev_pr(mergeable="UNKNOWN")) == []
+    assert acts(_rev_pr(), ohist) == [], "failed once, nothing pushed, main did not move: the existing hold stands"
+    assert acts(_rev_pr(), ohist, behind=lambda p: 2) == ["update"], "main moved: one retry on a fresh head"
+    assert pr_arm_sweep.sweep([_rev_pr()], REV_REQUIRED, NOW_TS, queue={16340: 2}, revive_hist=hist)["revive"] == []
+    assert pr_arm_sweep.sweep([_rev_pr()], REV_REQUIRED, NOW_TS, queue={}, revive_hist={})["revive"] == []
+    # a red or running head is not pushed to (it only restarts CI); a manual dequeue frees on a push, and old drops are parked
+    assert acts(_rev_pr(checks=(("test", "IN_PROGRESS"), ("lint", "SUCCESS"), ("fleet-code-review", "SUCCESS"))),
+                behind=lambda p: 4) == []
+    assert acts(_rev_pr(checks=(("test", "FAILURE"), ("lint", "SUCCESS"), ("fleet-code-review", "SUCCESS"))),
+                behind=lambda p: 4) == []
+    freed = pr_arm_sweep.queue_history([_rev_tl(("removed", "2026-11-11T14:42:07Z", "manual"), ("commit", "2026-11-11T14:59:12Z"))])
+    assert acts(_rev_pr(), freed) == ["enqueue"], "16340 today: a person dequeued, then pushed"
+    old = pr_arm_sweep.queue_history([_rev_tl(("removed", "2026-09-01T14:42:07Z", "merge_conflict"))])
+    assert acts(_rev_pr(), old) == [], "dropped 11 days before the sweep: parked"
+    assert pr_arm_sweep.author_seat("jobs/phia-2495-x", "reif-y") == "jobs"
+    assert pr_arm_sweep.author_seat("hq-rail-reth", "reif-y") == "reif-y"
+
 
 
 for _name, _fn in sorted((n, f) for n, f in list(globals().items()) if n.startswith("test_")):
