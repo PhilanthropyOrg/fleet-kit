@@ -500,14 +500,266 @@ def held_by_manual_dequeue(events) -> bool:
     return held
 
 
+# PHIA-4110 (philanthropy 11-10 22:33Z to 11-11 ~15:00Z): PR 16340 (the new HQ sidebar, approved) sat out of main 17 hours.
+# The queue dropped it for failed_checks and merge_conflict, and nothing brought it back: the sweep held a failed head
+# ("push a fix"), skipped a conflicting one, and a human re-merged main and re-queued it by hand each time. A PR the
+# queue dropped for one of those two reasons (never a human's `manual` dequeue) is now REVIVED, one owner per PR:
+#   * clean and behind main -> push main into the head (update-branch under the arm PAT, so CI starts), cap per day;
+#   * green and reviewed    -> enqueue at the back, retried every pass (the mutation fails until checks finish: expected);
+#   * conflicts with main   -> one the-fixer issue and one PR comment to the author seat per head, never again;
+#   * the queue failed the same head twice -> one comment that NAMES the red test, not only "push a fix".
+REVIVE_REASONS = ("failed_checks", "merge_conflict")
+REVIVE_UPDATES_MAX = 3
+REVIVE_WINDOW_SEC = 24 * 3600
+REVIVE_MAX_AGE_H = 72.0
+REVIVE_STATE = os.environ.get("FLEET_REVIVE_STATE", "/var/log/fleet-kit/pr_revive_state.json")
+_QUEUE_HISTORY = ("query($o:String!,$n:String!){repository(owner:$o,name:$n){pullRequests(states:OPEN,"
+                  "first:100,orderBy:{field:UPDATED_AT,direction:DESC}){nodes{number author{login} timelineItems(last:50,"
+                  "itemTypes:[REMOVED_FROM_MERGE_QUEUE_EVENT,ADDED_TO_MERGE_QUEUE_EVENT,PULL_REQUEST_COMMIT,"
+                  "HEAD_REF_FORCE_PUSHED_EVENT]){nodes{__typename ... on RemovedFromMergeQueueEvent{createdAt reason}"
+                  " ... on AddedToMergeQueueEvent{createdAt}}}}}}}")
+
+
+def queue_history(nodes) -> dict[int, dict]:
+    """Pure: {PR number: {reason, at, pushed, fails, author}} for each PR (GraphQL node, timeline oldest
+    first) whose LAST queue event is a removal. `pushed`: a commit or force-push came after it. `fails`:
+    failed_checks removals since the last push. A PR added back after its removal is in the queue: absent."""
+    out: dict[int, dict] = {}
+    for pr in nodes or []:
+        last, fails = None, 0
+        for ev in ((pr or {}).get("timelineItems") or {}).get("nodes") or []:
+            kind = ev.get("__typename")
+            if kind == "RemovedFromMergeQueueEvent":
+                reason = (ev.get("reason") or "").lower()
+                fails += reason == "failed_checks"
+                last = {"reason": reason, "at": _ts(ev.get("createdAt")), "pushed": False}
+            elif kind == "AddedToMergeQueueEvent":
+                last = None
+            elif kind in ("PullRequestCommit", "HeadRefForcePushedEvent"):
+                fails = 0
+                if last:
+                    last["pushed"] = True
+        if last and (pr or {}).get("number"):
+            out[pr["number"]] = dict(last, fails=fails, author=((pr.get("author") or {}).get("login")))
+    return out
+
+
+def should_revive(pr: dict, required: list[str], hist: dict | None, main_is_red: bool = False,
+                  st: dict | None = None, now: float | None = None, behind: int = 0) -> tuple[str | None, str]:
+    """Pure: what to do for an open PR the queue dropped. Returns (action, why); action is one of
+    enqueue, update, fixer, explain, or None (leave it to the other rules, why says what it waits on).
+    `st` is this PR's saved state (updates: [unix time], fixer: head, explained: head); `behind` is how
+    many commits the head is behind main (read only for a candidate)."""
+    st, now = st or {}, time.time() if now is None else now
+    reason = (hist or {}).get("reason")
+    # `manual` is a person's dequeue: it holds until a push frees it (held_by_manual_dequeue), then the PR is theirs to finish.
+    if not hist or not (reason in REVIVE_REASONS or (reason == "manual" and hist.get("pushed"))):
+        return None, "not dropped from the queue for a failure or a conflict"
+    if (now - (hist.get("at") or now)) / 3600.0 > REVIVE_MAX_AGE_H:
+        return None, f"dropped more than {REVIVE_MAX_AGE_H:.0f} h ago: parked, not stuck"
+    if (pr.get("state") or "OPEN").upper() != "OPEN" or pr.get("isDraft"):
+        return None, "not an open, ready PR"
+    labels = _label_names(pr.get("labels"))
+    if labels & HOLD_LABELS:
+        return None, "hold label"
+    if main_is_red and FIX_LABEL not in labels:
+        return None, f"main is red: only the fix enters the queue (label {FIX_LABEL})"
+    if _check_state(pr, REVIEW_CHECK) in ("FAILURE", "ERROR"):
+        return None, "judge-judy blocked this head"
+    head = pr.get("headRefOid") or ""
+    if not pr.get("id") or not head:
+        return None, "no PR id or head sha to pin to"
+    mergeable = (pr.get("mergeable") or "").upper()
+    if mergeable == "CONFLICTING":
+        if st.get("fixer") == head:
+            return None, "conflict already reported for this head"
+        return "fixer", "conflicts with main: a fixer and the author seat get it once"
+    if mergeable != "MERGEABLE":
+        return None, f"mergeable is {pr.get('mergeable') or 'unknown'}: waiting"
+    unpushed_fail = reason == "failed_checks" and not hist.get("pushed")
+    not_ready = _not_green_and_reviewed(pr, required)
+    if unpushed_fail and hist.get("fails", 0) >= 2:
+        # Only a real fix helps a head the queue failed twice; merging main again just fails a third time (16340: 8 runs).
+        if st.get("explained") == head:
+            return None, "the red test was already named for this head"
+        return "explain", f"the queue failed this head {hist['fails']} times: name the red test"
+    # Merge main only into a head that already passed its own checks and review (a red or running head is the fixer's
+    # or CI's: a push there only restarts CI), and at most REVIVE_UPDATES_MAX times a day, so a fast-moving main is not chased.
+    if behind > 0 and not not_ready:
+        recent = [t for t in st.get("updates") or [] if now - t < REVIVE_WINDOW_SEC]
+        if len(recent) < REVIVE_UPDATES_MAX:
+            return "update", f"clean and {behind} commit(s) behind main: push main into the head"
+    if unpushed_fail:
+        return None, "the queue failed this head once: push a fix (or main moves on)"
+    if not_ready:
+        return None, not_ready
+    return "enqueue", "dropped from the queue, now green and reviewed: back in line"
+
+
+_FAILED_ID = re.compile(r"(?:FAILED|ERROR)\s+(tests?/[^\s]+?::[^\s]+)")
+
+
+def failed_ids_from_log(text: str) -> set[str]:
+    """Pure: the pytest ids a CI log says failed ("FAILED tests/test_x.py::test_y - reason")."""
+    return set(_FAILED_ID.findall(text or ""))
+
+
+def common_red(groups: list[set]) -> set[str]:
+    """Pure: what was red in each of the newest two failed merge groups (`groups` newest first)."""
+    return set.intersection(*[set(g) for g in groups[:2]]) if len(groups) >= 2 else set()
+
+
+def red_clause(groups: list[set]) -> str:
+    """Pure: which test was red in the failed merge groups (`groups` newest first), in words."""
+    common = sorted(common_red(groups))
+    if common:
+        return "the same red each time: " + ", ".join(f"`{c}`" for c in common[:6])
+    if groups:
+        return "the last failure was " + ", ".join(f"`{c}`" for c in sorted(groups[0])[:6]) + " (it differs from the one before)"
+    return "the failing job could not be read from the merge-group runs"
+
+
+def explain_note(failures: int, groups: list[set]) -> str:
+    """Pure: the comment for a head the queue failed again and again, naming the red test."""
+    return (f"pr_arm_sweep: the merge queue failed this head {failures} times with nothing pushed since; "
+            f"{red_clause(groups)}. Push a fix (a new commit) and it re-enters the queue on its own once the checks pass.")
+
+
+def merge_group_reds(repo: str, number: int, limit: int = 2, api=None, log_of=None) -> list[set]:
+    """Newest first: what failed in each of the PR's last `limit` finished merge-group heads: `job` names, and
+    the pytest ids from a `test*` job's log. [] on a read error."""
+    api = api or _api
+    log_of = log_of or _job_log
+    try:
+        runs = api(f"repos/{repo}/actions/runs?event=merge_group&status=completed&per_page=100")["workflow_runs"]
+        mine = f"/pr-{number}-"
+        order: list[str] = []
+        failed: dict[str, set] = {}
+        for r in runs or []:
+            if mine not in (r.get("head_branch") or "") or r.get("conclusion") != "failure":
+                continue
+            sha = r.get("head_sha")
+            if sha not in failed:
+                if len(order) == limit:
+                    break
+                order.append(sha)
+                failed[sha] = set()
+            for j in api(f"repos/{repo}/actions/runs/{r['id']}/jobs?per_page=100")["jobs"] or []:
+                if j.get("conclusion") != "failure":
+                    continue
+                ids = failed_ids_from_log(log_of(repo, j["id"])) if (j.get("name") or "").startswith("test") else set()
+                failed[sha] |= ids or {f"job {j.get('name')}"}
+        return [failed[s] for s in order]
+    except (RuntimeError, ValueError, KeyError, OSError, subprocess.SubprocessError):
+        return []
+
+
+def _job_log(repo: str, job_id: int) -> str:
+    out = subprocess.run(["gh", "api", f"repos/{repo}/actions/jobs/{job_id}/logs"],
+                         capture_output=True, text=True, timeout=120)
+    return out.stdout[-1_000_000:] if out.returncode == 0 else ""
+
+
+def revive_state_load(path: str = REVIVE_STATE) -> dict:
+    try:
+        d = json.loads(Path(path).read_text())
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def revive_state_save(state: dict, path: str = REVIVE_STATE) -> None:
+    try:
+        Path(path).write_text(json.dumps(state, sort_keys=True))
+    except OSError:
+        pass  # no state: the worst case is one repeated comment, never a loop of pushes (the cap re-reads next pass)
+
+
+def queue_history_prs(repo: str, gql=None) -> dict[int, dict]:
+    """queue_history for the repo's open PRs; {} on a read error (nothing is revived)."""
+    owner, name = repo.split("/", 1)
+    try:
+        data = (gql or _graphql)(_QUEUE_HISTORY, o=owner, n=name)
+        return queue_history((((data.get("data") or {}).get("repository") or {})
+                              .get("pullRequests") or {}).get("nodes"))
+    except (RuntimeError, ValueError, KeyError, OSError, subprocess.SubprocessError):
+        return {}
+
+
+def behind_by(repo: str, branch: str, head: str) -> int:
+    """Commits the head is behind the branch; 0 on a read error (no push is made on a guess)."""
+    out = subprocess.run(["gh", "api", f"repos/{repo}/compare/{branch}...{head}", "--jq", ".behind_by"],
+                         capture_output=True, text=True, timeout=60)
+    try:
+        return int(out.stdout.strip() or 0) if out.returncode == 0 else 0
+    except ValueError:
+        return 0
+
+
+def update_branch(repo: str, number: int, head: str) -> tuple[bool, str]:
+    """Merge main into the PR head under the arm PAT (a GITHUB_TOKEN push would start no CI). A 422 is a conflict."""
+    out = subprocess.run(["gh", "api", "-X", "PUT", f"repos/{repo}/pulls/{number}/update-branch",
+                          "-f", f"expected_head_sha={head}"], capture_output=True, text=True, timeout=120)
+    return out.returncode == 0, (out.stderr or out.stdout).strip()[:300]
+
+
+_SEAT = re.compile(r"^([a-z][a-z0-9-]*)/")
+
+
+def author_seat(branch: str, author: str | None) -> str:
+    """Pure: the seat that owns a PR: the branch prefix (`jobs/phia-2495-x` is Jobs); else the PR author login."""
+    m = _SEAT.match(branch or "")
+    return m.group(1) if m else (author or "the PR author")
+
+
+def conflict_issue(number: int, branch: str, author: str | None, head: str) -> tuple[str, str]:
+    """Pure: (title, body) of the one the-fixer item for a PR the queue dropped on a conflict."""
+    seat = author_seat(branch, author)
+    title = f"the-fixer: PR #{number} left the merge queue on a conflict with main"
+    body = (f"PR #{number} (branch `{branch}`, head `{head[:12]}`, seat `{seat}`) was dropped from the merge queue and now "
+            "conflicts with main, so nothing can re-queue it. Merge main into the branch, resolve the conflict, push. "
+            "pr_arm_sweep enqueues it again on its own once the checks pass. Filed once per head by pr_arm_sweep "
+            "(PHIA-4110); it files nothing more for this head.")
+    return title, body
+
+
+def ensure_fixer_issue(repo: str, number: int, branch: str, author: str | None, head: str) -> str:
+    """File the conflict item once: an open item with the same title is reused. Returns its URL or number."""
+    title, body = conflict_issue(number, branch, author, head)
+    found = subprocess.run(["gh", "issue", "list", "--repo", repo, "--state", "open", "--search",
+                            f'"{title}" in:title', "--json", "number,title"], capture_output=True, text=True, timeout=120)
+    try:
+        for i in json.loads(found.stdout or "[]"):
+            if i.get("title") == title:
+                return f"#{i['number']} (already open)"
+    except ValueError:
+        pass
+    made = subprocess.run(["gh", "issue", "create", "--repo", repo, "--title", title, "--body", body],
+                          capture_output=True, text=True, timeout=120)
+    if made.returncode != 0:
+        raise RuntimeError(f"gh issue create failed: {made.stderr.strip()[:300]}")
+    return made.stdout.strip()
+
+
+def conflict_note(branch: str, author: str | None, issue: str) -> str:
+    """Pure: the PR comment to the author seat."""
+    return (f"pr_arm_sweep: to seat `{author_seat(branch, author)}`: the merge queue dropped this PR and it now "
+            f"conflicts with main. Merge main into the branch, resolve it, push; the sweep enqueues it once the checks pass. "
+            f"Fixer item: {issue}. Said once for this head.")
+
+
 def sweep(prs: list[dict], required: list[str], now: float | None = None,
           min_age_min: float = MIN_AGE_MIN, main_is_red: bool = False,
           queue: dict | None = None, queue_is_red: bool = False,
           queue_failed: dict | None = None, failing: set | None = None,
-          files_of=None, dequeued=None, repeat_failed: dict | None = None) -> dict:
+          files_of=None, dequeued=None, repeat_failed: dict | None = None,
+          revive_hist: dict | None = None, revive_state: dict | None = None, behind=None) -> dict:
     """`dequeued(number)` -> True when a human dequeue still holds the PR; asked only of a PR the
-    sweep would otherwise arm, jump or enqueue (one timeline read each)."""
+    sweep would otherwise arm, jump or enqueue (one timeline read each). `revive_hist` (queue_history) names
+    the PRs the queue dropped; each is revived or left to the rules below, never both (PHIA-4110).
+    `behind(pr)` -> commits the head is behind main, asked only of a candidate."""
     arm, skip, jump, enqueue, disarm, dequeue = [], [], [], [], [], []
+    revive, revive_wait = [], []
     for pr in prs:
         n = pr.get("number")
         queued = (queue or {}).get(n) is not None
@@ -522,6 +774,19 @@ def sweep(prs: list[dict], required: list[str], now: float | None = None,
         held_red = main_is_red and not is_fix(pr, failing, files_of)
         if held_red and pr.get("autoMergeRequest") and not queued:
             disarm.append(n)
+        if not queued and n in (revive_hist or {}):
+            can_update = behind and not pr.get("isDraft") and (pr.get("mergeable") or "").upper() == "MERGEABLE" \
+                and revive_hist[n].get("reason") in REVIVE_REASONS
+            act, rwhy = should_revive(pr, required, revive_hist[n], held_red, (revive_state or {}).get(str(n)), now,
+                                      behind(pr) if can_update else 0)
+            if act and dequeued is not None and dequeued(n):
+                act, rwhy = None, "a human took it out of the merge queue and nothing was pushed since"
+            if act:
+                revive.append({"number": n, "id": pr.get("id"), "head": pr.get("headRefOid"), "action": act,
+                               "why": rwhy, "branch": pr.get("headRefName") or "", "author": revive_hist[n].get("author"),
+                               "failures": revive_hist[n].get("fails", 0)})
+                continue
+            revive_wait.append({"number": n, "why": rwhy})
         # 2026-11-03: the fixed arm step re-armed #15093 and #15000, heads the queue had already
         # failed and thrown out. Back in line, each fails again and reds the groups behind it.
         # Same verdict pick_launch_jump honours: the queue failed this head and nothing was pushed
@@ -548,7 +813,7 @@ def sweep(prs: list[dict], required: list[str], now: float | None = None,
         elif go_e:
             enqueue.append({"number": n, "id": pr.get("id"), "head": pr.get("headRefOid"), "why": ewhy})
     return {"arm": [a["number"] for a in arm], "armed_why": arm, "skipped": skip, "jump": jump,
-            "enqueue": enqueue, "disarm": disarm, "dequeue": dequeue}
+            "enqueue": enqueue, "disarm": disarm, "dequeue": dequeue, "revive": revive, "revive_wait": revive_wait}
 
 
 def _gh(args: list[str], repo: str) -> object:
@@ -731,6 +996,47 @@ def jump_to_front(pr_id: str, head: str, gql=_graphql, recheck=None) -> int:
     return pos
 
 
+def _comment(repo: str, number: int, body: str) -> None:
+    subprocess.run(["gh", "pr", "comment", str(number), "--body", body, "--repo", repo],
+                   capture_output=True, text=True, timeout=120, check=False)
+
+
+def apply_revives(repo: str, revives: list[dict], state: dict, now: float | None = None, gql=None,
+                  update=None, issue=None, comment=None, reds=None) -> None:
+    """Act on each `revive` entry (seams are injectable for the test); records the outcome on the entry and saves state."""
+    now = time.time() if now is None else now
+    update, issue, comment = update or update_branch, issue or ensure_fixer_issue, comment or _comment
+    for r in revives:
+        st = state.setdefault(str(r["number"]), {})
+        act = r["action"]
+        try:
+            if act == "update":
+                ok, msg = update(repo, r["number"], r["head"])
+                if ok:
+                    st["updates"] = [t for t in st.get("updates") or [] if now - t < REVIVE_WINDOW_SEC] + [now]
+                    r["updated"] = True
+                    continue
+                if "conflict" not in msg.lower():
+                    r["error"] = msg
+                    continue
+                act = "fixer"  # GitHub found the merge conflicts after all
+            if act == "enqueue":
+                r["position"] = enqueue_at_back(r["id"], r["head"], gql or _graphql)
+            elif act == "fixer":
+                if st.get("fixer") != r["head"]:
+                    r["issue"] = issue(repo, r["number"], r["branch"], r["author"], r["head"])
+                    comment(repo, r["number"], conflict_note(r["branch"], r["author"], r["issue"]))
+                    st["fixer"] = r["head"]
+            elif act == "explain":
+                groups = (reds or merge_group_reds)(repo, r["number"])
+                comment(repo, r["number"], explain_note(r["failures"], groups))
+                r["named"] = sorted(common_red(groups))
+                st["explained"] = r["head"]
+        except (RuntimeError, ValueError, OSError, subprocess.SubprocessError) as exc:
+            r["error"] = str(exc)[:300]  # an enqueue before the checks finish lands here; the next pass retries it
+    revive_state_save(state)
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(
         description="Print the open PRs that are green, unarmed and safe to arm, as JSON. "
@@ -745,6 +1051,9 @@ def main(argv=None) -> int:
                     help="put each PR in `jump` (main red, the green reviewed fix) first in the queue")
     ap.add_argument("--apply-dequeues", action="store_true",
                     help="take each PR in `dequeue` (head failed in the queue again with no push) out of the queue")
+    ap.add_argument("--apply-revives", action="store_true",
+                    help="bring back each PR in `revive` (the queue dropped it for a failure or a conflict): push main, "
+                         "enqueue, file the conflict once, name the red test once")
     ap.add_argument("--queue-failed", action="store_true",
                     help="print only the open PRs the merge queue failed with nothing pushed since, space-separated")
     a = ap.parse_args(argv)
@@ -776,10 +1085,13 @@ def main(argv=None) -> int:
         if n not in held:
             held[n] = dequeue_held(a.repo, n)
         return held[n]
+    rstate = revive_state_load()
     result = sweep(prs, required, min_age_min=a.min_age_min,
                    main_is_red=red, queue=queue, queue_is_red=bool(qred), queue_failed=qfailed,
                    failing=failing_tests(items), files_of=lambda n: pr_files(a.repo, n),
-                   dequeued=dequeued, repeat_failed=rfailed)
+                   dequeued=dequeued, repeat_failed=rfailed,
+                   revive_hist=queue_history_prs(a.repo), revive_state=rstate,
+                   behind=lambda pr: behind_by(a.repo, a.branch, pr.get("headRefOid") or ""))
     def at(n):  # re-read one PR's queue position (the mutation's own answer can be stale)
         return lambda: (queue_positions(a.repo, a.branch) or {}).get(n)
     if a.apply_dequeues:
@@ -791,7 +1103,8 @@ def main(argv=None) -> int:
                 d["error"] = str(exc)[:300]
                 continue
             note = (f"pr_arm_sweep: the merge queue failed this head {d['failures']} times with nothing pushed "
-                    "since, so it is out of the queue. Push a fix (a new commit) and it re-enters.")
+                    "since, so it is out of the queue; " + red_clause(merge_group_reds(a.repo, d["number"])) +
+                    ". Push a fix (a new commit) and it re-enters.")
             for cmd in (["pr", "merge", str(d["number"]), "--disable-auto"], ["pr", "comment", str(d["number"]), "--body", note]):
                 subprocess.run(["gh", *cmd, "--repo", a.repo], capture_output=True, text=True, timeout=120, check=False)
     if a.apply_jumps:
@@ -800,6 +1113,8 @@ def main(argv=None) -> int:
                 j["position"] = jump_to_front(j["id"], j["head"], recheck=at(j["number"]))
             except (RuntimeError, ValueError, OSError, subprocess.SubprocessError) as exc:
                 j["error"] = str(exc)[:300]
+    if a.apply_revives:
+        apply_revives(a.repo, result["revive"], rstate)
     judge_yes: set[str] = set()
     launch, spec, lwhy = read_launch(LAUNCH_FILE, time.time(), judge_yes)
     pick, pwhy = (None, lwhy) if lwhy != "ok" else pick_launch_jump(
