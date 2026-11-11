@@ -376,6 +376,46 @@ def queue_failed_prs(repo: str, gql=None) -> dict[int, float]:
         return {}
 
 
+# philanthropy 11-10 22:33Z to 11-11 04:45Z (PHIA-1309): PR 16340 was removed from the merge queue
+# for failed_checks and added back 8 times on one head, nothing pushed in between (9 red runs, 217
+# billed min, 10% of the queue's day; every red was the same hq-crawl job). The holds above stop
+# THIS sweep from re-arming a failed head; whoever else re-adds it (an author's own arm) went around
+# them. One retry stays, because after a main fix the same head can pass (#16319 did), but a head
+# the queue has failed more than QUEUE_RETRY_MAX times with no push since is taken out of the queue.
+QUEUE_RETRY_MAX = 1
+
+
+def queue_fail_counts(nodes) -> dict[int, int]:
+    """Pure: {PR number: failed_checks removals since its last push}, same timeline as
+    queue_failed_heads."""
+    out: dict[int, int] = {}
+    for pr in nodes or []:
+        count = 0
+        for ev in ((pr or {}).get("timelineItems") or {}).get("nodes") or []:
+            kind = ev.get("__typename")
+            if kind == "RemovedFromMergeQueueEvent":
+                if (ev.get("reason") or "").lower() == "failed_checks":
+                    count += 1
+            elif kind in ("PullRequestCommit", "HeadRefForcePushedEvent"):
+                count = 0
+        if count and (pr or {}).get("number"):
+            out[pr["number"]] = count
+    return out
+
+
+def queue_repeat_failed_prs(repo: str, gql=None, retry_max: int = QUEUE_RETRY_MAX) -> dict[int, int]:
+    """{PR number: failures} for the open PRs whose current head the queue failed more than
+    retry_max times with nothing pushed since; {} on a read error (nothing is taken out)."""
+    owner, name = repo.split("/", 1)
+    try:
+        data = (gql or _graphql)(_QUEUE_FAILED, o=owner, n=name)
+        counts = queue_fail_counts((((data.get("data") or {}).get("repository") or {})
+                                    .get("pullRequests") or {}).get("nodes"))
+    except (RuntimeError, ValueError, KeyError, OSError, subprocess.SubprocessError):
+        return {}
+    return {n: c for n, c in counts.items() if c > retry_max}
+
+
 def pick_launch_jump(prs: list[dict], required: list[str], queue: dict | None, launch: set[str],
                      spec_status: str | None, line_red: bool, last_jump: float,
                      now: float, queue_failed: dict | None = None,
@@ -464,13 +504,19 @@ def sweep(prs: list[dict], required: list[str], now: float | None = None,
           min_age_min: float = MIN_AGE_MIN, main_is_red: bool = False,
           queue: dict | None = None, queue_is_red: bool = False,
           queue_failed: dict | None = None, failing: set | None = None,
-          files_of=None, dequeued=None) -> dict:
+          files_of=None, dequeued=None, repeat_failed: dict | None = None) -> dict:
     """`dequeued(number)` -> True when a human dequeue still holds the PR; asked only of a PR the
     sweep would otherwise arm, jump or enqueue (one timeline read each)."""
-    arm, skip, jump, enqueue, disarm = [], [], [], [], []
+    arm, skip, jump, enqueue, disarm, dequeue = [], [], [], [], [], []
     for pr in prs:
         n = pr.get("number")
         queued = (queue or {}).get(n) is not None
+        if queued and n in (repeat_failed or {}):
+            # The queue failed this head again and again and someone put it back: out until a push.
+            dequeue.append({"number": n, "id": pr.get("id"), "failures": repeat_failed[n]})
+            skip.append({"number": n, "why": f"the merge queue failed this head {repeat_failed[n]} times "
+                                             "with nothing pushed since: out of the queue until a push"})
+            continue
         # Red main stops the line (philanthropy main_red_hold.py): every PR that is not the fix is
         # held, and an armed one is disarmed, or GitHub queues it onto the red main anyway.
         held_red = main_is_red and not is_fix(pr, failing, files_of)
@@ -502,7 +548,7 @@ def sweep(prs: list[dict], required: list[str], now: float | None = None,
         elif go_e:
             enqueue.append({"number": n, "id": pr.get("id"), "head": pr.get("headRefOid"), "why": ewhy})
     return {"arm": [a["number"] for a in arm], "armed_why": arm, "skipped": skip, "jump": jump,
-            "enqueue": enqueue, "disarm": disarm}
+            "enqueue": enqueue, "disarm": disarm, "dequeue": dequeue}
 
 
 def _gh(args: list[str], repo: str) -> object:
@@ -697,6 +743,8 @@ def main(argv=None) -> int:
                     help="enqueue each PR in `enqueue` (armed, green, reviewed, never queued)")
     ap.add_argument("--apply-jumps", action="store_true",
                     help="put each PR in `jump` (main red, the green reviewed fix) first in the queue")
+    ap.add_argument("--apply-dequeues", action="store_true",
+                    help="take each PR in `dequeue` (head failed in the queue again with no push) out of the queue")
     ap.add_argument("--queue-failed", action="store_true",
                     help="print only the open PRs the merge queue failed with nothing pushed since, space-separated")
     a = ap.parse_args(argv)
@@ -721,6 +769,7 @@ def main(argv=None) -> int:
               f"a green, reviewed {FIX_LABEL} PR jumps", file=sys.stderr)
     queue = queue_positions(a.repo, a.branch)
     qfailed = queue_failed_prs(a.repo)
+    rfailed = queue_repeat_failed_prs(a.repo)
     held: dict[int, bool] = {}
 
     def dequeued(n: int) -> bool:
@@ -730,9 +779,21 @@ def main(argv=None) -> int:
     result = sweep(prs, required, min_age_min=a.min_age_min,
                    main_is_red=red, queue=queue, queue_is_red=bool(qred), queue_failed=qfailed,
                    failing=failing_tests(items), files_of=lambda n: pr_files(a.repo, n),
-                   dequeued=dequeued)
+                   dequeued=dequeued, repeat_failed=rfailed)
     def at(n):  # re-read one PR's queue position (the mutation's own answer can be stale)
         return lambda: (queue_positions(a.repo, a.branch) or {}).get(n)
+    if a.apply_dequeues:
+        for d in result["dequeue"]:
+            try:
+                _graphql(_DEQUEUE, id=d["id"])
+                d["dequeued"] = True
+            except (RuntimeError, ValueError, OSError, subprocess.SubprocessError) as exc:
+                d["error"] = str(exc)[:300]
+                continue
+            note = (f"pr_arm_sweep: the merge queue failed this head {d['failures']} times with nothing pushed "
+                    "since, so it is out of the queue. Push a fix (a new commit) and it re-enters.")
+            for cmd in (["pr", "merge", str(d["number"]), "--disable-auto"], ["pr", "comment", str(d["number"]), "--body", note]):
+                subprocess.run(["gh", *cmd, "--repo", a.repo], capture_output=True, text=True, timeout=120, check=False)
     if a.apply_jumps:
         for j in result["jump"]:
             try:

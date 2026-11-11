@@ -45,7 +45,7 @@ fi
 
 for repo in $REPOS; do
   [ -n "$repo" ] || continue
-  out="$(python3 "$KIT/scripts/pr_arm_sweep.py" --repo "$repo" --apply-jumps --apply-enqueues)" || {
+  out="$(python3 "$KIT/scripts/pr_arm_sweep.py" --repo "$repo" --apply-jumps --apply-enqueues --apply-dequeues)" || {
     log "$repo: pr_arm_sweep.py failed: ${out:0:200}"; continue; }
   # Red main or red queue: the green, reviewed fix:main-red PR was put first in the merge queue (pr_arm_sweep.py
   # should_jump). One line per jump, with the error when GitHub refused it.
@@ -62,6 +62,9 @@ elif "error" in lj:
 held = [s for s in d.get("skipped", []) if s.get("why", "").startswith(("a human took it out", "hold label", "main is red"))]
 if held:  # the holds the app arm workflow had (fleet-kit#1867): one line, so the log proves them
     print("held -- " + ", ".join("#%s (%s)" % (s["number"], "human dequeue" if s["why"].startswith("a human") else "main is red" if s["why"].startswith("main is red") else s["why"]) for s in held))
+for q in d.get("dequeue", []):
+    print(("queue failed this head %s times, nothing pushed -- took #%s out of the queue" % (q["failures"], q["number"]))
+          if q.get("dequeued") else ("queue failed this head %s times -- DEQUEUE #%s FAILED: %s" % (q["failures"], q["number"], q.get("error", "?"))))
 for e in d.get("enqueue", []):
     print(("armed but never queued -- enqueued #%s at position %s" % (e["number"], e["position"]))
           if "position" in e else ("armed but never queued -- ENQUEUE #%s FAILED: %s" % (e["number"], e.get("error", "?"))))' 2>/dev/null \

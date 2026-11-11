@@ -624,6 +624,37 @@ def test_queue_failed_heads_holds_a_failed_head_until_a_push():
     assert pr_arm_sweep.queue_failed_prs("o/r", gql=boom) == {}
 
 
+# philanthropy 11-10 to 11-11 (PHIA-1309): PR 16340 went back into the queue 8 times on one head, 5 of them
+# after a failed_checks removal with nothing pushed since (its real timeline, below). One retry stays
+# (the same head can pass after a main fix); more takes it out until a push.
+def test_a_head_the_queue_failed_again_and_again_is_taken_out_until_a_push():
+    real_16340 = dict(_tl(("commit", "2026-11-10T23:19:06Z"),
+                          ("removed", "2026-11-10T23:58:46Z", "failed_checks"),
+                          ("removed", "2026-11-11T00:37:07Z", "manual"),
+                          ("removed", "2026-11-11T01:35:25Z", "failed_checks"),
+                          ("removed", "2026-11-11T03:32:08Z", "manual"),
+                          ("removed", "2026-11-11T04:11:10Z", "failed_checks"),
+                          ("removed", "2026-11-11T04:29:03Z", "failed_checks"),
+                          ("removed", "2026-11-11T04:45:19Z", "failed_checks")), number=16340)
+    one_retry = dict(_tl(("commit", "2026-11-10T23:19:06Z"),
+                         ("removed", "2026-11-10T23:58:46Z", "failed_checks")), number=16319)
+    pushed = dict(_tl(("removed", "2026-11-10T23:58:46Z", "failed_checks"),
+                      ("removed", "2026-11-11T01:35:25Z", "failed_checks"),
+                      ("commit", "2026-11-11T05:20:20Z")), number=16360)
+    assert pr_arm_sweep.queue_fail_counts([real_16340, one_retry, pushed, None]) == {16340: 5, 16319: 1}
+    page = {"data": {"repository": {"pullRequests": {"nodes": [real_16340, one_retry, pushed]}}}}
+    assert pr_arm_sweep.queue_repeat_failed_prs("o/r", gql=lambda q, **v: page) == {16340: 5}
+    boom = lambda q, **v: (_ for _ in ()).throw(RuntimeError("gh down"))
+    assert pr_arm_sweep.queue_repeat_failed_prs("o/r", gql=boom) == {}  # a read error takes nothing out
+    prs = [_pr(16340, age_h=2.0), _pr(16319, age_h=2.0)]
+    prs[0]["id"] = "PR_16340"
+    out = pr_arm_sweep.sweep(prs, REQUIRED, NOW_TS, queue={16340: 2, 16319: 3}, repeat_failed={16340: 5})
+    assert out["dequeue"] == [{"number": 16340, "id": "PR_16340", "failures": 5}], out
+    assert "out of the queue until a push" in out["skipped"][0]["why"], out
+    # Not in the queue: nothing to take out (the failed-head hold already keeps the sweep from re-adding it).
+    assert pr_arm_sweep.sweep(prs, REQUIRED, NOW_TS, queue={}, repeat_failed={16340: 5})["dequeue"] == []
+
+
 def test_queue_failed_flag_prints_the_held_heads_for_the_other_arm_paths():
     # PHIA-3374: auto_update_branch.sh re-armed #15791/#15885 after the queue failed them, no new commit.
     # It reads this flag: the same verdict, numbers only, and no PR list read or arm of its own.
