@@ -1053,6 +1053,28 @@ def test_revive_leaves_drafts_human_dequeues_holds_and_blocked_heads_alone():
     assert pr_arm_sweep.author_seat("hq-rail-reth", "reif-y") == "reif-y"
 
 
+def test_timeline_queries_are_balanced_graphql():
+    # PHIA-4363: 91db3ef added commit{parents{totalCount}} one brace short; GitHub refused both timeline reads, every
+    # read answered {}, and the failed-head hold never saw a failed head (#16569 went back in the queue 4 times).
+    for name in ("_QUEUE_FAILED", "_QUEUE_HISTORY"):
+        q = getattr(pr_arm_sweep, name)
+        assert q.count("{") == q.count("}"), f"{name}: braces {q.count('{')} open, {q.count('}')} close"
+        assert q.count("(") == q.count(")") and q.count("[") == q.count("]"), f"{name}: parens or brackets"
+
+
+def test_failed_timeline_read_says_so_and_holds_nothing():
+    import contextlib
+    import io
+
+    def boom(query, **kw):
+        raise RuntimeError("graphql failed: gh: Expected NAME")
+    err = io.StringIO()
+    with contextlib.redirect_stderr(err):
+        got = (pr_arm_sweep.queue_failed_prs("o/r", gql=boom), pr_arm_sweep.queue_repeat_failed_prs("o/r", gql=boom),
+               pr_arm_sweep.queue_history_prs("o/r", gql=boom))
+    assert got == ({}, {}, {}), got
+    assert err.getvalue().count("WARNING") == 3, err.getvalue()
+
 
 for _name, _fn in sorted((n, f) for n, f in list(globals().items()) if n.startswith("test_")):
     check(_name, _fn)
