@@ -601,6 +601,9 @@ def _tl(*events):
             nodes.append({"__typename": "RemovedFromMergeQueueEvent", "createdAt": at, "reason": rest[0]})
         elif kind == "commit":
             nodes.append({"__typename": "PullRequestCommit", "commit": {"committedDate": at}})
+        elif kind == "merge":  # main merged into the head: two parents, no code of the author's
+            nodes.append({"__typename": "PullRequestCommit",
+                          "commit": {"committedDate": at, "parents": {"totalCount": 2}}})
         elif kind == "force":
             nodes.append({"__typename": "HeadRefForcePushedEvent", "createdAt": at})
         elif kind == "added":
@@ -655,6 +658,30 @@ def test_a_head_the_queue_failed_again_and_again_is_taken_out_until_a_push():
     assert "out of the queue until a push" in out["skipped"][0]["why"], out
     # Not in the queue: nothing to take out (the failed-head hold already keeps the sweep from re-adding it).
     assert pr_arm_sweep.sweep(prs, REQUIRED, NOW_TS, queue={}, repeat_failed={16340: 5})["dequeue"] == []
+
+
+# philanthropy 11-12 (PHIA-1309): PR 16340's heads between reds were merges of main (07:20Z, 10:27Z), same code, same
+# hq-crawl red, and each merge reset the counters, so 13 reds in 44 h went round the two-reds rule. A merge of main
+# is not a fix; a commit of the author's (8130e9b, G 15:25Z) is.
+def test_a_merge_of_main_does_not_free_a_head_the_queue_keeps_failing():
+    red = lambda at: ("removed", at, "failed_checks")  # noqa: E731
+    real = dict(_tl(("commit", "2026-11-11T20:00:00Z"), red("2026-11-12T07:36:00Z"), ("merge", "2026-11-12T08:30:00Z"),
+                    red("2026-11-12T09:19:00Z"), ("merge", "2026-11-12T10:27:30Z"), red("2026-11-12T10:42:00Z"),
+                    red("2026-11-12T12:40:00Z")), number=16340)
+    two = dict(_tl(("commit", "2026-11-12T07:00:00Z"), red("2026-11-12T07:36:00Z"), ("merge", "2026-11-12T08:30:00Z"),
+                   red("2026-11-12T09:19:00Z")), number=16429)  # main fault: two reds, merged main in: not out yet
+    fixed = dict(_tl(red("2026-11-12T07:36:00Z"), red("2026-11-12T09:19:00Z"), red("2026-11-12T10:42:00Z"),
+                     ("commit", "2026-11-12T15:25:30Z")), number=16360)  # a real commit frees it
+    assert pr_arm_sweep.queue_fail_counts([real, two, fixed], code_only=True) == {16340: 4, 16429: 2}
+    assert pr_arm_sweep.queue_fail_counts([real]) == {16340: 2}, "head count still resets on a merge"
+    page = {"data": {"repository": {"pullRequests": {"nodes": [real, two, fixed]}}}}
+    assert pr_arm_sweep.queue_repeat_failed_prs("o/r", gql=lambda q, **v: page) == {16340: 4}
+    # the revive does not push main into it or put it back, until the author commits
+    hist = pr_arm_sweep.queue_history([real])[16340]
+    assert hist["code_fails"] == 4 and hist["pushed"] is False
+    act, why = pr_arm_sweep.should_revive(_rev_pr(), REV_REQUIRED, hist, now=NOW_TS)
+    assert act is None and "merges of main do not count" in why, (act, why)
+    assert pr_arm_sweep.queue_history([two])[16429]["code_fails"] == 2
 
 
 def test_queue_failed_flag_prints_the_held_heads_for_the_other_arm_paths():
@@ -880,7 +907,8 @@ def test_queue_history_reads_the_last_removal_and_what_came_after():
     assert h[16340]["reason"] == "merge_conflict" and h[16340]["pushed"] is False and h[16340]["fails"] == 0, h
     pushed = _rev_tl(("removed", "2026-11-11T13:23:58Z", "failed_checks"), ("commit", "2026-11-11T14:59:12Z"))
     assert pr_arm_sweep.queue_history([pushed])[16340] == dict(
-        reason="failed_checks", at=pr_arm_sweep._ts("2026-11-11T13:23:58Z"), pushed=True, fails=0, author="reif-y")
+        reason="failed_checks", at=pr_arm_sweep._ts("2026-11-11T13:23:58Z"), pushed=True, fails=0, code_fails=0,
+        author="reif-y")
     readded = _rev_tl(("removed", "2026-11-11T13:23:58Z", "failed_checks"), ("added", "2026-11-11T13:27:08Z"))
     assert pr_arm_sweep.queue_history([readded]) == {}, "in the queue again: nothing to revive"
     twice = _rev_tl(("removed", "2026-11-11T04:11:10Z", "failed_checks"), ("removed", "2026-11-11T04:29:03Z", "failed_checks"))

@@ -344,7 +344,8 @@ def _ts(iso: str | None) -> float:
 _QUEUE_FAILED = ("query($o:String!,$n:String!){repository(owner:$o,name:$n){pullRequests(states:OPEN,"
                  "first:100,orderBy:{field:UPDATED_AT,direction:DESC}){nodes{number timelineItems(last:50,"
                  "itemTypes:[REMOVED_FROM_MERGE_QUEUE_EVENT,PULL_REQUEST_COMMIT,HEAD_REF_FORCE_PUSHED_EVENT])"
-                 "{nodes{__typename ... on RemovedFromMergeQueueEvent{createdAt reason}}}}}}}")
+                 "{nodes{__typename ... on RemovedFromMergeQueueEvent{createdAt reason} "
+                 "... on PullRequestCommit{commit{parents{totalCount}}}}}}}}")
 
 
 def queue_failed_heads(nodes) -> dict[int, float]:
@@ -383,11 +384,27 @@ def queue_failed_prs(repo: str, gql=None) -> dict[int, float]:
 # them. One retry stays, because after a main fix the same head can pass (#16319 did), but a head
 # the queue has failed more than QUEUE_RETRY_MAX times with no push since is taken out of the queue.
 QUEUE_RETRY_MAX = 1
+# philanthropy 11-12 (PHIA-1309): PR 16340 was red 13 times in 44 h. Between most reds the head changed, but only
+# by a merge of main (a commit with two parents, from the author's update or the revive's update-branch): same code,
+# same hq-crawl red, and every merge reset the counters above. A merge of main is not a fix, so the code count below
+# ignores it. Main faults also fail innocent PRs twice (11-12 18:44 to 19:10Z), so the limit is three reds on one
+# code, not two.
+QUEUE_CODE_RETRY_MAX = 2
 
 
-def queue_fail_counts(nodes) -> dict[int, int]:
+def _is_code_push(ev: dict) -> bool:
+    """A timeline push that can change what the queue runs: a commit with one parent, or a force-push. A merge
+    commit (two parents: main merged into the head) changes nothing the PR wrote. A commit read without its
+    parent count is treated as code."""
+    if ev.get("__typename") == "HeadRefForcePushedEvent":
+        return True
+    parents = ((ev.get("commit") or {}).get("parents") or {}).get("totalCount")
+    return not (isinstance(parents, int) and parents >= 2)
+
+
+def queue_fail_counts(nodes, code_only: bool = False) -> dict[int, int]:
     """Pure: {PR number: failed_checks removals since its last push}, same timeline as
-    queue_failed_heads."""
+    queue_failed_heads. With code_only, a merge of main does not count as a push (_is_code_push)."""
     out: dict[int, int] = {}
     for pr in nodes or []:
         count = 0
@@ -397,7 +414,8 @@ def queue_fail_counts(nodes) -> dict[int, int]:
                 if (ev.get("reason") or "").lower() == "failed_checks":
                     count += 1
             elif kind in ("PullRequestCommit", "HeadRefForcePushedEvent"):
-                count = 0
+                if not code_only or _is_code_push(ev):
+                    count = 0
         if count and (pr or {}).get("number"):
             out[pr["number"]] = count
     return out
@@ -409,11 +427,13 @@ def queue_repeat_failed_prs(repo: str, gql=None, retry_max: int = QUEUE_RETRY_MA
     owner, name = repo.split("/", 1)
     try:
         data = (gql or _graphql)(_QUEUE_FAILED, o=owner, n=name)
-        counts = queue_fail_counts((((data.get("data") or {}).get("repository") or {})
-                                    .get("pullRequests") or {}).get("nodes"))
+        nodes = (((data.get("data") or {}).get("repository") or {}).get("pullRequests") or {}).get("nodes")
+        counts, code_counts = queue_fail_counts(nodes), queue_fail_counts(nodes, code_only=True)
     except (RuntimeError, ValueError, KeyError, OSError, subprocess.SubprocessError):
         return {}
-    return {n: c for n, c in counts.items() if c > retry_max}
+    out = {n: c for n, c in counts.items() if c > retry_max}
+    out.update({n: c for n, c in code_counts.items() if c > QUEUE_CODE_RETRY_MAX})
+    return out
 
 
 def pick_launch_jump(prs: list[dict], required: list[str], queue: dict | None, launch: set[str],
@@ -517,7 +537,7 @@ _QUEUE_HISTORY = ("query($o:String!,$n:String!){repository(owner:$o,name:$n){pul
                   "first:100,orderBy:{field:UPDATED_AT,direction:DESC}){nodes{number author{login} timelineItems(last:50,"
                   "itemTypes:[REMOVED_FROM_MERGE_QUEUE_EVENT,ADDED_TO_MERGE_QUEUE_EVENT,PULL_REQUEST_COMMIT,"
                   "HEAD_REF_FORCE_PUSHED_EVENT]){nodes{__typename ... on RemovedFromMergeQueueEvent{createdAt reason}"
-                  " ... on AddedToMergeQueueEvent{createdAt}}}}}}}")
+                  " ... on AddedToMergeQueueEvent{createdAt} ... on PullRequestCommit{commit{parents{totalCount}}}}}}}}")
 
 
 def queue_history(nodes) -> dict[int, dict]:
@@ -526,21 +546,25 @@ def queue_history(nodes) -> dict[int, dict]:
     failed_checks removals since the last push. A PR added back after its removal is in the queue: absent."""
     out: dict[int, dict] = {}
     for pr in nodes or []:
-        last, fails = None, 0
+        last, fails, code_fails = None, 0, 0
         for ev in ((pr or {}).get("timelineItems") or {}).get("nodes") or []:
             kind = ev.get("__typename")
             if kind == "RemovedFromMergeQueueEvent":
                 reason = (ev.get("reason") or "").lower()
                 fails += reason == "failed_checks"
+                code_fails += reason == "failed_checks"
                 last = {"reason": reason, "at": _ts(ev.get("createdAt")), "pushed": False}
             elif kind == "AddedToMergeQueueEvent":
                 last = None
             elif kind in ("PullRequestCommit", "HeadRefForcePushedEvent"):
                 fails = 0
+                if _is_code_push(ev):
+                    code_fails = 0
                 if last:
                     last["pushed"] = True
         if last and (pr or {}).get("number"):
-            out[pr["number"]] = dict(last, fails=fails, author=((pr.get("author") or {}).get("login")))
+            out[pr["number"]] = dict(last, fails=fails, code_fails=code_fails,
+                                     author=((pr.get("author") or {}).get("login")))
     return out
 
 
@@ -569,6 +593,11 @@ def should_revive(pr: dict, required: list[str], hist: dict | None, main_is_red:
     head = pr.get("headRefOid") or ""
     if not pr.get("id") or not head:
         return None, "no PR id or head sha to pin to"
+    if (hist or {}).get("code_fails", 0) > QUEUE_CODE_RETRY_MAX:
+        # 16340 (11-12): red 13 times; main merged into it between reds, so no push ever "freed" it. Only a real
+        # commit of the author's does.
+        return None, (f"the queue failed this code {hist['code_fails']} times (merges of main do not count as a "
+                      "fix): push a fix")
     mergeable = (pr.get("mergeable") or "").upper()
     if mergeable == "CONFLICTING":
         if st.get("fixer") == head:
