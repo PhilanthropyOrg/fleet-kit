@@ -345,7 +345,7 @@ _QUEUE_FAILED = ("query($o:String!,$n:String!){repository(owner:$o,name:$n){pull
                  "first:100,orderBy:{field:UPDATED_AT,direction:DESC}){nodes{number timelineItems(last:50,"
                  "itemTypes:[REMOVED_FROM_MERGE_QUEUE_EVENT,PULL_REQUEST_COMMIT,HEAD_REF_FORCE_PUSHED_EVENT])"
                  "{nodes{__typename ... on RemovedFromMergeQueueEvent{createdAt reason} "
-                 "... on PullRequestCommit{commit{parents{totalCount}}}}}}}}")
+                 "... on PullRequestCommit{commit{parents{totalCount}}}}}}}}}")
 
 
 def queue_failed_heads(nodes) -> dict[int, float]:
@@ -366,6 +366,14 @@ def queue_failed_heads(nodes) -> dict[int, float]:
     return out
 
 
+def _read_failed(what: str, exc: Exception) -> None:
+    """A timeline read that fails opens the guards it feeds (nothing held, nothing taken out). 11-12 23:10Z to 11-13
+    07:20Z (PHIA-4363): a query one brace short failed every pass, and the empty answer let the jump put #16569 back
+    in the queue on a failed head 4 times, with no line in the log. Say so, once per read, on stderr."""
+    print(f"pr_arm_sweep: WARNING {what}: timeline read failed, its guard is off this pass: {str(exc)[:200]}",
+          file=sys.stderr)
+
+
 def queue_failed_prs(repo: str, gql=None) -> dict[int, float]:
     """queue_failed_heads for the repo's open PRs; {} on a read error."""
     owner, name = repo.split("/", 1)
@@ -373,7 +381,8 @@ def queue_failed_prs(repo: str, gql=None) -> dict[int, float]:
         data = (gql or _graphql)(_QUEUE_FAILED, o=owner, n=name)
         return queue_failed_heads((((data.get("data") or {}).get("repository") or {})
                                    .get("pullRequests") or {}).get("nodes"))
-    except (RuntimeError, ValueError, KeyError, OSError, subprocess.SubprocessError):
+    except (RuntimeError, ValueError, KeyError, OSError, subprocess.SubprocessError) as exc:
+        _read_failed("queue_failed_prs", exc)
         return {}
 
 
@@ -429,7 +438,8 @@ def queue_repeat_failed_prs(repo: str, gql=None, retry_max: int = QUEUE_RETRY_MA
         data = (gql or _graphql)(_QUEUE_FAILED, o=owner, n=name)
         nodes = (((data.get("data") or {}).get("repository") or {}).get("pullRequests") or {}).get("nodes")
         counts, code_counts = queue_fail_counts(nodes), queue_fail_counts(nodes, code_only=True)
-    except (RuntimeError, ValueError, KeyError, OSError, subprocess.SubprocessError):
+    except (RuntimeError, ValueError, KeyError, OSError, subprocess.SubprocessError) as exc:
+        _read_failed("queue_repeat_failed_prs", exc)
         return {}
     out = {n: c for n, c in counts.items() if c > retry_max}
     out.update({n: c for n, c in code_counts.items() if c > QUEUE_CODE_RETRY_MAX})
@@ -537,7 +547,7 @@ _QUEUE_HISTORY = ("query($o:String!,$n:String!){repository(owner:$o,name:$n){pul
                   "first:100,orderBy:{field:UPDATED_AT,direction:DESC}){nodes{number author{login} timelineItems(last:50,"
                   "itemTypes:[REMOVED_FROM_MERGE_QUEUE_EVENT,ADDED_TO_MERGE_QUEUE_EVENT,PULL_REQUEST_COMMIT,"
                   "HEAD_REF_FORCE_PUSHED_EVENT]){nodes{__typename ... on RemovedFromMergeQueueEvent{createdAt reason}"
-                  " ... on AddedToMergeQueueEvent{createdAt} ... on PullRequestCommit{commit{parents{totalCount}}}}}}}}")
+                  " ... on AddedToMergeQueueEvent{createdAt} ... on PullRequestCommit{commit{parents{totalCount}}}}}}}}}")
 
 
 def queue_history(nodes) -> dict[int, dict]:
@@ -711,7 +721,8 @@ def queue_history_prs(repo: str, gql=None) -> dict[int, dict]:
         data = (gql or _graphql)(_QUEUE_HISTORY, o=owner, n=name)
         return queue_history((((data.get("data") or {}).get("repository") or {})
                               .get("pullRequests") or {}).get("nodes"))
-    except (RuntimeError, ValueError, KeyError, OSError, subprocess.SubprocessError):
+    except (RuntimeError, ValueError, KeyError, OSError, subprocess.SubprocessError) as exc:
+        _read_failed("queue_history_prs", exc)
         return {}
 
 
