@@ -631,6 +631,12 @@ while :; do
   # value is decided by the Judge seat on the pitch, before code; scores here are points only, never a send-back.
   # A PR goes back only for correctness, or for naming no Judge-approved (`judge-yes`) or `fast-lane` task.
   VALUE_EXEMPT=""
+  # PHIA-4359: a PR labelled fix:main-red passes the task check and the value floor when its task has a two-line card
+  # (value_judge.py decides); the label is read from the PR here, so a red-main fix is never held for a missing Judge YES.
+  MAIN_RED_FLAG=""
+  if gh pr view "$PR" --json labels -q '[.labels[]?.name] | index("fix:main-red") != null' 2>/dev/null | grep -qx true; then
+    MAIN_RED_FLAG="--main-red"
+  fi
   RULES_TEXT=""
   # docs/ui-rules.md: the owner's 13 UI rules (PHIA-1451); every UI send-back cites one by name.
   for f in ${JUDGE_RULES_FILES:-docs/ui-rules.md docs/design-system.md}; do
@@ -901,7 +907,7 @@ print("true" if d.get("ok") else "false")' 2>/dev/null)
     # append one ledger row per review for points per seat per day (value_judge.py summary).
     PR_TITLE=$(head -1 "$BODY_FILE" | sed 's/^TITLE: //')
     VJ=$(printf '%s' "$VERDICT_JSON" | python3 "$KIT_DIR/scripts/value_judge.py" apply --body "$BODY_FILE" \
-      --pr "$PR" --head "$HEAD_SHA" --title "$PR_TITLE" --ref "${HEAD_REF:-}" $VALUE_EXEMPT --card "$CARD_FILE" 2>>"$LOG")
+      --pr "$PR" --head "$HEAD_SHA" --title "$PR_TITLE" --ref "${HEAD_REF:-}" $VALUE_EXEMPT $MAIN_RED_FLAG --card "$CARD_FILE" 2>>"$LOG")
     if [ -n "$VJ" ]; then
       VERDICT_JSON="$VJ"
       printf '%s' "$VJ" | python3 -c 'import json,sys

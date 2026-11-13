@@ -357,6 +357,38 @@ class ValueJudge(unittest.TestCase):
         self.assertEqual(vj.apply(obj, "", "1", "h", "bump", "dependabot/x", True, card)["verdict"], "approve")
         self.assertEqual(vj.apply(obj, "", "1", "h", "t", "x/y", False, card, value_floor=False)["verdict"], "approve")
 
+    def test_fix_main_red_pr_passes_on_a_two_line_card_with_no_judge_yes(self):
+        # PHIA-4359: PR 16566 (fix:main-red, task PHIA-4351) was blocked for no judge-yes / fast-lane / hack-solo and no
+        # best-in-class line; main stayed red two more hours. A fix:main-red PR whose task has a two-line card passes
+        # the task check and the value floor; a card-less one still blocks, and a correctness block still blocks.
+        new = "2026-11-13T10:00:00Z"
+        card = {"task": "PHIA-4351", "owner": "platform", "card": "User: visitors\nNeed: main green", "plan": "",
+                "labels": [], "created_at": new}
+        thin = _scored(v=1, research=False)
+        out = vj.apply(thin, "", "16566", "h", "PHIA-4351 fix main", "ops/x", False, card, gate=True)
+        self.assertEqual(out["verdict"], "block")  # without the lane it is the PR 16566 block
+        out = vj.apply(thin, "", "16566", "h", "PHIA-4351 fix main", "ops/x", False, card, gate=True, main_red=True)
+        self.assertEqual(out["verdict"], "approve")
+        self.assertEqual((out["ledger"]["approval_reasons"], out["ledger"]["floor_reasons"]), ([], []))
+        one_line = dict(card, card="User: visitors")
+        out = vj.apply(thin, "", "16566", "h", "PHIA-4351 fix main", "ops/x", False, one_line, gate=True, main_red=True)
+        self.assertEqual(out["verdict"], "block")
+        self.assertIn("fix:main-red", out["findings_text"])
+        no_card = dict(card, card="")
+        out = vj.apply(thin, "", "16566", "h", "PHIA-4351 fix main", "ops/x", False, no_card, gate=True, main_red=True)
+        self.assertEqual(out["verdict"], "block")
+        bad = _scored(); bad["verdict"] = "block"
+        self.assertEqual(vj.apply(bad, "", "1", "h", "PHIA-4351 x", "ops/x", False, card, gate=True, main_red=True)["verdict"], "block")
+        # the CLI flag reaches apply
+        import contextlib
+        with tempfile.TemporaryDirectory() as d:
+            cf = Path(d) / "card.json"; cf.write_text(json.dumps(card)); bf = Path(d) / "body"; bf.write_text("TITLE: PHIA-4351 x")
+            with unittest.mock.patch.object(sys, "stdin", io.StringIO(json.dumps(thin))), \
+                 contextlib.redirect_stdout(io.StringIO()) as buf:
+                vj.main(["apply", "--body", str(bf), "--pr", "1", "--title", "PHIA-4351 x", "--ref", "ops/x",
+                         "--card", str(cf), "--main-red"])
+            self.assertEqual(json.loads(buf.getvalue())["verdict"], "approve")
+
     def test_value_floor_blocks_points_under_the_bar(self):
         # Paul 11-02 9 PM: a PR scored Value 2, Usability 2, Feasibility 1, Viability 1 (2.67 points, the bar 3.0)
         # with research passed review, because under-bar was only a note, and merged. The floor blocks it now.

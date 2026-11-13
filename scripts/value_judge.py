@@ -107,6 +107,16 @@ APPROVAL_SINCE = os.environ.get("JUDGE_APPROVAL_SINCE", "2026-11-02T21:00:00Z") 
 # `fast-lane` does, with none of the breakage meaning and none of fast-lane's pull onto a seat. The correctness review still runs.
 HACK_SOLO = "hack-solo"
 APPROVAL_LABELS = {"judge-yes", "fast-lane", HACK_SOLO}
+# PHIA-4359: PR 16566, the fix for red main (task PHIA-4351), was blocked for no judge-yes / fast-lane / hack-solo label and no
+# best-in-class line; main stayed red two more hours. A PR labelled `fix:main-red` whose task has a card of two short lines
+# (a bug fix needs only two) clears the task check and the value floor with no Judge YES. The correctness review still runs.
+MAIN_RED_LABEL = "fix:main-red"
+
+
+def main_red_card_ok(card: dict | None) -> bool:
+    """A card of two short lines: at least two non-blank lines of card text."""
+    text = str((card or {}).get("card") or "")
+    return sum(1 for l in text.splitlines() if l.strip()) >= 2
 # Paul 11-02 (Paperclip 2, value gate): #15261 passed with Value 1/3 and no research because value only wrote notes.
 # The floor is a rule, not a note: Value below MIN_VALUE, or research not done, blocks the PR whatever the model's
 # correctness verdict, unless the task carries judge-yes (floored on its pitch) or fast-lane (a breakage fixed first,
@@ -325,7 +335,7 @@ def labels_of(card: dict) -> set:
     return out
 
 
-def approval(card: dict | None, title: str = "", ref: str = "") -> list:
+def approval(card: dict | None, title: str = "", ref: str = "", main_red: bool = False) -> list:
     """Reasons to send the PR back because it does not link a Judge-approved (or fast-lane) task; empty = fine.
 
     Never fatal on a slow board: when the PR names a task but its labels could not be read (the read failed or
@@ -342,6 +352,12 @@ def approval(card: dict | None, title: str = "", ref: str = "") -> list:
         return []
     if labels_of(card) & APPROVAL_LABELS:
         return []
+    if main_red:
+        if main_red_card_ok(card):
+            return []
+        return [f"This PR carries `{MAIN_RED_LABEL}`, which passes with no Judge YES when its task has a card of two short "
+                f"lines. {task} has none: put the value-card document on it (User: who the green main serves; "
+                "Need: what broke), and the judge reads it again with no new commit."]
     return [f"{task} has no Judge YES (label `judge-yes`) and is not `fast-lane` or `hack-solo`. Pitch it first: the value card on "
             "the task, assigned to the Judge in backlog; build once the Judge moves it to todo for you. "
             "A breakage (site down, error spike, broken step) takes the fast lane: label the task `fast-lane`. "
@@ -409,7 +425,7 @@ def plan_matches(plan, nums) -> bool:
 
 def apply(verdict: dict, body: str, pr: str, head: str, title: str, ref: str, exempt: bool,
           card: dict | None = None, gate: bool = False, value_send_back: bool | None = None,
-          value_floor: bool | None = None) -> dict:
+          value_floor: bool | None = None, main_red: bool = False) -> dict:
     card = card if isinstance(card, dict) else {}
     out = dict(verdict)
     if not verdict.get("ok"):
@@ -439,7 +455,8 @@ def apply(verdict: dict, body: str, pr: str, head: str, title: str, ref: str, ex
         notes = []
     floor_on = VALUE_FLOOR if value_floor is None else value_floor
     # A task the Judge said YES to was floored on its pitch (value-rubric.md); fast-lane is judged after the fix.
-    floor_reasons = [] if (exempt or not floor_on or labels_of(card) & APPROVAL_LABELS) else floor(
+    main_red_ok = main_red and main_red_card_ok(card)  # PHIA-4359: a fix:main-red PR with a two-line card
+    floor_reasons = [] if (exempt or not floor_on or main_red_ok or labels_of(card) & APPROVAL_LABELS) else floor(
         nums, research_ok, str(research.get("why", "")), card.get("task") or task_of(title, ref) or "the task",
         beneficiary)
     if floor_reasons:  # the floor says it; drop the notes and send-backs that say the same thing softer
@@ -450,7 +467,7 @@ def apply(verdict: dict, body: str, pr: str, head: str, title: str, ref: str, ex
     if REUSE_SEND_BACK and not exempt and nums["viability"] == 1:
         reasons.append(f"Reuse: Viability is 1/3, a second copy of something we built. {whys['viability']} "
                        "Call the existing one, and change it in place for every app if it needs a change.")
-    gate_reasons = [] if (exempt or not gate) else approval(card, title, ref)
+    gate_reasons = [] if (exempt or not gate) else approval(card, title, ref, main_red)
     reasons += gate_reasons
     correctness = verdict.get("verdict")
     final = "block" if (correctness == "block" or reasons) else "approve"
@@ -547,6 +564,7 @@ def main(argv=None) -> int:
     a.add_argument("--title", default="")
     a.add_argument("--ref", default="")
     a.add_argument("--exempt", action="store_true")
+    a.add_argument("--main-red", action="store_true")  # the PR carries the fix:main-red label (PHIA-4359)
     a.add_argument("--card", default="")
     s = sub.add_parser("summary")
     s.add_argument("ledger")
@@ -600,7 +618,7 @@ def main(argv=None) -> int:
             except (OSError, json.JSONDecodeError):
                 card = {}
         json.dump(apply(verdict, body, args.pr, args.head, args.title, args.ref, args.exempt, card,
-                        gate=APPROVAL_GATE), sys.stdout)
+                        gate=APPROVAL_GATE, main_red=args.main_red), sys.stdout)
         return 0
     rows = []
     try:
