@@ -225,6 +225,17 @@ def invisible(verdict: dict, nums: dict) -> bool:
     return isinstance(u, dict) and u.get("visible") is False and nums["usability"] >= 2
 
 
+# The Judge, PHIA-4396: the rubric makes a visible change with no shot usability 1. The whys kept
+# writing "no shots at 390 and 1440" under a 2 (16582, 16584, 16586 on 11-13), so code holds the cap.
+_NO_SHOT_RE = re.compile(r"\b(?:no|without(?: an?| any)?) (?:after[- ]?)?(?:screen)?shots?\b", re.IGNORECASE)
+
+
+def no_shot(verdict: dict, why: str) -> bool:
+    """A visible change whose usability why says the PR carries no shot."""
+    u = (verdict.get("scores") or {}).get("usability")
+    return isinstance(u, dict) and u.get("visible") is not False and bool(_NO_SHOT_RE.search(why or ""))
+
+
 def sampled(head: str, every: int = CALIBRATE_EVERY) -> bool:
     """1 head in `every`, by the head sha, so a re-run of the same head picks the same answer."""
     try:
@@ -427,6 +438,9 @@ def apply(verdict: dict, body: str, pr: str, head: str, title: str, ref: str, ex
     if beneficiary.get("tool") is True and nums["value"] > 2:  # G, PHIA-2043: a measuring tool caps at Value 2
         whys = dict(whys, value=whys["value"] + f" (capped at 2 from {nums['value']}: a measuring tool)")
         nums = dict(nums, value=2)
+    if nums["usability"] > 1 and no_shot(verdict, whys["usability"]):  # PHIA-4396: no shot is usability 1
+        whys = dict(whys, usability=whys["usability"] + f" (capped at 1 from {nums['usability']}: no shot at 390 and 1440)")
+        nums = dict(nums, usability=1)
     research = verdict.get("research") if isinstance(verdict.get("research"), dict) else {}
     research_ok = bool(research.get("ok"))
     visible = not invisible(verdict, nums)

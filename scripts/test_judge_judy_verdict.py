@@ -682,6 +682,24 @@ class ValueJudge(unittest.TestCase):
         del old["scores"]["usability"]["visible"]
         self.assertTrue(vj.apply(old, "", "1", "h", "t", "g/x", False)["ledger"]["usability_visible"])
 
+    def test_a_visible_change_with_no_shot_caps_usability_at_1(self):
+        # PHIA-4396: 16586 kept usability 2 on "The PR has no shots at 390 and 1440".
+        for why in ("The PR has no shots at 390 and 1440, so this rests on the rules.",
+                    "Not a 3 because there is no after-shot.", "It ships without a screenshot of the list."):
+            obj = _scored(u=2, visible=True)
+            obj["scores"]["usability"]["why"] = why
+            out = vj.apply(obj, "", "16586", "h", "t", "jobs/x", False)
+            self.assertEqual(out["ledger"]["scores"]["usability"], 1, why)
+            self.assertIn("capped at 1 from 2: no shot", out["scores_text"])
+        shot = _scored(u=3, visible=True)
+        shot["scores"]["usability"]["why"] = "Shots at 390 and 1440 show the list on the first screen."
+        self.assertEqual(vj.apply(shot, "", "1", "h", "t", "g/x", False)["ledger"]["scores"]["usability"], 3)
+        hidden = _scored(u=2, visible=False)
+        hidden["scores"]["usability"]["why"] = "Nothing visible: a cron, no shots to take."
+        out = vj.apply(hidden, "", "1", "h", "t", "g/x", False)
+        self.assertEqual(out["ledger"]["scores"]["usability"], 2)
+        self.assertFalse(out["ledger"]["usability_visible"])
+
     def test_one_head_in_ten_is_sampled_by_sha(self):
         heads = [f"{i:08x}" + "0" * 32 for i in range(1000)]
         self.assertEqual(sum(vj.sampled(h, 10) for h in heads), 100)
